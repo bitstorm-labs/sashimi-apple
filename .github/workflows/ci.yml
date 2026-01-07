@@ -26,7 +26,17 @@ jobs:
 
       - name: Install tvOS Platform
         run: |
-          xcodebuild -downloadPlatform tvOS
+          # Check if tvOS SDK is already available
+          if xcodebuild -showsdks | grep -q tvos; then
+            echo "tvOS SDK already installed"
+          else
+            echo "Downloading tvOS platform..."
+            for i in 1 2 3; do
+              xcodebuild -downloadPlatform tvOS && break
+              echo "Retry $i failed, waiting 10s..."
+              sleep 10
+            done
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen

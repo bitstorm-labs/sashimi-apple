@@ -62,3 +62,43 @@ The app has special handling for YouTube content (from Pinchflat). YouTube libra
 - **Display preference**: Use series poster in rows, episode thumbnails only in episode detail hero
 
 When adding new views that display media items, pass `libraryName` to `MediaPosterButton` to enable proper YouTube detection. The `isYouTubeStyle` computed property handles the logic.
+
+## Git Workflow & CI
+
+### Branch Protection
+- **main** branch has protection rules enforced (including for admins)
+- All changes MUST go through pull requests
+- Required status checks: `Build tvOS App` and `SwiftLint`
+- Never bypass PR requirements - create a branch and PR instead
+
+### Creating Changes
+```bash
+# Create feature branch
+git checkout -b feature/my-change
+
+# Make changes, then commit
+git add -A && git commit -m "feat: description"
+
+# Push and create PR
+git push -u origin feature/my-change
+gh pr create --fill
+```
+
+### CI Monitoring
+After pushing changes or creating PRs, always monitor CI until completion:
+```bash
+# List recent CI runs
+gh run list --limit 5
+
+# Watch a specific run in real-time
+gh run watch
+
+# View failed run details
+gh run view <run-id> --log-failed
+```
+
+### SwiftLint
+- CI runs SwiftLint in strict mode (warnings fail the build)
+- Run locally before committing: `swiftlint lint`
+- Auto-fix issues: `swiftlint --fix`
+- Documented exceptions use inline `swiftlint:disable` comments with explanations
