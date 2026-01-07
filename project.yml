@@ -71,6 +71,10 @@ targets:
           - "**/.DS_Store"
     info:
       path: TopShelf/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app.topshelf
