@@ -65,6 +65,25 @@ When adding new views that display media items, pass `libraryName` to `MediaPost
 
 ## Git Workflow & CI
 
+### Issue Tracking
+**Always create a GitHub issue before starting work.** This ensures:
+- Work is tracked and discoverable
+- PRs can reference issues (`Fixes #123`)
+- Progress is visible to all contributors
+
+```bash
+# Create an issue for new work
+gh issue create --title "feat: add dark mode support" --body "Description of the feature"
+
+# List open issues
+gh issue list
+
+# Reference issue in PR (auto-closes when merged)
+gh pr create --title "feat: add dark mode" --body "Fixes #123"
+```
+
+For bug fixes, enhancements, or new features - create the issue first, then the branch and PR.
+
 ### Branch Protection
 - **main** branch has protection rules enforced (including for admins)
 - All changes MUST go through pull requests
