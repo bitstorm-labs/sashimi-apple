@@ -18,6 +18,7 @@ private enum SashimiTheme {
 
 struct MediaDetailView: View {
     let item: BaseItemDto
+    var forceYouTubeStyle: Bool = false
     @Environment(\.dismiss) private var dismiss
     @State private var showingPlayer = false
     @State private var isFavorite: Bool = false
@@ -40,6 +41,17 @@ struct MediaDetailView: View {
     private var isSeries: Bool { item.type == .series }
     private var isEpisode: Bool { item.type == .episode }
     private var isVideo: Bool { item.type == .video }
+
+    // YouTube-style content uses landscape thumbnails instead of portrait posters
+    private var isYouTubeStyle: Bool {
+        // Explicitly set from calling context
+        if forceYouTubeStyle { return true }
+        // Videos are always YouTube-style
+        if isVideo { return true }
+        // Episodes without parent backdrops are YouTube-style (from Pinchflat)
+        if isEpisode && !seriesHasBackdrop { return true }
+        return false
+    }
 
     // Check if series has backdrop images available
     private var seriesHasBackdrop: Bool {
@@ -126,10 +138,10 @@ struct MediaDetailView: View {
             PlayerView(item: selectedEpisode ?? item)
         }
         .fullScreenCover(item: $showingSeriesDetail) { series in
-            MediaDetailView(item: series)
+            MediaDetailView(item: series, forceYouTubeStyle: forceYouTubeStyle)
         }
         .fullScreenCover(item: $showingEpisodeDetail) { episode in
-            MediaDetailView(item: episode)
+            MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle)
         }
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
@@ -238,13 +250,21 @@ struct MediaDetailView: View {
     private var posterFallbackIds: [String] {
         var ids: [String] = []
         if isEpisode {
-            // For episodes: try season, then episode itself, then series
-            if let seasonId = item.seasonId {
-                ids.append(seasonId)
-            }
-            ids.append(item.id)
-            if let seriesId = item.seriesId {
-                ids.append(seriesId)
+            if isYouTubeStyle {
+                // YouTube-style: episode thumbnail first, then series
+                ids.append(item.id)
+                if let seriesId = item.seriesId {
+                    ids.append(seriesId)
+                }
+            } else {
+                // Regular TV: season poster first, then episode, then series
+                if let seasonId = item.seasonId {
+                    ids.append(seasonId)
+                }
+                ids.append(item.id)
+                if let seriesId = item.seriesId {
+                    ids.append(seriesId)
+                }
             }
         } else {
             ids.append(item.id)
@@ -253,10 +273,14 @@ struct MediaDetailView: View {
     }
 
     private var posterSection: some View {
-        SmartPosterImage(itemIds: posterFallbackIds, maxWidth: 400)
-            .frame(width: 200, height: 300)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        SmartPosterImage(
+            itemIds: posterFallbackIds,
+            maxWidth: isYouTubeStyle ? 640 : 400,
+            imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"]
+        )
+        .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
     }
 
     // MARK: - Info Section
@@ -877,11 +901,16 @@ struct EpisodeCard: View {
 
     @FocusState private var isFocused: Bool
 
-    private var imageId: String {
-        if showEpisodeThumbnail {
-            return episode.id
+    // All possible image sources in order: episode, season, series
+    private var fallbackImageIds: [String] {
+        var ids = [episode.id]
+        if let seasonId = episode.seasonId {
+            ids.append(seasonId)
         }
-        return episode.seasonId ?? episode.seriesId ?? episode.id
+        if let seriesId = episode.seriesId {
+            ids.append(seriesId)
+        }
+        return ids
     }
 
     var body: some View {
@@ -889,24 +918,15 @@ struct EpisodeCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack(alignment: .bottomLeading) {
                     if showEpisodeThumbnail {
-                        AsyncItemImage(
-                            itemId: episode.id,
-                            imageType: "Primary",
-                            maxWidth: 400,
-                            contentMode: .fit,
-                            fallbackImageTypes: ["Thumb"]
-                        )
-                        .frame(width: 240, height: 135)
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        // Try episode thumbnail first, fall back to season/series poster
+                        SmartPosterImage(itemIds: fallbackImageIds, maxWidth: 400)
+                            .frame(width: 240, height: 135)
+                            .background(Color.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        AsyncItemImage(
-                            itemId: imageId,
-                            imageType: "Primary",
-                            maxWidth: 400
-                        )
-                        .frame(width: 150, height: 225)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        SmartPosterImage(itemIds: fallbackImageIds, maxWidth: 400)
+                            .frame(width: 150, height: 225)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
 
                     if episode.progressPercent > 0 {

@@ -374,6 +374,21 @@ actor JellyfinClient {
         return components.url
     }
 
+    /// Synchronous image URL builder - uses cached server URL from UserDefaults
+    nonisolated func syncImageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
+              let url = URL(string: serverURL) else { return nil }
+
+        guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(itemId)/Images/\(imageType)"), resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.queryItems = [
+            URLQueryItem(name: "maxWidth", value: "\(maxWidth)")
+        ]
+
+        return components.url
+    }
+
     func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0) async throws {
         let body: [String: Any] = [
             "ItemId": itemId,
@@ -442,7 +457,8 @@ actor JellyfinClient {
 
         var queryItems = [
             URLQueryItem(name: "UserId", value: userId),
-            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating")
+            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,ImageTags"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Thumb")
         ]
 
         if let seasonId {

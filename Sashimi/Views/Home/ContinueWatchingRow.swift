@@ -77,6 +77,14 @@ struct ContinueWatchingCard: View {
         }
     }
 
+    // Fallback image types for when primary choice fails
+    private var fallbackImageTypes: [String] {
+        if item.type == .episode && !seriesHasBackdrop {
+            return ["Thumb", "Backdrop"]
+        }
+        return ["Primary", "Thumb"]
+    }
+
     private var displayTitle: String {
         switch item.type {
         case .movie, .video:
@@ -103,7 +111,8 @@ struct ContinueWatchingCard: View {
                     AsyncItemImage(
                         itemId: imageId,
                         imageType: imageType,
-                        maxWidth: 600
+                        maxWidth: 600,
+                        fallbackImageTypes: fallbackImageTypes
                     )
                     .frame(width: 440, height: 248)
                     .overlay(

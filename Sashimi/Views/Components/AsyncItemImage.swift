@@ -1,27 +1,43 @@
 import SwiftUI
 
-// Smart poster that tries multiple item IDs until one works
+// Smart image that tries multiple item IDs until one works
+// For each item ID, tries specified image types in order
 struct SmartPosterImage: View {
     let itemIds: [String]
     let maxWidth: Int
+    var imageTypes: [String] = ["Primary", "Thumb"]
+    var contentMode: ContentMode = .fill
 
     @State private var currentIndex: Int = 0
-    @State private var imageURL: URL?
+    @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
+    @State private var attemptId = UUID()
+
+    private var currentURL: URL? {
+        guard currentIndex < itemIds.count, currentTypeIndex < imageTypes.count else { return nil }
+        return JellyfinClient.shared.syncImageURL(
+            itemId: itemIds[currentIndex],
+            imageType: imageTypes[currentTypeIndex],
+            maxWidth: maxWidth
+        )
+    }
 
     var body: some View {
         Group {
-            if let url = imageURL {
+            if loadFailed {
+                placeholderView
+            } else if let url = currentURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: contentMode)
                     case .failure:
-                        Color.clear.onAppear {
-                            tryNextItemId()
-                        }
+                        Color.clear
+                            .task(id: attemptId) {
+                                advanceToNext()
+                            }
                     case .empty:
                         Rectangle()
                             .fill(.gray.opacity(0.2))
@@ -30,42 +46,26 @@ struct SmartPosterImage: View {
                         placeholderView
                     }
                 }
-            } else if loadFailed {
-                placeholderView
+                .id("\(currentIndex)-\(currentTypeIndex)-\(attemptId)")
             } else {
-                Rectangle()
-                    .fill(.gray.opacity(0.2))
-                    .overlay { ProgressView() }
+                placeholderView
             }
-        }
-        .task {
-            await loadImage()
         }
     }
 
-    private func loadImage() async {
-        guard currentIndex < itemIds.count else {
-            loadFailed = true
+    private func advanceToNext() {
+        // Try next image type for current item
+        if currentTypeIndex < imageTypes.count - 1 {
+            currentTypeIndex += 1
+            attemptId = UUID()
             return
         }
 
-        // Try Primary first, then Thumb for current item
-        let itemId = itemIds[currentIndex]
-        if let url = await JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Primary", maxWidth: maxWidth) {
-            imageURL = url
-        } else if let url = await JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Thumb", maxWidth: maxWidth) {
-            imageURL = url
-        } else {
-            tryNextItemId()
-        }
-    }
-
-    private func tryNextItemId() {
-        currentIndex += 1
-        if currentIndex < itemIds.count {
-            Task {
-                await loadImage()
-            }
+        // Move to next item ID, reset to first image type
+        if currentIndex < itemIds.count - 1 {
+            currentIndex += 1
+            currentTypeIndex = 0
+            attemptId = UUID()
         } else {
             loadFailed = true
         }
@@ -89,17 +89,28 @@ struct AsyncItemImage: View {
     var contentMode: ContentMode = .fill
     var fallbackImageTypes: [String] = []
 
-    @State private var imageURL: URL?
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
+    @State private var attemptId = UUID()
 
     private var allImageTypes: [String] {
         [imageType] + fallbackImageTypes
     }
 
+    private var currentURL: URL? {
+        guard currentTypeIndex < allImageTypes.count else { return nil }
+        return JellyfinClient.shared.syncImageURL(
+            itemId: itemId,
+            imageType: allImageTypes[currentTypeIndex],
+            maxWidth: maxWidth
+        )
+    }
+
     var body: some View {
         Group {
-            if let url = imageURL {
+            if loadFailed {
+                placeholderView
+            } else if let url = currentURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
@@ -107,57 +118,29 @@ struct AsyncItemImage: View {
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
                     case .failure:
-                        if currentTypeIndex < allImageTypes.count - 1 {
-                            // Try next fallback
-                            Color.clear.onAppear {
-                                tryNextFallback()
+                        Color.clear
+                            .task(id: attemptId) {
+                                advanceToNextType()
                             }
-                        } else {
-                            placeholderView
-                        }
                     case .empty:
                         Rectangle()
                             .fill(.gray.opacity(0.2))
-                            .overlay {
-                                ProgressView()
-                            }
+                            .overlay { ProgressView() }
                     @unknown default:
                         placeholderView
                     }
                 }
-            } else if loadFailed {
-                placeholderView
+                .id("\(currentTypeIndex)-\(attemptId)")
             } else {
-                Rectangle()
-                    .fill(.gray.opacity(0.2))
-                    .overlay {
-                        ProgressView()
-                    }
+                placeholderView
             }
-        }
-        .task {
-            await loadImage()
         }
     }
 
-    private func loadImage() async {
-        imageURL = await JellyfinClient.shared.imageURL(itemId: itemId, imageType: allImageTypes[currentTypeIndex], maxWidth: maxWidth)
-        if imageURL == nil && currentTypeIndex < allImageTypes.count - 1 {
-            tryNextFallback()
-        } else if imageURL == nil {
-            loadFailed = true
-        }
-    }
-
-    private func tryNextFallback() {
-        currentTypeIndex += 1
-        if currentTypeIndex < allImageTypes.count {
-            Task {
-                imageURL = await JellyfinClient.shared.imageURL(itemId: itemId, imageType: allImageTypes[currentTypeIndex], maxWidth: maxWidth)
-                if imageURL == nil && currentTypeIndex >= allImageTypes.count - 1 {
-                    loadFailed = true
-                }
-            }
+    private func advanceToNextType() {
+        if currentTypeIndex < allImageTypes.count - 1 {
+            currentTypeIndex += 1
+            attemptId = UUID()
         } else {
             loadFailed = true
         }

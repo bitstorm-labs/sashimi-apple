@@ -14,6 +14,7 @@ struct MediaRow: View {
     let title: String
     var subtitle: String?
     let items: [BaseItemDto]
+    var isLandscape: Bool = false
     let onSelect: (BaseItemDto) -> Void
 
     var body: some View {
@@ -32,9 +33,9 @@ struct MediaRow: View {
             .padding(.horizontal, 80)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 36) {
+                LazyHStack(spacing: isLandscape ? 24 : 36) {
                     ForEach(items) { item in
-                        MediaPosterButton(item: item) {
+                        MediaPosterButton(item: item, isLandscape: isLandscape) {
                             onSelect(item)
                         }
                     }
@@ -50,31 +51,20 @@ struct MediaPosterButton: View {
     let item: BaseItemDto
     var libraryType: String?
     var libraryName: String?
+    var isLandscape: Bool = false
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
 
-    // Detect YouTube-style content by library name or characteristics
-    private var isYouTubeStyle: Bool {
-        // Check library name for YouTube
-        if let name = libraryName?.lowercased(), name.contains("youtube") {
-            return true
-        }
-        // Check library type for homevideos
-        if libraryType?.lowercased() == "homevideos" {
-            return true
-        }
-        // For episodes without parent backdrops (legacy check)
-        if item.type == .episode {
-            let parentHasBackdrop = item.parentBackdropImageTags?.isEmpty == false
-            if !parentHasBackdrop {
-                return true
-            }
-        }
-        return false
-    }
+    // Card dimensions
+    private var cardWidth: CGFloat { isLandscape ? 320 : 220 }
+    private var cardHeight: CGFloat { isLandscape ? 180 : 330 }
 
     private var displayTitle: String {
+        if isLandscape {
+            // For landscape (YouTube), show video title
+            return item.name
+        }
         switch item.type {
         case .movie:
             return item.name
@@ -87,71 +77,57 @@ struct MediaPosterButton: View {
         }
     }
 
-    // Check if item has its own primary image
-    private var itemHasPrimaryImage: Bool {
-        if let tags = item.imageTags, tags["Primary"] != nil {
-            return true
+    private var subtitleText: String? {
+        if isLandscape, item.type == .episode {
+            // Show channel/series name for YouTube videos
+            return item.seriesName
         }
-        return false
+        return nil
     }
 
-    private var imageId: String {
-        if item.type == .episode || item.type == .video {
-            // For YouTube-style: use series poster (seasons don't have images)
-            if isYouTubeStyle {
-                return item.seriesId ?? item.id
+    // Fallback image IDs
+    private var imageFallbackIds: [String] {
+        var ids: [String] = []
+        if isLandscape {
+            // Landscape mode: show item's own thumbnail first
+            ids.append(item.id)
+            if let seriesId = item.seriesId {
+                ids.append(seriesId)
             }
-            // Use season poster for regular TV shows, fall back to series
-            return item.seasonId ?? item.seriesId ?? item.id
+        } else if item.type == .episode || item.type == .video {
+            // Portrait mode: season/series poster for episodes
+            if let seasonId = item.seasonId {
+                ids.append(seasonId)
+            }
+            if let seriesId = item.seriesId {
+                ids.append(seriesId)
+            }
+            ids.append(item.id)
+        } else {
+            ids.append(item.id)
         }
-        return item.id
+        return ids
     }
 
-    private var fallbackImageTypes: [String] {
-        if isYouTubeStyle {
-            // YouTube-style content may have Thumb instead of Primary
-            return ["Thumb", "Backdrop"]
+    // Image types to try
+    private var imageTypes: [String] {
+        if isLandscape {
+            return ["Primary", "Thumb", "Backdrop"]
         }
-        return ["Thumb"]
+        return ["Primary", "Thumb"]
     }
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
                 ZStack(alignment: .bottomLeading) {
-                    AsyncItemImage(
-                        itemId: imageId,
-                        imageType: "Primary",
-                        maxWidth: 400,
-                        fallbackImageTypes: fallbackImageTypes
+                    SmartPosterImage(
+                        itemIds: imageFallbackIds,
+                        maxWidth: isLandscape ? 640 : 400,
+                        imageTypes: imageTypes
                     )
-                    .frame(width: 220, height: 330)
-                    .overlay(
-                        LinearGradient(
-                            colors: [.clear, .clear, .black.opacity(0.6)],
-                            startPoint: .center,
-                            endPoint: .bottom
-                        )
-                    )
+                    .frame(width: cardWidth, height: cardHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                    if let rating = item.communityRating, rating > 0 {
-                        HStack(spacing: 4) {
-                            Image("TMDBLogo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 18)
-                            Text(String(format: "%.1f", rating))
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.black.opacity(0.7))
-                        .clipShape(Capsule())
-                        .padding(10)
-                    }
 
                     if item.userData?.played == true {
                         VStack {
@@ -165,9 +141,22 @@ struct MediaPosterButton: View {
                                             .fill(.black.opacity(0.5))
                                             .padding(-2)
                                     )
-                                    .padding(10)
+                                    .padding(8)
                             }
                             Spacer()
+                        }
+                    }
+
+                    // Progress bar for landscape cards
+                    if isLandscape, item.progressPercent > 0 {
+                        VStack {
+                            Spacer()
+                            GeometryReader { geo in
+                                Rectangle()
+                                    .fill(SashimiTheme.accent)
+                                    .frame(width: geo.size.width * item.progressPercent, height: 3)
+                            }
+                            .frame(height: 3)
                         }
                     }
                 }
@@ -177,23 +166,25 @@ struct MediaPosterButton: View {
                         .stroke(Color.white.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
                 )
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     MarqueeText(
                         text: displayTitle,
-                        isScrolling: isFocused
+                        isScrolling: isFocused,
+                        height: 24
                     )
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: isLandscape ? 20 : 22, weight: .medium))
                     .foregroundStyle(SashimiTheme.textPrimary)
 
-                    if !isYouTubeStyle, let year = item.productionYear {
-                        Text(String(year))
+                    if let subtitle = subtitleText {
+                        Text(subtitle)
                             .font(.system(size: 16))
                             .foregroundStyle(SashimiTheme.textTertiary)
+                            .lineLimit(1)
                     }
                 }
-                .frame(width: 220, alignment: .leading)
+                .frame(width: cardWidth, alignment: .leading)
             }
-            .scaleEffect(isFocused ? 1.10 : 1.0)
+            .scaleEffect(isFocused ? 1.08 : 1.0)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())

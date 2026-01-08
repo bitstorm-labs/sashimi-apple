@@ -16,6 +16,7 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
     @State private var selectedItem: BaseItemDto?
+    @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @Binding var resetTrigger: Bool
@@ -81,7 +82,7 @@ struct HomeView: View {
                 }
             }
             .fullScreenCover(item: $selectedItem) { item in
-                MediaDetailView(item: item)
+                MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
             }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
@@ -122,6 +123,7 @@ struct HomeView: View {
                         items: viewModel.heroItems,
                         currentIndex: $heroIndex,
                         onSelect: { item in
+                            selectedItemIsYouTube = false
                             selectedItem = item
                         }
                     )
@@ -132,6 +134,7 @@ struct HomeView: View {
                     ContinueWatchingRow(
                         items: viewModel.continueWatchingItems,
                         onSelect: { item in
+                            selectedItemIsYouTube = false
                             selectedItem = item
                         }
                     )
@@ -141,6 +144,7 @@ struct HomeView: View {
         } else if let libraryId = config.libraryId,
                   let library = viewModel.libraries.first(where: { $0.id == libraryId }) {
             RecentlyAddedLibraryRow(library: library, onSelect: { item in
+                selectedItemIsYouTube = library.name.lowercased().contains("youtube")
                 selectedItem = item
             })
             .focusSection()
@@ -179,29 +183,27 @@ struct HeroSection: View {
         items[safeIndex]
     }
 
-    // Check if item has backdrop images (regular shows have it, YouTube doesn't)
-    private var itemHasBackdrop: Bool {
-        if let tags = currentItem.backdropImageTags, !tags.isEmpty {
-            return true
-        }
-        return false
-    }
-
-    private var heroImageId: String {
-        // For episodes with backdrops (regular shows), use series backdrop
-        // For episodes without backdrops (YouTube), use episode's own thumbnail
+    // Fallback image IDs for hero display
+    private var heroFallbackIds: [String] {
+        var ids: [String] = []
         if currentItem.type == .episode {
-            return itemHasBackdrop ? (currentItem.seriesId ?? currentItem.id) : currentItem.id
+            // For episodes: try episode, then season, then series
+            ids.append(currentItem.id)
+            if let seasonId = currentItem.seasonId {
+                ids.append(seasonId)
+            }
+            if let seriesId = currentItem.seriesId {
+                ids.append(seriesId)
+            }
+        } else {
+            ids.append(currentItem.id)
         }
-        return currentItem.id
+        return ids
     }
 
-    private var heroImageType: String {
-        // YouTube episodes don't have backdrops, use Primary (thumbnail)
-        if currentItem.type == .episode && !itemHasBackdrop {
-            return "Primary"
-        }
-        return "Backdrop"
+    // Image types to try for hero (landscape preference)
+    private var heroImageTypes: [String] {
+        return ["Backdrop", "Primary", "Thumb"]
     }
 
     private func startAutoScroll() {
@@ -224,12 +226,11 @@ struct HeroSection: View {
             onSelect(currentItem)
         } label: {
             ZStack(alignment: .bottomLeading) {
-                AsyncItemImage(
-                    itemId: heroImageId,
-                    imageType: heroImageType,
+                SmartPosterImage(
+                    itemIds: heroFallbackIds,
                     maxWidth: 1920,
-                    contentMode: .fit,
-                    fallbackImageTypes: ["Thumb", "Primary"]
+                    imageTypes: heroImageTypes,
+                    contentMode: .fit
                 )
                 .id(currentItem.id)
                 .frame(maxWidth: .infinity)
@@ -392,6 +393,11 @@ struct RecentlyAddedLibraryRow: View {
         "Recently Added \(library.name)"
     }
 
+    // Detect YouTube library by name
+    private var isYouTubeLibrary: Bool {
+        library.name.lowercased().contains("youtube")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text(sectionTitle)
@@ -406,12 +412,17 @@ struct RecentlyAddedLibraryRow: View {
                         .tint(SashimiTheme.accent)
                     Spacer()
                 }
-                .frame(height: 340)
+                .frame(height: isYouTubeLibrary ? 220 : 340)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 40) {
+                    LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
                         ForEach(items) { item in
-                            MediaPosterButton(item: item, libraryType: library.collectionType, libraryName: library.name) {
+                            MediaPosterButton(
+                                item: item,
+                                libraryType: library.collectionType,
+                                libraryName: library.name,
+                                isLandscape: isYouTubeLibrary
+                            ) {
                                 onSelect(item)
                             }
                         }

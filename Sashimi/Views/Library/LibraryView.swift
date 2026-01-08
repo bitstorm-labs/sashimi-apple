@@ -88,16 +88,26 @@ struct LibraryDetailView: View {
     @State private var isLoading = true
     @State private var selectedItem: BaseItemDto?
 
+    // Detect YouTube library by name
+    private var isYouTubeLibrary: Bool {
+        library.name.lowercased().contains("youtube")
+    }
+
+    private var gridColumns: [GridItem] {
+        if isYouTubeLibrary {
+            return [GridItem(.adaptive(minimum: 300, maximum: 340), spacing: 24)]
+        }
+        return [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 30)]
+    }
+
     var body: some View {
         ScrollView {
             if isLoading {
                 ProgressView()
             } else {
-                LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 30)
-                ], spacing: 40) {
+                LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 30 : 40) {
                     ForEach(items) { item in
-                        MediaPosterButton(item: item) {
+                        MediaPosterButton(item: item, isLandscape: isYouTubeLibrary) {
                             selectedItem = item
                         }
                     }
@@ -110,7 +120,7 @@ struct LibraryDetailView: View {
             await loadItems()
         }
         .fullScreenCover(item: $selectedItem) { item in
-            MediaDetailView(item: item)
+            MediaDetailView(item: item, forceYouTubeStyle: isYouTubeLibrary)
         }
         .onChange(of: selectedItem) { oldValue, newValue in
             if oldValue != nil && newValue == nil {
