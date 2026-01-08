@@ -1,28 +1,46 @@
 import SwiftUI
 
 struct LibraryView: View {
+    var onBackAtRoot: (() -> Void)?
     @State private var libraries: [LibraryView_Model] = []
-    @State private var selectedLibrary: LibraryView_Model?
     @State private var isLoading = true
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ScrollView {
                 if isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    LazyVGrid(columns: [
-                        GridItem(.adaptive(minimum: 300, maximum: 400), spacing: 40)
-                    ], spacing: 40) {
-                        ForEach(libraries) { library in
-                            NavigationLink(value: library) {
-                                LibraryCard(library: library)
+                    // Use HStack for small number of libraries to center them
+                    if libraries.count <= 4 {
+                        HStack(spacing: 40) {
+                            ForEach(libraries) { library in
+                                NavigationLink(value: library) {
+                                    LibraryCard(library: library)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(CardButtonStyle())
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(60)
+                    } else {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible(), spacing: 40),
+                            GridItem(.flexible(), spacing: 40),
+                            GridItem(.flexible(), spacing: 40),
+                            GridItem(.flexible(), spacing: 40)
+                        ], spacing: 40) {
+                            ForEach(libraries) { library in
+                                NavigationLink(value: library) {
+                                    LibraryCard(library: library)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(60)
                     }
-                    .padding(60)
                 }
             }
             .navigationDestination(for: LibraryView_Model.self) { library in
@@ -31,6 +49,13 @@ struct LibraryView: View {
         }
         .task {
             await loadLibraries()
+        }
+        .onExitCommand {
+            if navigationPath.isEmpty {
+                onBackAtRoot?()
+            } else {
+                navigationPath.removeLast()
+            }
         }
     }
 

@@ -50,7 +50,6 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
-    @State private var allowExit = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -60,43 +59,34 @@ struct MainTabView: View {
                 }
                 .tag(0)
 
-            LibraryView()
+            LibraryView(onBackAtRoot: { selectedTab = 0 })
                 .tabItem {
                     Label("Library", systemImage: "square.grid.2x2")
                 }
                 .tag(1)
 
-            SearchView()
+            SearchView(onBackAtRoot: { selectedTab = 0 })
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
                 .tag(2)
 
-            ProfileMenuView()
+            ProfileMenuView(onBackAtRoot: { selectedTab = 0 })
                 .tabItem {
                     Label(sessionManager.currentUser?.name ?? "Profile", systemImage: "person.circle")
                 }
                 .tag(3)
         }
-        .ifCondition(!allowExit) { view in
+        .ifCondition(selectedTab != 0 || !isAtDefaultState) { view in
             view.onExitCommand {
-                if selectedTab != 0 {
+                if selectedTab == 0 {
+                    // Home tab not at top: scroll to top
+                    homeViewResetTrigger.toggle()
+                } else {
                     // Non-home tabs: go to home
                     selectedTab = 0
-                } else {
-                    // Home tab: scroll to top, then allow exit on next press
-                    homeViewResetTrigger.toggle()
-                    allowExit = true
-                    // Reset after delay
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        allowExit = false
-                    }
                 }
             }
-        }
-        .onChange(of: selectedTab) { _, _ in
-            allowExit = false
         }
     }
 }
@@ -113,11 +103,13 @@ extension View {
 }
 
 struct ProfileMenuView: View {
+    var onBackAtRoot: (() -> Void)?
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             List {
                 Section {
                     HStack(spacing: 20) {
@@ -195,6 +187,13 @@ struct ProfileMenuView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Are you sure you want to sign out?")
+            }
+        }
+        .onExitCommand {
+            if navigationPath.isEmpty {
+                onBackAtRoot?()
+            } else {
+                navigationPath.removeLast()
             }
         }
     }

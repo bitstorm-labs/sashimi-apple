@@ -148,11 +148,11 @@ struct MediaDetailView: View {
         } message: {
             Text(mediaInfo?.path ?? "Path not available")
         }
-        .alert("Delete Item", isPresented: $showingDeleteConfirm) {
-            Button("Cancel", role: .cancel) { }
+        .confirmationDialog("Delete Item", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task { await deleteItem() }
             }
+            Button("Cancel", role: .cancel) { }
         } message: {
             Text("Are you sure you want to delete this item? This cannot be undone.")
         }
@@ -168,9 +168,14 @@ struct MediaDetailView: View {
     private func deleteItem() async {
         do {
             try await JellyfinClient.shared.deleteItem(itemId: item.id)
-            dismiss()
+            ToastManager.shared.show("Item deleted")
+            // Small delay to let the toast appear before dismissing
+            try? await Task.sleep(for: .milliseconds(500))
+            await MainActor.run {
+                dismiss()
+            }
         } catch {
-            ToastManager.shared.show("Failed to delete item")
+            ToastManager.shared.show("Failed to delete: \(error.localizedDescription)")
         }
     }
 

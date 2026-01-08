@@ -556,19 +556,28 @@ enum JellyfinError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Server not configured"
+            return "Not connected to a server. Please sign in."
         case .invalidResponse:
-            return "Invalid server response"
+            return "The server returned an unexpected response. Try again."
         case .invalidURL:
-            return "Failed to construct URL"
+            return "Could not connect to the server. Check server address."
         case .httpError(let code):
-            return "HTTP error: \(code)"
+            switch code {
+            case 401, 403:
+                return "Session expired. Please sign in again."
+            case 404:
+                return "Content not found. It may have been removed."
+            case 500...599:
+                return "Server is having issues. Try again later."
+            default:
+                return "Something went wrong. Please try again."
+            }
         case .decodingError:
-            return "Failed to decode response"
+            return "Could not load content. Try again."
         case .sessionExpired:
-            return "Your session has expired. Please log in again."
+            return "Session expired. Please sign in again."
         case .networkError:
-            return "Network connection failed. Please check your connection."
+            return "No internet connection. Check your network."
         }
     }
 }

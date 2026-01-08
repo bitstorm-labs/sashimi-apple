@@ -13,7 +13,7 @@ private enum SashimiTheme {
 }
 
 struct SearchView: View {
-    @Environment(\.dismiss) private var dismiss
+    var onBackAtRoot: (() -> Void)?
     @State private var searchText = ""
     @State private var results: [BaseItemDto] = []
     @State private var isSearching = false
@@ -27,33 +27,13 @@ struct SearchView: View {
             SashimiTheme.background.ignoresSafeArea()
 
             VStack(spacing: 40) {
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "chevron.left")
-                                .font(.title3)
-                            Text("Back")
-                                .font(.headline)
-                        }
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Text("Search")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(SashimiTheme.textPrimary)
-
-                    Spacer()
-
-                    Color.clear.frame(width: 80)
-                }
-                .padding(.horizontal, 80)
-                .padding(.top, 40)
+                Text("Search")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 80)
+                    .padding(.top, 40)
 
                 TextField("Search movies, shows...", text: $searchText)
                     .textFieldStyle(.plain)
@@ -135,15 +115,14 @@ struct SearchView: View {
         .fullScreenCover(item: $selectedItem) { item in
             MediaDetailView(item: item)
         }
-        .onAppear {
-            isSearchFieldFocused = true
-        }
         .onExitCommand {
-            if searchText.isEmpty {
-                dismiss()
-            } else {
+            if !searchText.isEmpty {
+                // Clear search first
                 searchText = ""
                 results = []
+            } else {
+                // At root with empty search
+                onBackAtRoot?()
             }
         }
     }
