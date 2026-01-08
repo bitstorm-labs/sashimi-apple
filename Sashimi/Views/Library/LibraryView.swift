@@ -61,23 +61,13 @@ struct LibraryCard: View {
     let library: LibraryView_Model
 
     var body: some View {
-        VStack {
-            AsyncItemImage(
-                itemId: library.id,
-                imageType: "Primary",
-                maxWidth: 400
-            )
-            .frame(width: 300, height: 170)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.black.opacity(0.4))
-
-                Text(library.name)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-            }
-        }
+        AsyncItemImage(
+            itemId: library.id,
+            imageType: "Primary",
+            maxWidth: 400
+        )
+        .frame(width: 300, height: 170)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
