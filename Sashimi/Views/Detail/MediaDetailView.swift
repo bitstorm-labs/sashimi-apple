@@ -33,6 +33,8 @@ struct MediaDetailView: View {
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingFileInfo = false
     @State private var showingDeleteConfirm = false
+    @State private var isRefreshing = false
+    @State private var refreshID = UUID()
     @FocusState private var isMoreButtonFocused: Bool
 
     private var isSeries: Bool { item.type == .series }
@@ -91,6 +93,7 @@ struct MediaDetailView: View {
                     contentMode: .fill,
                     fallbackImageTypes: ["Thumb", "Backdrop", "Primary"]
                 )
+                .id(refreshID)
                 .ignoresSafeArea()
 
                 // Gradient overlays for readability
@@ -157,6 +160,27 @@ struct MediaDetailView: View {
         } catch {
             ToastManager.shared.show("Failed to delete item")
         }
+    }
+
+    private func refreshMetadata() async {
+        isRefreshing = true
+        do {
+            // Refresh metadata on server
+            try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
+            ToastManager.shared.show("Metadata refresh started")
+
+            // Wait a moment for server to process
+            try await Task.sleep(for: .seconds(2))
+
+            // Reload content to pick up new metadata/images
+            await loadContent()
+
+            // Force image views to reload by changing the refresh ID
+            refreshID = UUID()
+        } catch {
+            ToastManager.shared.show("Failed to refresh metadata")
+        }
+        isRefreshing = false
     }
 
     // MARK: - Main Content
@@ -446,6 +470,13 @@ struct MediaDetailView: View {
                     Label("File Info", systemImage: "info.circle")
                 }
 
+                Button {
+                    Task { await refreshMetadata() }
+                } label: {
+                    Label(isRefreshing ? "Refreshing..." : "Refresh Metadata", systemImage: "arrow.clockwise")
+                }
+                .disabled(isRefreshing)
+
                 if isEpisode, let seriesId = item.seriesId {
                     Button {
                         navigateToSeries(seriesId: seriesId)
@@ -639,6 +670,7 @@ struct MediaDetailView: View {
                                 EpisodeCard(episode: episode, isCurrentEpisode: episode.id == item.id, showEpisodeThumbnail: true) {
                                     showingEpisodeDetail = episode
                                 }
+                                .id("\(episode.id)-\(refreshID)")
                             }
                         }
                         .padding(.horizontal, 60)

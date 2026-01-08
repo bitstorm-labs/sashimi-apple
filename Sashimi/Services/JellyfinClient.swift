@@ -501,6 +501,18 @@ actor JellyfinClient {
         _ = try await request(path: "/Items/\(itemId)", method: "DELETE")
     }
 
+    func refreshMetadata(itemId: String, replaceImages: Bool = false) async throws {
+        var queryItems = [
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "MetadataRefreshMode", value: "FullRefresh"),
+            URLQueryItem(name: "ImageRefreshMode", value: "FullRefresh")
+        ]
+        if replaceImages {
+            queryItems.append(URLQueryItem(name: "ReplaceAllImages", value: "true"))
+        }
+        _ = try await request(path: "/Items/\(itemId)/Refresh", method: "POST", queryItems: queryItems)
+    }
+
     func getItem(itemId: String) async throws -> BaseItemDto {
         guard let userId else { throw JellyfinError.notConfigured }
 
