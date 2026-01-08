@@ -43,6 +43,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let seriesName: String?
     let seriesId: String?
     let seasonId: String?
+    let parentId: String?
     let indexNumber: Int?
     let parentIndexNumber: Int?
     let overview: String?
@@ -69,6 +70,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case seriesName = "SeriesName"
         case seriesId = "SeriesId"
         case seasonId = "SeasonId"
+        case parentId = "ParentId"
         case indexNumber = "IndexNumber"
         case parentIndexNumber = "ParentIndexNumber"
         case overview = "Overview"

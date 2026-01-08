@@ -968,7 +968,7 @@ struct EpisodeCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(isCurrentEpisode || isFocused ? SashimiTheme.highlight : .clear, lineWidth: 2)
+                        .stroke(isFocused ? SashimiTheme.highlight : .clear, lineWidth: 2)
                 )
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -981,7 +981,7 @@ struct EpisodeCard: View {
                     .foregroundStyle(.white)
 
                     HStack(spacing: 6) {
-                        Text("S\(episode.parentIndexNumber ?? 1):E\(episode.indexNumber ?? 0)")
+                        Text(verbatim: "S\(episode.parentIndexNumber ?? 1):E\(episode.indexNumber ?? 0)")
                             .font(.system(size: 20))
                             .foregroundStyle(SashimiTheme.textTertiary)
 

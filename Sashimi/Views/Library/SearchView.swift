@@ -139,6 +139,7 @@ struct SearchView: View {
             results = try await JellyfinClient.shared.search(query: searchText)
         } catch {
             logger.error("Search failed: \(error.localizedDescription)")
+            ToastManager.shared.show("Search failed. Try again.")
         }
 
         isSearching = false

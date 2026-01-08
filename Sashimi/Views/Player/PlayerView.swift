@@ -26,6 +26,20 @@ struct PlayerView: View {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
             }
+
+            // Up Next overlay
+            if viewModel.showingUpNext, let nextEpisode = viewModel.nextEpisode {
+                UpNextOverlay(
+                    nextEpisode: nextEpisode,
+                    onPlayNow: {
+                        Task { await viewModel.playNextEpisode() }
+                    },
+                    onCancel: {
+                        viewModel.cancelUpNext()
+                    }
+                )
+                .transition(.opacity)
+            }
         }
         .task {
             await viewModel.loadMedia(item: item)
@@ -36,8 +50,17 @@ struct PlayerView: View {
             }
         }
         .onExitCommand {
-            Task {
-                await viewModel.stop()
+            if viewModel.showingUpNext {
+                viewModel.cancelUpNext()
+            } else {
+                Task {
+                    await viewModel.stop()
+                    dismiss()
+                }
+            }
+        }
+        .onChange(of: viewModel.playbackEnded) { _, ended in
+            if ended {
                 dismiss()
             }
         }
@@ -252,6 +275,123 @@ struct SubtitlePickerSheet: View {
     }
 }
 
+struct UpNextOverlay: View {
+    let nextEpisode: BaseItemDto
+    let onPlayNow: () -> Void
+    let onCancel: () -> Void
+
+    @State private var countdown = 10
+    @State private var countdownTask: Task<Void, Never>?
+
+    var body: some View {
+        ZStack {
+            // Semi-transparent background
+            LinearGradient(
+                colors: [Color.black.opacity(0.9), Color.black.opacity(0.7)],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .ignoresSafeArea()
+
+            HStack(spacing: 60) {
+                // Episode thumbnail
+                AsyncItemImage(
+                    itemId: nextEpisode.id,
+                    imageType: "Primary",
+                    maxWidth: 400
+                )
+                .frame(width: 400, height: 225)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                // Episode info and controls
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("Up Next")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let seriesName = nextEpisode.seriesName {
+                            Text(seriesName)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                        }
+
+                        Text(nextEpisode.name)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+
+                        if let season = nextEpisode.parentIndexNumber,
+                           let episode = nextEpisode.indexNumber {
+                            Text(verbatim: "S\(season):E\(episode)")
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
+                    Spacer().frame(height: 20)
+
+                    HStack(spacing: 30) {
+                        Button {
+                            countdownTask?.cancel()
+                            onPlayNow()
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "play.fill")
+                                Text("Play Now")
+                            }
+                            .font(.headline)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 16)
+                            .background(Color.white)
+                            .foregroundStyle(.black)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            countdownTask?.cancel()
+                            onCancel()
+                        } label: {
+                            Text("Cancel")
+                                .font(.headline)
+                                .padding(.horizontal, 32)
+                                .padding(.vertical, 16)
+                                .background(Color.white.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text("Starting in \(countdown) seconds...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                }
+            }
+            .padding(80)
+        }
+        .onAppear {
+            startCountdown()
+        }
+        .onDisappear {
+            countdownTask?.cancel()
+        }
+    }
+
+    private func startCountdown() {
+        countdownTask = Task {
+            while countdown > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                countdown -= 1
+            }
+            if !Task.isCancelled {
+                onPlayNow()
+            }
+        }
+    }
+}
+
 #Preview {
     PlayerView(item: BaseItemDto(
         id: "test",
@@ -260,6 +400,7 @@ struct SubtitlePickerSheet: View {
         seriesName: nil,
         seriesId: nil,
         seasonId: nil,
+        parentId: nil,
         indexNumber: nil,
         parentIndexNumber: nil,
         overview: nil,
