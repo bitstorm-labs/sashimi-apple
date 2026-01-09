@@ -119,35 +119,13 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
-        var seen = Set<String>()
-        var merged: [BaseItemDto] = []
-
-        // Add all resume items
-        for item in resume where !seen.contains(item.id) {
-            seen.insert(item.id)
-            merged.append(item)
-        }
-
-        // Add nextUp items (avoiding duplicates by series)
-        for item in nextUp {
-            if let seriesId = item.seriesId {
-                if !seen.contains(seriesId) && !seen.contains(item.id) {
-                    seen.insert(seriesId)
-                    seen.insert(item.id)
-                    merged.append(item)
-                }
-            } else if !seen.contains(item.id) {
-                seen.insert(item.id)
-                merged.append(item)
-            }
-        }
+        // Combine resume and nextUp
+        let allItems = resume + nextUp
 
         // Sort by lastPlayedDate (most recent first)
-        let sorted = merged.sorted { item1, item2 in
+        let sorted = allItems.sorted { item1, item2 in
             let date1 = parseDate(item1.userData?.lastPlayedDate)
             let date2 = parseDate(item2.userData?.lastPlayedDate)
-            // Items with dates come before items without dates
-            // More recent dates come first
             switch (date1, date2) {
             case (.some(let d1), .some(let d2)):
                 return d1 > d2
@@ -160,7 +138,26 @@ final class HomeViewModel: ObservableObject {
             }
         }
 
-        return Array(sorted.prefix(20))
+        // Deduplicate: only keep the most recent episode per series (or movie)
+        var seenIds = Set<String>()
+        var seenSeriesIds = Set<String>()
+        var merged: [BaseItemDto] = []
+
+        for item in sorted {
+            // Skip if we've already seen this exact item
+            guard !seenIds.contains(item.id) else { continue }
+
+            // For episodes, dedupe by series - only keep the most recent episode per series
+            if let seriesId = item.seriesId {
+                guard !seenSeriesIds.contains(seriesId) else { continue }
+                seenSeriesIds.insert(seriesId)
+            }
+
+            seenIds.insert(item.id)
+            merged.append(item)
+        }
+
+        return Array(merged.prefix(20))
     }
 
     private func parseDate(_ dateString: String?) -> Date? {

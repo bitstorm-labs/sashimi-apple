@@ -12,6 +12,7 @@ private enum PlayerTheme {
 
 struct TVPlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
+    var isInteractionEnabled: Bool = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -30,6 +31,8 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         uiViewController.player = player
+        // Disable interaction when dialogs are showing to prevent focus stealing
+        uiViewController.view.isUserInteractionEnabled = isInteractionEnabled
     }
 
     private func createSpeedMenu(for player: AVPlayer, coordinator: Coordinator) -> UIMenu {
@@ -97,8 +100,11 @@ struct PlayerView: View {
                 errorView(error: error)
             } else if let player = viewModel.player {
                 // Native AVPlayerViewController for full tvOS controls including audio/subtitle selection
-                TVPlayerViewController(player: player)
-                    .ignoresSafeArea()
+                TVPlayerViewController(
+                    player: player,
+                    isInteractionEnabled: !viewModel.showingResumeDialog && !viewModel.showingUpNext
+                )
+                .ignoresSafeArea()
             }
 
             // Resume playback dialog
