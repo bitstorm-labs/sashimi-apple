@@ -405,6 +405,7 @@ struct RecentlyAddedLibraryRow: View {
     let library: JellyfinLibrary
     let onSelect: (BaseItemDto) -> Void
     @State private var items: [BaseItemDto] = []
+    @State private var episodeCounts: [String: Int] = [:]  // seriesId -> count of new episodes
     @State private var isLoading = true
     @State private var loadError = false
 
@@ -464,11 +465,14 @@ struct RecentlyAddedLibraryRow: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
                         ForEach(items) { item in
+                            let key = item.seriesId ?? item.id
+                            let count = episodeCounts[key] ?? 1
                             MediaPosterButton(
                                 item: item,
                                 libraryType: library.collectionType,
                                 libraryName: library.name,
-                                isLandscape: isYouTubeLibrary
+                                isLandscape: isYouTubeLibrary,
+                                badgeCount: count > 1 ? count : nil
                             ) {
                                 onSelect(item)
                             }
@@ -493,7 +497,9 @@ struct RecentlyAddedLibraryRow: View {
 
         do {
             let latestItems = try await JellyfinClient.shared.getLatestMedia(parentId: library.id, limit: 30)
-            items = deduplicateBySeries(latestItems)
+            let (dedupedItems, counts) = deduplicateBySeries(latestItems)
+            items = dedupedItems
+            episodeCounts = counts
         } catch is CancellationError {
             // Ignore cancellation errors - expected during navigation
         } catch {
@@ -503,10 +509,18 @@ struct RecentlyAddedLibraryRow: View {
         isLoading = false
     }
 
-    private func deduplicateBySeries(_ items: [BaseItemDto]) -> [BaseItemDto] {
+    private func deduplicateBySeries(_ items: [BaseItemDto]) -> (items: [BaseItemDto], counts: [String: Int]) {
+        var counts: [String: Int] = [:]
         var seen = Set<String>()
         var result: [BaseItemDto] = []
 
+        // First pass: count episodes per series
+        for item in items {
+            let key = item.type == .episode ? (item.seriesId ?? item.id) : item.id
+            counts[key, default: 0] += 1
+        }
+
+        // Second pass: deduplicate
         for item in items {
             let key = item.type == .episode ? (item.seriesId ?? item.id) : item.id
             if !seen.contains(key) {
@@ -515,7 +529,7 @@ struct RecentlyAddedLibraryRow: View {
             }
         }
 
-        return Array(result.prefix(20))
+        return (Array(result.prefix(20)), counts)
     }
 }
 

@@ -52,6 +52,7 @@ struct MediaPosterButton: View {
     var libraryType: String?
     var libraryName: String?
     var isLandscape: Bool = false
+    var badgeCount: Int?  // Shows "X new" badge when > 1
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -142,6 +143,24 @@ struct MediaPosterButton: View {
                                             .padding(-2)
                                     )
                                     .padding(8)
+                            }
+                            Spacer()
+                        }
+                    }
+
+                    // "X new" badge for multiple episodes
+                    if let count = badgeCount, count > 1 {
+                        VStack {
+                            HStack {
+                                Text("\(count) new")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(SashimiTheme.accent)
+                                    .clipShape(Capsule())
+                                    .padding(8)
+                                Spacer()
                             }
                             Spacer()
                         }
