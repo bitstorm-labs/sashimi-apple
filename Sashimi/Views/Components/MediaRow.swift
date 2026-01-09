@@ -206,10 +206,13 @@ struct MarqueeText: View {
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geo in
             let needsScroll = textWidth > geo.size.width
+            // Disable scrolling if user has Reduce Motion enabled
+            let shouldScroll = needsScroll && isScrolling && !reduceMotion
 
             Text(text)
                 .lineLimit(1)
@@ -220,8 +223,11 @@ struct MarqueeText: View {
                         containerWidth = geo.size.width
                     }
                 })
-                .offset(x: needsScroll && isScrolling ? offset : 0)
+                .offset(x: shouldScroll ? offset : 0)
                 .onChange(of: isScrolling) { _, scrolling in
+                    // Skip animation if Reduce Motion is enabled
+                    guard !reduceMotion else { return }
+
                     if scrolling && needsScroll {
                         withAnimation(.linear(duration: Double(textWidth - containerWidth) / 30).delay(0.5)) {
                             offset = -(textWidth - containerWidth + 20)
