@@ -38,6 +38,7 @@ final class PlayerViewModel: ObservableObject {
     private var progressReportTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
+    private var rateObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private let client = JellyfinClient.shared
 
@@ -99,6 +100,13 @@ final class PlayerViewModel: ObservableObject {
                 }
             }
 
+            // Observe play/pause to report progress immediately
+            rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
+                Task { @MainActor in
+                    await self?.reportProgress()
+                }
+            }
+
             // Observe playback end
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,
@@ -132,7 +140,7 @@ final class PlayerViewModel: ObservableObject {
         progressReportTask?.cancel()
         progressReportTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: .seconds(5))
                 await reportProgress()
             }
         }
