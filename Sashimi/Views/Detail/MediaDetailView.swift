@@ -4,18 +4,6 @@ import SwiftUI
 // MediaDetailView is a complex view handling movies, series, seasons, and episodes
 // with multiple states and sub-views - splitting would reduce cohesion
 
-private enum SashimiTheme {
-    static let background = Color(red: 0.07, green: 0.07, blue: 0.09)
-    static let cardBackground = Color(white: 0.12)
-    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
-    static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
-    static let highlight = Color(red: 0.36, green: 0.68, blue: 0.90) // Blue accent for highlights
-    static let textPrimary = Color.white
-    static let textSecondary = Color(white: 0.75)
-    static let textTertiary = Color(white: 0.55)
-    static let progressBackground = Color(white: 0.25)
-}
-
 struct MediaDetailView: View {
     let item: BaseItemDto
     var forceYouTubeStyle: Bool = false
@@ -862,11 +850,11 @@ struct SeasonTab: View {
     var body: some View {
         Button(action: action) {
             Text(season.name)
-                .font(.system(size: 20))
+                .font(.system(size: 24))
                 .fontWeight(isSelected ? .bold : .medium)
                 .foregroundStyle(isSelected || isFocused ? SashimiTheme.highlight : .white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
                 .background(
                     isSelected || isFocused ? SashimiTheme.highlight.opacity(0.2) : SashimiTheme.cardBackground
                 )
@@ -889,19 +877,20 @@ struct CastCard: View {
     var body: some View {
         VStack(spacing: 8) {
             if person.primaryImageTag != nil {
-                AsyncImage(url: JellyfinClient.shared.personImageURL(personId: person.id)) { image in
+                AsyncImage(url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 200)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     Circle().fill(SashimiTheme.cardBackground)
                 }
-                .frame(width: 80, height: 80)
+                .frame(width: 100, height: 100)
                 .clipShape(Circle())
             } else {
                 Circle()
                     .fill(SashimiTheme.cardBackground)
-                    .frame(width: 80, height: 80)
+                    .frame(width: 100, height: 100)
                     .overlay {
                         Image(systemName: "person.fill")
+                            .font(.system(size: 40))
                             .foregroundStyle(SashimiTheme.textTertiary)
                     }
             }
@@ -919,7 +908,7 @@ struct CastCard: View {
                     .lineLimit(1)
             }
         }
-        .frame(width: 90)
+        .frame(width: 120)
     }
 }
 

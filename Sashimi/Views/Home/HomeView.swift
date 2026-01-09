@@ -8,18 +8,6 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
-// MARK: - Theme Colors
-private enum SashimiTheme {
-    static let background = Color(red: 0.07, green: 0.07, blue: 0.09)
-    static let cardBackground = Color(white: 0.12)
-    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
-    static let textPrimary = Color.white
-    static let textSecondary = Color(white: 0.75)
-    static let textTertiary = Color(white: 0.55)
-    static let progressBackground = Color(white: 0.25)
-    static let focusGlow = Color(red: 0.36, green: 0.68, blue: 0.90).opacity(0.5)
-}
-
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
@@ -127,6 +115,15 @@ struct HomeView: View {
                 LoadingOverlay()
                     .allowsHitTesting(false) // Allow navigation while loading
             }
+        }
+        .overlay(alignment: .topLeading) {
+            Image("Logo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 50)
+                .padding(.leading, 80)
+                .padding(.top, 40)
+                .allowsHitTesting(false)
         }
     }
 

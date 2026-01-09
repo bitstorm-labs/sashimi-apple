@@ -1,15 +1,5 @@
 import SwiftUI
 
-private enum SashimiTheme {
-    static let background = Color(red: 0.07, green: 0.07, blue: 0.09)
-    static let cardBackground = Color(white: 0.12)
-    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
-    static let textPrimary = Color.white
-    static let textSecondary = Color(white: 0.75)
-    static let textTertiary = Color(white: 0.55)
-    static let focusGlow = Color(red: 0.36, green: 0.68, blue: 0.90).opacity(0.5)
-}
-
 struct MediaRow: View {
     let title: String
     var subtitle: String?

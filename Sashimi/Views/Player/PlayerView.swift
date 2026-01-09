@@ -2,11 +2,6 @@ import SwiftUI
 import AVKit
 import Combine
 
-private enum PlayerTheme {
-    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
-    static let cardBackground = Color(white: 0.12)
-}
-
 // MARK: - AVPlayerViewController Wrapper
 // Uses native tvOS player controls including swipe-down info panel for audio/subtitle selection
 
@@ -417,7 +412,7 @@ struct ResumePlaybackOverlay: View {
                 VStack(spacing: 16) {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 80))
-                        .foregroundStyle(PlayerTheme.accent)
+                        .foregroundStyle(SashimiTheme.accent)
 
                     Text("Resume Playback?")
                         .font(.title)
@@ -502,7 +497,7 @@ private struct ResumeDialogButton: View {
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(PlayerTheme.accent, lineWidth: isFocused ? 4 : 0)
+                    .stroke(SashimiTheme.accent, lineWidth: isFocused ? 4 : 0)
             )
             .scaleEffect(isFocused ? 1.05 : 1.0)
             .animation(.spring(response: 0.3), value: isFocused)
@@ -548,7 +543,7 @@ struct UpNextOverlay: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Text("Up Next")
                         .font(.headline)
-                        .foregroundStyle(PlayerTheme.accent)
+                        .foregroundStyle(SashimiTheme.accent)
 
                     VStack(alignment: .leading, spacing: 8) {
                         if let seriesName = nextEpisode.seriesName {
@@ -655,7 +650,7 @@ struct SkipSegmentOverlay: View {
                     .clipShape(Capsule())
                     .overlay(
                         Capsule()
-                            .stroke(PlayerTheme.accent, lineWidth: isFocused ? 4 : 0)
+                            .stroke(SashimiTheme.accent, lineWidth: isFocused ? 4 : 0)
                     )
                     .scaleEffect(isFocused ? 1.05 : 1.0)
                     .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
