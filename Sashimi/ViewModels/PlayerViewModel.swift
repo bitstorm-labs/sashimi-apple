@@ -45,13 +45,16 @@ final class PlayerViewModel: ObservableObject {
     private let client = JellyfinClient.shared
 
     func loadMedia(item: BaseItemDto) async {
-        currentItem = item
         isLoading = true
         error = nil
         errorMessage = nil
 
         do {
-            let playbackInfo = try await client.getPlaybackInfo(itemId: item.id)
+            // Fetch fresh item data to get latest playback position
+            let freshItem = try await client.getItem(itemId: item.id)
+            currentItem = freshItem
+
+            let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id)
 
             guard let mediaSource = playbackInfo.mediaSources?.first else {
                 throw PlayerError.noMediaSource
@@ -123,13 +126,13 @@ final class PlayerViewModel: ObservableObject {
             isLoading = false
 
             // Check if there's saved progress to resume from
-            if let startTicks = item.userData?.playbackPositionTicks, startTicks > 0 {
+            if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > 0 {
                 resumePositionTicks = startTicks
                 showingResumeDialog = true
                 // Don't auto-play - wait for user choice
             } else {
                 // No saved progress - start playing immediately
-                try? await client.reportPlaybackStart(itemId: item.id, positionTicks: 0)
+                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
                 startProgressReporting()
                 player?.play()
             }

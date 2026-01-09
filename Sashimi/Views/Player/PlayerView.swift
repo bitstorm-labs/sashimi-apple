@@ -7,6 +7,24 @@ private enum PlayerTheme {
     static let cardBackground = Color(white: 0.12)
 }
 
+// MARK: - AVPlayerViewController Wrapper
+// Uses native tvOS player controls including swipe-down info panel for audio/subtitle selection
+
+struct TVPlayerViewController: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.allowsPictureInPicturePlayback = false
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.player = player
+    }
+}
+
 struct PlayerView: View {
     let item: BaseItemDto
 
@@ -27,8 +45,8 @@ struct PlayerView: View {
             } else if let error = viewModel.error ?? (viewModel.errorMessage != nil ? PlayerError.noStreamURL : nil) {
                 errorView(error: error)
             } else if let player = viewModel.player {
-                // Native VideoPlayer with built-in tvOS controls
-                VideoPlayer(player: player)
+                // Native AVPlayerViewController for full tvOS controls including audio/subtitle selection
+                TVPlayerViewController(player: player)
                     .ignoresSafeArea()
             }
 
