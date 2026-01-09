@@ -49,12 +49,17 @@ struct HomeView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 40) {
-                            // Top anchor for scroll reset
-                            GeometryReader { geo in
-                                Color.clear
-                                    .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("scroll")).minY)
+                            // Logo at top-left
+                            HStack(spacing: 16) {
+                                Image("Logo")
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(height: 120)
+
+                                Text("Sashimi")
+                                    .font(.system(size: 56, weight: .bold))
+                                    .foregroundStyle(SashimiTheme.textPrimary)
                             }
-                            .frame(height: 1)
                             .id("top")
 
                             // Render rows based on settings order
@@ -70,10 +75,7 @@ struct HomeView: View {
                         }
                     }
                     .coordinateSpace(name: "scroll")
-                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                        // At top when offset is >= 0 (or close to it)
-                        isAtDefaultState = offset >= -10
-                    }
+                    .ignoresSafeArea(edges: .top)
                     .refreshable {
                         await viewModel.refresh()
                     }
@@ -115,15 +117,6 @@ struct HomeView: View {
                 LoadingOverlay()
                     .allowsHitTesting(false) // Allow navigation while loading
             }
-        }
-        .overlay(alignment: .topLeading) {
-            Image("Logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(height: 50)
-                .padding(.leading, 80)
-                .padding(.top, 40)
-                .allowsHitTesting(false)
         }
     }
 

@@ -60,9 +60,17 @@ struct LibraryView: View {
     }
 
     private func loadLibraries() async {
+        // Skip if already loaded
+        guard libraries.isEmpty else {
+            isLoading = false
+            return
+        }
+
         do {
             let views = try await JellyfinClient.shared.getLibraryViews()
             libraries = views.map { LibraryView_Model(from: $0) }
+        } catch is CancellationError {
+            // Ignore cancellation - expected during navigation
         } catch {
             ToastManager.shared.show("Failed to load libraries")
         }
