@@ -33,6 +33,8 @@ final class PlayerViewModel: ObservableObject {
     @Published var playbackEnded = false
     @Published var nextEpisode: BaseItemDto?
     @Published var showingUpNext = false
+    @Published var showingResumeDialog = false
+    @Published var resumePositionTicks: Int64 = 0
 
     private var timeObserver: Any?
     private var progressReportTask: Task<Void, Never>?
@@ -118,17 +120,19 @@ final class PlayerViewModel: ObservableObject {
                 }
             }
 
-            if let startTicks = item.userData?.playbackPositionTicks, startTicks > 0 {
-                let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
-                await player?.seek(to: startTime)
-            }
-
-            try? await client.reportPlaybackStart(itemId: item.id, positionTicks: item.userData?.playbackPositionTicks ?? 0)
-
-            startProgressReporting()
-
             isLoading = false
-            player?.play()
+
+            // Check if there's saved progress to resume from
+            if let startTicks = item.userData?.playbackPositionTicks, startTicks > 0 {
+                resumePositionTicks = startTicks
+                showingResumeDialog = true
+                // Don't auto-play - wait for user choice
+            } else {
+                // No saved progress - start playing immediately
+                try? await client.reportPlaybackStart(itemId: item.id, positionTicks: 0)
+                startProgressReporting()
+                player?.play()
+            }
         } catch {
             self.error = error
             self.errorMessage = error.localizedDescription
@@ -233,6 +237,23 @@ final class PlayerViewModel: ObservableObject {
         showingUpNext = false
         nextEpisode = nil
         playbackEnded = true
+    }
+
+    func resumePlayback() async {
+        showingResumeDialog = false
+        let startTime = CMTime(value: resumePositionTicks / 10000, timescale: 1000)
+        await player?.seek(to: startTime)
+        try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: resumePositionTicks)
+        startProgressReporting()
+        player?.play()
+    }
+
+    func startFromBeginning() async {
+        showingResumeDialog = false
+        resumePositionTicks = 0
+        try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: 0)
+        startProgressReporting()
+        player?.play()
     }
 
     func stop() async {

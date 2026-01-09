@@ -27,6 +27,20 @@ struct PlayerView: View {
                     .ignoresSafeArea()
             }
 
+            // Resume playback dialog
+            if viewModel.showingResumeDialog {
+                ResumePlaybackOverlay(
+                    resumePositionTicks: viewModel.resumePositionTicks,
+                    onResume: {
+                        Task { await viewModel.resumePlayback() }
+                    },
+                    onStartOver: {
+                        Task { await viewModel.startFromBeginning() }
+                    }
+                )
+                .transition(.opacity)
+            }
+
             // Up Next overlay
             if viewModel.showingUpNext, let nextEpisode = viewModel.nextEpisode {
                 UpNextOverlay(
@@ -270,6 +284,108 @@ struct SubtitlePickerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+struct ResumePlaybackOverlay: View {
+    let resumePositionTicks: Int64
+    let onResume: () -> Void
+    let onStartOver: () -> Void
+
+    @State private var countdown = 5
+    @State private var countdownTask: Task<Void, Never>?
+
+    private var formattedTime: String {
+        let totalSeconds = Int(resumePositionTicks / 10_000_000)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    var body: some View {
+        ZStack {
+            // Semi-transparent background
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+
+            VStack(spacing: 40) {
+                VStack(spacing: 16) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 80))
+                        .foregroundStyle(.white)
+
+                    Text("Resume Playback?")
+                        .font(.title)
+                        .fontWeight(.bold)
+
+                    Text("You were at \(formattedTime)")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 30) {
+                    Button {
+                        countdownTask?.cancel()
+                        onResume()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "play.fill")
+                            Text("Resume")
+                        }
+                        .font(.headline)
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 16)
+                        .background(Color.white)
+                        .foregroundStyle(.black)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        countdownTask?.cancel()
+                        onStartOver()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Start Over")
+                        }
+                        .font(.headline)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 16)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text("Resuming in \(countdown) seconds...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear {
+            startCountdown()
+        }
+        .onDisappear {
+            countdownTask?.cancel()
+        }
+    }
+
+    private func startCountdown() {
+        countdownTask = Task {
+            while countdown > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                countdown -= 1
+            }
+            if !Task.isCancelled {
+                onResume()
             }
         }
     }
