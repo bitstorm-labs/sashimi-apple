@@ -13,15 +13,66 @@ private enum PlayerTheme {
 struct TVPlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.allowsPictureInPicturePlayback = false
+
+        // Add playback speed menu to transport bar
+        controller.transportBarCustomMenuItems = [createSpeedMenu(for: player, coordinator: context.coordinator)]
+
         return controller
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
         uiViewController.player = player
+    }
+
+    private func createSpeedMenu(for player: AVPlayer, coordinator: Coordinator) -> UIMenu {
+        let speeds: [(String, Float)] = [
+            ("0.5×", 0.5),
+            ("0.75×", 0.75),
+            ("1× (Normal)", 1.0),
+            ("1.25×", 1.25),
+            ("1.5×", 1.5),
+            ("2×", 2.0)
+        ]
+
+        let actions = speeds.map { (title, rate) in
+            UIAction(
+                title: title,
+                state: coordinator.currentSpeed == rate ? .on : .off
+            ) { _ in
+                player.rate = rate
+                coordinator.currentSpeed = rate
+            }
+        }
+
+        return UIMenu(
+            title: "Playback Speed",
+            image: UIImage(systemName: "speedometer"),
+            children: actions
+        )
+    }
+
+    class Coordinator {
+        var currentSpeed: Float = 1.0
+
+        var speedTitle: String {
+            switch currentSpeed {
+            case 0.5: return "0.5×"
+            case 0.75: return "0.75×"
+            case 1.0: return "1×"
+            case 1.25: return "1.25×"
+            case 1.5: return "1.5×"
+            case 2.0: return "2×"
+            default: return "\(currentSpeed)×"
+            }
+        }
     }
 }
 
