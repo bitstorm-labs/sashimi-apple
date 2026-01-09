@@ -42,7 +42,7 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
             ("2×", 2.0)
         ]
 
-        let actions = speeds.map { (title, rate) in
+        let actions = speeds.map { title, rate in
             UIAction(
                 title: title,
                 state: coordinator.currentSpeed == rate ? .on : .off
@@ -128,9 +128,21 @@ struct PlayerView: View {
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
+
+            // Skip Intro/Credits button
+            if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
+                SkipSegmentOverlay(
+                    segmentType: segment.type,
+                    onSkip: {
+                        viewModel.skipCurrentSegment()
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.showingResumeDialog)
         .animation(.easeInOut(duration: 0.3), value: viewModel.showingUpNext)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.showingSkipButton)
         .task {
             await viewModel.loadMedia(item: item)
         }
@@ -605,6 +617,51 @@ struct UpNextOverlay: View {
             if !Task.isCancelled {
                 onPlayNow()
             }
+        }
+    }
+}
+
+struct SkipSegmentOverlay: View {
+    let segmentType: MediaSegmentType
+    let onSkip: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    private var buttonTitle: String {
+        "Skip \(segmentType.displayName)"
+    }
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Button(action: onSkip) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "forward.fill")
+                        Text(buttonTitle)
+                    }
+                    .font(.system(size: 24, weight: .semibold))
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 16)
+                    .foregroundStyle(.black)
+                    .background(Color.white)
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(PlayerTheme.accent, lineWidth: isFocused ? 4 : 0)
+                    )
+                    .scaleEffect(isFocused ? 1.05 : 1.0)
+                    .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
+                    .animation(.spring(response: 0.3), value: isFocused)
+                }
+                .buttonStyle(PlainNoHighlightButtonStyle())
+                .focused($isFocused)
+                .padding(60)
+            }
+        }
+        .onAppear {
+            isFocused = true
         }
     }
 }

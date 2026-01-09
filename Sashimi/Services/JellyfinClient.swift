@@ -542,6 +542,26 @@ actor JellyfinClient {
 
         return try JSONDecoder().decode(BaseItemDto.self, from: data)
     }
+
+    /// Fetch skip segments from intro-skipper plugin
+    /// Endpoint: /Episode/{itemId}/IntroSkipperSegments
+    /// Response: {"Introduction": {"Start": 0, "End": 90}, "Credits": {"Start": 1200, "End": 1300}}
+    func getMediaSegments(itemId: String) async throws -> [MediaSegmentDto] {
+        let data = try await request(path: "/Episode/\(itemId)/IntroSkipperSegments")
+
+        // Parse the dictionary response from intro-skipper
+        let segmentsDict = try JSONDecoder().decode([String: IntroSkipperSegment].self, from: data)
+
+        return segmentsDict.compactMap { key, segment in
+            let segmentType = MediaSegmentType(rawValue: key) ?? .unknown
+            return MediaSegmentDto(
+                id: "\(itemId)-\(key)",
+                type: segmentType,
+                startSeconds: segment.start,
+                endSeconds: segment.end
+            )
+        }
+    }
 }
 
 enum JellyfinError: LocalizedError {

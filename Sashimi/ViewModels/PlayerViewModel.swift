@@ -36,7 +36,13 @@ final class PlayerViewModel: ObservableObject {
     @Published var showingResumeDialog = false
     @Published var resumePositionTicks: Int64 = 0
 
+    // Skip intro/credits
+    @Published var segments: [MediaSegmentDto] = []
+    @Published var currentSegment: MediaSegmentDto?
+    @Published var showingSkipButton = false
+
     private var timeObserver: Any?
+    private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
@@ -125,6 +131,9 @@ final class PlayerViewModel: ObservableObject {
 
             isLoading = false
 
+            // Fetch media segments for skip intro/credits (non-blocking)
+            await fetchSegments(itemId: freshItem.id)
+
             // Check if there's saved progress to resume from
             if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > 0 {
                 resumePositionTicks = startTicks
@@ -134,6 +143,7 @@ final class PlayerViewModel: ObservableObject {
                 // No saved progress - start playing immediately
                 try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
                 startProgressReporting()
+                setupSegmentTracking()
                 player?.play()
             }
         } catch {
@@ -248,6 +258,7 @@ final class PlayerViewModel: ObservableObject {
         await player?.seek(to: startTime)
         try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: resumePositionTicks)
         startProgressReporting()
+        setupSegmentTracking()
         player?.play()
     }
 
@@ -256,11 +267,13 @@ final class PlayerViewModel: ObservableObject {
         resumePositionTicks = 0
         try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: 0)
         startProgressReporting()
+        setupSegmentTracking()
         player?.play()
     }
 
     func stop() async {
         progressReportTask?.cancel()
+        cleanupSegmentTracking()
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -381,6 +394,69 @@ final class PlayerViewModel: ObservableObject {
     func loadAllTracks() {
         loadAudioTracks()
         loadSubtitleTracks()
+    }
+
+    // MARK: - Skip Intro/Credits
+
+    private func fetchSegments(itemId: String) async {
+        do {
+            segments = try await client.getMediaSegments(itemId: itemId)
+        } catch {
+            // Segments not available - silently ignore (server may not have intro-skipper plugin)
+            segments = []
+        }
+    }
+
+    private func setupSegmentTracking() {
+        guard let player else { return }
+
+        // Check position every 0.5 seconds for segment detection
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        segmentObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            Task { @MainActor in
+                self?.checkCurrentSegment(at: time.seconds)
+            }
+        }
+    }
+
+    private func checkCurrentSegment(at currentSeconds: Double) {
+        // Find if we're currently in any skippable segment
+        let skippableTypes: [MediaSegmentType] = [.intro, .outro, .recap, .preview]
+        let activeSegment = segments.first { segment in
+            skippableTypes.contains(segment.type) &&
+            currentSeconds >= segment.startSeconds &&
+            currentSeconds < segment.endSeconds
+        }
+
+        if let segment = activeSegment {
+            if currentSegment?.id != segment.id {
+                currentSegment = segment
+                showingSkipButton = true
+            }
+        } else {
+            if currentSegment != nil {
+                currentSegment = nil
+                showingSkipButton = false
+            }
+        }
+    }
+
+    func skipCurrentSegment() {
+        guard let segment = currentSegment, let player else { return }
+        let targetTime = CMTime(seconds: segment.endSeconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        player.seek(to: targetTime)
+        showingSkipButton = false
+        currentSegment = nil
+    }
+
+    private func cleanupSegmentTracking() {
+        if let segmentObserver, let player {
+            player.removeTimeObserver(segmentObserver)
+        }
+        segmentObserver = nil
+        segments = []
+        currentSegment = nil
+        showingSkipButton = false
     }
 
     deinit {

@@ -287,3 +287,41 @@ struct LibraryViewsResponse: Codable {
         case items = "Items"
     }
 }
+
+// MARK: - Media Segments (for skip intro/credits via intro-skipper plugin)
+
+struct MediaSegmentDto: Identifiable {
+    let id: String
+    let type: MediaSegmentType
+    let startSeconds: Double
+    let endSeconds: Double
+}
+
+enum MediaSegmentType: String {
+    case intro = "Introduction"
+    case outro = "Credits"
+    case preview = "Preview"
+    case recap = "Recap"
+    case unknown
+
+    var displayName: String {
+        switch self {
+        case .intro: return "Intro"
+        case .outro: return "Credits"
+        case .preview: return "Preview"
+        case .recap: return "Recap"
+        case .unknown: return "Segment"
+        }
+    }
+}
+
+// Intro-skipper plugin response format: {"Introduction": {"Start": 0, "End": 90}, "Credits": {...}}
+struct IntroSkipperSegment: Codable {
+    let start: Double
+    let end: Double
+
+    enum CodingKeys: String, CodingKey {
+        case start = "Start"
+        case end = "End"
+    }
+}
