@@ -11,8 +11,8 @@ private enum SashimiTheme {
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
     static let highlight = Color(red: 0.36, green: 0.68, blue: 0.90) // Blue accent for highlights
     static let textPrimary = Color.white
-    static let textSecondary = Color(white: 0.70)
-    static let textTertiary = Color(white: 0.45)
+    static let textSecondary = Color(white: 0.75)
+    static let textTertiary = Color(white: 0.55)
     static let progressBackground = Color(white: 0.25)
 }
 

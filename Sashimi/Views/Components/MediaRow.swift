@@ -5,8 +5,8 @@ private enum SashimiTheme {
     static let cardBackground = Color(white: 0.12)
     static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
     static let textPrimary = Color.white
-    static let textSecondary = Color(white: 0.65)
-    static let textTertiary = Color(white: 0.45)
+    static let textSecondary = Color(white: 0.75)
+    static let textTertiary = Color(white: 0.55)
     static let focusGlow = Color(red: 0.36, green: 0.68, blue: 0.90).opacity(0.5)
 }
 
