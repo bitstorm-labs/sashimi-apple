@@ -62,6 +62,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let people: [PersonInfo]?
     let criticRating: Int?
     let premiereDate: String?
+    let chapters: [ChapterInfo]?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -89,6 +90,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case people = "People"
         case criticRating = "CriticRating"
         case premiereDate = "PremiereDate"
+        case chapters = "Chapters"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -285,6 +287,24 @@ struct LibraryViewsResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case items = "Items"
+    }
+}
+
+// MARK: - Chapters
+
+struct ChapterInfo: Codable {
+    let startPositionTicks: Int64
+    let name: String?
+    let imageTag: String?
+
+    enum CodingKeys: String, CodingKey {
+        case startPositionTicks = "StartPositionTicks"
+        case name = "Name"
+        case imageTag = "ImageTag"
+    }
+
+    var startSeconds: Double {
+        Double(startPositionTicks) / 10_000_000.0
     }
 }
 

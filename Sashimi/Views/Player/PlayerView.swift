@@ -698,6 +698,7 @@ struct SkipSegmentOverlay: View {
         taglines: nil,
         people: nil,
         criticRating: nil,
-        premiereDate: nil
+        premiereDate: nil,
+        chapters: nil
     ))
 }
