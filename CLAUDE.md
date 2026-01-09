@@ -45,8 +45,9 @@ xcodegen generate
 ### Video Playback
 `PlayerViewModel` handles playback via AVKit:
 - Fetches `PlaybackInfoResponse` to determine best stream URL (transcoding vs direct)
-- Reports playback progress to Jellyfin server every 10 seconds
-- Supports resume from last position via `userData.playbackPositionTicks`
+- Reports playback progress to Jellyfin server every 5 seconds (and immediately on play/pause)
+- Shows resume dialog when video has saved progress (auto-resumes after 5 seconds)
+- Supports Up Next feature for continuous episode playback
 
 ### Dependencies
 - **Nuke/NukeUI**: Image loading and caching (via SPM)
@@ -102,6 +103,15 @@ git add -A && git commit -m "feat: description"
 git push -u origin feature/my-change
 gh pr create --fill
 ```
+
+### Testing Before Merge
+**Always wait for user testing before merging PRs.** After deploying a build to Apple TV:
+1. Create the PR and wait for CI to pass
+2. Deploy the build to Apple TV for testing
+3. **Wait for user confirmation** that the feature works correctly
+4. Only merge after user approval
+
+Do not automatically merge PRs after CI passes - the user needs to test on actual hardware first.
 
 ### CI Monitoring
 After pushing changes or creating PRs, always monitor CI until completion:
