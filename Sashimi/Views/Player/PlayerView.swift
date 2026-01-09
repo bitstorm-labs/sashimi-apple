@@ -2,6 +2,11 @@ import SwiftUI
 import AVKit
 import Combine
 
+private enum PlayerTheme {
+    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
+    static let cardBackground = Color(white: 0.12)
+}
+
 struct PlayerView: View {
     let item: BaseItemDto
 
@@ -38,7 +43,7 @@ struct PlayerView: View {
                         Task { await viewModel.startFromBeginning() }
                     }
                 )
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
 
             // Up Next overlay
@@ -52,9 +57,11 @@ struct PlayerView: View {
                         viewModel.cancelUpNext()
                     }
                 )
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.showingResumeDialog)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.showingUpNext)
         .task {
             await viewModel.loadMedia(item: item)
         }
@@ -296,6 +303,11 @@ struct ResumePlaybackOverlay: View {
 
     @State private var countdown = 5
     @State private var countdownTask: Task<Void, Never>?
+    @FocusState private var focusedButton: ResumeButton?
+
+    private enum ResumeButton {
+        case resume, startOver
+    }
 
     private var formattedTime: String {
         let totalSeconds = Int(resumePositionTicks / 10_000_000)
@@ -318,7 +330,7 @@ struct ResumePlaybackOverlay: View {
                 VStack(spacing: 16) {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 80))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(PlayerTheme.accent)
 
                     Text("Resume Playback?")
                         .font(.title)
@@ -330,38 +342,27 @@ struct ResumePlaybackOverlay: View {
                 }
 
                 HStack(spacing: 30) {
-                    Button {
+                    ResumeDialogButton(
+                        title: "Resume",
+                        icon: "play.fill",
+                        isPrimary: true,
+                        isFocused: focusedButton == .resume
+                    ) {
                         countdownTask?.cancel()
                         onResume()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "play.fill")
-                            Text("Resume")
-                        }
-                        .font(.headline)
-                        .padding(.horizontal, 40)
-                        .padding(.vertical, 16)
-                        .background(Color.white)
-                        .foregroundStyle(.black)
-                        .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .focused($focusedButton, equals: .resume)
 
-                    Button {
+                    ResumeDialogButton(
+                        title: "Start Over",
+                        icon: "arrow.counterclockwise",
+                        isPrimary: false,
+                        isFocused: focusedButton == .startOver
+                    ) {
                         countdownTask?.cancel()
                         onStartOver()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("Start Over")
-                        }
-                        .font(.headline)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 16)
-                        .background(Color.white.opacity(0.2))
-                        .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .focused($focusedButton, equals: .startOver)
                 }
 
                 Text("Resuming in \(countdown) seconds...")
@@ -370,6 +371,8 @@ struct ResumePlaybackOverlay: View {
             }
         }
         .onAppear {
+            countdown = 5  // Reset countdown each time overlay appears
+            focusedButton = .resume
             startCountdown()
         }
         .onDisappear {
@@ -391,6 +394,36 @@ struct ResumePlaybackOverlay: View {
     }
 }
 
+private struct ResumeDialogButton: View {
+    let title: String
+    let icon: String
+    let isPrimary: Bool
+    let isFocused: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                Text(title)
+            }
+            .font(.headline)
+            .padding(.horizontal, isPrimary ? 40 : 32)
+            .padding(.vertical, 16)
+            .foregroundStyle(isPrimary ? .black : .white)
+            .background(isPrimary ? Color.white : Color.white.opacity(0.2))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(PlayerTheme.accent, lineWidth: isFocused ? 4 : 0)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+    }
+}
+
 struct UpNextOverlay: View {
     let nextEpisode: BaseItemDto
     let onPlayNow: () -> Void
@@ -398,6 +431,11 @@ struct UpNextOverlay: View {
 
     @State private var countdown = 10
     @State private var countdownTask: Task<Void, Never>?
+    @FocusState private var focusedButton: UpNextButton?
+
+    private enum UpNextButton {
+        case playNow, cancel
+    }
 
     var body: some View {
         ZStack {
@@ -423,7 +461,7 @@ struct UpNextOverlay: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Text("Up Next")
                         .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PlayerTheme.accent)
 
                     VStack(alignment: .leading, spacing: 8) {
                         if let seriesName = nextEpisode.seriesName {
@@ -447,35 +485,27 @@ struct UpNextOverlay: View {
                     Spacer().frame(height: 20)
 
                     HStack(spacing: 30) {
-                        Button {
+                        ResumeDialogButton(
+                            title: "Play Now",
+                            icon: "play.fill",
+                            isPrimary: true,
+                            isFocused: focusedButton == .playNow
+                        ) {
                             countdownTask?.cancel()
                             onPlayNow()
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "play.fill")
-                                Text("Play Now")
-                            }
-                            .font(.headline)
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                            .background(Color.white)
-                            .foregroundStyle(.black)
-                            .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .focused($focusedButton, equals: .playNow)
 
-                        Button {
+                        ResumeDialogButton(
+                            title: "Cancel",
+                            icon: "xmark",
+                            isPrimary: false,
+                            isFocused: focusedButton == .cancel
+                        ) {
                             countdownTask?.cancel()
                             onCancel()
-                        } label: {
-                            Text("Cancel")
-                                .font(.headline)
-                                .padding(.horizontal, 32)
-                                .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.2))
-                                .clipShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .focused($focusedButton, equals: .cancel)
                     }
 
                     Text("Starting in \(countdown) seconds...")
@@ -487,6 +517,8 @@ struct UpNextOverlay: View {
             .padding(80)
         }
         .onAppear {
+            countdown = 10  // Reset countdown each time overlay appears
+            focusedButton = .playNow
             startCountdown()
         }
         .onDisappear {

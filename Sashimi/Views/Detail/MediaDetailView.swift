@@ -23,6 +23,7 @@ struct MediaDetailView: View {
     @State private var showingPlayer = false
     @State private var isFavorite: Bool = false
     @State private var isWatched: Bool = false
+    @State private var hasProgress: Bool = false
     @State private var seasons: [BaseItemDto] = []
     @State private var episodes: [BaseItemDto] = []
     @State private var moreFromSeason: [BaseItemDto] = []
@@ -162,6 +163,13 @@ struct MediaDetailView: View {
         .onAppear {
             isFavorite = item.userData?.isFavorite ?? false
             isWatched = item.userData?.played ?? false
+            hasProgress = item.progressPercent > 0
+        }
+        .onChange(of: showingPlayer) { _, isShowing in
+            if !isShowing {
+                // Refresh item data when returning from player
+                Task { await refreshItemState() }
+            }
         }
     }
 
@@ -176,6 +184,17 @@ struct MediaDetailView: View {
             }
         } catch {
             ToastManager.shared.show("Failed to delete: \(error.localizedDescription)")
+        }
+    }
+
+    private func refreshItemState() async {
+        do {
+            let refreshedItem = try await JellyfinClient.shared.getItem(itemId: item.id)
+            isFavorite = refreshedItem.userData?.isFavorite ?? false
+            isWatched = refreshedItem.userData?.played ?? false
+            hasProgress = refreshedItem.progressPercent > 0 && !(refreshedItem.userData?.played ?? false)
+        } catch {
+            // Silently ignore - non-critical refresh
         }
     }
 
@@ -469,7 +488,7 @@ struct MediaDetailView: View {
     private var actionButtonsRow: some View {
         HStack(spacing: 16) {
             ActionButton(
-                title: item.progressPercent > 0 ? "Resume" : "Play",
+                title: hasProgress ? "Resume" : "Play",
                 icon: "play.fill",
                 isPrimary: true
             ) {
@@ -547,7 +566,12 @@ struct MediaDetailView: View {
 
     private func toggleWatched() async {
         let newState = !isWatched
+        let previousProgress = hasProgress
         isWatched = newState
+        if newState {
+            // When marking as watched, clear progress (it's complete)
+            hasProgress = false
+        }
         do {
             if newState {
                 try await JellyfinClient.shared.markPlayed(itemId: item.id)
@@ -556,6 +580,7 @@ struct MediaDetailView: View {
             }
         } catch {
             isWatched = !newState
+            hasProgress = previousProgress
             ToastManager.shared.show("Failed to update watched status")
         }
     }
