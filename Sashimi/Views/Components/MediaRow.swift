@@ -120,19 +120,20 @@ struct MediaPosterButton: View {
                     .frame(width: cardWidth, height: cardHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
+                    // Watched indicator (small corner checkmark)
                     if item.userData?.played == true {
                         VStack {
                             HStack {
                                 Spacer()
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.title3)
+                                    .font(.system(size: 20))
                                     .foregroundStyle(.green)
                                     .background(
                                         Circle()
-                                            .fill(.black.opacity(0.5))
+                                            .fill(.black.opacity(0.6))
                                             .padding(-2)
                                     )
-                                    .padding(8)
+                                    .padding(6)
                             }
                             Spacer()
                         }
@@ -172,8 +173,9 @@ struct MediaPosterButton: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
+                        .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
                 )
+                .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.6) : .clear, radius: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
                     MarqueeText(
@@ -193,8 +195,8 @@ struct MediaPosterButton: View {
                 }
                 .frame(width: cardWidth, alignment: .leading)
             }
-            .scaleEffect(isFocused ? 1.08 : 1.0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
