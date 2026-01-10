@@ -2,42 +2,59 @@ import SwiftUI
 
 struct LibraryView: View {
     var onBackAtRoot: (() -> Void)?
+    @Binding var showProfile: Bool
     @State private var libraries: [LibraryView_Model] = []
     @State private var isLoading = true
     @State private var navigationPath = NavigationPath()
 
+    init(onBackAtRoot: (() -> Void)? = nil, showProfile: Binding<Bool> = .constant(false)) {
+        self.onBackAtRoot = onBackAtRoot
+        _showProfile = showProfile
+    }
+
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            ScrollView {
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    // Use HStack for small number of libraries to center them
-                    if libraries.count <= 4 {
-                        HStack(spacing: 40) {
-                            ForEach(libraries) { library in
-                                LibraryCardButton(library: library) {
-                                    navigationPath.append(library)
+            ZStack {
+                SashimiTheme.background.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 30) {
+                        AppHeader(showProfile: $showProfile)
+
+                        if isLoading {
+                            ProgressView()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding(.top, 100)
+                        } else {
+                            // Use HStack for small number of libraries to center them
+                            if libraries.count <= 4 {
+                                HStack(spacing: 40) {
+                                    ForEach(libraries) { library in
+                                        LibraryCardButton(library: library) {
+                                            navigationPath.append(library)
+                                        }
+                                    }
                                 }
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 60)
+                                .padding(.bottom, 60)
+                            } else {
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible(), spacing: 40),
+                                    GridItem(.flexible(), spacing: 40),
+                                    GridItem(.flexible(), spacing: 40),
+                                    GridItem(.flexible(), spacing: 40)
+                                ], spacing: 40) {
+                                    ForEach(libraries) { library in
+                                        LibraryCardButton(library: library) {
+                                            navigationPath.append(library)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 60)
+                                .padding(.bottom, 60)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(60)
-                    } else {
-                        LazyVGrid(columns: [
-                            GridItem(.flexible(), spacing: 40),
-                            GridItem(.flexible(), spacing: 40),
-                            GridItem(.flexible(), spacing: 40),
-                            GridItem(.flexible(), spacing: 40)
-                        ], spacing: 40) {
-                            ForEach(libraries) { library in
-                                LibraryCardButton(library: library) {
-                                    navigationPath.append(library)
-                                }
-                            }
-                        }
-                        .padding(60)
                     }
                 }
             }

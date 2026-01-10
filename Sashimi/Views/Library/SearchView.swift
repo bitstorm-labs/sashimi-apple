@@ -56,6 +56,7 @@ final class SearchHistoryManager: ObservableObject {
 
 struct SearchView: View {
     var onBackAtRoot: (() -> Void)?
+    @Binding var showProfile: Bool
     @State private var searchText = ""
     @State private var results: [BaseItemDto] = []
     @State private var isSearching = false
@@ -65,18 +66,17 @@ struct SearchView: View {
 
     @FocusState private var isSearchFieldFocused: Bool
 
+    init(onBackAtRoot: (() -> Void)? = nil, showProfile: Binding<Bool> = .constant(false)) {
+        self.onBackAtRoot = onBackAtRoot
+        _showProfile = showProfile
+    }
+
     var body: some View {
         ZStack {
             SashimiTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 40) {
-                Text("Search")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 80)
-                    .padding(.top, 40)
+            VStack(spacing: 30) {
+                AppHeader(showProfile: $showProfile)
 
                 TextField("Search movies, shows...", text: $searchText)
                     .textFieldStyle(.plain)

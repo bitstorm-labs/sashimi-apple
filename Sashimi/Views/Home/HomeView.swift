@@ -17,13 +17,14 @@ struct HomeView: View {
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var showContinueWatchingDetail = false
-    @State private var showProfile = false
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
+    @Binding var showProfile: Bool
 
-    init(resetTrigger: Binding<Bool> = .constant(false), isAtDefaultState: Binding<Bool> = .constant(true)) {
+    init(resetTrigger: Binding<Bool> = .constant(false), isAtDefaultState: Binding<Bool> = .constant(true), showProfile: Binding<Bool> = .constant(false)) {
         _resetTrigger = resetTrigger
         _isAtDefaultState = isAtDefaultState
+        _showProfile = showProfile
     }
 
     // Order libraries according to settings
@@ -53,28 +54,8 @@ struct HomeView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 40) {
                             // Header with logo and profile avatar
-                            HStack {
-                                // Logo at top-left
-                                HStack(spacing: 16) {
-                                    Image("Logo")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(height: 120)
-
-                                    Text("Sashimi")
-                                        .font(.system(size: 56, weight: .bold))
-                                        .foregroundStyle(SashimiTheme.textPrimary)
-                                }
-
-                                Spacer()
-
-                                // Profile avatar at top-right
-                                ProfileAvatarButton {
-                                    showProfile = true
-                                }
-                            }
-                            .padding(.trailing, 80)
-                            .id("top")
+                            AppHeader(showProfile: $showProfile)
+                                .id("top")
 
                             // Render rows based on settings order
                             ForEach(homeSettings.rowConfigs) { config in
@@ -115,9 +96,6 @@ struct HomeView: View {
                         }
                     }
                 )
-            }
-            .fullScreenCover(isPresented: $showProfile) {
-                ProfileMenuView()
             }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
@@ -615,59 +593,6 @@ struct RecentlyAddedLibraryRow: View {
         }
 
         return (Array(result.prefix(20)), counts)
-    }
-}
-
-// MARK: - Profile Avatar Button
-struct ProfileAvatarButton: View {
-    @EnvironmentObject private var sessionManager: SessionManager
-    let action: () -> Void
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-
-                if let userId = sessionManager.currentUser?.id,
-                   let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
-                    AsyncImage(url: imageURL) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 32))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 72, height: 72)
-                    .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.white)
-                }
-            }
-            .overlay(
-                Circle()
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 4)
-            )
-            .shadow(color: SashimiTheme.accent.opacity(isFocused ? 0.6 : 0.3), radius: isFocused ? 15 : 8)
-            .scaleEffect(isFocused ? 1.1 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(.card)
-        .focused($isFocused)
-        .accessibilityLabel(sessionManager.currentUser?.name ?? "Profile")
-        .accessibilityHint("Double-tap to open profile settings")
     }
 }
 

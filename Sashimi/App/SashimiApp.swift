@@ -50,22 +50,23 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
+    @State private var showProfile = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView(resetTrigger: $homeViewResetTrigger, isAtDefaultState: $isAtDefaultState)
+            HomeView(resetTrigger: $homeViewResetTrigger, isAtDefaultState: $isAtDefaultState, showProfile: $showProfile)
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
                 .tag(0)
 
-            LibraryView(onBackAtRoot: { selectedTab = 0 })
+            LibraryView(onBackAtRoot: { selectedTab = 0 }, showProfile: $showProfile)
                 .tabItem {
                     Label("Library", systemImage: "square.grid.2x2")
                 }
                 .tag(1)
 
-            SearchView(onBackAtRoot: { selectedTab = 0 })
+            SearchView(onBackAtRoot: { selectedTab = 0 }, showProfile: $showProfile)
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
@@ -83,6 +84,9 @@ struct MainTabView: View {
                 // Other tabs (Library, Search): go to Home
                 selectedTab = 0
             }
+        }
+        .fullScreenCover(isPresented: $showProfile) {
+            ProfileMenuView()
         }
     }
 }
