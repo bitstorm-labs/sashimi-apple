@@ -3,6 +3,57 @@ import os
 
 private let logger = Logger(subsystem: "com.sashimi.app", category: "Search")
 
+// MARK: - Search History Manager
+
+@MainActor
+final class SearchHistoryManager: ObservableObject {
+    static let shared = SearchHistoryManager()
+
+    @Published private(set) var recentSearches: [String] = []
+    private let maxHistory = 10
+    private let userDefaultsKey = "searchHistory"
+
+    private init() {
+        loadHistory()
+    }
+
+    private func loadHistory() {
+        recentSearches = UserDefaults.standard.stringArray(forKey: userDefaultsKey) ?? []
+    }
+
+    func addSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        // Remove if already exists (we'll re-add at top)
+        recentSearches.removeAll { $0.lowercased() == trimmed.lowercased() }
+
+        // Add to beginning
+        recentSearches.insert(trimmed, at: 0)
+
+        // Trim to max
+        if recentSearches.count > maxHistory {
+            recentSearches = Array(recentSearches.prefix(maxHistory))
+        }
+
+        saveHistory()
+    }
+
+    func removeSearch(_ query: String) {
+        recentSearches.removeAll { $0 == query }
+        saveHistory()
+    }
+
+    func clearHistory() {
+        recentSearches = []
+        saveHistory()
+    }
+
+    private func saveHistory() {
+        UserDefaults.standard.set(recentSearches, forKey: userDefaultsKey)
+    }
+}
+
 struct SearchView: View {
     var onBackAtRoot: (() -> Void)?
     @State private var searchText = ""
@@ -10,6 +61,7 @@ struct SearchView: View {
     @State private var isSearching = false
     @State private var selectedItem: BaseItemDto?
     @State private var searchTask: Task<Void, Never>?
+    @StateObject private var historyManager = SearchHistoryManager.shared
 
     @FocusState private var isSearchFieldFocused: Bool
 
@@ -47,6 +99,11 @@ struct SearchView: View {
                             }
                         }
                     }
+                    .onSubmit {
+                        if !searchText.isEmpty {
+                            historyManager.addSearch(searchText)
+                        }
+                    }
 
                 if isSearching {
                     Spacer()
@@ -56,36 +113,68 @@ struct SearchView: View {
                     Spacer()
                 } else if results.isEmpty && !searchText.isEmpty {
                     Spacer()
-                    VStack(spacing: 20) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 60))
-                            .foregroundStyle(SashimiTheme.textTertiary)
-
-                        Text("No results found")
-                            .font(.title3)
-                            .foregroundStyle(SashimiTheme.textSecondary)
-
-                        Text("Try a different search term")
-                            .font(.body)
-                            .foregroundStyle(SashimiTheme.textTertiary)
-                    }
+                    EmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "No results found",
+                        message: "Try a different search term"
+                    )
                     Spacer()
                 } else if results.isEmpty {
-                    Spacer()
-                    VStack(spacing: 20) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 60))
-                            .foregroundStyle(SashimiTheme.textTertiary)
+                    // Show search history or empty state
+                    if historyManager.recentSearches.isEmpty {
+                        Spacer()
+                        EmptyStateView(
+                            icon: "magnifyingglass",
+                            title: "Search your library",
+                            message: "Find movies and TV shows"
+                        )
+                        Spacer()
+                    } else {
+                        // Recent searches
+                        VStack(alignment: .leading, spacing: 20) {
+                            HStack {
+                                Text("Recent Searches")
+                                    .font(Typography.headlineSmall)
+                                    .foregroundStyle(SashimiTheme.textPrimary)
 
-                        Text("Search your library")
-                            .font(.title3)
-                            .foregroundStyle(SashimiTheme.textSecondary)
+                                Spacer()
 
-                        Text("Find movies and TV shows")
-                            .font(.body)
-                            .foregroundStyle(SashimiTheme.textTertiary)
+                                Button("Clear") {
+                                    historyManager.clearHistory()
+                                }
+                                .font(Typography.body)
+                                .foregroundStyle(SashimiTheme.accent)
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 80)
+
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 16) {
+                                    ForEach(historyManager.recentSearches, id: \.self) { query in
+                                        Button {
+                                            searchText = query
+                                            historyManager.addSearch(query)
+                                        } label: {
+                                            HStack(spacing: 10) {
+                                                Image(systemName: "clock.arrow.circlepath")
+                                                    .foregroundStyle(SashimiTheme.textTertiary)
+                                                Text(query)
+                                                    .foregroundStyle(SashimiTheme.textPrimary)
+                                            }
+                                            .font(Typography.body)
+                                            .padding(.horizontal, 20)
+                                            .padding(.vertical, 12)
+                                            .background(SashimiTheme.cardBackground)
+                                            .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 80)
+                            }
+                        }
+                        Spacer()
                     }
-                    Spacer()
                 } else {
                     ScrollView {
                         LazyVGrid(columns: [
@@ -128,6 +217,10 @@ struct SearchView: View {
 
         do {
             results = try await JellyfinClient.shared.search(query: searchText)
+            // Add to history on successful search
+            if !results.isEmpty {
+                historyManager.addSearch(searchText)
+            }
         } catch {
             logger.error("Search failed: \(error.localizedDescription)")
             ToastManager.shared.show("Search failed. Try again.")

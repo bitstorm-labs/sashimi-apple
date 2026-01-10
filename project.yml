@@ -12,8 +12,12 @@ schemes:
       targets:
         Sashimi: all
         TopShelf: all
+        SashimiTests: [test]
     run:
       config: Release
+    test:
+      targets:
+        - SashimiTests
 
 targets:
   Sashimi:
@@ -93,3 +97,23 @@ targets:
         com.apple.security.application-groups:
           - group.com.sashimi.app
     dependencies: []
+
+  SashimiTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources:
+      - path: SashimiTests
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app.tests
+        SWIFT_VERSION: 5.9
+        SDKROOT: appletvos
+        SUPPORTED_PLATFORMS: appletvos
+        DEVELOPMENT_TEAM: S6WU9SVVDW
+        CODE_SIGN_STYLE: Automatic
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sashimi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sashimi"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: Sashimi

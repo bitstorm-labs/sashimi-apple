@@ -123,11 +123,61 @@ struct LibraryCardButton: View {
     }
 }
 
+// MARK: - Sort Options
+
+enum LibrarySortOption: String, CaseIterable {
+    case name = "SortName"
+    case dateAdded = "DateCreated"
+    case releaseDate = "PremiereDate"
+    case rating = "CommunityRating"
+    case runtime = "Runtime"
+
+    var displayName: String {
+        switch self {
+        case .name: return "Name"
+        case .dateAdded: return "Date Added"
+        case .releaseDate: return "Release Date"
+        case .rating: return "Rating"
+        case .runtime: return "Runtime"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .name: return "textformat.abc"
+        case .dateAdded: return "calendar.badge.plus"
+        case .releaseDate: return "calendar"
+        case .rating: return "star.fill"
+        case .runtime: return "clock"
+        }
+    }
+}
+
+enum SortOrder: String, CaseIterable {
+    case ascending = "Ascending"
+    case descending = "Descending"
+
+    var displayName: String {
+        switch self {
+        case .ascending: return "Ascending"
+        case .descending: return "Descending"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .ascending: return "arrow.up"
+        case .descending: return "arrow.down"
+        }
+    }
+}
+
 // MARK: - Library Detail View
 struct LibraryDetailView: View {
     enum FocusArea: Hashable {
         case grid
         case alphabet
+        case sortPicker
     }
 
     let library: LibraryView_Model
@@ -138,6 +188,9 @@ struct LibraryDetailView: View {
     @State private var selectedItem: BaseItemDto?
     @State private var totalCount = 0
     @State private var selectedLetter: String?
+    @State private var sortOption: LibrarySortOption = .name
+    @State private var sortOrder: SortOrder = .ascending
+    @State private var showSortOptions = false
     @FocusState private var focusedArea: FocusArea?
     private let pageSize = 50
 
@@ -168,18 +221,68 @@ struct LibraryDetailView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 30) {
-                        // Header with title and count
-                        HStack {
-                            Text(library.name)
-                                .font(.system(size: 48, weight: .bold))
-                                .foregroundStyle(SashimiTheme.textPrimary)
+                        // Header with title, count, and sort
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text(library.name)
+                                    .font(.system(size: 48, weight: .bold))
+                                    .foregroundStyle(SashimiTheme.textPrimary)
 
-                            Spacer()
+                                Spacer()
 
-                            if totalCount > 0 {
-                                Text("\(totalCount) items")
-                                    .font(.system(size: 24))
-                                    .foregroundStyle(SashimiTheme.textSecondary)
+                                if totalCount > 0 {
+                                    Text("\(totalCount) items")
+                                        .font(.system(size: 24))
+                                        .foregroundStyle(SashimiTheme.textSecondary)
+                                }
+                            }
+
+                            // Sort options row
+                            HStack(spacing: 16) {
+                                Menu {
+                                    ForEach(LibrarySortOption.allCases, id: \.self) { option in
+                                        Button {
+                                            if sortOption != option {
+                                                sortOption = option
+                                                Task { await reloadWithNewSort() }
+                                            }
+                                        } label: {
+                                            Label(option.displayName, systemImage: option.icon)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: sortOption.icon)
+                                        Text(sortOption.displayName)
+                                        Image(systemName: "chevron.down")
+                                            .font(.caption)
+                                    }
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(SashimiTheme.textPrimary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(SashimiTheme.cardBackground)
+                                    .clipShape(Capsule())
+                                }
+
+                                Button {
+                                    sortOrder = sortOrder == .ascending ? .descending : .ascending
+                                    Task { await reloadWithNewSort() }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: sortOrder.icon)
+                                        Text(sortOrder.displayName)
+                                    }
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(SashimiTheme.textPrimary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(SashimiTheme.cardBackground)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+
+                                Spacer()
                             }
                         }
                         .padding(.horizontal, 80)
@@ -305,7 +408,8 @@ struct LibraryDetailView: View {
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
-                sortBy: "SortName",
+                sortBy: sortOption.rawValue,
+                sortOrder: sortOrder.rawValue,
                 limit: pageSize,
                 startIndex: 0
             )
@@ -317,6 +421,12 @@ struct LibraryDetailView: View {
             ToastManager.shared.show("Failed to load library items")
         }
         isLoading = false
+    }
+
+    private func reloadWithNewSort() async {
+        items = []
+        totalCount = 0
+        await loadItems()
     }
 
     private func loadMoreItems() async {
@@ -333,7 +443,8 @@ struct LibraryDetailView: View {
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
-                sortBy: "SortName",
+                sortBy: sortOption.rawValue,
+                sortOrder: sortOrder.rawValue,
                 limit: pageSize,
                 startIndex: items.count
             )
@@ -358,7 +469,8 @@ struct LibraryDetailView: View {
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
-                sortBy: "SortName",
+                sortBy: sortOption.rawValue,
+                sortOrder: sortOrder.rawValue,
                 limit: items.count,
                 startIndex: 0
             )

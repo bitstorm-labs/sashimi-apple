@@ -10,20 +10,23 @@ struct ToastMessage: Identifiable, Equatable {
         case error
         case warning
         case info
+        case success
 
         var icon: String {
             switch self {
             case .error: return "exclamationmark.triangle.fill"
             case .warning: return "exclamationmark.circle.fill"
             case .info: return "info.circle.fill"
+            case .success: return "checkmark.circle.fill"
             }
         }
 
         var color: Color {
             switch self {
-            case .error: return .red
-            case .warning: return .yellow
-            case .info: return .blue
+            case .error: return SashimiTheme.error
+            case .warning: return SashimiTheme.warning
+            case .info: return SashimiTheme.accent
+            case .success: return SashimiTheme.success
             }
         }
     }

@@ -108,6 +108,42 @@ struct MediaPosterButton: View {
         return ["Primary", "Thumb"]
     }
 
+    // VoiceOver accessibility description
+    private var accessibilityDescription: String {
+        var parts: [String] = []
+
+        // Title
+        parts.append(displayTitle)
+
+        // Type
+        if let type = item.type {
+            parts.append(type.rawValue)
+        }
+
+        // Year
+        if let year = item.productionYear {
+            parts.append("from \(year)")
+        }
+
+        // Progress
+        if item.progressPercent > 0 {
+            let percent = Int(item.progressPercent * 100)
+            parts.append("\(percent)% watched")
+        }
+
+        // Watched status
+        if item.userData?.played == true {
+            parts.append("watched")
+        }
+
+        // Favorite status
+        if item.userData?.isFavorite == true {
+            parts.append("favorite")
+        }
+
+        return parts.joined(separator: ", ")
+    }
+
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 10) {
@@ -200,6 +236,82 @@ struct MediaPosterButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Double-tap to view details")
+        .contextMenu {
+            // Mark as watched/unwatched
+            Button {
+                Task {
+                    await toggleWatched()
+                }
+            } label: {
+                Label(
+                    item.userData?.played == true ? "Mark as Unwatched" : "Mark as Watched",
+                    systemImage: item.userData?.played == true ? "eye.slash" : "eye"
+                )
+            }
+
+            // Add/remove from favorites
+            Button {
+                Task {
+                    await toggleFavorite()
+                }
+            } label: {
+                Label(
+                    item.userData?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: item.userData?.isFavorite == true ? "heart.slash" : "heart"
+                )
+            }
+
+            Divider()
+
+            // Refresh metadata
+            Button {
+                Task {
+                    await refreshMetadata()
+                }
+            } label: {
+                Label("Refresh Metadata", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+    }
+
+    private func toggleWatched() async {
+        do {
+            if item.userData?.played == true {
+                try await JellyfinClient.shared.markUnplayed(itemId: item.id)
+                ToastManager.shared.show("Marked as unwatched", type: .success)
+            } else {
+                try await JellyfinClient.shared.markPlayed(itemId: item.id)
+                ToastManager.shared.show("Marked as watched", type: .success)
+            }
+        } catch {
+            ToastManager.shared.show("Failed to update watch status")
+        }
+    }
+
+    private func toggleFavorite() async {
+        do {
+            if item.userData?.isFavorite == true {
+                try await JellyfinClient.shared.removeFavorite(itemId: item.id)
+                ToastManager.shared.show("Removed from favorites", type: .success)
+            } else {
+                try await JellyfinClient.shared.markFavorite(itemId: item.id)
+                ToastManager.shared.show("Added to favorites", type: .success)
+            }
+        } catch {
+            ToastManager.shared.show("Failed to update favorites")
+        }
+    }
+
+    private func refreshMetadata() async {
+        do {
+            try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
+            ToastManager.shared.show("Metadata refresh started", type: .info)
+        } catch {
+            ToastManager.shared.show("Failed to refresh metadata")
+        }
     }
 }
 

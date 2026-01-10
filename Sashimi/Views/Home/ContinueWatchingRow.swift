@@ -165,6 +165,21 @@ struct ContinueWatchingCard: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Double-tap to resume playback")
+    }
+
+    private var accessibilityDescription: String {
+        var parts: [String] = [displayTitle]
+
+        if item.type == .episode {
+            parts.append(episodeInfoString)
+        }
+
+        parts.append(formatRemainingTime())
+
+        return parts.joined(separator: ", ")
     }
 
     private func formatRemainingTime() -> String {
@@ -201,6 +216,57 @@ struct ContinueProgressBar: View {
                     )
                     .frame(width: geometry.size.width * min(max(progress, 0), 1))
             }
+        }
+    }
+}
+
+// MARK: - Continue Watching Detail View (See All)
+
+struct ContinueWatchingDetailView: View {
+    let items: [BaseItemDto]
+    let onSelect: (BaseItemDto) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            SashimiTheme.background.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 30) {
+                    // Header
+                    HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Continue Watching")
+                                .font(.system(size: 48, weight: .bold))
+                                .foregroundStyle(SashimiTheme.textPrimary)
+
+                            Text("\(items.count) items in progress")
+                                .font(.system(size: 22))
+                                .foregroundStyle(SashimiTheme.textSecondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 80)
+                    .padding(.top, 40)
+
+                    // Grid of items
+                    LazyVGrid(columns: [
+                        GridItem(.adaptive(minimum: 420, maximum: 480), spacing: 40)
+                    ], spacing: 40) {
+                        ForEach(items) { item in
+                            ContinueWatchingCard(item: item) {
+                                onSelect(item)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 80)
+                    .padding(.bottom, 60)
+                }
+            }
+        }
+        .onExitCommand {
+            dismiss()
         }
     }
 }

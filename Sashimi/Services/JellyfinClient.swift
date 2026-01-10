@@ -1,7 +1,123 @@
 import Foundation
+import Security
 
 // swiftlint:disable type_body_length
 // JellyfinClient handles all Jellyfin API endpoints - splitting would fragment the API layer
+
+// MARK: - Certificate Trust Settings
+
+@MainActor
+class CertificateTrustSettings: ObservableObject {
+    static let shared = CertificateTrustSettings()
+
+    @Published var allowSelfSigned: Bool {
+        didSet { UserDefaults.standard.set(allowSelfSigned, forKey: "allowSelfSignedCerts") }
+    }
+    @Published var allowExpiredCerts: Bool {
+        didSet { UserDefaults.standard.set(allowExpiredCerts, forKey: "allowExpiredCerts") }
+    }
+    @Published var trustedHosts: Set<String> {
+        didSet {
+            UserDefaults.standard.set(Array(trustedHosts), forKey: "trustedHosts")
+        }
+    }
+
+    init() {
+        self.allowSelfSigned = UserDefaults.standard.bool(forKey: "allowSelfSignedCerts")
+        self.allowExpiredCerts = UserDefaults.standard.bool(forKey: "allowExpiredCerts")
+        if let hosts = UserDefaults.standard.array(forKey: "trustedHosts") as? [String] {
+            self.trustedHosts = Set(hosts)
+        } else {
+            self.trustedHosts = []
+        }
+    }
+
+    func trustHost(_ host: String) {
+        trustedHosts.insert(host)
+    }
+
+    func untrustHost(_ host: String) {
+        trustedHosts.remove(host)
+    }
+
+    func isHostTrusted(_ host: String) -> Bool {
+        trustedHosts.contains(host)
+    }
+}
+
+// MARK: - URLSession Delegate for Certificate Validation
+
+final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    private let allowSelfSigned: () -> Bool
+    private let allowExpired: () -> Bool
+    private let isHostTrusted: (String) -> Bool
+
+    init(
+        allowSelfSigned: @escaping () -> Bool,
+        allowExpired: @escaping () -> Bool,
+        isHostTrusted: @escaping (String) -> Bool
+    ) {
+        self.allowSelfSigned = allowSelfSigned
+        self.allowExpired = allowExpired
+        self.isHostTrusted = isHostTrusted
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let serverTrust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        let host = challenge.protectionSpace.host
+
+        // If host is explicitly trusted, accept the certificate
+        if isHostTrusted(host) {
+            let credential = URLCredential(trust: serverTrust)
+            completionHandler(.useCredential, credential)
+            return
+        }
+
+        // Evaluate the certificate chain
+        var error: CFError?
+        let isValid = SecTrustEvaluateWithError(serverTrust, &error)
+
+        if isValid {
+            // Certificate is valid through system trust
+            let credential = URLCredential(trust: serverTrust)
+            completionHandler(.useCredential, credential)
+            return
+        }
+
+        // Check for recoverable errors
+        if let cfError = error {
+            let errorCode = CFErrorGetCode(cfError)
+
+            // Self-signed certificate (error code 3 = kSecTrustResultRecoverableTrustFailure often)
+            if allowSelfSigned() {
+                let credential = URLCredential(trust: serverTrust)
+                completionHandler(.useCredential, credential)
+                return
+            }
+
+            // Expired certificate
+            if allowExpired() && errorCode == errSecCertificateExpired {
+                let credential = URLCredential(trust: serverTrust)
+                completionHandler(.useCredential, credential)
+                return
+            }
+        }
+
+        // Certificate validation failed
+        completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+}
+
+// MARK: - Jellyfin Client
 
 actor JellyfinClient {
     private var serverURL: URL?
@@ -14,6 +130,7 @@ actor JellyfinClient {
     private let clientVersion = "1.0.0"
 
     private let urlSession: URLSession
+    private let certificateDelegate: CertificateValidationDelegate
     private let maxRetries = 3
 
     static let shared = JellyfinClient()
@@ -27,12 +144,28 @@ actor JellyfinClient {
             self.deviceId = newId
         }
 
-        // Configure URLSession with timeouts
+        // Create certificate validation delegate
+        self.certificateDelegate = CertificateValidationDelegate(
+            allowSelfSigned: { UserDefaults.standard.bool(forKey: "allowSelfSignedCerts") },
+            allowExpired: { UserDefaults.standard.bool(forKey: "allowExpiredCerts") },
+            isHostTrusted: { host in
+                if let hosts = UserDefaults.standard.array(forKey: "trustedHosts") as? [String] {
+                    return hosts.contains(host)
+                }
+                return false
+            }
+        )
+
+        // Configure URLSession with certificate validation delegate
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = true
-        self.urlSession = URLSession(configuration: config)
+        self.urlSession = URLSession(
+            configuration: config,
+            delegate: certificateDelegate,
+            delegateQueue: nil
+        )
     }
 
     func configure(serverURL: URL, accessToken: String? = nil, userId: String? = nil) {

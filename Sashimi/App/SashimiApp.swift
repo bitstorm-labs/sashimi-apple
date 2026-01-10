@@ -50,6 +50,8 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
+    @State private var profileIsAtRoot = true
+    @State private var profilePopTrigger = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -71,21 +73,26 @@ struct MainTabView: View {
                 }
                 .tag(2)
 
-            ProfileMenuView(onBackAtRoot: { selectedTab = 0 })
+            ProfileMenuView(isAtRoot: $profileIsAtRoot, popTrigger: $profilePopTrigger)
                 .tabItem {
                     Label(sessionManager.currentUser?.name ?? "Profile", systemImage: "person.circle")
                 }
                 .tag(3)
         }
-        .ifCondition(selectedTab != 0 || !isAtDefaultState) { view in
-            view.onExitCommand {
-                if selectedTab == 0 {
-                    // Home tab not at top: scroll to top
+        .onExitCommand {
+            // Handle back/menu button press
+            if selectedTab == 3 && !profileIsAtRoot {
+                // Profile sub-view: trigger navigation pop
+                profilePopTrigger.toggle()
+            } else if selectedTab == 0 {
+                if !isAtDefaultState {
+                    // Home tab not at default: scroll to top
                     homeViewResetTrigger.toggle()
-                } else {
-                    // Non-home tabs: go to home
-                    selectedTab = 0
                 }
+                // If at default state on Home, do nothing (system exits)
+            } else {
+                // Other tabs (Library, Search, Profile at root): go to Home
+                selectedTab = 0
             }
         }
     }
@@ -102,78 +109,120 @@ extension View {
     }
 }
 
+// MARK: - Profile Menu View
+
+enum ProfileDestination: Hashable {
+    case homeScreen
+    case playback
+    case parentalControls
+    case certificates
+}
+
 struct ProfileMenuView: View {
-    var onBackAtRoot: (() -> Void)?
+    @Binding var isAtRoot: Bool
+    @Binding var popTrigger: Bool
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            List {
-                Section {
-                    HStack(spacing: 20) {
-                        if let userId = sessionManager.currentUser?.id,
-                           let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
-                            AsyncImage(url: imageURL) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .foregroundStyle(.secondary)
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    colors: [SashimiTheme.background, Color.black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 50) {
+                        // User Profile Header
+                        ProfileHeaderView()
+                            .padding(.top, 60)
+
+                        // Settings Grid
+                        VStack(alignment: .leading, spacing: 30) {
+                            Text("Settings")
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundStyle(SashimiTheme.textPrimary)
+                                .padding(.horizontal, 80)
+
+                            LazyVGrid(columns: [
+                                GridItem(.flexible(), spacing: 30),
+                                GridItem(.flexible(), spacing: 30),
+                                GridItem(.flexible(), spacing: 30),
+                                GridItem(.flexible(), spacing: 30)
+                            ], spacing: 30) {
+                                ProfileSettingsCard(
+                                    icon: "house",
+                                    title: "Home Screen",
+                                    subtitle: "Customize rows",
+                                    color: .blue
+                                ) {
+                                    navigationPath.append(ProfileDestination.homeScreen)
+                                }
+
+                                ProfileSettingsCard(
+                                    icon: "play.circle",
+                                    title: "Playback",
+                                    subtitle: "Quality & behavior",
+                                    color: .purple
+                                ) {
+                                    navigationPath.append(ProfileDestination.playback)
+                                }
+
+                                ProfileSettingsCard(
+                                    icon: "lock.shield",
+                                    title: "Parental",
+                                    subtitle: "PIN & restrictions",
+                                    color: .orange
+                                ) {
+                                    navigationPath.append(ProfileDestination.parentalControls)
+                                }
+
+                                ProfileSettingsCard(
+                                    icon: "checkmark.shield",
+                                    title: "Security",
+                                    subtitle: "Certificates",
+                                    color: .green
+                                ) {
+                                    navigationPath.append(ProfileDestination.certificates)
+                                }
                             }
-                            .frame(width: 80, height: 80)
-                            .clipShape(Circle())
-                        } else {
-                            Image(systemName: "person.circle.fill")
-                                .resizable()
-                                .frame(width: 80, height: 80)
-                                .foregroundStyle(.secondary)
+                            .padding(.horizontal, 80)
                         }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            if let userName = sessionManager.currentUser?.name {
-                                Text(userName)
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
+                        // App Info & Sign Out
+                        VStack(spacing: 30) {
+                            // App info
+                            HStack(spacing: 40) {
+                                AppInfoItem(label: "Version", value: "1.0.0")
+                                AppInfoItem(label: "Build", value: "1")
                             }
+                            .padding(.vertical, 20)
 
-                            if let serverURL = sessionManager.serverURL {
-                                Text(serverURL.host ?? serverURL.absoluteString)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                            // Sign out button
+                            SignOutButton {
+                                showingLogoutConfirmation = true
                             }
                         }
-                    }
-                    .padding(.vertical, 8)
-                }
-
-                Section("Home Screen") {
-                    NavigationLink("Row Order") {
-                        HomeScreenSettingsView()
+                        .padding(.top, 20)
+                        .padding(.bottom, 80)
                     }
                 }
-
-                Section("Playback") {
-                    NavigationLink("Video Quality") {
-                        VideoQualitySettingsView()
-                    }
-                }
-
-                Section("About") {
-                    LabeledContent("Version", value: "1.0.0")
-                    LabeledContent("Build", value: "1")
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        showingLogoutConfirmation = true
-                    } label: {
-                        Text("Sign Out")
-                            .frame(maxWidth: .infinity)
-                    }
+            }
+            .navigationDestination(for: ProfileDestination.self) { destination in
+                switch destination {
+                case .homeScreen:
+                    HomeScreenSettingsView()
+                case .playback:
+                    PlaybackSettingsView()
+                case .parentalControls:
+                    ParentalControlsView()
+                case .certificates:
+                    CertificateSettingsView()
                 }
             }
             .confirmationDialog(
@@ -188,13 +237,176 @@ struct ProfileMenuView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-        }
-        .onExitCommand {
-            if navigationPath.isEmpty {
-                onBackAtRoot?()
-            } else {
-                navigationPath.removeLast()
+            .onChange(of: navigationPath) { _, newPath in
+                isAtRoot = newPath.isEmpty
+            }
+            .onChange(of: popTrigger) { _, _ in
+                // Pop navigation when triggered from parent
+                if !navigationPath.isEmpty {
+                    navigationPath.removeLast()
+                }
             }
         }
+    }
+}
+
+// MARK: - Profile Header
+
+struct ProfileHeaderView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+
+    var body: some View {
+        VStack(spacing: 20) {
+            // Avatar
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 140, height: 140)
+
+                if let userId = sessionManager.currentUser?.id,
+                   let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
+                    AsyncImage(url: imageURL) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 50))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 130, height: 130)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 50))
+                        .foregroundStyle(.white)
+                }
+            }
+            .shadow(color: SashimiTheme.accent.opacity(0.4), radius: 20)
+
+            // User name
+            if let userName = sessionManager.currentUser?.name {
+                Text(userName)
+                    .font(.system(size: 38, weight: .bold))
+                    .foregroundStyle(SashimiTheme.textPrimary)
+            }
+
+            // Server info
+            if let serverURL = sessionManager.serverURL {
+                HStack(spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 16))
+                    Text(serverURL.host ?? serverURL.absoluteString)
+                        .font(.system(size: 20))
+                }
+                .foregroundStyle(SashimiTheme.textSecondary)
+            }
+        }
+    }
+}
+
+// MARK: - Settings Card
+
+struct ProfileSettingsCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let color: Color
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(isFocused ? 0.3 : 0.15))
+                        .frame(width: 70, height: 70)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(isFocused ? .white : color)
+                }
+
+                VStack(spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(SashimiTheme.textPrimary)
+
+                    Text(subtitle)
+                        .font(.system(size: 16))
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 30)
+            .padding(.horizontal, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(SashimiTheme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 4)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(.card)
+        .focused($isFocused)
+    }
+}
+
+// MARK: - App Info Item
+
+struct AppInfoItem: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 16))
+                .foregroundStyle(SashimiTheme.textTertiary)
+            Text(value)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(SashimiTheme.textSecondary)
+        }
+    }
+}
+
+// MARK: - Sign Out Button
+
+struct SignOutButton: View {
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 20))
+                Text("Sign Out")
+                    .font(.system(size: 22, weight: .medium))
+            }
+            .foregroundStyle(isFocused ? .white : .red.opacity(0.8))
+            .padding(.horizontal, 40)
+            .padding(.vertical, 16)
+            .background(
+                Capsule()
+                    .fill(isFocused ? Color.red : Color.red.opacity(0.15))
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
     }
 }

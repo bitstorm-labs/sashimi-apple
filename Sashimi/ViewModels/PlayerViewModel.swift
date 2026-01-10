@@ -49,6 +49,7 @@ final class PlayerViewModel: ObservableObject {
     private var rateObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private let client = JellyfinClient.shared
+    private let playbackSettings = PlaybackSettings.shared
 
     func loadMedia(item: BaseItemDto) async {
         isLoading = true
@@ -142,7 +143,8 @@ final class PlayerViewModel: ObservableObject {
             await fetchSegments(itemId: freshItem.id)
 
             // Check if there's saved progress to resume from
-            if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > 0 {
+            let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
+            if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
                 resumePositionTicks = startTicks
                 showingResumeDialog = true
                 // Don't auto-play - wait for user choice
@@ -194,7 +196,7 @@ final class PlayerViewModel: ObservableObject {
             try? await client.markPlayed(itemId: item.id)
 
             // Check for next episode/video if this is an episode or video
-            if let next = await fetchNextItem(for: item) {
+            if playbackSettings.autoPlayNextEpisode, let next = await fetchNextItem(for: item) {
                 nextEpisode = next
                 showingUpNext = true
                 return
@@ -438,7 +440,23 @@ final class PlayerViewModel: ObservableObject {
         if let segment = activeSegment {
             if currentSegment?.id != segment.id {
                 currentSegment = segment
-                showingSkipButton = true
+
+                // Check if we should auto-skip this segment type
+                let shouldAutoSkip: Bool
+                switch segment.type {
+                case .intro, .recap:
+                    shouldAutoSkip = playbackSettings.autoSkipIntro
+                case .outro, .preview:
+                    shouldAutoSkip = playbackSettings.autoSkipCredits
+                default:
+                    shouldAutoSkip = false
+                }
+
+                if shouldAutoSkip {
+                    skipCurrentSegment()
+                } else {
+                    showingSkipButton = true
+                }
             }
         } else {
             if currentSegment != nil {

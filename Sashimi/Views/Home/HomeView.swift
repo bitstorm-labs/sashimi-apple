@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
+    @State private var showContinueWatchingDetail = false
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
 
@@ -89,6 +90,18 @@ struct HomeView: View {
             }
             .fullScreenCover(item: $selectedItem) { item in
                 MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
+            }
+            .fullScreenCover(isPresented: $showContinueWatchingDetail) {
+                ContinueWatchingDetailView(
+                    items: viewModel.continueWatchingItems,
+                    onSelect: { item in
+                        showContinueWatchingDetail = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            selectedItemIsYouTube = false
+                            selectedItem = item
+                        }
+                    }
+                )
             }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
@@ -180,6 +193,10 @@ struct HeroSection: View {
 
     @FocusState private var isFocused: Bool
     @State private var autoScrollTimer: Timer?
+    @State private var autoScrollProgress: Double = 0
+    @State private var progressTimer: Timer?
+
+    private let autoScrollInterval: Double = 8
 
     private var safeIndex: Int {
         guard !items.isEmpty else { return 0 }
@@ -215,17 +232,57 @@ struct HeroSection: View {
 
     private func startAutoScroll() {
         autoScrollTimer?.invalidate()
+        progressTimer?.invalidate()
+        autoScrollProgress = 0
+
         guard items.count > 1 else { return }
-        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { _ in
+
+        // Progress timer updates more frequently for smooth animation
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            autoScrollProgress += 0.1 / autoScrollInterval
+        }
+
+        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: autoScrollInterval, repeats: true) { _ in
             withAnimation(.easeInOut(duration: 0.6)) {
                 currentIndex = (currentIndex + 1) % items.count
             }
+            autoScrollProgress = 0
         }
     }
 
     private func stopAutoScroll() {
         autoScrollTimer?.invalidate()
         autoScrollTimer = nil
+        progressTimer?.invalidate()
+        progressTimer = nil
+        autoScrollProgress = 0
+    }
+
+    // VoiceOver accessibility description
+    private var accessibilityDescription: String {
+        var parts: [String] = []
+
+        if currentItem.type == .episode {
+            parts.append(currentItem.seriesName ?? currentItem.name)
+            parts.append(formatEpisodeInfo(currentItem))
+        } else {
+            parts.append(currentItem.name)
+        }
+
+        if let type = currentItem.type {
+            parts.append(type.rawValue)
+        }
+
+        if let year = currentItem.productionYear {
+            parts.append("from \(year)")
+        }
+
+        if items.count > 1 {
+            parts.append("Item \(safeIndex + 1) of \(items.count)")
+            parts.append("Swipe left or right to browse")
+        }
+
+        return parts.joined(separator: ", ")
     }
 
     var body: some View {
@@ -268,6 +325,7 @@ struct HeroSection: View {
                     .frame(width: 300)
                     Spacer()
                 }
+
 
                 // Content
                 VStack(alignment: .leading, spacing: 16) {
@@ -322,13 +380,29 @@ struct HeroSection: View {
                             .frame(maxWidth: 700, alignment: .leading)
                     }
 
+                    // Page indicators with progress bar
                     if items.count > 1 {
                         HStack(spacing: 8) {
                             ForEach(0..<items.count, id: \.self) { index in
-                                Capsule()
-                                    .fill(index == currentIndex ? SashimiTheme.accent : SashimiTheme.textTertiary)
-                                    .frame(width: index == currentIndex ? 26 : 10, height: 4)
-                                    .animation(.easeInOut(duration: 0.3), value: currentIndex)
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(SashimiTheme.textTertiary.opacity(0.5))
+                                        .frame(width: index == currentIndex ? 36 : 10, height: 4)
+
+                                    if index == currentIndex {
+                                        // Progress fill for current item
+                                        Capsule()
+                                            .fill(SashimiTheme.accent)
+                                            .frame(width: 36 * min(autoScrollProgress, 1.0), height: 4)
+                                    } else if index < currentIndex {
+                                        // Past items shown as filled
+                                        Capsule()
+                                            .fill(SashimiTheme.textTertiary)
+                                            .frame(width: 10, height: 4)
+                                    }
+                                }
+                                .animation(.linear(duration: 0.1), value: autoScrollProgress)
+                                .animation(.easeInOut(duration: 0.3), value: currentIndex)
                             }
                         }
                         .padding(.top, 8)
@@ -340,14 +414,19 @@ struct HeroSection: View {
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.white.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
+                    .stroke(SashimiTheme.accent.opacity(isFocused ? 0.8 : 0), lineWidth: 4)
             )
+            .shadow(color: SashimiTheme.accent.opacity(isFocused ? 0.4 : 0), radius: 20)
             .padding(.horizontal, 40)
             .scaleEffect(isFocused ? 1.02 : 1.0)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Double-tap to view details")
+        .accessibilityAddTraits(.isButton)
         .onMoveCommand { direction in
             guard items.count > 1 else { return }
             switch direction {

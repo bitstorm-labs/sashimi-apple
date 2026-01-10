@@ -207,8 +207,28 @@ struct MediaSourceInfo: Codable {
         mediaStreams?.first(where: { $0.type == "Audio" })?.channels
     }
 
+    var audioStreams: [MediaStream] {
+        mediaStreams?.filter { $0.type == "Audio" } ?? []
+    }
+
     var subtitleStreams: [MediaStream] {
         mediaStreams?.filter { $0.type == "Subtitle" } ?? []
+    }
+
+    /// Returns unique audio languages (e.g., ["English", "Spanish", "Japanese"])
+    var audioLanguages: [String] {
+        let languages = audioStreams.compactMap { stream -> String? in
+            if let displayTitle = stream.displayTitle, !displayTitle.isEmpty {
+                return displayTitle
+            }
+            if let language = stream.language, !language.isEmpty {
+                return Locale.current.localizedString(forLanguageCode: language) ?? language.uppercased()
+            }
+            return nil
+        }
+        // Remove duplicates while preserving order
+        var seen = Set<String>()
+        return languages.filter { seen.insert($0).inserted }
     }
 
     enum CodingKeys: String, CodingKey {

@@ -623,6 +623,18 @@ struct MediaDetailView: View {
                     mediaInfoPill(icon: "speaker.wave.3", text: "\(channels) CH")
                 }
             }
+
+            // Audio track languages
+            if !info.audioLanguages.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe")
+                        .font(.caption)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                    Text("Audio: " + info.audioLanguages.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(SashimiTheme.textSecondary)
+                }
+            }
         }
     }
 

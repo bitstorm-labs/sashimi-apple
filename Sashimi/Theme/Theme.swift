@@ -13,6 +13,28 @@ enum SashimiTheme {
     static let textTertiary = Color(white: 0.55)
     static let focusGlow = Color(red: 0.36, green: 0.68, blue: 0.90).opacity(0.5)
     static let progressBackground = Color(white: 0.25)
+    static let success = Color.green
+    static let warning = Color.orange
+    static let error = Color.red
+    static let overlay = Color.black.opacity(0.7)
+}
+
+// MARK: - Corner Radius
+
+enum CornerRadius {
+    static let small: CGFloat = 8
+    static let medium: CGFloat = 12
+    static let large: CGFloat = 16
+    static let xl: CGFloat = 24
+}
+
+// MARK: - Animation
+
+enum Animation {
+    static let fast: Double = 0.15
+    static let normal: Double = 0.3
+    static let slow: Double = 0.5
+    static let focusSpring = SwiftUI.Animation.spring(response: 0.3, dampingFraction: 0.7)
 }
 
 // MARK: - Spacing
