@@ -50,8 +50,6 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
-    @State private var profileIsAtRoot = true
-    @State private var profilePopTrigger = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -72,26 +70,17 @@ struct MainTabView: View {
                     Label("Search", systemImage: "magnifyingglass")
                 }
                 .tag(2)
-
-            ProfileMenuView(isAtRoot: $profileIsAtRoot, popTrigger: $profilePopTrigger)
-                .tabItem {
-                    Label(sessionManager.currentUser?.name ?? "Profile", systemImage: "person.circle")
-                }
-                .tag(3)
         }
         .onExitCommand {
             // Handle back/menu button press
-            if selectedTab == 3 && !profileIsAtRoot {
-                // Profile sub-view: trigger navigation pop
-                profilePopTrigger.toggle()
-            } else if selectedTab == 0 {
+            if selectedTab == 0 {
                 if !isAtDefaultState {
                     // Home tab not at default: scroll to top
                     homeViewResetTrigger.toggle()
                 }
                 // If at default state on Home, do nothing (system exits)
             } else {
-                // Other tabs (Library, Search, Profile at root): go to Home
+                // Other tabs (Library, Search): go to Home
                 selectedTab = 0
             }
         }
@@ -119,8 +108,7 @@ enum ProfileDestination: Hashable {
 }
 
 struct ProfileMenuView: View {
-    @Binding var isAtRoot: Bool
-    @Binding var popTrigger: Bool
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
@@ -237,12 +225,11 @@ struct ProfileMenuView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .onChange(of: navigationPath) { _, newPath in
-                isAtRoot = newPath.isEmpty
-            }
-            .onChange(of: popTrigger) { _, _ in
-                // Pop navigation when triggered from parent
-                if !navigationPath.isEmpty {
+            .onExitCommand {
+                // Handle back/menu button
+                if navigationPath.isEmpty {
+                    dismiss()
+                } else {
                     navigationPath.removeLast()
                 }
             }
