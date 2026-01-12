@@ -5,13 +5,21 @@ import SwiftUI
 // with multiple states and sub-views - splitting would reduce cohesion
 
 struct MediaDetailView: View {
-    let item: BaseItemDto
+    let initialItem: BaseItemDto
     var forceYouTubeStyle: Bool = false
     @Environment(\.dismiss) private var dismiss
+    @State private var item: BaseItemDto
     @State private var showingPlayer = false
+    @State private var startFromBeginning = false
     @State private var isFavorite: Bool = false
     @State private var isWatched: Bool = false
     @State private var hasProgress: Bool = false
+
+    init(item: BaseItemDto, forceYouTubeStyle: Bool = false) {
+        self.initialItem = item
+        self.forceYouTubeStyle = forceYouTubeStyle
+        self._item = State(initialValue: item)
+    }
     @State private var seasons: [BaseItemDto] = []
     @State private var episodes: [BaseItemDto] = []
     @State private var moreFromSeason: [BaseItemDto] = []
@@ -40,6 +48,11 @@ struct MediaDetailView: View {
         // Episodes without parent backdrops are YouTube-style (from Pinchflat)
         if isEpisode && !seriesHasBackdrop { return true }
         return false
+    }
+
+    // YouTube series (channels) should show circular art like in the library list
+    private var isYouTubeSeriesStyle: Bool {
+        isSeries && forceYouTubeStyle
     }
 
     // Check if series has backdrop images available
@@ -124,7 +137,7 @@ struct MediaDetailView: View {
             }
         }
         .fullScreenCover(isPresented: $showingPlayer) {
-            PlayerView(item: selectedEpisode ?? item)
+            PlayerView(item: selectedEpisode ?? item, startFromBeginning: startFromBeginning)
         }
         .fullScreenCover(item: $showingSeriesDetail) { series in
             MediaDetailView(item: series, forceYouTubeStyle: forceYouTubeStyle)
@@ -155,7 +168,8 @@ struct MediaDetailView: View {
         }
         .onChange(of: showingPlayer) { _, isShowing in
             if !isShowing {
-                // Refresh item data when returning from player
+                // Reset startFromBeginning and refresh item data when returning from player
+                startFromBeginning = false
                 Task { await refreshItemState() }
             }
         }
@@ -284,15 +298,33 @@ struct MediaDetailView: View {
         return ids
     }
 
+    @ViewBuilder
     private var posterSection: some View {
-        SmartPosterImage(
-            itemIds: posterFallbackIds,
-            maxWidth: isYouTubeStyle ? 640 : 400,
-            imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"]
-        )
-        .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        if isYouTubeSeriesStyle {
+            // Circular art for YouTube channels
+            Circle()
+                .fill(SashimiTheme.cardBackground)
+                .frame(width: 200, height: 200)
+                .overlay(
+                    SmartPosterImage(
+                        itemIds: posterFallbackIds,
+                        maxWidth: 400,
+                        imageTypes: ["Primary", "Thumb"],
+                        contentMode: .fit
+                    )
+                    .clipShape(Circle())
+                )
+                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        } else {
+            SmartPosterImage(
+                itemIds: posterFallbackIds,
+                maxWidth: isYouTubeStyle ? 640 : 400,
+                imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"]
+            )
+            .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+        }
     }
 
     // MARK: - Info Section
@@ -474,13 +506,25 @@ struct MediaDetailView: View {
 
     // MARK: - Action Buttons
     private var actionButtonsRow: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 20) {
             ActionButton(
                 title: hasProgress ? "Resume" : "Play",
                 icon: "play.fill",
                 isPrimary: true
             ) {
+                startFromBeginning = false
                 showingPlayer = true
+            }
+
+            if hasProgress {
+                ActionButton(
+                    title: "Start Over",
+                    icon: "arrow.counterclockwise",
+                    isPrimary: false
+                ) {
+                    startFromBeginning = true
+                    showingPlayer = true
+                }
             }
 
             ActionButton(
@@ -748,6 +792,17 @@ struct MediaDetailView: View {
 
     // MARK: - Data Loading
     private func loadContent() async {
+        // Refresh item data to ensure consistency regardless of navigation source
+        do {
+            let refreshedItem = try await JellyfinClient.shared.getItem(itemId: item.id)
+            item = refreshedItem
+            isFavorite = refreshedItem.userData?.isFavorite ?? false
+            isWatched = refreshedItem.userData?.played ?? false
+            hasProgress = refreshedItem.progressPercent > 0 && !(refreshedItem.userData?.played ?? false)
+        } catch {
+            // Use initial item data if refresh fails
+        }
+
         if isSeries {
             await loadSeriesContent()
         } else if isEpisode {

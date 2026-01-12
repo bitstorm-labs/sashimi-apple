@@ -63,6 +63,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let criticRating: Int?
     let premiereDate: String?
     let chapters: [ChapterInfo]?
+    let path: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -91,6 +92,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case criticRating = "CriticRating"
         case premiereDate = "PremiereDate"
         case chapters = "Chapters"
+        case path = "Path"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -307,6 +309,18 @@ struct LibraryViewsResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case items = "Items"
+    }
+}
+
+struct VirtualFolderInfo: Codable {
+    let name: String
+    let itemId: String
+    let collectionType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name = "Name"
+        case itemId = "ItemId"
+        case collectionType = "CollectionType"
     }
 }
 

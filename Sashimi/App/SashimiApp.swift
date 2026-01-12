@@ -70,6 +70,12 @@ struct MainTabView: View {
                     Label("Search", systemImage: "magnifyingglass")
                 }
                 .tag(2)
+
+            SettingsView(onBackAtRoot: { selectedTab = 0 })
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(3)
         }
         .onExitCommand {
             // Handle back/menu button press
@@ -80,7 +86,7 @@ struct MainTabView: View {
                 }
                 // If at default state on Home, do nothing (system exits)
             } else {
-                // Other tabs (Library, Search): go to Home
+                // Other tabs: go to Home
                 selectedTab = 0
             }
         }

@@ -98,89 +98,87 @@ struct ParentalControlsView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Parental Controls")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Parental Controls")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    // PIN Protection Section
-                    SettingsSection(title: "PIN Protection") {
-                        SettingsToggleRow(
-                            title: "Enable PIN Lock",
-                            isOn: Binding(
-                                get: { controls.isPINEnabled },
-                                set: { newValue in
-                                    if newValue {
-                                        showPINSetup = true
-                                    } else {
-                                        pendingAction = { controls.disablePIN() }
-                                        showPINVerify = true
-                                    }
+                // PIN Protection Section
+                SettingsSection(title: "PIN Protection") {
+                    SettingsToggleRow(
+                        title: "Enable PIN Lock",
+                        isOn: Binding(
+                            get: { controls.isPINEnabled },
+                            set: { newValue in
+                                if newValue {
+                                    showPINSetup = true
+                                } else {
+                                    pendingAction = { controls.disablePIN() }
+                                    showPINVerify = true
                                 }
-                            )
-                        )
-
-                        if controls.isPINEnabled {
-                            SettingsActionRow(title: "Change PIN", icon: "key") {
-                                pendingAction = { showPINSetup = true }
-                                showPINVerify = true
                             }
+                        )
+                    )
+
+                    if controls.isPINEnabled {
+                        SettingsActionRow(title: "Change PIN", icon: "key") {
+                            pendingAction = { showPINSetup = true }
+                            showPINVerify = true
                         }
                     }
+                }
 
-                    Text("PIN protects access to settings and adult content.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
+                Text("PIN protects access to settings and adult content.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
 
-                    // Content Restrictions Section
-                    SettingsSection(title: "Content Restrictions") {
-                        SettingsNavigationRow(
-                            title: "Maximum Content Rating",
-                            subtitle: controls.maxContentRating.rawValue
-                        ) {
-                            ContentRatingPickerView()
-                        }
-
-                        SettingsToggleRow(title: "Hide Unrated Content", isOn: $controls.hideUnrated)
+                // Content Restrictions Section
+                SettingsSection(title: "Content Restrictions") {
+                    SettingsNavigationRow(
+                        title: "Maximum Content Rating",
+                        subtitle: controls.maxContentRating.rawValue
+                    ) {
+                        ContentRatingPickerView()
                     }
 
-                    Text("Content above the selected rating will be hidden.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
+                    SettingsToggleRow(title: "Hide Unrated Content", isOn: $controls.hideUnrated)
+                }
 
-                    // Kids Mode Section
-                    SettingsSection(title: "Kids Mode") {
-                        SettingsToggleRow(
-                            title: "Enable Kids Mode",
-                            isOn: Binding(
-                                get: { controls.kidsMode },
-                                set: { newValue in
-                                    if !newValue && controls.isPINEnabled {
-                                        pendingAction = { controls.kidsMode = false }
-                                        showPINVerify = true
-                                    } else {
-                                        controls.kidsMode = newValue
-                                        if newValue {
-                                            controls.maxContentRating = .g
-                                        }
+                Text("Content above the selected rating will be hidden.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
+
+                // Kids Mode Section
+                SettingsSection(title: "Kids Mode") {
+                    SettingsToggleRow(
+                        title: "Enable Kids Mode",
+                        isOn: Binding(
+                            get: { controls.kidsMode },
+                            set: { newValue in
+                                if !newValue && controls.isPINEnabled {
+                                    pendingAction = { controls.kidsMode = false }
+                                    showPINVerify = true
+                                } else {
+                                    controls.kidsMode = newValue
+                                    if newValue {
+                                        controls.maxContentRating = .g
                                     }
                                 }
-                            )
+                            }
                         )
-                    }
-
-                    Text("Kids Mode shows only G-rated content. Requires PIN to exit.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
+                    )
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
+
+                Text("Kids Mode shows only G-rated content. Requires PIN to exit.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
         .sheet(isPresented: $showPINSetup) {
             PINSetupView { pin in
@@ -210,14 +208,14 @@ struct SettingsActionRow: View {
         Button(action: action) {
             HStack {
                 Text(title)
-                    .font(.system(size: 22))
+                    .font(Typography.body)
                     .foregroundStyle(SashimiTheme.textPrimary)
 
                 Spacer()
 
                 if !icon.isEmpty {
                     Image(systemName: icon)
-                        .font(.system(size: 20))
+                        .font(Typography.body)
                         .foregroundStyle(SashimiTheme.textTertiary)
                 }
             }
@@ -244,31 +242,29 @@ struct ContentRatingPickerView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Content Rating")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Content Rating")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    Text("Content above the selected rating will be hidden")
-                        .font(.system(size: 18))
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                        .padding(.bottom, 16)
+                Text("Content above the selected rating will be hidden")
+                    .font(Typography.caption)
+                    .foregroundStyle(SashimiTheme.textSecondary)
+                    .padding(.bottom, 16)
 
-                    ForEach(ContentRating.allCases, id: \.rawValue) { rating in
-                        SettingsOptionRow(
-                            title: rating.rawValue,
-                            subtitle: rating.displayName,
-                            isSelected: maxContentRating == rating
-                        ) {
-                            maxContentRating = rating
-                        }
+                ForEach(ContentRating.allCases, id: \.rawValue) { rating in
+                    SettingsPickerOptionRow(
+                        title: rating.rawValue,
+                        subtitle: rating.displayName,
+                        isSelected: maxContentRating == rating
+                    ) {
+                        maxContentRating = rating
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
     }
 }

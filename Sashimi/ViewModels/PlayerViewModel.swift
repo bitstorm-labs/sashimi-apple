@@ -16,6 +16,16 @@ struct SubtitleTrackOption: Identifiable, Hashable {
     let languageCode: String?
     let index: Int
     let isOffOption: Bool
+    let isExternal: Bool
+
+    init(id: String, displayName: String, languageCode: String?, index: Int, isOffOption: Bool, isExternal: Bool = false) {
+        self.id = id
+        self.displayName = displayName
+        self.languageCode = languageCode
+        self.index = index
+        self.isOffOption = isOffOption
+        self.isExternal = isExternal
+    }
 }
 
 @MainActor
@@ -30,11 +40,16 @@ final class PlayerViewModel: ObservableObject {
     @Published var selectedAudioTrackId: String?
     @Published var subtitleTracks: [SubtitleTrackOption] = []
     @Published var selectedSubtitleTrackId: String?
+    @Published var subtitleManager = SubtitleManager()
     @Published var playbackEnded = false
     @Published var nextEpisode: BaseItemDto?
     @Published var showingUpNext = false
     @Published var showingResumeDialog = false
     @Published var resumePositionTicks: Int64 = 0
+
+    // Media source info for subtitle/audio selection
+    private var currentMediaSource: MediaSourceInfo?
+    private var currentSubtitleStreamIndex: Int?
 
     // Skip intro/credits
     @Published var segments: [MediaSegmentDto] = []
@@ -51,7 +66,7 @@ final class PlayerViewModel: ObservableObject {
     private let client = JellyfinClient.shared
     private let playbackSettings = PlaybackSettings.shared
 
-    func loadMedia(item: BaseItemDto) async {
+    func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false) async {
         isLoading = true
         error = nil
         errorMessage = nil
@@ -66,6 +81,9 @@ final class PlayerViewModel: ObservableObject {
             guard let mediaSource = playbackInfo.mediaSources?.first else {
                 throw PlayerError.noMediaSource
             }
+
+            // Store media source for subtitle/audio track info
+            currentMediaSource = mediaSource
 
             let url: URL?
             if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
@@ -144,7 +162,13 @@ final class PlayerViewModel: ObservableObject {
 
             // Check if there's saved progress to resume from
             let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
-            if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
+            if startFromBeginning {
+                // User explicitly chose to start over - play from beginning
+                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                startProgressReporting()
+                setupSegmentTracking()
+                player?.play()
+            } else if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
                 resumePositionTicks = startTicks
                 showingResumeDialog = true
                 // Don't auto-play - wait for user choice
@@ -283,6 +307,7 @@ final class PlayerViewModel: ObservableObject {
     func stop() async {
         progressReportTask?.cancel()
         cleanupSegmentTracking()
+        subtitleManager.clear()
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -343,10 +368,6 @@ final class PlayerViewModel: ObservableObject {
     }
 
     func loadSubtitleTracks() {
-        guard let playerItem = player?.currentItem else { return }
-
-        let subtitleGroup = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
-
         var tracks: [SubtitleTrackOption] = []
 
         // Add "Off" option first
@@ -358,45 +379,41 @@ final class PlayerViewModel: ObservableObject {
             isOffOption: true
         ))
 
-        if let options = subtitleGroup?.options {
-            for (index, option) in options.enumerated() {
-                let locale = option.locale
-                let displayName = option.displayName
-                let langCode = locale?.language.languageCode?.identifier
-
+        // Load subtitle tracks from Jellyfin's media source (not AVPlayer)
+        if let mediaSource = currentMediaSource {
+            let subtitleStreams = mediaSource.subtitleStreams
+            for stream in subtitleStreams {
+                let displayName = stream.displayTitle ?? stream.language ?? "Unknown"
                 tracks.append(SubtitleTrackOption(
-                    id: "\(index)",
+                    id: "\(stream.index ?? 0)",
                     displayName: displayName,
-                    languageCode: langCode,
-                    index: index,
-                    isOffOption: false
+                    languageCode: stream.language,
+                    index: stream.index ?? 0,
+                    isOffOption: false,
+                    isExternal: stream.isExternal ?? false
                 ))
             }
         }
 
         subtitleTracks = tracks
-
-        // Check current selection
-        if let subtitleGroup,
-           let currentSelection = playerItem.currentMediaSelection.selectedMediaOption(in: subtitleGroup),
-           let currentIndex = subtitleGroup.options.firstIndex(of: currentSelection) {
-            selectedSubtitleTrackId = "\(currentIndex)"
-        } else {
-            selectedSubtitleTrackId = "off"
-        }
+        selectedSubtitleTrackId = "off"
     }
 
     func selectSubtitleTrack(_ track: SubtitleTrackOption) {
-        guard let playerItem = player?.currentItem,
-              let subtitleGroup = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) else { return }
+        // Update selection state
+        selectedSubtitleTrackId = track.isOffOption ? "off" : track.id
+
+        guard let item = currentItem, let player = player else { return }
 
         if track.isOffOption {
-            playerItem.select(nil, in: subtitleGroup)
-            selectedSubtitleTrackId = "off"
-        } else if track.index < subtitleGroup.options.count {
-            let option = subtitleGroup.options[track.index]
-            playerItem.select(option, in: subtitleGroup)
-            selectedSubtitleTrackId = track.id
+            // Turn off subtitles
+            subtitleManager.clear()
+        } else {
+            // Load and display subtitles via our custom overlay
+            Task {
+                await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+                subtitleManager.startTracking(player: player)
+            }
         }
     }
 

@@ -17,7 +17,6 @@ struct HomeView: View {
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var showContinueWatchingDetail = false
-    @State private var showProfile = false
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
 
@@ -53,28 +52,9 @@ struct HomeView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 40) {
                             // Header with logo and profile avatar
-                            HStack {
-                                // Logo at top-left
-                                HStack(spacing: 16) {
-                                    Image("Logo")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(height: 120)
-
-                                    Text("Sashimi")
-                                        .font(.system(size: 56, weight: .bold))
-                                        .foregroundStyle(SashimiTheme.textPrimary)
-                                }
-
-                                Spacer()
-
-                                // Profile avatar at top-right
-                                ProfileAvatarButton {
-                                    showProfile = true
-                                }
-                            }
-                            .padding(.trailing, 80)
-                            .id("top")
+                            AppHeader()
+                                .id("top")
+                                .padding(.bottom, -140)
 
                             // Render rows based on settings order
                             ForEach(homeSettings.rowConfigs) { config in
@@ -116,9 +96,6 @@ struct HomeView: View {
                     }
                 )
             }
-            .fullScreenCover(isPresented: $showProfile) {
-                ProfileMenuView()
-            }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
                     Task { await viewModel.refresh() }
@@ -157,6 +134,7 @@ struct HomeView: View {
                 if !viewModel.heroItems.isEmpty {
                     HeroSection(
                         items: viewModel.heroItems,
+                        libraryNames: viewModel.heroItemLibraryNames,
                         currentIndex: $heroIndex,
                         onSelect: { item in
                             selectedItemIsYouTube = false
@@ -204,15 +182,11 @@ struct HomeView: View {
 // MARK: - Hero Section
 struct HeroSection: View {
     let items: [BaseItemDto]
+    let libraryNames: [String: String]
     @Binding var currentIndex: Int
     let onSelect: (BaseItemDto) -> Void
 
     @FocusState private var isFocused: Bool
-    @State private var autoScrollTimer: Timer?
-    @State private var autoScrollProgress: Double = 0
-    @State private var progressTimer: Timer?
-
-    private let autoScrollInterval: Double = 8
 
     private var safeIndex: Int {
         guard !items.isEmpty else { return 0 }
@@ -246,32 +220,18 @@ struct HeroSection: View {
         return ["Backdrop", "Primary", "Thumb"]
     }
 
-    private func startAutoScroll() {
-        autoScrollTimer?.invalidate()
-        progressTimer?.invalidate()
-        autoScrollProgress = 0
-
-        guard items.count > 1 else { return }
-
-        // Progress timer updates more frequently for smooth animation
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            autoScrollProgress += 0.1 / autoScrollInterval
-        }
-
-        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: autoScrollInterval, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.6)) {
-                currentIndex = (currentIndex + 1) % items.count
-            }
-            autoScrollProgress = 0
-        }
+    // Detect YouTube content by checking library name
+    private var isYouTubeContent: Bool {
+        guard let libraryName = libraryNames[currentItem.id] else { return false }
+        return libraryName.lowercased().contains("youtube")
     }
 
-    private func stopAutoScroll() {
-        autoScrollTimer?.invalidate()
-        autoScrollTimer = nil
-        progressTimer?.invalidate()
-        progressTimer = nil
-        autoScrollProgress = 0
+    // Display label for content type
+    private var contentTypeLabel: String {
+        if isYouTubeContent {
+            return "YouTube"
+        }
+        return currentItem.type?.rawValue.uppercased() ?? ""
     }
 
     // VoiceOver accessibility description
@@ -345,8 +305,8 @@ struct HeroSection: View {
 
                 // Content
                 VStack(alignment: .leading, spacing: 16) {
-                    if let type = currentItem.type {
-                        Text(type.rawValue.uppercased())
+                    if !contentTypeLabel.isEmpty {
+                        Text(contentTypeLabel)
                             .font(.system(size: 16, weight: .bold))
                             .tracking(1.5)
                             .foregroundStyle(SashimiTheme.accent)
@@ -396,29 +356,14 @@ struct HeroSection: View {
                             .frame(maxWidth: 700, alignment: .leading)
                     }
 
-                    // Page indicators with progress bar
+                    // Page indicators
                     if items.count > 1 {
                         HStack(spacing: 8) {
                             ForEach(0..<items.count, id: \.self) { index in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(SashimiTheme.textTertiary.opacity(0.5))
-                                        .frame(width: index == currentIndex ? 36 : 10, height: 4)
-
-                                    if index == currentIndex {
-                                        // Progress fill for current item
-                                        Capsule()
-                                            .fill(SashimiTheme.accent)
-                                            .frame(width: 36 * min(autoScrollProgress, 1.0), height: 4)
-                                    } else if index < currentIndex {
-                                        // Past items shown as filled
-                                        Capsule()
-                                            .fill(SashimiTheme.textTertiary)
-                                            .frame(width: 10, height: 4)
-                                    }
-                                }
-                                .animation(.linear(duration: 0.1), value: autoScrollProgress)
-                                .animation(.easeInOut(duration: 0.3), value: currentIndex)
+                                Capsule()
+                                    .fill(index == currentIndex ? SashimiTheme.accent : SashimiTheme.textTertiary.opacity(0.5))
+                                    .frame(width: index == currentIndex ? 36 : 10, height: 4)
+                                    .animation(.easeInOut(duration: 0.3), value: currentIndex)
                             }
                         }
                         .padding(.top, 8)
@@ -450,21 +395,13 @@ struct HeroSection: View {
                 withAnimation(.easeInOut(duration: 0.4)) {
                     currentIndex = (currentIndex - 1 + items.count) % items.count
                 }
-                startAutoScroll()
             case .right:
                 withAnimation(.easeInOut(duration: 0.4)) {
                     currentIndex = (currentIndex + 1) % items.count
                 }
-                startAutoScroll()
             default:
                 break
             }
-        }
-        .onAppear {
-            startAutoScroll()
-        }
-        .onDisappear {
-            stopAutoScroll()
         }
     }
 
@@ -574,14 +511,22 @@ struct RecentlyAddedLibraryRow: View {
     }
 
     private func loadItems() async {
-        // Skip if already loaded successfully
-        guard items.isEmpty else { return }
-
-        isLoading = true
+        isLoading = items.isEmpty  // Only show loading on first load
         loadError = false
 
         do {
-            let latestItems = try await JellyfinClient.shared.getLatestMedia(parentId: library.id, limit: 30)
+            // For TV libraries, fetch more items to ensure we get episodes from multiple series
+            // even if one series had many episodes added recently
+            let isTVLibrary = library.collectionType?.lowercased() == "tvshows"
+            let fetchLimit = isTVLibrary && !isYouTubeLibrary ? 100 : 30
+
+            let latestItems = try await JellyfinClient.shared.getLatestMedia(
+                parentId: library.id,
+                limit: fetchLimit,
+                includeWatched: true,
+                collectionType: library.collectionType,
+                isYouTubeLibrary: isYouTubeLibrary
+            )
             let (dedupedItems, counts) = deduplicateBySeries(latestItems)
             items = dedupedItems
             episodeCounts = counts
@@ -615,59 +560,6 @@ struct RecentlyAddedLibraryRow: View {
         }
 
         return (Array(result.prefix(20)), counts)
-    }
-}
-
-// MARK: - Profile Avatar Button
-struct ProfileAvatarButton: View {
-    @EnvironmentObject private var sessionManager: SessionManager
-    let action: () -> Void
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-
-                if let userId = sessionManager.currentUser?.id,
-                   let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
-                    AsyncImage(url: imageURL) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 32))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 72, height: 72)
-                    .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.white)
-                }
-            }
-            .overlay(
-                Circle()
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 4)
-            )
-            .shadow(color: SashimiTheme.accent.opacity(isFocused ? 0.6 : 0.3), radius: isFocused ? 15 : 8)
-            .scaleEffect(isFocused ? 1.1 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(.card)
-        .focused($isFocused)
-        .accessibilityLabel(sessionManager.currentUser?.name ?? "Profile")
-        .accessibilityHint("Double-tap to open profile settings")
     }
 }
 
