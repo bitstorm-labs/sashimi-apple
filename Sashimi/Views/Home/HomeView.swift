@@ -108,6 +108,8 @@ struct HomeView: View {
         }
         .onAppear {
             startAutoRefresh()
+            // Refresh immediately when view appears (e.g., switching tabs)
+            Task { await viewModel.refresh() }
         }
         .onDisappear {
             stopAutoRefresh()
@@ -123,6 +125,9 @@ struct HomeView: View {
                 LoadingOverlay()
                     .allowsHitTesting(false) // Allow navigation while loading
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
+            Task { await viewModel.refresh() }
         }
     }
 

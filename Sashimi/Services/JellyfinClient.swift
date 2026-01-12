@@ -161,6 +161,7 @@ actor JellyfinClient {
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = true
+        config.urlCache = nil  // Disable caching to ensure fresh API responses
         self.urlSession = URLSession(
             configuration: config,
             delegate: certificateDelegate,
@@ -312,7 +313,7 @@ actor JellyfinClient {
                 URLQueryItem(name: "Limit", value: "\(limit)"),
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ParentBackdropImageTags"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
-                URLQueryItem(name: "EnableRewatching", value: "true"),
+                URLQueryItem(name: "EnableRewatching", value: "false"),
                 URLQueryItem(name: "DisableFirstEpisode", value: "false")
             ]
         )
