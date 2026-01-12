@@ -108,6 +108,8 @@ struct HomeView: View {
         }
         .onAppear {
             startAutoRefresh()
+            // Refresh immediately when view appears (e.g., switching tabs)
+            Task { await viewModel.refresh() }
         }
         .onDisappear {
             stopAutoRefresh()
