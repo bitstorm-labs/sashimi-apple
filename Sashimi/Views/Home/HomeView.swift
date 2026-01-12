@@ -19,12 +19,10 @@ struct HomeView: View {
     @State private var showContinueWatchingDetail = false
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
-    @Binding var showProfile: Bool
 
-    init(resetTrigger: Binding<Bool> = .constant(false), isAtDefaultState: Binding<Bool> = .constant(true), showProfile: Binding<Bool> = .constant(false)) {
+    init(resetTrigger: Binding<Bool> = .constant(false), isAtDefaultState: Binding<Bool> = .constant(true)) {
         _resetTrigger = resetTrigger
         _isAtDefaultState = isAtDefaultState
-        _showProfile = showProfile
     }
 
     // Order libraries according to settings
@@ -54,8 +52,9 @@ struct HomeView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 40) {
                             // Header with logo and profile avatar
-                            AppHeader(showProfile: $showProfile)
+                            AppHeader()
                                 .id("top")
+                                .padding(.bottom, -140)
 
                             // Render rows based on settings order
                             ForEach(homeSettings.rowConfigs) { config in
@@ -135,6 +134,7 @@ struct HomeView: View {
                 if !viewModel.heroItems.isEmpty {
                     HeroSection(
                         items: viewModel.heroItems,
+                        libraryNames: viewModel.heroItemLibraryNames,
                         currentIndex: $heroIndex,
                         onSelect: { item in
                             selectedItemIsYouTube = false
@@ -182,15 +182,11 @@ struct HomeView: View {
 // MARK: - Hero Section
 struct HeroSection: View {
     let items: [BaseItemDto]
+    let libraryNames: [String: String]
     @Binding var currentIndex: Int
     let onSelect: (BaseItemDto) -> Void
 
     @FocusState private var isFocused: Bool
-    @State private var autoScrollTimer: Timer?
-    @State private var autoScrollProgress: Double = 0
-    @State private var progressTimer: Timer?
-
-    private let autoScrollInterval: Double = 8
 
     private var safeIndex: Int {
         guard !items.isEmpty else { return 0 }
@@ -224,32 +220,18 @@ struct HeroSection: View {
         return ["Backdrop", "Primary", "Thumb"]
     }
 
-    private func startAutoScroll() {
-        autoScrollTimer?.invalidate()
-        progressTimer?.invalidate()
-        autoScrollProgress = 0
-
-        guard items.count > 1 else { return }
-
-        // Progress timer updates more frequently for smooth animation
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            autoScrollProgress += 0.1 / autoScrollInterval
-        }
-
-        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: autoScrollInterval, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.6)) {
-                currentIndex = (currentIndex + 1) % items.count
-            }
-            autoScrollProgress = 0
-        }
+    // Detect YouTube content by checking library name
+    private var isYouTubeContent: Bool {
+        guard let libraryName = libraryNames[currentItem.id] else { return false }
+        return libraryName.lowercased().contains("youtube")
     }
 
-    private func stopAutoScroll() {
-        autoScrollTimer?.invalidate()
-        autoScrollTimer = nil
-        progressTimer?.invalidate()
-        progressTimer = nil
-        autoScrollProgress = 0
+    // Display label for content type
+    private var contentTypeLabel: String {
+        if isYouTubeContent {
+            return "YouTube"
+        }
+        return currentItem.type?.rawValue.uppercased() ?? ""
     }
 
     // VoiceOver accessibility description
@@ -323,8 +305,8 @@ struct HeroSection: View {
 
                 // Content
                 VStack(alignment: .leading, spacing: 16) {
-                    if let type = currentItem.type {
-                        Text(type.rawValue.uppercased())
+                    if !contentTypeLabel.isEmpty {
+                        Text(contentTypeLabel)
                             .font(.system(size: 16, weight: .bold))
                             .tracking(1.5)
                             .foregroundStyle(SashimiTheme.accent)
@@ -374,29 +356,14 @@ struct HeroSection: View {
                             .frame(maxWidth: 700, alignment: .leading)
                     }
 
-                    // Page indicators with progress bar
+                    // Page indicators
                     if items.count > 1 {
                         HStack(spacing: 8) {
                             ForEach(0..<items.count, id: \.self) { index in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(SashimiTheme.textTertiary.opacity(0.5))
-                                        .frame(width: index == currentIndex ? 36 : 10, height: 4)
-
-                                    if index == currentIndex {
-                                        // Progress fill for current item
-                                        Capsule()
-                                            .fill(SashimiTheme.accent)
-                                            .frame(width: 36 * min(autoScrollProgress, 1.0), height: 4)
-                                    } else if index < currentIndex {
-                                        // Past items shown as filled
-                                        Capsule()
-                                            .fill(SashimiTheme.textTertiary)
-                                            .frame(width: 10, height: 4)
-                                    }
-                                }
-                                .animation(.linear(duration: 0.1), value: autoScrollProgress)
-                                .animation(.easeInOut(duration: 0.3), value: currentIndex)
+                                Capsule()
+                                    .fill(index == currentIndex ? SashimiTheme.accent : SashimiTheme.textTertiary.opacity(0.5))
+                                    .frame(width: index == currentIndex ? 36 : 10, height: 4)
+                                    .animation(.easeInOut(duration: 0.3), value: currentIndex)
                             }
                         }
                         .padding(.top, 8)
@@ -428,21 +395,13 @@ struct HeroSection: View {
                 withAnimation(.easeInOut(duration: 0.4)) {
                     currentIndex = (currentIndex - 1 + items.count) % items.count
                 }
-                startAutoScroll()
             case .right:
                 withAnimation(.easeInOut(duration: 0.4)) {
                     currentIndex = (currentIndex + 1) % items.count
                 }
-                startAutoScroll()
             default:
                 break
             }
-        }
-        .onAppear {
-            startAutoScroll()
-        }
-        .onDisappear {
-            stopAutoScroll()
         }
     }
 
@@ -552,14 +511,22 @@ struct RecentlyAddedLibraryRow: View {
     }
 
     private func loadItems() async {
-        // Skip if already loaded successfully
-        guard items.isEmpty else { return }
-
-        isLoading = true
+        isLoading = items.isEmpty  // Only show loading on first load
         loadError = false
 
         do {
-            let latestItems = try await JellyfinClient.shared.getLatestMedia(parentId: library.id, limit: 30)
+            // For TV libraries, fetch more items to ensure we get episodes from multiple series
+            // even if one series had many episodes added recently
+            let isTVLibrary = library.collectionType?.lowercased() == "tvshows"
+            let fetchLimit = isTVLibrary && !isYouTubeLibrary ? 100 : 30
+
+            let latestItems = try await JellyfinClient.shared.getLatestMedia(
+                parentId: library.id,
+                limit: fetchLimit,
+                includeWatched: true,
+                collectionType: library.collectionType,
+                isYouTubeLibrary: isYouTubeLibrary
+            )
             let (dedupedItems, counts) = deduplicateBySeries(latestItems)
             items = dedupedItems
             episodeCounts = counts

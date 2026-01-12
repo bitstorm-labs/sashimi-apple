@@ -4,90 +4,111 @@ import SwiftUI
 
 struct CertificateSettingsView: View {
     @StateObject private var certSettings = CertificateTrustSettings.shared
+    @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingWarning = false
     @State private var pendingToggle: (() -> Void)?
 
+    private var isHTTPS: Bool {
+        sessionManager.serverURL?.scheme?.lowercased() == "https"
+    }
+
+    private var hasValidCert: Bool {
+        isHTTPS && !certSettings.allowSelfSigned && !certSettings.allowExpiredCerts
+    }
+
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Security Settings")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Security Settings")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    // Certificate Validation Section
-                    SettingsSection(title: "Certificate Validation") {
-                        SettingsToggleRow(
-                            title: "Allow Self-Signed Certificates",
-                            isOn: Binding(
-                                get: { certSettings.allowSelfSigned },
-                                set: { newValue in
-                                    if newValue {
-                                        pendingToggle = { certSettings.allowSelfSigned = true }
-                                        showingWarning = true
-                                    } else {
-                                        certSettings.allowSelfSigned = false
-                                    }
-                                }
-                            )
-                        )
-
-                        SettingsToggleRow(
-                            title: "Allow Expired Certificates",
-                            isOn: Binding(
-                                get: { certSettings.allowExpiredCerts },
-                                set: { newValue in
-                                    if newValue {
-                                        pendingToggle = { certSettings.allowExpiredCerts = true }
-                                        showingWarning = true
-                                    } else {
-                                        certSettings.allowExpiredCerts = false
-                                    }
-                                }
-                            )
-                        )
-                    }
-
-                    Text("Disabling certificate validation reduces security. Only enable if you trust your network.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
-
-                    // Trusted Hosts Section
-                    if !certSettings.trustedHosts.isEmpty {
-                        SettingsSection(title: "Trusted Hosts") {
-                            ForEach(Array(certSettings.trustedHosts).sorted(), id: \.self) { host in
-                                TrustedHostRow(host: host) {
-                                    certSettings.untrustHost(host)
+                // Certificate Validation Section
+                SettingsSection(title: "Certificate Validation") {
+                    SettingsToggleRow(
+                        title: "Allow Self-Signed Certificates",
+                        isOn: Binding(
+                            get: { certSettings.allowSelfSigned },
+                            set: { newValue in
+                                if newValue {
+                                    pendingToggle = { certSettings.allowSelfSigned = true }
+                                    showingWarning = true
+                                } else {
+                                    certSettings.allowSelfSigned = false
                                 }
                             }
-                        }
-
-                        Text("These hosts have been manually trusted.")
-                            .font(.system(size: 16))
-                            .foregroundStyle(SashimiTheme.textTertiary)
-                            .padding(.horizontal, 8)
-                    }
-
-                    // Security Status Section
-                    SettingsSection(title: "Security Status") {
-                        SecurityStatusRow(
-                            icon: "lock.shield",
-                            iconColor: .green,
-                            text: "HTTPS connections are always encrypted"
                         )
+                    )
 
-                        SecurityStatusRow(
-                            icon: certSettings.allowSelfSigned ? "exclamationmark.triangle" : "checkmark.shield",
-                            iconColor: certSettings.allowSelfSigned ? .yellow : .green,
-                            text: certSettings.allowSelfSigned ? "Self-signed certificates accepted" : "Only trusted certificates accepted"
+                    SettingsToggleRow(
+                        title: "Allow Expired Certificates",
+                        isOn: Binding(
+                            get: { certSettings.allowExpiredCerts },
+                            set: { newValue in
+                                if newValue {
+                                    pendingToggle = { certSettings.allowExpiredCerts = true }
+                                    showingWarning = true
+                                } else {
+                                    certSettings.allowExpiredCerts = false
+                                }
+                            }
                         )
-                    }
+                    )
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
+
+                Text("Disabling certificate validation reduces security. Only enable if you trust your network.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
+
+                // Trusted Hosts Section
+                if !certSettings.trustedHosts.isEmpty {
+                    SettingsSection(title: "Trusted Hosts") {
+                        ForEach(Array(certSettings.trustedHosts).sorted(), id: \.self) { host in
+                            TrustedHostRow(host: host) {
+                                certSettings.untrustHost(host)
+                            }
+                        }
+                    }
+
+                    Text("These hosts have been manually trusted.")
+                        .font(Typography.captionSmall)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                        .padding(.horizontal, 8)
+                }
+
+                // Security Status Section
+                SettingsSection(title: "Security Status") {
+                    if hasValidCert {
+                        SecurityStatusRow(
+                            icon: "lock.shield.fill",
+                            iconColor: .green,
+                            text: "HTTPS"
+                        )
+                    } else if isHTTPS {
+                        SecurityStatusRow(
+                            icon: "lock.trianglebadge.exclamationmark",
+                            iconColor: .yellow,
+                            text: "HTTPS (certificate override)"
+                        )
+                    } else {
+                        SecurityStatusRow(
+                            icon: "lock.open",
+                            iconColor: .red,
+                            text: "HTTP (not encrypted)"
+                        )
+                    }
+
+                    SecurityStatusRow(
+                        icon: certSettings.allowSelfSigned ? "exclamationmark.triangle" : "checkmark.shield",
+                        iconColor: certSettings.allowSelfSigned ? .yellow : .green,
+                        text: certSettings.allowSelfSigned ? "Self-signed certificates accepted" : "Only trusted certificates accepted"
+                    )
+                }
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
         .confirmationDialog(
             "Security Warning",
@@ -117,17 +138,17 @@ struct TrustedHostRow: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(host)
-                        .font(.system(size: 22))
+                        .font(Typography.body)
                         .foregroundStyle(SashimiTheme.textPrimary)
                     Text("Tap to remove")
-                        .font(.system(size: 16))
+                        .font(Typography.captionSmall)
                         .foregroundStyle(SashimiTheme.textTertiary)
                 }
 
                 Spacer()
 
                 Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
+                    .font(Typography.titleSmall)
                     .foregroundStyle(.red.opacity(0.8))
             }
         }
@@ -156,11 +177,11 @@ struct SecurityStatusRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(Typography.titleSmall)
                 .foregroundStyle(iconColor)
 
             Text(text)
-                .font(.system(size: 20))
+                .font(Typography.body)
                 .foregroundStyle(SashimiTheme.textPrimary)
 
             Spacer()

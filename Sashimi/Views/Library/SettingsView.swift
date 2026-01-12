@@ -2,48 +2,83 @@ import SwiftUI
 
 struct SettingsView: View {
     var showSignOut: Bool = true
+    var onBackAtRoot: (() -> Void)?
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        List {
-            Section("Home Screen") {
-                NavigationLink("Row Order") {
-                    HomeScreenSettingsView()
-                }
-            }
+        NavigationStack(path: $navigationPath) {
+            ZStack {
+                SashimiTheme.background.ignoresSafeArea()
 
-            Section("Playback") {
-                NavigationLink("Playback Settings") {
-                    PlaybackSettingsView()
-                }
-            }
+                ScrollView {
+                    VStack(spacing: 30) {
+                        // Settings content with constrained width
+                        VStack(spacing: 24) {
+                            SettingsOptionRow(
+                                icon: "house",
+                                title: "Home Screen",
+                                subtitle: "Customize row order"
+                            ) {
+                                navigationPath.append(SettingsDestination.homeScreen)
+                            }
 
-            Section("Parental Controls") {
-                NavigationLink("Restrictions") {
-                    ParentalControlsView()
-                }
-            }
+                            SettingsOptionRow(
+                                icon: "play.circle",
+                                title: "Playback",
+                                subtitle: "Quality and behavior"
+                            ) {
+                                navigationPath.append(SettingsDestination.playback)
+                            }
 
-            Section("Security") {
-                NavigationLink("Certificate Settings") {
-                    CertificateSettingsView()
-                }
-            }
+                            SettingsOptionRow(
+                                icon: "lock.shield",
+                                title: "Parental Controls",
+                                subtitle: "PIN and restrictions"
+                            ) {
+                                navigationPath.append(SettingsDestination.parentalControls)
+                            }
 
-            Section("About") {
-                LabeledContent("Version", value: "1.0.0")
-                LabeledContent("Build", value: "1")
-            }
+                            SettingsOptionRow(
+                                icon: "checkmark.shield",
+                                title: "Security",
+                                subtitle: "Certificate settings"
+                            ) {
+                                navigationPath.append(SettingsDestination.certificates)
+                            }
 
-            if showSignOut {
-                Section {
-                    Button(role: .destructive) {
-                        showingLogoutConfirmation = true
-                    } label: {
-                        Text("Sign Out")
-                            .frame(maxWidth: .infinity)
+                            // About section
+                            VStack(spacing: 12) {
+                                SettingsInfoRow(label: "Version", value: "1.0.0")
+                                SettingsInfoRow(label: "Build", value: "1")
+                            }
+                            .padding(.top, 20)
+
+                            if showSignOut {
+                                SettingsSignOutButton {
+                                    showingLogoutConfirmation = true
+                                }
+                                .padding(.top, 20)
+                            }
+                        }
+                        .frame(maxWidth: 800)
+                        .padding(.horizontal, 80)
+                        .padding(.top, 40)
+                        .padding(.bottom, 60)
                     }
+                }
+            }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                switch destination {
+                case .homeScreen:
+                    HomeScreenSettingsView()
+                case .playback:
+                    PlaybackSettingsView()
+                case .parentalControls:
+                    ParentalControlsView()
+                case .certificates:
+                    CertificateSettingsView()
                 }
             }
         }
@@ -59,6 +94,117 @@ struct SettingsView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
+        .onExitCommand {
+            if !navigationPath.isEmpty {
+                navigationPath.removeLast()
+            } else {
+                onBackAtRoot?()
+            }
+        }
+    }
+}
+
+enum SettingsDestination: Hashable {
+    case homeScreen
+    case playback
+    case parentalControls
+    case certificates
+}
+
+struct SettingsOptionRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(Typography.title)
+                    .foregroundStyle(isFocused ? .white : SashimiTheme.accent)
+                    .frame(width: 50)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(Typography.title)
+                        .foregroundStyle(isFocused ? .white : SashimiTheme.textPrimary)
+
+                    Text(subtitle)
+                        .font(Typography.caption)
+                        .foregroundStyle(isFocused ? .white.opacity(0.8) : SashimiTheme.textTertiary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(Typography.bodySmall)
+                    .foregroundStyle(isFocused ? .white.opacity(0.8) : SashimiTheme.textTertiary)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isFocused ? SashimiTheme.accent : SashimiTheme.cardBackground)
+            )
+            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+    }
+}
+
+struct SettingsInfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(Typography.bodySmall)
+                .foregroundStyle(SashimiTheme.textSecondary)
+
+            Spacer()
+
+            Text(value)
+                .font(Typography.bodySmall.weight(.medium))
+                .foregroundStyle(SashimiTheme.textPrimary)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(SashimiTheme.cardBackground)
+        )
+    }
+}
+
+struct SettingsSignOutButton: View {
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(Typography.titleSmall)
+                Text("Sign Out")
+                    .font(Typography.titleSmall)
+            }
+            .foregroundStyle(isFocused ? .white : .red.opacity(0.9))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isFocused ? Color.red : Color.red.opacity(0.15))
+            )
+            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
     }
 }
 
@@ -205,46 +351,45 @@ struct HomeScreenSettingsView: View {
         SettingsContainer {
             if isLoading {
                 ProgressView("Loading...")
+                    .padding(.top, 60)
             } else if settings.rowConfigs.isEmpty {
                 VStack(spacing: 20) {
                     Image(systemName: "square.grid.2x2")
                         .font(.system(size: 60))
                         .foregroundStyle(.secondary)
                     Text("No rows configured")
-                        .font(.title3)
+                        .font(Typography.titleSmall)
                         .foregroundStyle(.secondary)
                     Text("Visit the Home tab first to load your libraries")
-                        .font(.subheadline)
+                        .font(Typography.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 60)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Home Screen Rows")
-                            .font(.system(size: 38, weight: .bold))
-                            .foregroundStyle(SashimiTheme.textPrimary)
-                            .padding(.bottom, 8)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Home Screen Rows")
+                        .font(Typography.headline)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                        .padding(.bottom, 8)
 
-                        Text("Use arrows to reorder, tap checkmark to show/hide")
-                            .font(.system(size: 18))
-                            .foregroundStyle(SashimiTheme.textSecondary)
-                            .padding(.bottom, 16)
+                    Text("Use arrows to reorder, tap checkmark to show/hide")
+                        .font(Typography.caption)
+                        .foregroundStyle(SashimiTheme.textSecondary)
+                        .padding(.bottom, 16)
 
-                        ForEach(Array(settings.rowConfigs.enumerated()), id: \.element.id) { index, config in
-                            HomeScreenRowItem(
-                                config: config,
-                                index: index,
-                                totalCount: settings.rowConfigs.count,
-                                onToggle: { settings.toggleVisibility(for: config) },
-                                onMoveUp: { moveRow(from: index, direction: -1) },
-                                onMoveDown: { moveRow(from: index, direction: 1) }
-                            )
-                        }
+                    ForEach(Array(settings.rowConfigs.enumerated()), id: \.element.id) { index, config in
+                        HomeScreenRowItem(
+                            config: config,
+                            index: index,
+                            totalCount: settings.rowConfigs.count,
+                            onToggle: { settings.toggleVisibility(for: config) },
+                            onMoveUp: { moveRow(from: index, direction: -1) },
+                            onMoveDown: { moveRow(from: index, direction: 1) }
+                        )
                     }
-                    .padding(.horizontal, 60)
-                    .padding(.vertical, 40)
                 }
+                .padding(.horizontal, 60)
+                .padding(.bottom, 60)
             }
         }
         .onAppear {
@@ -315,7 +460,7 @@ struct HomeRowMoveButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: direction.icon)
-                .font(.system(size: 20, weight: .semibold))
+                .font(Typography.bodySmall.weight(.semibold))
                 .foregroundStyle(isEnabled ? (isFocused ? .white : SashimiTheme.textSecondary) : SashimiTheme.textTertiary.opacity(0.3))
                 .frame(width: 50, height: 50)
                 .background(
@@ -338,18 +483,18 @@ struct HomeRowToggleButton: View {
         Button(action: onToggle) {
             HStack(spacing: 16) {
                 Image(systemName: config.isVisible ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
+                    .font(Typography.title)
                     .foregroundStyle(config.isVisible ? SashimiTheme.accent : SashimiTheme.textTertiary)
 
                 Text(config.displayName)
-                    .font(.system(size: 22))
+                    .font(Typography.body)
                     .foregroundStyle(config.isVisible ? SashimiTheme.textPrimary : SashimiTheme.textSecondary)
 
                 Spacer()
 
                 if config.type != nil {
                     Text("Built-in")
-                        .font(.caption)
+                        .font(Typography.captionSmall)
                         .foregroundStyle(SashimiTheme.textTertiary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -374,7 +519,7 @@ struct HomeRowToggleButton: View {
     }
 }
 
-// MARK: - Settings Container (styled background with width constraint)
+// MARK: - Settings Container (styled background with AppHeader and width constraint)
 
 struct SettingsContainer<Content: View>: View {
     let content: Content
@@ -387,8 +532,13 @@ struct SettingsContainer<Content: View>: View {
         ZStack {
             SashimiTheme.background.ignoresSafeArea()
 
-            content
-                .frame(maxWidth: 900)
+            ScrollView {
+                VStack(spacing: 30) {
+                    content
+                        .frame(maxWidth: 900)
+                        .padding(.top, 40)
+                }
+            }
         }
     }
 }
@@ -456,10 +606,11 @@ struct SettingsToggleRow: View {
         } label: {
             HStack {
                 Text(title)
+                    .font(Typography.body)
                     .foregroundStyle(SashimiTheme.textPrimary)
                 Spacer()
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(Typography.titleSmall)
                     .foregroundStyle(isOn ? SashimiTheme.accent : SashimiTheme.textTertiary)
             }
         }
@@ -503,65 +654,63 @@ struct PlaybackSettingsView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Playback Settings")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Playback Settings")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    // Video Quality Section
-                    SettingsSection(title: "Video Quality") {
-                        SettingsNavigationRow(title: "Maximum Bitrate", subtitle: bitrateLabel) {
-                            VideoQualitySettingsView()
-                        }
-                        SettingsToggleRow(title: "Force Direct Play", isOn: $settings.forceDirectPlay)
+                // Video Quality Section
+                SettingsSection(title: "Video Quality") {
+                    SettingsNavigationRow(title: "Maximum Bitrate", subtitle: bitrateLabel) {
+                        VideoQualitySettingsView()
                     }
+                    SettingsToggleRow(title: "Force Direct Play", isOn: $settings.forceDirectPlay)
+                }
 
-                    Text("Direct play streams the original file without transcoding.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
+                Text("Direct play streams the original file without transcoding.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
 
-                    // Playback Behavior Section
-                    SettingsSection(title: "Playback Behavior") {
-                        SettingsToggleRow(title: "Auto-Play Next Episode", isOn: $settings.autoPlayNextEpisode)
-                        SettingsToggleRow(title: "Auto-Skip Intro", isOn: $settings.autoSkipIntro)
-                        SettingsToggleRow(title: "Auto-Skip Credits", isOn: $settings.autoSkipCredits)
+                // Playback Behavior Section
+                SettingsSection(title: "Playback Behavior") {
+                    SettingsToggleRow(title: "Auto-Play Next Episode", isOn: $settings.autoPlayNextEpisode)
+                    SettingsToggleRow(title: "Auto-Skip Intro", isOn: $settings.autoSkipIntro)
+                    SettingsToggleRow(title: "Auto-Skip Credits", isOn: $settings.autoSkipCredits)
+                }
+
+                Text("Auto-skip requires the intro-skipper plugin on your server.")
+                    .font(Typography.captionSmall)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .padding(.horizontal, 8)
+
+                // Resume Section
+                SettingsSection(title: "Resume Playback") {
+                    SettingsNavigationRow(title: "Resume Threshold", subtitle: resumeLabel) {
+                        ResumeThresholdSettingsView()
                     }
+                }
 
-                    Text("Auto-skip requires the intro-skipper plugin on your server.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .padding(.horizontal, 8)
-
-                    // Resume Section
-                    SettingsSection(title: "Resume Playback") {
-                        SettingsNavigationRow(title: "Resume Threshold", subtitle: resumeLabel) {
-                            ResumeThresholdSettingsView()
-                        }
+                // Audio Section
+                SettingsSection(title: "Audio") {
+                    SettingsNavigationRow(title: "Preferred Language", subtitle: audioLanguageLabel) {
+                        LanguagePickerView(title: "Audio Language", selection: $settings.preferredAudioLanguage)
                     }
+                }
 
-                    // Audio Section
-                    SettingsSection(title: "Audio") {
-                        SettingsNavigationRow(title: "Preferred Language", subtitle: audioLanguageLabel) {
-                            LanguagePickerView(title: "Audio Language", selection: $settings.preferredAudioLanguage)
-                        }
-                    }
-
-                    // Subtitles Section
-                    SettingsSection(title: "Subtitles") {
-                        SettingsToggleRow(title: "Enable Subtitles", isOn: $settings.subtitlesEnabled)
-                        if settings.subtitlesEnabled {
-                            SettingsNavigationRow(title: "Preferred Language", subtitle: subtitleLanguageLabel) {
-                                LanguagePickerView(title: "Subtitle Language", selection: $settings.preferredSubtitleLanguage)
-                            }
+                // Subtitles Section
+                SettingsSection(title: "Subtitles") {
+                    SettingsToggleRow(title: "Enable Subtitles", isOn: $settings.subtitlesEnabled)
+                    if settings.subtitlesEnabled {
+                        SettingsNavigationRow(title: "Preferred Language", subtitle: subtitleLanguageLabel) {
+                            LanguagePickerView(title: "Subtitle Language", selection: $settings.preferredSubtitleLanguage)
                         }
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
     }
 
@@ -601,7 +750,7 @@ struct SettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 20, weight: .semibold))
+                .font(Typography.bodySmall.weight(.semibold))
                 .foregroundStyle(SashimiTheme.textSecondary)
                 .padding(.leading, 8)
 
@@ -624,19 +773,19 @@ struct SettingsNavigationRow<Destination: View>: View {
         NavigationLink(destination: destination) {
             HStack {
                 Text(title)
-                    .font(.system(size: 22))
+                    .font(Typography.body)
                     .foregroundStyle(SashimiTheme.textPrimary)
 
                 Spacer()
 
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 18))
+                        .font(Typography.caption)
                         .foregroundStyle(SashimiTheme.textTertiary)
                 }
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(Typography.captionSmall.weight(.semibold))
                     .foregroundStyle(SashimiTheme.textTertiary)
             }
         }
@@ -672,32 +821,30 @@ struct VideoQualitySettingsView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Video Quality")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Video Quality")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    ForEach(bitrateOptions, id: \.value) { option in
-                        SettingsOptionRow(
-                            title: option.label,
-                            isSelected: maxBitrate == option.value
-                        ) {
-                            maxBitrate = option.value
-                        }
+                ForEach(bitrateOptions, id: \.value) { option in
+                    SettingsPickerOptionRow(
+                        title: option.label,
+                        isSelected: maxBitrate == option.value
+                    ) {
+                        maxBitrate = option.value
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
     }
 }
 
-// MARK: - Settings Option Row (for pickers)
+// MARK: - Settings Picker Option Row (for selection lists)
 
-struct SettingsOptionRow: View {
+struct SettingsPickerOptionRow: View {
     let title: String
     var subtitle: String = ""
     let isSelected: Bool
@@ -709,12 +856,12 @@ struct SettingsOptionRow: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 22))
+                        .font(Typography.body)
                         .foregroundStyle(SashimiTheme.textPrimary)
 
                     if !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: 16))
+                            .font(Typography.captionSmall)
                             .foregroundStyle(SashimiTheme.textTertiary)
                     }
                 }
@@ -723,7 +870,7 @@ struct SettingsOptionRow: View {
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
+                        .font(Typography.title)
                         .foregroundStyle(SashimiTheme.accent)
                 }
             }
@@ -759,30 +906,28 @@ struct ResumeThresholdSettingsView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Resume Threshold")
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Resume Threshold")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    Text("Only ask to resume if watched more than this amount")
-                        .font(.system(size: 18))
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                        .padding(.bottom, 16)
+                Text("Only ask to resume if watched more than this amount")
+                    .font(Typography.caption)
+                    .foregroundStyle(SashimiTheme.textSecondary)
+                    .padding(.bottom, 16)
 
-                    ForEach(thresholdOptions, id: \.value) { option in
-                        SettingsOptionRow(
-                            title: option.label,
-                            isSelected: resumeThresholdSeconds == option.value
-                        ) {
-                            resumeThresholdSeconds = option.value
-                        }
+                ForEach(thresholdOptions, id: \.value) { option in
+                    SettingsPickerOptionRow(
+                        title: option.label,
+                        isSelected: resumeThresholdSeconds == option.value
+                    ) {
+                        resumeThresholdSeconds = option.value
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
     }
 }
@@ -815,25 +960,23 @@ struct LanguagePickerView: View {
 
     var body: some View {
         SettingsContainer {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(title)
-                        .font(.system(size: 38, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 16) {
+                Text(title)
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
 
-                    ForEach(languages, id: \.code) { language in
-                        SettingsOptionRow(
-                            title: language.name,
-                            isSelected: selection == language.code
-                        ) {
-                            selection = language.code
-                        }
+                ForEach(languages, id: \.code) { language in
+                    SettingsPickerOptionRow(
+                        title: language.name,
+                        isSelected: selection == language.code
+                    ) {
+                        selection = language.code
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
             }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
         }
     }
 }

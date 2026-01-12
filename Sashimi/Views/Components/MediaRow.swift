@@ -42,14 +42,15 @@ struct MediaPosterButton: View {
     var libraryType: String?
     var libraryName: String?
     var isLandscape: Bool = false
+    var isCircular: Bool = false  // For YouTube channel-style circular covers
     var badgeCount: Int?  // Shows "X new" badge when > 1
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
 
     // Card dimensions
-    private var cardWidth: CGFloat { isLandscape ? 320 : 220 }
-    private var cardHeight: CGFloat { isLandscape ? 180 : 330 }
+    private var cardWidth: CGFloat { isCircular ? 200 : (isLandscape ? 320 : 220) }
+    private var cardHeight: CGFloat { isCircular ? 200 : (isLandscape ? 180 : 330) }
 
     private var displayTitle: String {
         if isLandscape {
@@ -146,15 +147,32 @@ struct MediaPosterButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 10) {
-                ZStack(alignment: .bottomLeading) {
-                    SmartPosterImage(
-                        itemIds: imageFallbackIds,
-                        maxWidth: isLandscape ? 640 : 400,
-                        imageTypes: imageTypes
-                    )
-                    .frame(width: cardWidth, height: cardHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .center, spacing: 10) {
+                ZStack(alignment: isCircular ? .center : .bottomLeading) {
+                    if isCircular {
+                        // Centered circular image
+                        Circle()
+                            .fill(SashimiTheme.cardBackground)
+                            .frame(width: cardWidth, height: cardHeight)
+                            .overlay(
+                                SmartPosterImage(
+                                    itemIds: imageFallbackIds,
+                                    maxWidth: 400,
+                                    imageTypes: imageTypes,
+                                    contentMode: .fit
+                                )
+                                .clipShape(Circle())
+                            )
+                    } else {
+                        SmartPosterImage(
+                            itemIds: imageFallbackIds,
+                            maxWidth: isLandscape ? 640 : 400,
+                            imageTypes: imageTypes,
+                            contentMode: .fill
+                        )
+                        .frame(width: cardWidth, height: cardHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
 
                     // Watched indicator (small corner checkmark)
                     if item.userData?.played == true {
@@ -206,20 +224,29 @@ struct MediaPosterButton: View {
                         }
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(width: cardWidth, height: cardHeight)
+                .clipShape(isCircular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 12)))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                    Group {
+                        if isCircular {
+                            Circle()
+                                .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                        }
+                    }
                 )
-                .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.6) : .clear, radius: 20)
+                .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15, x: 0, y: 0)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .center, spacing: 2) {
                     MarqueeText(
                         text: displayTitle,
                         isScrolling: isFocused,
-                        height: 24
+                        height: 24,
+                        alignment: .center
                     )
-                    .font(.system(size: isLandscape ? 20 : 22, weight: .medium))
+                    .font(.system(size: isCircular ? 20 : (isLandscape ? 20 : 22), weight: .medium))
                     .foregroundStyle(SashimiTheme.textPrimary)
 
                     if let subtitle = subtitleText {
@@ -229,7 +256,7 @@ struct MediaPosterButton: View {
                             .lineLimit(1)
                     }
                 }
-                .frame(width: cardWidth, alignment: .leading)
+                .frame(width: cardWidth, alignment: .center)
             }
             .scaleEffect(isFocused ? 1.05 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -325,11 +352,25 @@ struct MarqueeText: View {
     let text: String
     let isScrolling: Bool
     var height: CGFloat = 28
+    var alignment: HorizontalAlignment = .leading
 
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private func baseOffset(for containerWidth: CGFloat) -> CGFloat {
+        // If text fits, center it (or align as specified)
+        guard textWidth <= containerWidth else { return 0 }
+        switch alignment {
+        case .center:
+            return (containerWidth - textWidth) / 2
+        case .trailing:
+            return containerWidth - textWidth
+        default:
+            return 0
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -346,7 +387,7 @@ struct MarqueeText: View {
                         containerWidth = geo.size.width
                     }
                 })
-                .offset(x: shouldScroll ? offset : 0)
+                .offset(x: shouldScroll ? offset : baseOffset(for: geo.size.width))
                 .onChange(of: isScrolling) { _, scrolling in
                     // Skip animation if Reduce Motion is enabled
                     guard !reduceMotion else { return }

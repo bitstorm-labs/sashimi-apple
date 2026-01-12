@@ -302,7 +302,7 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getNextUp(limit: Int = 12) async throws -> [BaseItemDto] {
+    func getNextUp(limit: Int = 50) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
         let data = try await request(
@@ -310,8 +310,10 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "UserId", value: userId),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData"),
-                URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ParentBackdropImageTags"),
+                URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
+                URLQueryItem(name: "EnableRewatching", value: "true"),
+                URLQueryItem(name: "DisableFirstEpisode", value: "false")
             ]
         )
 
@@ -319,25 +321,67 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getLatestMedia(parentId: String? = nil, limit: Int = 16) async throws -> [BaseItemDto] {
+    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil, isYouTubeLibrary: Bool = false) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
-        var queryItems = [
-            URLQueryItem(name: "Limit", value: "\(limit)"),
-            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines"),
-            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
-        ]
+        if includeWatched {
+            // Determine item types based on collection type
+            let itemTypes: String
+            if let collectionType = collectionType?.lowercased() {
+                switch collectionType {
+                case "tvshows":
+                    // Fetch episodes - caller will deduplicate by series with badge counts
+                    itemTypes = "Episode"
+                case "movies":
+                    itemTypes = "Movie"
+                default:
+                    itemTypes = "Movie,Series,Episode"
+                }
+            } else {
+                itemTypes = "Movie,Series,Episode"
+            }
 
-        if let parentId {
-            queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
+            // Use /Items endpoint with date sorting to include watched items
+            var queryItems = [
+                URLQueryItem(name: "Limit", value: "\(limit)"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines"),
+                URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
+                URLQueryItem(name: "SortBy", value: "DateCreated,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: itemTypes)
+            ]
+
+            if let parentId {
+                queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
+            }
+
+            let data = try await request(
+                path: "/Users/\(userId)/Items",
+                queryItems: queryItems
+            )
+
+            let response = try JSONDecoder().decode(ItemsResponse.self, from: data)
+            return response.items
+        } else {
+            // Use /Items/Latest which filters out watched by default
+            var queryItems = [
+                URLQueryItem(name: "Limit", value: "\(limit)"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines"),
+                URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+            ]
+
+            if let parentId {
+                queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
+            }
+
+            let data = try await request(
+                path: "/Users/\(userId)/Items/Latest",
+                queryItems: queryItems
+            )
+
+            return try JSONDecoder().decode([BaseItemDto].self, from: data)
         }
-
-        let data = try await request(
-            path: "/Users/\(userId)/Items/Latest",
-            queryItems: queryItems
-        )
-
-        return try JSONDecoder().decode([BaseItemDto].self, from: data)
     }
 
     func getLibraryViews() async throws -> [JellyfinLibrary] {
@@ -348,13 +392,21 @@ actor JellyfinClient {
         return response.items
     }
 
+    func getVirtualFolders() async throws -> [VirtualFolderInfo] {
+        let data = try await request(path: "/Library/VirtualFolders")
+        return try JSONDecoder().decode([VirtualFolderInfo].self, from: data)
+    }
+
     func getItems(
         parentId: String? = nil,
         includeTypes: [ItemType]? = nil,
         sortBy: String = "SortName",
         sortOrder: String = "Ascending",
         limit: Int = 100,
-        startIndex: Int = 0
+        startIndex: Int = 0,
+        isPlayed: Bool? = nil,
+        isFavorite: Bool? = nil,
+        isResumable: Bool? = nil
     ) async throws -> ItemsResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
@@ -374,6 +426,18 @@ actor JellyfinClient {
 
         if let types = includeTypes {
             queryItems.append(URLQueryItem(name: "IncludeItemTypes", value: types.map(\.rawValue).joined(separator: ",")))
+        }
+
+        if let isPlayed {
+            queryItems.append(URLQueryItem(name: "IsPlayed", value: isPlayed ? "true" : "false"))
+        }
+
+        if let isFavorite, isFavorite {
+            queryItems.append(URLQueryItem(name: "IsFavorite", value: "true"))
+        }
+
+        if let isResumable, isResumable {
+            queryItems.append(URLQueryItem(name: "Filters", value: "IsResumable"))
         }
 
         let data = try await request(
@@ -463,6 +527,37 @@ actor JellyfinClient {
             URLQueryItem(name: "DeviceId", value: deviceId)
         ]
 
+        return components?.url
+    }
+
+    /// Get HLS transcoding URL with optional subtitle track
+    func getHLSStreamURL(itemId: String, mediaSourceId: String, subtitleStreamIndex: Int? = nil) -> URL? {
+        guard let serverURL, let accessToken else {
+            return nil
+        }
+
+        var components = URLComponents(string: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        components?.path += "/Videos/\(itemId)/master.m3u8"
+
+        var queryItems = [
+            URLQueryItem(name: "MediaSourceId", value: mediaSourceId),
+            URLQueryItem(name: "api_key", value: accessToken),
+            URLQueryItem(name: "DeviceId", value: deviceId),
+            URLQueryItem(name: "VideoCodec", value: "h264"),
+            URLQueryItem(name: "AudioCodec", value: "aac"),
+            URLQueryItem(name: "TranscodingMaxAudioChannels", value: "6"),
+            URLQueryItem(name: "SegmentContainer", value: "ts"),
+            URLQueryItem(name: "MinSegments", value: "2"),
+            URLQueryItem(name: "BreakOnNonKeyFrames", value: "true"),
+            URLQueryItem(name: "TranscodeReasons", value: "SubtitleCodecNotSupported")
+        ]
+
+        if let subIndex = subtitleStreamIndex {
+            queryItems.append(URLQueryItem(name: "SubtitleStreamIndex", value: "\(subIndex)"))
+            queryItems.append(URLQueryItem(name: "SubtitleMethod", value: "Hls"))
+        }
+
+        components?.queryItems = queryItems
         return components?.url
     }
 
@@ -607,7 +702,7 @@ actor JellyfinClient {
         return response.items
     }
 
-    func search(query: String, limit: Int = 24) async throws -> [BaseItemDto] {
+    func search(query: String, limit: Int = 50) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
         let data = try await request(
@@ -615,7 +710,7 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "SearchTerm", value: query),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
                 URLQueryItem(name: "Recursive", value: "true")
@@ -674,6 +769,16 @@ actor JellyfinClient {
         )
 
         return try JSONDecoder().decode(BaseItemDto.self, from: data)
+    }
+
+    func getItemAncestors(itemId: String) async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+
+        let data = try await request(path: "/Items/\(itemId)/Ancestors", queryItems: [
+            URLQueryItem(name: "UserId", value: userId)
+        ])
+
+        return try JSONDecoder().decode([BaseItemDto].self, from: data)
     }
 
     /// Fetch skip segments from intro-skipper plugin

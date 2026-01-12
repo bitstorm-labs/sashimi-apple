@@ -2,14 +2,12 @@ import SwiftUI
 
 struct LibraryView: View {
     var onBackAtRoot: (() -> Void)?
-    @Binding var showProfile: Bool
     @State private var libraries: [LibraryView_Model] = []
     @State private var isLoading = true
     @State private var navigationPath = NavigationPath()
 
-    init(onBackAtRoot: (() -> Void)? = nil, showProfile: Binding<Bool> = .constant(false)) {
+    init(onBackAtRoot: (() -> Void)? = nil) {
         self.onBackAtRoot = onBackAtRoot
-        _showProfile = showProfile
     }
 
     var body: some View {
@@ -19,45 +17,28 @@ struct LibraryView: View {
 
                 ScrollView {
                     VStack(spacing: 30) {
-                        AppHeader(showProfile: $showProfile)
+                        Spacer().frame(height: 120)
 
                         if isLoading {
                             ProgressView()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding(.top, 100)
                         } else {
-                            // Use HStack for small number of libraries to center them
-                            if libraries.count <= 4 {
-                                HStack(spacing: 40) {
-                                    ForEach(libraries) { library in
-                                        LibraryCardButton(library: library) {
-                                            navigationPath.append(library)
-                                        }
+                            VStack(spacing: 24) {
+                                ForEach(libraries) { library in
+                                    LibraryRowButton(library: library) {
+                                        navigationPath.append(library)
                                     }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, 60)
-                                .padding(.bottom, 60)
-                            } else {
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible(), spacing: 40),
-                                    GridItem(.flexible(), spacing: 40),
-                                    GridItem(.flexible(), spacing: 40),
-                                    GridItem(.flexible(), spacing: 40)
-                                ], spacing: 40) {
-                                    ForEach(libraries) { library in
-                                        LibraryCardButton(library: library) {
-                                            navigationPath.append(library)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 60)
-                                .padding(.bottom, 60)
                             }
+                            .frame(maxWidth: 800)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 60)
                         }
                     }
                 }
             }
+            .ignoresSafeArea(edges: .top)
             .navigationDestination(for: LibraryView_Model.self) { library in
                 LibraryDetailView(library: library)
             }
@@ -140,6 +121,51 @@ struct LibraryCardButton: View {
     }
 }
 
+struct LibraryRowButton: View {
+    let library: LibraryView_Model
+    let onSelect: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 20) {
+                AsyncItemImage(
+                    itemId: library.id,
+                    imageType: "Primary",
+                    maxWidth: 300
+                )
+                .frame(width: 120, height: 70)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Text(library.name)
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 24))
+                    .foregroundStyle(SashimiTheme.textTertiary)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+            )
+            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+    }
+}
+
 // MARK: - Sort Options
 
 enum LibrarySortOption: String, CaseIterable {
@@ -189,6 +215,19 @@ enum SortOrder: String, CaseIterable {
     }
 }
 
+// MARK: - Filter Options
+
+enum LibraryFilterOption: String, CaseIterable {
+    case all = "All"
+    case unwatched = "Unwatched"
+    case watched = "Watched"
+    case favorites = "Favorites"
+
+    var displayName: String {
+        rawValue
+    }
+}
+
 // MARK: - Library Detail View
 struct LibraryDetailView: View {
     enum FocusArea: Hashable {
@@ -207,7 +246,7 @@ struct LibraryDetailView: View {
     @State private var selectedLetter: String?
     @State private var sortOption: LibrarySortOption = .name
     @State private var sortOrder: SortOrder = .ascending
-    @State private var showSortOptions = false
+    @State private var filterOption: LibraryFilterOption = .all
     @FocusState private var focusedArea: FocusArea?
     private let pageSize = 50
 
@@ -225,7 +264,8 @@ struct LibraryDetailView: View {
 
     private var gridColumns: [GridItem] {
         if isYouTubeLibrary {
-            return [GridItem(.adaptive(minimum: 300, maximum: 340), spacing: 40)]
+            // Circular covers for YouTube channels
+            return [GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 50)]
         }
         return [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 50)]
     }
@@ -238,71 +278,45 @@ struct LibraryDetailView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 30) {
-                        // Header with title, count, and sort
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Text(library.name)
-                                    .font(.system(size: 48, weight: .bold))
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                                Spacer()
-
-                                if totalCount > 0 {
-                                    Text("\(totalCount) items")
-                                        .font(.system(size: 24))
-                                        .foregroundStyle(SashimiTheme.textSecondary)
-                                }
-                            }
-
-                            // Sort options row
-                            HStack(spacing: 16) {
-                                Menu {
-                                    ForEach(LibrarySortOption.allCases, id: \.self) { option in
-                                        Button {
-                                            if sortOption != option {
-                                                sortOption = option
-                                                Task { await reloadWithNewSort() }
-                                            }
-                                        } label: {
-                                            Label(option.displayName, systemImage: option.icon)
-                                        }
+                        // Header with sort, filter options and count
+                        HStack(spacing: 16) {
+                            SortMenuButton(
+                                currentOption: sortOption,
+                                onSelect: { option in
+                                    if sortOption != option {
+                                        sortOption = option
+                                        Task { await reloadWithNewSort() }
                                     }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: sortOption.icon)
-                                        Text(sortOption.displayName)
-                                        Image(systemName: "chevron.down")
-                                            .font(.caption)
-                                    }
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(SashimiTheme.cardBackground)
-                                    .clipShape(Capsule())
                                 }
+                            )
 
-                                Button {
+                            SortOrderButton(
+                                sortOrder: sortOrder,
+                                onToggle: {
                                     sortOrder = sortOrder == .ascending ? .descending : .ascending
                                     Task { await reloadWithNewSort() }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: sortOrder.icon)
-                                        Text(sortOrder.displayName)
-                                    }
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(SashimiTheme.cardBackground)
-                                    .clipShape(Capsule())
                                 }
-                                .buttonStyle(.plain)
+                            )
 
-                                Spacer()
+                            FilterMenuButton(
+                                currentFilter: filterOption,
+                                onSelect: { filter in
+                                    if filterOption != filter {
+                                        filterOption = filter
+                                        Task { await reloadWithNewSort() }
+                                    }
+                                }
+                            )
+
+                            Spacer()
+
+                            if totalCount > 0 {
+                                Text("\(totalCount) items")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(SashimiTheme.textSecondary)
                             }
                         }
-                        .padding(.horizontal, 80)
+                        .padding(.horizontal, 50)
                         .padding(.top, 40)
 
                         if isLoading && items.isEmpty {
@@ -313,7 +327,7 @@ struct LibraryDetailView: View {
                         } else {
                             LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 40 : 60) {
                                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                    MediaPosterButton(item: item, libraryName: library.name, isLandscape: isYouTubeLibrary) {
+                                    MediaPosterButton(item: item, libraryName: library.name, isCircular: isYouTubeLibrary) {
                                         selectedItem = item
                                     }
                                     .id(item.id)
@@ -350,7 +364,7 @@ struct LibraryDetailView: View {
                 .focused($focusedArea, equals: .grid)
             }
 
-            // Alphabet fast scroll bar (right side)
+            // Alphabet fast scroll bar (right side, aligned with grid)
             if !isLoading && !items.isEmpty {
                 ScrollView(showsIndicators: false) {
                     AlphabetScrollBar(
@@ -360,12 +374,11 @@ struct LibraryDetailView: View {
                 }
                 .focusSection()
                 .focused($focusedArea, equals: .alphabet)
-                .frame(maxHeight: .infinity)
-                .padding(.trailing, 20)
-                .padding(.vertical, 20)
                 .onExitCommand {
                     focusedArea = .grid
                 }
+                .padding(.top, 100)  // Align with grid (below header)
+                .padding(.trailing, 20)
             }
         }
         .focusScope(namespace)
@@ -411,6 +424,20 @@ struct LibraryDetailView: View {
         }
     }
 
+    // Convert filter option to API parameters
+    private var filterParams: (isPlayed: Bool?, isFavorite: Bool?) {
+        switch filterOption {
+        case .all:
+            return (nil, nil)
+        case .unwatched:
+            return (false, nil)
+        case .watched:
+            return (true, nil)
+        case .favorites:
+            return (nil, true)
+        }
+    }
+
     private func loadItems() async {
         guard items.isEmpty else { return }
 
@@ -422,13 +449,16 @@ struct LibraryDetailView: View {
             default: nil
             }
 
+            let filter = filterParams
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
                 sortBy: sortOption.rawValue,
                 sortOrder: sortOrder.rawValue,
                 limit: pageSize,
-                startIndex: 0
+                startIndex: 0,
+                isPlayed: filter.isPlayed,
+                isFavorite: filter.isFavorite
             )
             items = response.items
             totalCount = response.totalRecordCount
@@ -457,13 +487,16 @@ struct LibraryDetailView: View {
             default: nil
             }
 
+            let filter = filterParams
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
                 sortBy: sortOption.rawValue,
                 sortOrder: sortOrder.rawValue,
                 limit: pageSize,
-                startIndex: items.count
+                startIndex: items.count,
+                isPlayed: filter.isPlayed,
+                isFavorite: filter.isFavorite
             )
             items.append(contentsOf: response.items)
         } catch is CancellationError {
@@ -483,13 +516,16 @@ struct LibraryDetailView: View {
             default: nil
             }
 
+            let filter = filterParams
             let response = try await JellyfinClient.shared.getItems(
                 parentId: library.id,
                 includeTypes: includeTypes,
                 sortBy: sortOption.rawValue,
                 sortOrder: sortOrder.rawValue,
                 limit: items.count,
-                startIndex: 0
+                startIndex: 0,
+                isPlayed: filter.isPlayed,
+                isFavorite: filter.isFavorite
             )
             items = response.items
         } catch {
@@ -535,5 +571,118 @@ struct AlphabetScrollBar: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(SashimiTheme.cardBackground.opacity(0.85))
         )
+    }
+}
+
+// MARK: - Sort Menu Button
+struct SortMenuButton: View {
+    let currentOption: LibrarySortOption
+    let onSelect: (LibrarySortOption) -> Void
+    @State private var showingOptions = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button {
+            showingOptions = true
+        } label: {
+            HStack(spacing: 8) {
+                Text(currentOption.displayName)
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+            }
+            .font(.system(size: 20))
+            .foregroundStyle(SashimiTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+        .confirmationDialog("Sort By", isPresented: $showingOptions) {
+            ForEach(LibrarySortOption.allCases, id: \.self) { option in
+                Button(option.displayName) {
+                    onSelect(option)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Sort Order Button
+struct SortOrderButton: View {
+    let sortOrder: SortOrder
+    let onToggle: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Image(systemName: sortOrder.icon)
+                Text(sortOrder.displayName)
+            }
+            .font(.system(size: 20))
+            .foregroundStyle(SashimiTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+    }
+}
+
+// MARK: - Filter Menu Button
+struct FilterMenuButton: View {
+    let currentFilter: LibraryFilterOption
+    let onSelect: (LibraryFilterOption) -> Void
+    @State private var showingOptions = false
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button {
+            showingOptions = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                Text(currentFilter.displayName)
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+            }
+            .font(.system(size: 20))
+            .foregroundStyle(currentFilter != .all ? SashimiTheme.accent : SashimiTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+        .confirmationDialog("Filter", isPresented: $showingOptions) {
+            ForEach(LibraryFilterOption.allCases, id: \.self) { option in
+                Button(option.displayName) {
+                    onSelect(option)
+                }
+            }
+        }
     }
 }

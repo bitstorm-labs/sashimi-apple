@@ -8,6 +8,9 @@ import Combine
 struct TVPlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
     var isInteractionEnabled: Bool = true
+    var subtitleTracks: [SubtitleTrackOption] = []
+    var selectedSubtitleId: String?
+    var onSubtitleSelected: ((SubtitleTrackOption) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -18,8 +21,17 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
         controller.player = player
         controller.allowsPictureInPicturePlayback = false
 
-        // Add playback speed menu to transport bar
-        controller.transportBarCustomMenuItems = [createSpeedMenu(for: player, coordinator: context.coordinator)]
+        // Hide native subtitle/audio selection - we use our own
+        controller.requiresLinearPlayback = false
+
+        // Add playback speed and subtitle menus to transport bar
+        var menuItems: [UIMenuElement] = [createSpeedMenu(for: player, coordinator: context.coordinator)]
+
+        if !subtitleTracks.isEmpty {
+            menuItems.append(createSubtitleMenu(coordinator: context.coordinator))
+        }
+
+        controller.transportBarCustomMenuItems = menuItems
 
         return controller
     }
@@ -28,6 +40,18 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
         uiViewController.player = player
         // Disable interaction when dialogs are showing to prevent focus stealing
         uiViewController.view.isUserInteractionEnabled = isInteractionEnabled
+
+        // Update coordinator with current state
+        context.coordinator.subtitleTracks = subtitleTracks
+        context.coordinator.selectedSubtitleId = selectedSubtitleId
+        context.coordinator.onSubtitleSelected = onSubtitleSelected
+
+        // Update transport bar menus
+        var menuItems: [UIMenuElement] = [createSpeedMenu(for: player, coordinator: context.coordinator)]
+        if !subtitleTracks.isEmpty {
+            menuItems.append(createSubtitleMenu(coordinator: context.coordinator))
+        }
+        uiViewController.transportBarCustomMenuItems = menuItems
     }
 
     private func createSpeedMenu(for player: AVPlayer, coordinator: Coordinator) -> UIMenu {
@@ -57,8 +81,31 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
         )
     }
 
+    private func createSubtitleMenu(coordinator: Coordinator) -> UIMenu {
+        let tracks = coordinator.subtitleTracks
+        let selectedId = coordinator.selectedSubtitleId
+
+        let actions = tracks.map { track in
+            UIAction(
+                title: track.displayName,
+                state: track.id == selectedId ? .on : .off
+            ) { [weak coordinator] _ in
+                coordinator?.onSubtitleSelected?(track)
+            }
+        }
+
+        return UIMenu(
+            title: "Subtitles",
+            image: UIImage(systemName: "captions.bubble"),
+            children: actions
+        )
+    }
+
     class Coordinator {
         var currentSpeed: Float = 1.0
+        var subtitleTracks: [SubtitleTrackOption] = []
+        var selectedSubtitleId: String?
+        var onSubtitleSelected: ((SubtitleTrackOption) -> Void)?
 
         var speedTitle: String {
             switch currentSpeed {
@@ -76,6 +123,7 @@ struct TVPlayerViewController: UIViewControllerRepresentable {
 
 struct PlayerView: View {
     let item: BaseItemDto
+    var startFromBeginning: Bool = false
 
     @StateObject private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
@@ -94,12 +142,25 @@ struct PlayerView: View {
             } else if let error = viewModel.error ?? (viewModel.errorMessage != nil ? PlayerError.noStreamURL : nil) {
                 errorView(error: error)
             } else if let player = viewModel.player {
-                // Native AVPlayerViewController for full tvOS controls including audio/subtitle selection
-                TVPlayerViewController(
-                    player: player,
-                    isInteractionEnabled: !viewModel.showingResumeDialog && !viewModel.showingUpNext
-                )
-                .ignoresSafeArea()
+                ZStack {
+                    // Native AVPlayerViewController for full tvOS controls
+                    TVPlayerViewController(
+                        player: player,
+                        isInteractionEnabled: !viewModel.showingResumeDialog && !viewModel.showingUpNext,
+                        subtitleTracks: viewModel.subtitleTracks,
+                        selectedSubtitleId: viewModel.selectedSubtitleTrackId,
+                        onSubtitleSelected: { track in
+                            viewModel.selectSubtitleTrack(track)
+                        }
+                    )
+                    .ignoresSafeArea()
+
+                    // Custom subtitle overlay
+                    SubtitleOverlay(manager: viewModel.subtitleManager)
+                }
+                .onAppear {
+                    viewModel.loadSubtitleTracks()
+                }
             }
 
             // Resume playback dialog
@@ -145,7 +206,7 @@ struct PlayerView: View {
         .animation(.easeInOut(duration: 0.3), value: viewModel.showingUpNext)
         .animation(.easeInOut(duration: 0.25), value: viewModel.showingSkipButton)
         .task {
-            await viewModel.loadMedia(item: item)
+            await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
         }
         .onDisappear {
             Task {
@@ -694,6 +755,7 @@ struct SkipSegmentOverlay: View {
         people: nil,
         criticRating: nil,
         premiereDate: nil,
-        chapters: nil
+        chapters: nil,
+        path: nil
     ))
 }

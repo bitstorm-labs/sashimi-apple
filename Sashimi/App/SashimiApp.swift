@@ -50,27 +50,32 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
-    @State private var showProfile = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView(resetTrigger: $homeViewResetTrigger, isAtDefaultState: $isAtDefaultState, showProfile: $showProfile)
+            HomeView(resetTrigger: $homeViewResetTrigger, isAtDefaultState: $isAtDefaultState)
                 .tabItem {
                     Label("Home", systemImage: "house")
                 }
                 .tag(0)
 
-            LibraryView(onBackAtRoot: { selectedTab = 0 }, showProfile: $showProfile)
+            LibraryView(onBackAtRoot: { selectedTab = 0 })
                 .tabItem {
                     Label("Library", systemImage: "square.grid.2x2")
                 }
                 .tag(1)
 
-            SearchView(onBackAtRoot: { selectedTab = 0 }, showProfile: $showProfile)
+            SearchView(onBackAtRoot: { selectedTab = 0 })
                 .tabItem {
                     Label("Search", systemImage: "magnifyingglass")
                 }
                 .tag(2)
+
+            SettingsView(onBackAtRoot: { selectedTab = 0 })
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(3)
         }
         .onExitCommand {
             // Handle back/menu button press
@@ -81,12 +86,9 @@ struct MainTabView: View {
                 }
                 // If at default state on Home, do nothing (system exits)
             } else {
-                // Other tabs (Library, Search): go to Home
+                // Other tabs: go to Home
                 selectedTab = 0
             }
-        }
-        .fullScreenCover(isPresented: $showProfile) {
-            ProfileMenuView()
         }
     }
 }
