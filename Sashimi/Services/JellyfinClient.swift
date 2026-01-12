@@ -313,7 +313,7 @@ actor JellyfinClient {
                 URLQueryItem(name: "Limit", value: "\(limit)"),
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ParentBackdropImageTags"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
-                URLQueryItem(name: "EnableRewatching", value: "true"),
+                URLQueryItem(name: "EnableRewatching", value: "false"),
                 URLQueryItem(name: "DisableFirstEpisode", value: "false")
             ]
         )

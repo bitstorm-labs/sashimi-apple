@@ -14,6 +14,10 @@ struct ContinueWatchingRow: View {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 38))
                     .foregroundStyle(SashimiTheme.accent)
+
+                Text("(\(items.count))")
+                    .font(.system(size: 24))
+                    .foregroundStyle(SashimiTheme.textTertiary)
             }
             .padding(.horizontal, 80)
 
