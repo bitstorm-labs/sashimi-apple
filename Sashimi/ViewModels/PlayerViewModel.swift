@@ -3,6 +3,10 @@ import AVKit
 import AVFoundation
 import Combine
 
+extension Notification.Name {
+    static let playbackDidEnd = Notification.Name("playbackDidEnd")
+}
+
 struct AudioTrackOption: Identifiable, Hashable {
     let id: String
     let displayName: String
@@ -324,6 +328,9 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         player = nil
         currentItem = nil
+
+        // Notify that playback ended so Home can refresh
+        NotificationCenter.default.post(name: .playbackDidEnd, object: nil)
     }
 
     func loadAudioTracks() {

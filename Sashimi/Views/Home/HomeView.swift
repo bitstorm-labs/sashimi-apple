@@ -124,6 +124,9 @@ struct HomeView: View {
                     .allowsHitTesting(false) // Allow navigation while loading
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
+            Task { await viewModel.refresh() }
+        }
     }
 
     @ViewBuilder
