@@ -3,6 +3,7 @@ import SwiftUI
 struct ContinueWatchingRow: View {
     let items: [BaseItemDto]
     let onSelect: (BaseItemDto) -> Void
+    var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -20,9 +21,11 @@ struct ContinueWatchingRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(items) { item in
-                        ContinueWatchingCard(item: item) {
-                            onSelect(item)
-                        }
+                        ContinueWatchingCard(
+                            item: item,
+                            onSelect: { onSelect(item) },
+                            onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
+                        )
                     }
                 }
                 .padding(.horizontal, 80)
@@ -35,6 +38,7 @@ struct ContinueWatchingRow: View {
 struct ContinueWatchingCard: View {
     let item: BaseItemDto
     let onSelect: () -> Void
+    var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
     @FocusState private var isFocused: Bool
 
@@ -167,7 +171,12 @@ struct ContinueWatchingCard: View {
         .focused($isFocused)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
-        .accessibilityHint("Double-tap to resume playback")
+        .accessibilityHint("Double-tap to resume playback, or press Play to start immediately")
+        .onPlayPauseCommand {
+            if let playPause = onPlayPause {
+                playPause()
+            }
+        }
     }
 
     private var accessibilityDescription: String {

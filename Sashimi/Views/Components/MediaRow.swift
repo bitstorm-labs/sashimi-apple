@@ -45,6 +45,7 @@ struct MediaPosterButton: View {
     var isCircular: Bool = false  // For YouTube channel-style circular covers
     var badgeCount: Int?  // Shows "X new" badge when > 1
     let onSelect: () -> Void
+    var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
     @FocusState private var isFocused: Bool
 
@@ -300,6 +301,11 @@ struct MediaPosterButton: View {
                 }
             } label: {
                 Label("Refresh Metadata", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+        .onPlayPauseCommand {
+            if let playPause = onPlayPause {
+                playPause()
             }
         }
     }

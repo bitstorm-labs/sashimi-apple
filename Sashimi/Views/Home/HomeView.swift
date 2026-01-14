@@ -17,6 +17,7 @@ struct HomeView: View {
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var showContinueWatchingDetail = false
+    @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
 
@@ -84,6 +85,9 @@ struct HomeView: View {
             .fullScreenCover(item: $selectedItem) { item in
                 MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
             }
+            .fullScreenCover(item: $playingItem) { item in
+                PlayerView(item: item, startFromBeginning: false)
+            }
             .fullScreenCover(isPresented: $showContinueWatchingDetail) {
                 ContinueWatchingDetailView(
                     items: viewModel.continueWatchingItems,
@@ -97,6 +101,11 @@ struct HomeView: View {
                 )
             }
             .onChange(of: selectedItem) { oldValue, newValue in
+                if oldValue != nil && newValue == nil {
+                    Task { await viewModel.refresh() }
+                }
+            }
+            .onChange(of: playingItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
                     Task { await viewModel.refresh() }
                 }
@@ -155,6 +164,9 @@ struct HomeView: View {
                         onSelect: { item in
                             selectedItemIsYouTube = false
                             selectedItem = item
+                        },
+                        onPlay: { item in
+                            playingItem = item
                         }
                     )
                     .focusSection()
