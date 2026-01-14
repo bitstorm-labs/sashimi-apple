@@ -178,7 +178,7 @@ struct MediaDetailView: View {
     private func deleteItem() async {
         do {
             try await JellyfinClient.shared.deleteItem(itemId: item.id)
-            ToastManager.shared.show("Item deleted")
+            ToastManager.shared.show("Item deleted", type: .success)
             // Small delay to let the toast appear before dismissing
             try? await Task.sleep(for: .milliseconds(500))
             await MainActor.run {
@@ -205,7 +205,7 @@ struct MediaDetailView: View {
         do {
             // Refresh metadata on server
             try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
-            ToastManager.shared.show("Metadata refresh started")
+            ToastManager.shared.show("Metadata refresh started", type: .info)
 
             // Wait a moment for server to process
             try await Task.sleep(for: .seconds(2))
@@ -1028,13 +1028,9 @@ struct EpisodeCard: View {
                     }
 
                     if episode.progressPercent > 0 {
-                        GeometryReader { geo in
-                            VStack {
-                                Spacer()
-                                Rectangle()
-                                    .fill(SashimiTheme.highlight)
-                                    .frame(width: geo.size.width * episode.progressPercent, height: 3)
-                            }
+                        VStack {
+                            Spacer()
+                            SashimiProgressBar(progress: episode.progressPercent, height: 4, showBackground: false)
                         }
                     }
 

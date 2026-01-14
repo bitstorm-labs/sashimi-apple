@@ -197,6 +197,7 @@ struct SashimiProgressBar: View {
     let progress: Double
     var height: CGFloat = 4
     var showBackground: Bool = true
+    var useGradient: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -207,10 +208,24 @@ struct SashimiProgressBar: View {
                 }
 
                 RoundedRectangle(cornerRadius: height / 2)
-                    .fill(SashimiTheme.accent)
+                    .fill(progressFill)
                     .frame(width: geo.size.width * min(max(progress, 0), 1))
             }
         }
         .frame(height: height)
+    }
+
+    private var progressFill: AnyShapeStyle {
+        if useGradient {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.7)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        } else {
+            return AnyShapeStyle(SashimiTheme.accent)
+        }
     }
 }

@@ -68,21 +68,28 @@ struct ServerConnectionView: View {
                 VStack(spacing: 16) {
                     // Server Address Field with validation
                     VStack(alignment: .leading, spacing: 6) {
-                        TextField("Server Address (e.g., http://192.168.1.100:8096)", text: $serverAddress)
-                            .textFieldStyle(.plain)
-                            .padding()
-                            .background(validationFieldBackground(for: serverAddressValidation))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(validationBorderColor(for: serverAddressValidation), lineWidth: 2)
-                            )
-                            .focused($focusedField, equals: .serverAddress)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onChange(of: serverAddress) { _, newValue in
-                                validateServerAddress(newValue)
+                        HStack(spacing: 12) {
+                            TextField("Server Address (e.g., http://192.168.1.100:8096)", text: $serverAddress)
+                                .textFieldStyle(.plain)
+                                .focused($focusedField, equals: .serverAddress)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .onChange(of: serverAddress) { _, newValue in
+                                    validateServerAddress(newValue)
+                                }
+
+                            // Validation status icon
+                            if !serverAddress.isEmpty {
+                                validationIcon(for: serverAddressValidation)
                             }
+                        }
+                        .padding()
+                        .background(validationFieldBackground(for: serverAddressValidation))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(validationBorderColor(for: serverAddressValidation), lineWidth: 2)
+                        )
 
                         // Inline validation message
                         if let error = serverAddressValidation.errorMessage, hasAttemptedSubmit || !serverAddress.isEmpty {
@@ -170,21 +177,28 @@ struct ServerConnectionView: View {
 
                 // Username Field with validation
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("Username", text: $username)
-                        .textFieldStyle(.plain)
-                        .padding()
-                        .background(validationFieldBackground(for: usernameValidation))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(validationBorderColor(for: usernameValidation), lineWidth: 2)
-                        )
-                        .focused($focusedField, equals: .username)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .onChange(of: username) { _, newValue in
-                            validateUsername(newValue)
+                    HStack(spacing: 12) {
+                        TextField("Username", text: $username)
+                            .textFieldStyle(.plain)
+                            .focused($focusedField, equals: .username)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onChange(of: username) { _, newValue in
+                                validateUsername(newValue)
+                            }
+
+                        // Validation status icon
+                        if !username.isEmpty || hasAttemptedSubmit {
+                            validationIcon(for: usernameValidation)
                         }
+                    }
+                    .padding()
+                    .background(validationFieldBackground(for: usernameValidation))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(validationBorderColor(for: usernameValidation), lineWidth: 2)
+                    )
 
                     // Inline validation message
                     if let error = usernameValidation.errorMessage, hasAttemptedSubmit {
@@ -277,6 +291,22 @@ struct ServerConnectionView: View {
 
         // Valid!
         usernameValidation = .valid
+    }
+
+    @ViewBuilder
+    private func validationIcon(for state: ValidationState) -> some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .valid:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(.green)
+        case .invalid:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(.red)
+        }
     }
 
     private func validationFieldBackground(for state: ValidationState) -> Color {

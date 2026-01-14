@@ -125,8 +125,7 @@ struct ContinueWatchingCard: View {
                                 .foregroundStyle(SashimiTheme.textSecondary)
                         }
 
-                        ContinueProgressBar(progress: item.progressPercent)
-                            .frame(height: 5)
+                        SashimiProgressBar(progress: item.progressPercent, height: 5, useGradient: true)
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 14)
@@ -195,29 +194,6 @@ struct ContinueWatchingCard: View {
             return "\(hours)h \(minutes)m left"
         }
         return "\(minutes)m left"
-    }
-}
-
-struct ContinueProgressBar: View {
-    let progress: Double
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(SashimiTheme.progressBackground)
-
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(
-                        LinearGradient(
-                            colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.7)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: geometry.size.width * min(max(progress, 0), 1))
-            }
-        }
     }
 }
 
