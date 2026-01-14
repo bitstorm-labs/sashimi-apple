@@ -50,6 +50,8 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
+    @State private var lastExitPressTime: Date?
+    private let exitTimeout: TimeInterval = 2.5
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -83,12 +85,36 @@ struct MainTabView: View {
                 if !isAtDefaultState {
                     // Home tab not at default: scroll to top
                     homeViewResetTrigger.toggle()
+                } else {
+                    // At default state on Home: two-press to exit
+                    handleExitAttempt()
                 }
-                // If at default state on Home, do nothing (system exits)
             } else {
                 // Other tabs: go to Home
                 selectedTab = 0
             }
+        }
+    }
+
+    private func handleExitAttempt() {
+        let now = Date()
+
+        if let lastPress = lastExitPressTime,
+           now.timeIntervalSince(lastPress) < exitTimeout {
+            // Second press within timeout - allow exit
+            // Clear the toast and exit
+            ToastManager.shared.dismiss()
+            // System will handle the exit on the next unhandled onExitCommand
+            lastExitPressTime = nil
+            exit(0)
+        } else {
+            // First press - show hint and start timeout
+            lastExitPressTime = now
+            ToastManager.shared.show(
+                "Press Menu again to exit",
+                type: .info,
+                duration: exitTimeout
+            )
         }
     }
 }

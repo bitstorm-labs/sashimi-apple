@@ -198,6 +198,12 @@ struct SashimiProgressBar: View {
     var height: CGFloat = 4
     var showBackground: Bool = true
     var useGradient: Bool = false
+    var accessibilityLabelPrefix: String = "Progress"
+
+    private var accessibilityText: String {
+        let percent = Int(min(max(progress, 0), 1) * 100)
+        return "\(accessibilityLabelPrefix): \(percent) percent"
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -213,6 +219,9 @@ struct SashimiProgressBar: View {
             }
         }
         .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityValue("\(Int(progress * 100)) percent")
     }
 
     private var progressFill: AnyShapeStyle {

@@ -334,9 +334,19 @@ struct MediaDetailView: View {
                 .font(.system(size: 38, weight: .bold))
                 .foregroundStyle(SashimiTheme.textPrimary)
 
-            Text(metadataLabel)
-                .font(.subheadline)
-                .foregroundStyle(SashimiTheme.textSecondary)
+            HStack(spacing: 12) {
+                Text(metadataLabel)
+                    .font(.subheadline)
+                    .foregroundStyle(SashimiTheme.textSecondary)
+
+                if let finishTime = finishTimeString {
+                    Text("•")
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                    Text(finishTime)
+                        .font(.subheadline)
+                        .foregroundStyle(SashimiTheme.accent)
+                }
+            }
 
             HStack(spacing: 16) {
                 ratingsRow
@@ -877,6 +887,25 @@ struct MediaDetailView: View {
         let minutes = (seconds % 3600) / 60
         return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
     }
+
+    /// Calculates and formats the finish time if playback started now
+    private var finishTimeString: String? {
+        guard let totalTicks = item.runTimeTicks, totalTicks > 0 else { return nil }
+
+        // Calculate remaining time (account for any progress)
+        let watchedTicks = item.userData?.playbackPositionTicks ?? 0
+        let remainingTicks = totalTicks - watchedTicks
+        guard remainingTicks > 0 else { return nil }
+
+        let remainingSeconds = TimeInterval(remainingTicks) / 10_000_000
+        let finishDate = Date().addingTimeInterval(remainingSeconds)
+
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short  // e.g., "10:45 PM"
+        formatter.dateStyle = .none
+
+        return "Ends at \(formatter.string(from: finishDate))"
+    }
 }
 
 // MARK: - Supporting Views
@@ -915,6 +944,8 @@ struct ActionButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isPrimary ? .startsMediaSession : [])
     }
 }
 
@@ -947,6 +978,8 @@ struct SeasonTab: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityLabel("\(season.name)\(isSelected ? ", selected" : "")")
+        .accessibilityHint("Double-tap to show episodes")
     }
 }
 
@@ -988,6 +1021,8 @@ struct CastCard: View {
             }
         }
         .frame(width: 120)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(person.role != nil ? "\(person.name) as \(person.role!)" : person.name)
     }
 }
 
@@ -1089,5 +1124,26 @@ struct EpisodeCard: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(episodeAccessibilityLabel)
+        .accessibilityHint("Double-tap to play")
+    }
+
+    private var episodeAccessibilityLabel: String {
+        var parts: [String] = []
+        parts.append("Episode \(episode.indexNumber ?? 0)")
+        parts.append(episode.name)
+
+        if episode.userData?.played == true {
+            parts.append("watched")
+        } else if episode.progressPercent > 0 {
+            parts.append("\(Int(episode.progressPercent * 100)) percent watched")
+        }
+
+        if isCurrentEpisode {
+            parts.append("now playing")
+        }
+
+        return parts.joined(separator: ", ")
     }
 }

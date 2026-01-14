@@ -134,6 +134,8 @@ struct LibraryCardButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityLabel("\(library.name) library")
+        .accessibilityHint("Double-tap to browse")
     }
 }
 
@@ -180,6 +182,8 @@ struct LibraryRowButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityLabel("\(library.name) library")
+        .accessibilityHint("Double-tap to browse")
     }
 }
 
@@ -672,6 +676,8 @@ struct SortOrderButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .accessibilityLabel("Sort order: \(sortOrder.displayName)")
+        .accessibilityHint("Double-tap to toggle sort direction")
     }
 }
 
