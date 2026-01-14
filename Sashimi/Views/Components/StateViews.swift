@@ -9,6 +9,8 @@ struct EmptyStateView: View {
     var actionTitle: String?
     var action: (() -> Void)?
 
+    @FocusState private var isButtonFocused: Bool
+
     var body: some View {
         VStack(spacing: Spacing.md) {
             Image(systemName: icon)
@@ -30,15 +32,26 @@ struct EmptyStateView: View {
 
             if let actionTitle = actionTitle, let action = action {
                 Button(action: action) {
-                    Text(actionTitle)
-                        .font(Typography.titleSmall)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.sm)
-                        .background(SashimiTheme.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.medium))
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                        Text(actionTitle)
+                    }
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(isButtonFocused ? .black : .white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(isButtonFocused ? Color.white : SashimiTheme.cardBackground)
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(isButtonFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                    )
+                    .shadow(color: isButtonFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
+                    .scaleEffect(isButtonFocused ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.3), value: isButtonFocused)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainNoHighlightButtonStyle())
+                .focused($isButtonFocused)
                 .padding(.top, Spacing.sm)
             }
         }

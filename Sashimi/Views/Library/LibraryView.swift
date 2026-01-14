@@ -23,6 +23,22 @@ struct LibraryView: View {
                             ProgressView()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding(.top, 100)
+                        } else if libraries.isEmpty {
+                            EmptyStateView(
+                                icon: "square.grid.2x2",
+                                title: "No Libraries",
+                                message: "No media libraries found on this server",
+                                actionTitle: "Refresh",
+                                action: {
+                                    Task {
+                                        libraries = []
+                                        isLoading = true
+                                        await loadLibraries()
+                                    }
+                                }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 100)
                         } else {
                             VStack(spacing: 24) {
                                 ForEach(libraries) { library in
@@ -106,7 +122,7 @@ struct LibraryCardButton: View {
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
                 )
-                .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.6) : .clear, radius: 20)
+                .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
 
                 Text(library.name)
                     .font(.system(size: 24, weight: .medium))
@@ -158,6 +174,7 @@ struct LibraryRowButton: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
             )
+            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
             .scaleEffect(isFocused ? 1.02 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
         }
@@ -324,6 +341,19 @@ struct LibraryDetailView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 100)
                                 .transition(.opacity)
+                        } else if items.isEmpty {
+                            EmptyStateView(
+                                icon: "film",
+                                title: "No Items",
+                                message: filterOption == .all ? "This library is empty" : "No items match this filter",
+                                actionTitle: filterOption == .all ? nil : "Clear Filter",
+                                action: filterOption == .all ? nil : {
+                                    filterOption = .all
+                                    Task { await reloadWithNewSort() }
+                                }
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 100)
                         } else {
                             LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 40 : 60) {
                                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in

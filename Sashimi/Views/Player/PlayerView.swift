@@ -146,7 +146,7 @@ struct PlayerView: View {
                     // Native AVPlayerViewController for full tvOS controls
                     TVPlayerViewController(
                         player: player,
-                        isInteractionEnabled: !viewModel.showingResumeDialog && !viewModel.showingUpNext,
+                        isInteractionEnabled: !viewModel.showingUpNext,
                         subtitleTracks: viewModel.subtitleTracks,
                         selectedSubtitleId: viewModel.selectedSubtitleTrackId,
                         onSubtitleSelected: { track in
@@ -161,20 +161,6 @@ struct PlayerView: View {
                 .onAppear {
                     viewModel.loadSubtitleTracks()
                 }
-            }
-
-            // Resume playback dialog
-            if viewModel.showingResumeDialog {
-                ResumePlaybackOverlay(
-                    resumePositionTicks: viewModel.resumePositionTicks,
-                    onResume: {
-                        Task { await viewModel.resumePlayback() }
-                    },
-                    onStartOver: {
-                        Task { await viewModel.startFromBeginning() }
-                    }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
 
             // Up Next overlay
@@ -202,7 +188,6 @@ struct PlayerView: View {
                 .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: viewModel.showingResumeDialog)
         .animation(.easeInOut(duration: 0.3), value: viewModel.showingUpNext)
         .animation(.easeInOut(duration: 0.25), value: viewModel.showingSkipButton)
         .task {
@@ -434,104 +419,6 @@ struct SubtitlePickerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
-            }
-        }
-    }
-}
-
-struct ResumePlaybackOverlay: View {
-    let resumePositionTicks: Int64
-    let onResume: () -> Void
-    let onStartOver: () -> Void
-
-    @State private var countdown = 5
-    @State private var countdownTask: Task<Void, Never>?
-    @FocusState private var focusedButton: ResumeButton?
-
-    private enum ResumeButton {
-        case resume, startOver
-    }
-
-    private var formattedTime: String {
-        let totalSeconds = Int(resumePositionTicks / 10_000_000)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        }
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    var body: some View {
-        ZStack {
-            // Semi-transparent background
-            Color.black.opacity(0.85)
-                .ignoresSafeArea()
-
-            VStack(spacing: 40) {
-                VStack(spacing: 16) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(SashimiTheme.accent)
-
-                    Text("Resume Playback?")
-                        .font(.title)
-                        .fontWeight(.bold)
-
-                    Text("You were at \(formattedTime)")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 30) {
-                    ResumeDialogButton(
-                        title: "Resume",
-                        icon: "play.fill",
-                        isPrimary: true,
-                        isFocused: focusedButton == .resume
-                    ) {
-                        countdownTask?.cancel()
-                        onResume()
-                    }
-                    .focused($focusedButton, equals: .resume)
-
-                    ResumeDialogButton(
-                        title: "Start Over",
-                        icon: "arrow.counterclockwise",
-                        isPrimary: false,
-                        isFocused: focusedButton == .startOver
-                    ) {
-                        countdownTask?.cancel()
-                        onStartOver()
-                    }
-                    .focused($focusedButton, equals: .startOver)
-                }
-
-                Text("Resuming in \(countdown) seconds...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .onAppear {
-            countdown = 5  // Reset countdown each time overlay appears
-            focusedButton = .resume
-            startCountdown()
-        }
-        .onDisappear {
-            countdownTask?.cancel()
-        }
-    }
-
-    private func startCountdown() {
-        countdownTask = Task {
-            while countdown > 0 {
-                try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled { return }
-                countdown -= 1
-            }
-            if !Task.isCancelled {
-                onResume()
             }
         }
     }

@@ -38,7 +38,8 @@ final class ValidationTests: XCTestCase {
 
         for urlString in invalidURLs {
             let url = URL(string: urlString)
-            let hasValidScheme = url?.scheme?.lowercased().flatMap { ["http", "https"].contains($0) } ?? false
+            let scheme = url?.scheme?.lowercased()
+            let hasValidScheme = scheme != nil && ["http", "https"].contains(scheme!)
             let hasValidHost = url?.host != nil && !url!.host!.isEmpty
 
             let isValid = url != nil && hasValidScheme && hasValidHost

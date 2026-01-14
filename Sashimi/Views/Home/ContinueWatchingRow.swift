@@ -14,10 +14,6 @@ struct ContinueWatchingRow: View {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 38))
                     .foregroundStyle(SashimiTheme.accent)
-
-                Text("(\(items.count))")
-                    .font(.system(size: 24))
-                    .foregroundStyle(SashimiTheme.textTertiary)
             }
             .padding(.horizontal, 80)
 
@@ -139,8 +135,9 @@ struct ContinueWatchingCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(isFocused ? 0.6 : 0), lineWidth: 2)
+                        .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
                 )
+                .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
 
                 VStack(alignment: .leading, spacing: 4) {
                     MarqueeText(
@@ -164,7 +161,7 @@ struct ContinueWatchingCard: View {
                 }
                 .frame(width: 440, alignment: .leading)
             }
-            .scaleEffect(isFocused ? 1.10 : 1.0)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())

@@ -70,11 +70,11 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil
+            premiereDate: nil, chapters: nil, path: nil
         )
         XCTAssertEqual(movie.displayTitle, "Test Movie")
 
-        // Episode should use series name if available
+        // Episode should use series name with season/episode info if available
         let episode = BaseItemDto(
             id: "2", name: "Episode Title", type: .episode,
             seriesName: "Series Name", seriesId: nil, seasonId: nil, parentId: nil,
@@ -84,9 +84,9 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil
+            premiereDate: nil, chapters: nil, path: nil
         )
-        XCTAssertEqual(episode.displayTitle, "Series Name")
+        XCTAssertEqual(episode.displayTitle, "Series Name S1E1")
     }
 
     func testBaseItemDtoProgressPercent() throws {
@@ -108,7 +108,7 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil
+            premiereDate: nil, chapters: nil, path: nil
         )
 
         XCTAssertEqual(item.progressPercent, 0.5, accuracy: 0.01)

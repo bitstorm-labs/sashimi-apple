@@ -347,8 +347,9 @@ struct ProfileSettingsCard: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 4)
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
             )
+            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
             .scaleEffect(isFocused ? 1.05 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
         }

@@ -48,8 +48,10 @@ final class PlayerViewModel: ObservableObject {
     @Published var playbackEnded = false
     @Published var nextEpisode: BaseItemDto?
     @Published var showingUpNext = false
-    @Published var showingResumeDialog = false
     @Published var resumePositionTicks: Int64 = 0
+
+    // Track when playback actually started (for quick-exit protection)
+    private var playbackStartDate: Date?
 
     // Media source info for subtitle/audio selection
     private var currentMediaSource: MediaSourceInfo?
@@ -168,19 +170,29 @@ final class PlayerViewModel: ObservableObject {
             let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
             if startFromBeginning {
                 // User explicitly chose to start over - play from beginning
+                resumePositionTicks = 0
                 try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
                 startProgressReporting()
                 setupSegmentTracking()
+                playbackStartDate = Date()
                 player?.play()
             } else if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
+                // Auto-resume from saved position (no dialog)
                 resumePositionTicks = startTicks
-                showingResumeDialog = true
-                // Don't auto-play - wait for user choice
+                let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
+                await player?.seek(to: startTime)
+                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks)
+                startProgressReporting()
+                setupSegmentTracking()
+                playbackStartDate = Date()
+                player?.play()
             } else {
                 // No saved progress - start playing immediately
+                resumePositionTicks = 0
                 try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
                 startProgressReporting()
                 setupSegmentTracking()
+                playbackStartDate = Date()
                 player?.play()
             }
         } catch {
@@ -289,25 +301,6 @@ final class PlayerViewModel: ObservableObject {
         playbackEnded = true
     }
 
-    func resumePlayback() async {
-        showingResumeDialog = false
-        let startTime = CMTime(value: resumePositionTicks / 10000, timescale: 1000)
-        await player?.seek(to: startTime)
-        try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: resumePositionTicks)
-        startProgressReporting()
-        setupSegmentTracking()
-        player?.play()
-    }
-
-    func startFromBeginning() async {
-        showingResumeDialog = false
-        resumePositionTicks = 0
-        try? await client.reportPlaybackStart(itemId: currentItem?.id ?? "", positionTicks: 0)
-        startProgressReporting()
-        setupSegmentTracking()
-        player?.play()
-    }
-
     func stop() async {
         progressReportTask?.cancel()
         cleanupSegmentTracking()
@@ -321,13 +314,32 @@ final class PlayerViewModel: ObservableObject {
         if let item = currentItem,
            let player,
            let currentTime = player.currentItem?.currentTime() {
-            let positionTicks = Int64(currentTime.seconds * 10_000_000)
+            // Check if playback was too short (< 10 seconds)
+            // If so, preserve the original resume position to prevent progress reset
+            let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
+            var positionTicks: Int64
+            if elapsedSeconds < 10 && resumePositionTicks > 0 {
+                // Quick exit - preserve original progress
+                positionTicks = resumePositionTicks
+            } else {
+                // Normal exit - report current position
+                positionTicks = Int64(currentTime.seconds * 10_000_000)
+            }
+
+            // Cap position at 90% to prevent Jellyfin from auto-marking as watched
+            // when user manually exits near the end. Only handlePlaybackEnded should mark as watched.
+            if let totalTicks = item.runTimeTicks, totalTicks > 0 {
+                let maxTicks = Int64(Double(totalTicks) * 0.90)
+                positionTicks = min(positionTicks, maxTicks)
+            }
+
             try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
         }
 
         player?.pause()
         player = nil
         currentItem = nil
+        playbackStartDate = nil
 
         // Notify that playback ended so Home can refresh
         NotificationCenter.default.post(name: .playbackDidEnd, object: nil)

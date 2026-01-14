@@ -33,9 +33,7 @@ targets:
         CFBundleDisplayName: Sashimi
         UILaunchScreen: {}
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-          NSAllowsArbitraryLoadsForMedia: true
-          NSAllowsArbitraryLoadsInWebContent: true
+          NSAllowsLocalNetworking: true
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - sashimi
@@ -47,7 +45,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
-        SUPPORTED_PLATFORMS: appletvos
+        SUPPORTED_PLATFORMS: "appletvos appletvsimulator"
         SUPPORTS_MACCATALYST: false
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
@@ -86,7 +84,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
-        SUPPORTED_PLATFORMS: appletvos
+        SUPPORTED_PLATFORMS: "appletvos appletvsimulator"
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
@@ -110,9 +108,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app.tests
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
-        SUPPORTED_PLATFORMS: appletvos
+        SUPPORTED_PLATFORMS: "appletvos appletvsimulator"
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sashimi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sashimi"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
