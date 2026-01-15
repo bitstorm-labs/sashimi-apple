@@ -7,16 +7,10 @@ struct ContinueWatchingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .lastTextBaseline, spacing: 12) {
-                Text("Continue Watching")
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 38))
-                    .foregroundStyle(SashimiTheme.accent)
-            }
-            .padding(.horizontal, 80)
+            Text("Continue Watching")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(SashimiTheme.textPrimary)
+                .padding(.horizontal, 80)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
@@ -220,21 +214,11 @@ struct ContinueWatchingDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
                     // Header
-                    HStack {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Continue Watching")
-                                .font(.system(size: 48, weight: .bold))
-                                .foregroundStyle(SashimiTheme.textPrimary)
-
-                            Text("\(items.count) items in progress")
-                                .font(.system(size: 22))
-                                .foregroundStyle(SashimiTheme.textSecondary)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.horizontal, 80)
-                    .padding(.top, 40)
+                    Text("Continue Watching")
+                        .font(.system(size: 48, weight: .bold))
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                        .padding(.horizontal, 80)
+                        .padding(.top, 40)
 
                     // Grid of items
                     LazyVGrid(columns: [

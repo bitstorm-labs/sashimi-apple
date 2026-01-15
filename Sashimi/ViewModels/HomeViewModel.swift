@@ -125,22 +125,43 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
-        // Combine resume and nextUp
-        let allItems = resume + nextUp
+        // Both APIs return items in correct order:
+        // - Resume: sorted by DatePlayed descending (most recently watched first)
+        // - NextUp: sorted by series last activity (most recently active series first)
+        //
+        // Strategy: Interleave based on lastPlayedDate where available,
+        // falling back to original API position for NextUp items without dates
 
-        // Sort by lastPlayedDate (most recent first)
-        let sorted = allItems.sorted { item1, item2 in
-            let date1 = parseDate(item1.userData?.lastPlayedDate)
-            let date2 = parseDate(item2.userData?.lastPlayedDate)
-            switch (date1, date2) {
+        // Tag items with their source and original index for stable sorting
+        struct TaggedItem {
+            let item: BaseItemDto
+            let isResume: Bool
+            let originalIndex: Int
+        }
+
+        let taggedResume = resume.enumerated().map { TaggedItem(item: $0.element, isResume: true, originalIndex: $0.offset) }
+        let taggedNextUp = nextUp.enumerated().map { TaggedItem(item: $0.element, isResume: false, originalIndex: $0.offset) }
+        let allTagged = taggedResume + taggedNextUp
+
+        // Sort: items with lastPlayedDate first (by date), then items without (by original order)
+        let sorted = allTagged.sorted { a, b in
+            let dateA = parseDate(a.item.userData?.lastPlayedDate)
+            let dateB = parseDate(b.item.userData?.lastPlayedDate)
+
+            switch (dateA, dateB) {
             case (.some(let d1), .some(let d2)):
-                return d1 > d2
+                return d1 > d2  // Both have dates: most recent first
             case (.some, .none):
-                return true
+                return true  // Item with date comes before item without
             case (.none, .some):
-                return false
+                return false  // Item without date comes after item with
             case (.none, .none):
-                return false
+                // Neither has date (both NextUp): use original API order
+                // Resume items should come first, then NextUp in API order
+                if a.isResume != b.isResume {
+                    return a.isResume  // Resume before NextUp
+                }
+                return a.originalIndex < b.originalIndex  // Preserve API order
             }
         }
 
@@ -149,7 +170,9 @@ final class HomeViewModel: ObservableObject {
         var seenSeriesIds = Set<String>()
         var merged: [BaseItemDto] = []
 
-        for item in sorted {
+        for tagged in sorted {
+            let item = tagged.item
+
             // Skip if we've already seen this exact item
             guard !seenIds.contains(item.id) else { continue }
 
