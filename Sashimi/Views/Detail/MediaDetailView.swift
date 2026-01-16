@@ -33,7 +33,6 @@ struct MediaDetailView: View {
     @State private var showingDeleteConfirm = false
     @State private var isRefreshing = false
     @State private var refreshID = UUID()
-    @State private var showingFullCast = false
     @FocusState private var isMoreButtonFocused: Bool
 
     private var isSeries: Bool { item.type == .series }
@@ -145,16 +144,6 @@ struct MediaDetailView: View {
         }
         .fullScreenCover(item: $showingEpisodeDetail) { episode in
             MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle)
-        }
-        .fullScreenCover(isPresented: $showingFullCast) {
-            if let people = item.people, !people.isEmpty {
-                FullCastView(people: people)
-            }
-        }
-        .onMoveCommand { direction in
-            if direction == .up, item.people?.isEmpty == false {
-                showingFullCast = true
-            }
         }
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
@@ -1156,149 +1145,5 @@ struct EpisodeCard: View {
         }
 
         return parts.joined(separator: ", ")
-    }
-}
-
-// MARK: - Full Cast View
-
-struct FullCastView: View {
-    let people: [PersonInfo]
-    @Environment(\.dismiss) private var dismiss
-
-    private var cast: [PersonInfo] {
-        people.filter { $0.type == "Actor" }
-    }
-
-    private var crew: [PersonInfo] {
-        people.filter { $0.type != "Actor" }
-    }
-
-    private var directors: [PersonInfo] {
-        crew.filter { $0.type == "Director" }
-    }
-
-    private var writers: [PersonInfo] {
-        crew.filter { $0.type == "Writer" }
-    }
-
-    private var otherCrew: [PersonInfo] {
-        crew.filter { $0.type != "Director" && $0.type != "Writer" }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
-                // Header
-                HStack {
-                    Text("Cast & Crew")
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                    Spacer()
-                    Text("Swipe down to close")
-                        .font(.subheadline)
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                }
-                .padding(.horizontal, 80)
-                .padding(.top, 60)
-
-                // Cast section
-                if !cast.isEmpty {
-                    crewSection(title: "Cast", people: cast)
-                }
-
-                // Directors
-                if !directors.isEmpty {
-                    crewSection(title: "Directors", people: directors)
-                }
-
-                // Writers
-                if !writers.isEmpty {
-                    crewSection(title: "Writers", people: writers)
-                }
-
-                // Other crew
-                if !otherCrew.isEmpty {
-                    crewSection(title: "Crew", people: otherCrew)
-                }
-
-                Spacer().frame(height: 80)
-            }
-        }
-        .background(SashimiTheme.background.ignoresSafeArea())
-        .onExitCommand { dismiss() }
-        .onMoveCommand { direction in
-            if direction == .down {
-                dismiss()
-            }
-        }
-    }
-
-    private func crewSection(title: String, people: [PersonInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(title)
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(SashimiTheme.textPrimary)
-                .padding(.horizontal, 80)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 24) {
-                    ForEach(people) { person in
-                        FullCastCard(person: person)
-                    }
-                }
-                .padding(.horizontal, 80)
-            }
-        }
-    }
-}
-
-struct FullCastCard: View {
-    let person: PersonInfo
-
-    var body: some View {
-        VStack(spacing: 12) {
-            if person.primaryImageTag != nil {
-                AsyncImage(url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 300)) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Circle().fill(SashimiTheme.cardBackground)
-                }
-                .frame(width: 150, height: 150)
-                .clipShape(Circle())
-            } else {
-                Circle()
-                    .fill(SashimiTheme.cardBackground)
-                    .frame(width: 150, height: 150)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 50))
-                            .foregroundStyle(SashimiTheme.textTertiary)
-                    }
-            }
-
-            VStack(spacing: 4) {
-                Text(person.name)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-
-                if let role = person.role, !role.isEmpty {
-                    Text(role)
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                } else if let type = person.type, type != "Actor" {
-                    Text(type)
-                        .font(.system(size: 16))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(width: 160)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(person.role != nil ? "\(person.name) as \(person.role!)" : person.name)
     }
 }

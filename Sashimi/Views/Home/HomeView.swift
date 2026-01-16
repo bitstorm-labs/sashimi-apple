@@ -204,6 +204,8 @@ struct HeroSection: View {
     let onSelect: (BaseItemDto) -> Void
 
     @FocusState private var isFocused: Bool
+    @State private var autoAdvanceTimer: Timer?
+    @State private var progress: Double = 0
 
     private var safeIndex: Int {
         guard !items.isEmpty else { return 0 }
@@ -373,14 +375,26 @@ struct HeroSection: View {
                             .frame(maxWidth: 700, alignment: .leading)
                     }
 
-                    // Page indicators
+                    // Page indicators with progress
                     if items.count > 1 {
                         HStack(spacing: 8) {
                             ForEach(0..<items.count, id: \.self) { index in
-                                Capsule()
-                                    .fill(index == currentIndex ? SashimiTheme.accent : SashimiTheme.textTertiary.opacity(0.5))
-                                    .frame(width: index == currentIndex ? 36 : 10, height: 4)
-                                    .animation(.easeInOut(duration: 0.3), value: currentIndex)
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(SashimiTheme.textTertiary.opacity(0.5))
+                                        .frame(width: index == safeIndex ? 36 : 10, height: 4)
+                                    if index == safeIndex {
+                                        Capsule()
+                                            .fill(SashimiTheme.accent)
+                                            .frame(width: 36 * progress, height: 4)
+                                    } else if index < safeIndex {
+                                        Capsule()
+                                            .fill(SashimiTheme.accent)
+                                            .frame(width: 10, height: 4)
+                                    }
+                                }
+                                .frame(width: index == safeIndex ? 36 : 10, height: 4)
+                                .animation(.easeInOut(duration: 0.3), value: safeIndex)
                             }
                         }
                         .padding(.top, 8)
@@ -405,21 +419,37 @@ struct HeroSection: View {
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Double-tap to view details")
         .accessibilityAddTraits(.isButton)
-        .onMoveCommand { direction in
-            guard items.count > 1 else { return }
-            switch direction {
-            case .left:
-                withAnimation(.easeInOut(duration: 0.4)) {
-                    currentIndex = (currentIndex - 1 + items.count) % items.count
+        .onAppear {
+            startAutoAdvance()
+        }
+        .onDisappear {
+            stopAutoAdvance()
+        }
+        .onChange(of: currentIndex) { _, _ in
+            // Reset progress when index changes
+            progress = 0
+        }
+    }
+
+    private func startAutoAdvance() {
+        guard items.count > 1 else { return }
+        progress = 0
+        autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            DispatchQueue.main.async {
+                progress += 0.1 / 5  // 5 seconds total
+                if progress >= 1.0 {
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        currentIndex = (currentIndex + 1) % items.count
+                    }
+                    progress = 0
                 }
-            case .right:
-                withAnimation(.easeInOut(duration: 0.4)) {
-                    currentIndex = (currentIndex + 1) % items.count
-                }
-            default:
-                break
             }
         }
+    }
+
+    private func stopAutoAdvance() {
+        autoAdvanceTimer?.invalidate()
+        autoAdvanceTimer = nil
     }
 
     private func formatRuntime(_ ticks: Int64) -> String {

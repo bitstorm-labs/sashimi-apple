@@ -131,3 +131,58 @@ gh run view <run-id> --log-failed
 - Run locally before committing: `swiftlint lint`
 - Auto-fix issues: `swiftlint --fix`
 - Documented exceptions use inline `swiftlint:disable` comments with explanations
+
+## Updating the App Icon
+
+tvOS app icons use a layered image stack (Back, Middle, Front) for parallax effects. To update the app icon:
+
+### Icon Requirements
+- **Dimensions**: 400x240 (1x), 800x480 (2x)
+- **Format**: PNG with dark background (#1a1a2e)
+- **Files to update** (same image for all layers):
+  - `App Icon.imagestack/Back.imagestacklayer/Content.imageset/icon_back.png` (1x)
+  - `App Icon.imagestack/Back.imagestacklayer/Content.imageset/icon_back@2x.png` (2x)
+  - `App Icon.imagestack/Front.imagestacklayer/Content.imageset/icon_front.png` (1x)
+  - `App Icon.imagestack/Front.imagestacklayer/Content.imageset/icon_front@2x.png` (2x)
+  - `App Icon.imagestack/Middle.imagestacklayer/Content.imageset/icon_middle.png` (1x)
+  - `App Icon.imagestack/Middle.imagestacklayer/Content.imageset/icon_middle@2x.png` (2x)
+
+All files are in: `Sashimi/Resources/Assets.xcassets/App Icon & Top Shelf Image.brandassets/`
+
+### Creating Icons with ImageMagick
+```bash
+# Example: Create icon from source image with positioning adjustments
+# -trim removes whitespace, -resize scales, -splice adds padding, -extent sets final size
+magick source.png -trim +repage -resize 390x -background '#1a1a2e' \
+  -gravity north -splice 0x100 \  # Add 100px top padding to shift down
+  -gravity east -splice 20x0 \    # Add 20px right padding to shift left
+  -gravity center -extent 400x240 icon_1x.png
+
+magick source.png -trim +repage -resize 780x -background '#1a1a2e' \
+  -gravity north -splice 0x200 \
+  -gravity east -splice 40x0 \
+  -gravity center -extent 800x480 icon_2x.png
+```
+
+### Critical: Force Asset Recompilation
+**tvOS aggressively caches app icons.** After updating icon files, you MUST:
+
+1. Delete derived data before building:
+   ```bash
+   rm -rf /Users/mondo/Library/Developer/Xcode/DerivedData/Sashimi-*
+   ```
+
+2. Build fresh:
+   ```bash
+   xcodebuild -project Sashimi.xcodeproj -scheme Sashimi \
+     -destination 'platform=tvOS,id=DEVICE_ID' -configuration Release build
+   ```
+
+3. Uninstall and reinstall the app (install alone may use cached icon):
+   ```bash
+   xcrun devicectl device uninstall app --device DEVICE_ID com.sashimi.app
+   xcrun devicectl device install app --device DEVICE_ID \
+     ~/Library/Developer/Xcode/DerivedData/Sashimi-*/Build/Products/Release-appletvos/Sashimi.app
+   ```
+
+**Warning**: Be careful with `rm -rf` wildcards - ensure you're only deleting DerivedData, not source folders.

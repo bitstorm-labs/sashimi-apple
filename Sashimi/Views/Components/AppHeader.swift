@@ -12,7 +12,7 @@ struct AppHeader: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: 270)
-                .padding(.top, -30)
+                .padding(.top, -45)
 
             Spacer()
 
