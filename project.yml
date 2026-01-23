@@ -37,10 +37,10 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - sashimi
-            CFBundleURLName: com.sashimi.app
+            CFBundleURLName: com.mondominator.sashimi
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi
         MARKETING_VERSION: 1.0.0
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: 5.9
@@ -60,7 +60,7 @@ targets:
       path: Sashimi/Sashimi.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.sashimi.app
+          - group.com.mondominator.sashimi
     dependencies:
       - target: TopShelf
 
@@ -79,7 +79,7 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app.topshelf
+        PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.topshelf
         MARKETING_VERSION: 1.0.0
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: 5.9
@@ -93,7 +93,7 @@ targets:
       path: TopShelf/TopShelf.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.sashimi.app
+          - group.com.mondominator.sashimi
     dependencies: []
 
   SashimiTests:
@@ -105,7 +105,7 @@ targets:
           - "**/.DS_Store"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.sashimi.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.tests
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
         SUPPORTED_PLATFORMS: "appletvos appletvsimulator"
