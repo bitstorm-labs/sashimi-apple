@@ -186,3 +186,113 @@ magick source.png -trim +repage -resize 780x -background '#1a1a2e' \
    ```
 
 **Warning**: Be careful with `rm -rf` wildcards - ensure you're only deleting DerivedData, not source folders.
+
+## Adding Alternate App Icons
+
+tvOS alternate icons must be **direct imagestacks** in Assets.xcassets (NOT in brandassets folders - those don't work for alternates).
+
+### Step 1: Create the Imagestack Structure
+
+For a new icon called `MyIcon`, create this folder structure in `Sashimi/Resources/Assets.xcassets/`:
+
+```
+MyIcon.imagestack/
+├── Contents.json
+├── Back.imagestacklayer/
+│   ├── Contents.json
+│   └── Content.imageset/
+│       ├── Contents.json
+│       ├── icon.png      (400x240)
+│       └── icon@2x.png   (800x480)
+├── Middle.imagestacklayer/
+│   ├── Contents.json
+│   └── Content.imageset/
+│       ├── Contents.json
+│       ├── icon.png      (400x240)
+│       └── icon@2x.png   (800x480)
+└── Front.imagestacklayer/
+    ├── Contents.json
+    └── Content.imageset/
+        ├── Contents.json
+        ├── icon.png      (400x240)
+        └── icon@2x.png   (800x480)
+```
+
+### Step 2: Contents.json Files
+
+**MyIcon.imagestack/Contents.json:**
+```json
+{
+  "info" : { "author" : "xcode", "version" : 1 },
+  "layers" : [
+    { "filename" : "Front.imagestacklayer" },
+    { "filename" : "Middle.imagestacklayer" },
+    { "filename" : "Back.imagestacklayer" }
+  ]
+}
+```
+
+**Each .imagestacklayer/Contents.json:**
+```json
+{
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+```
+
+**Each Content.imageset/Contents.json:**
+```json
+{
+  "images" : [
+    { "filename" : "icon.png", "idiom" : "tv", "scale" : "1x" },
+    { "filename" : "icon@2x.png", "idiom" : "tv", "scale" : "2x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+```
+
+### Step 3: Create Preview Image (for Settings)
+
+Create `AppIconPreviewMyIcon.imageset/` in Assets.xcassets with a preview image for the settings screen.
+
+### Step 4: Update project.yml
+
+Add the icon name to `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`:
+
+```yaml
+ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "CatIcon ChopsticksIcon WhitefishIcon MyIcon"
+```
+
+### Step 5: Update Info.plist
+
+Add the icon name to the `CFBundleAlternateIcons` array:
+
+```xml
+<key>CFBundleAlternateIcons</key>
+<array>
+    <string>CatIcon</string>
+    <string>ChopsticksIcon</string>
+    <string>WhitefishIcon</string>
+    <string>MyIcon</string>
+</array>
+```
+
+### Step 6: Update SettingsView.swift
+
+Add the icon to the `icons` array:
+
+```swift
+private let icons: [AppIconOption] = [
+    AppIconOption(id: nil, name: "Default", previewImage: "AppIconPreviewDefault"),
+    // ... existing icons ...
+    AppIconOption(id: "MyIcon", name: "My Icon", previewImage: "AppIconPreviewMyIcon")
+]
+```
+
+### Quick Copy Method
+
+Copy an existing imagestack and rename:
+```bash
+cd Sashimi/Resources/Assets.xcassets
+cp -r CatIcon.imagestack MyIcon.imagestack
+# Then replace the icon.png and icon@2x.png files in each layer
+```

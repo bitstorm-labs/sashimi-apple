@@ -11,8 +11,8 @@ struct AppHeader: View {
             Image("Logo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(height: 270)
-                .padding(.top, -45)
+                .frame(height: 220)
+                .padding(.top, -35)
 
             Spacer()
 
@@ -48,8 +48,8 @@ struct AppHeader: View {
                 }
             }
             .shadow(color: SashimiTheme.accent.opacity(0.3), radius: 8)
-            .padding(.trailing, 50)
-            .padding(.top, 30)
+            .padding(.trailing, 30)
+            .padding(.top, 22)
         }
         .frame(maxWidth: .infinity)
         .ignoresSafeArea(edges: .horizontal)

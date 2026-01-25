@@ -31,15 +31,19 @@ class SubtitleManager: ObservableObject {
         }
 
         // Build subtitle URL
-        let urlString = "\(serverURL)/Videos/\(itemId)/\(itemId)/Subtitles/\(subtitleIndex)/Stream.vtt?api_key=\(accessToken)"
+        let urlString = "\(serverURL)/Videos/\(itemId)/\(itemId)/Subtitles/\(subtitleIndex)/Stream.vtt"
 
         guard let url = URL(string: urlString) else {
             isLoading = false
             return
         }
 
+        // Use header for authentication instead of query parameter
+        var request = URLRequest(url: url)
+        request.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
+
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, _) = try await URLSession.shared.data(for: request)
             if let vttContent = String(data: data, encoding: .utf8) {
                 cues = parseWebVTT(vttContent)
             }

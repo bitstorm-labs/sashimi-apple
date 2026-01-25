@@ -2,6 +2,10 @@ import Foundation
 import AVKit
 import AVFoundation
 import Combine
+import MediaPlayer
+
+// swiftlint:disable file_length type_body_length function_body_length
+// PlayerViewModel manages complex video playback state - splitting would fragment playback logic
 
 extension Notification.Name {
     static let playbackDidEnd = Notification.Name("playbackDidEnd")
@@ -32,6 +36,33 @@ struct SubtitleTrackOption: Identifiable, Hashable {
     }
 }
 
+enum QualityOption: String, CaseIterable, Identifiable {
+    case auto = "auto"
+    case quality1080p = "1080"
+    case quality720p = "720"
+    case quality480p = "480"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .quality1080p: return "1080p"
+        case .quality720p: return "720p"
+        case .quality480p: return "480p"
+        }
+    }
+
+    var maxBitrate: Int? {
+        switch self {
+        case .auto: return nil  // No limit
+        case .quality1080p: return 20_000_000  // 20 Mbps
+        case .quality720p: return 8_000_000   // 8 Mbps
+        case .quality480p: return 4_000_000   // 4 Mbps
+        }
+    }
+}
+
 @MainActor
 final class PlayerViewModel: ObservableObject {
     @Published var player: AVPlayer?
@@ -49,6 +80,7 @@ final class PlayerViewModel: ObservableObject {
     @Published var nextEpisode: BaseItemDto?
     @Published var showingUpNext = false
     @Published var resumePositionTicks: Int64 = 0
+    @Published var selectedQuality: QualityOption = .auto
 
     // Track when playback actually started (for quick-exit protection)
     private var playbackStartDate: Date?
@@ -82,7 +114,7 @@ final class PlayerViewModel: ObservableObject {
             let freshItem = try await client.getItem(itemId: item.id)
             currentItem = freshItem
 
-            let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id)
+            let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id, maxBitrate: selectedQuality.maxBitrate)
 
             guard let mediaSource = playbackInfo.mediaSources?.first else {
                 throw PlayerError.noMediaSource
@@ -133,6 +165,10 @@ final class PlayerViewModel: ObservableObject {
             player = AVPlayer(playerItem: playerItem)
             player?.volume = 1.0
             player?.isMuted = false
+
+            // Set up remote control commands for Bluetooth headsets/remotes
+            setupRemoteCommands()
+            updateNowPlayingInfo(item: freshItem)
 
             statusObserver = player?.observe(\.status) { [weak self] player, _ in
                 Task { @MainActor in
@@ -301,6 +337,120 @@ final class PlayerViewModel: ObservableObject {
         playbackEnded = true
     }
 
+    func changeQuality(_ quality: QualityOption) async {
+        guard let item = currentItem else { return }
+
+        // Save current position
+        let currentPosition = player?.currentItem?.currentTime()
+        let positionTicks = currentPosition.map { Int64($0.seconds * 10_000_000) } ?? 0
+
+        // Update quality setting
+        selectedQuality = quality
+
+        // Stop current playback
+        player?.pause()
+        progressReportTask?.cancel()
+        cleanupSegmentTracking()
+        subtitleManager.clear()
+
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+
+        player = nil
+        isLoading = true
+
+        // Reload with new quality
+        do {
+            let playbackInfo = try await client.getPlaybackInfo(itemId: item.id, maxBitrate: quality.maxBitrate)
+
+            guard let mediaSource = playbackInfo.mediaSources?.first else {
+                throw PlayerError.noMediaSource
+            }
+
+            currentMediaSource = mediaSource
+
+            let url: URL?
+            if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
+                url = await client.buildURL(path: transcodingPath)
+            } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
+                url = await client.buildURL(path: directPath)
+            } else {
+                url = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+            }
+
+            guard let url else {
+                throw PlayerError.noStreamURL
+            }
+
+            let asset = AVURLAsset(url: url)
+            let playerItem = AVPlayerItem(asset: asset)
+
+            // Set up chapter markers
+            if let chapters = item.chapters, !chapters.isEmpty,
+               let runTimeTicks = item.runTimeTicks {
+                let duration = Double(runTimeTicks) / 10_000_000.0
+                setupChapterMarkers(on: playerItem, chapters: chapters, duration: duration)
+            }
+
+            errorObserver = playerItem.observe(\.status) { [weak self] item, _ in
+                Task { @MainActor in
+                    if item.status == .failed {
+                        self?.errorMessage = item.error?.localizedDescription ?? "Unknown playback error"
+                        self?.error = item.error
+                    }
+                }
+            }
+
+            player = AVPlayer(playerItem: playerItem)
+            player?.volume = 1.0
+            player?.isMuted = false
+
+            statusObserver = player?.observe(\.status) { [weak self] player, _ in
+                Task { @MainActor in
+                    if player.status == .failed {
+                        self?.errorMessage = player.error?.localizedDescription ?? "Player failed"
+                        self?.error = player.error
+                    }
+                }
+            }
+
+            rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
+                Task { @MainActor in
+                    await self?.reportProgress()
+                }
+            }
+
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: playerItem,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    await self?.handlePlaybackEnded()
+                }
+            }
+
+            isLoading = false
+
+            // Seek to saved position
+            if positionTicks > 0 {
+                let seekTime = CMTime(value: positionTicks / 10000, timescale: 1000)
+                await player?.seek(to: seekTime)
+            }
+
+            // Resume playback and tracking
+            startProgressReporting()
+            setupSegmentTracking()
+            player?.play()
+        } catch {
+            self.error = error
+            self.errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
+
     func stop() async {
         progressReportTask?.cancel()
         cleanupSegmentTracking()
@@ -324,13 +474,6 @@ final class PlayerViewModel: ObservableObject {
             } else {
                 // Normal exit - report current position
                 positionTicks = Int64(currentTime.seconds * 10_000_000)
-            }
-
-            // Cap position at 90% to prevent Jellyfin from auto-marking as watched
-            // when user manually exits near the end. Only handlePlaybackEnded should mark as watched.
-            if let totalTicks = item.runTimeTicks, totalTicks > 0 {
-                let maxTicks = Int64(Double(totalTicks) * 0.90)
-                positionTicks = min(positionTicks, maxTicks)
             }
 
             try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
@@ -553,8 +696,94 @@ final class PlayerViewModel: ObservableObject {
         playerItem.navigationMarkerGroups = [markerGroup]
     }
 
+    // MARK: - Remote Control Commands (Bluetooth headsets)
+
+    private func setupRemoteCommands() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        // Play command
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            self?.player?.play()
+            return .success
+        }
+
+        // Pause command
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            self?.player?.pause()
+            return .success
+        }
+
+        // Toggle play/pause (what most Bluetooth headsets use)
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard let self = self, let player = self.player else { return .commandFailed }
+            if player.timeControlStatus == .playing {
+                player.pause()
+            } else {
+                player.play()
+            }
+            return .success
+        }
+
+        // Skip forward/backward
+        commandCenter.skipForwardCommand.isEnabled = true
+        commandCenter.skipForwardCommand.preferredIntervals = [15]
+        commandCenter.skipForwardCommand.addTarget { [weak self] _ in
+            guard let self = self, let player = self.player else { return .commandFailed }
+            let currentTime = player.currentTime().seconds
+            let newTime = currentTime + 15
+            player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
+            return .success
+        }
+
+        commandCenter.skipBackwardCommand.isEnabled = true
+        commandCenter.skipBackwardCommand.preferredIntervals = [15]
+        commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
+            guard let self = self, let player = self.player else { return .commandFailed }
+            let currentTime = player.currentTime().seconds
+            let newTime = max(0, currentTime - 15)
+            player.seek(to: CMTime(seconds: newTime, preferredTimescale: 600))
+            return .success
+        }
+    }
+
+    private func updateNowPlayingInfo(item: BaseItemDto) {
+        var nowPlayingInfo = [String: Any]()
+
+        nowPlayingInfo[MPMediaItemPropertyTitle] = item.name ?? "Unknown"
+
+        if let seriesName = item.seriesName {
+            nowPlayingInfo[MPMediaItemPropertyArtist] = seriesName
+        }
+
+        if let runTimeTicks = item.runTimeTicks {
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(runTimeTicks) / 10_000_000.0
+        }
+
+        if let playbackPositionTicks = item.userData?.playbackPositionTicks {
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(playbackPositionTicks) / 10_000_000.0
+        }
+
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+    }
+
+    private nonisolated func cleanupRemoteCommands() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
     deinit {
         progressReportTask?.cancel()
+        cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }

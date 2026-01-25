@@ -87,7 +87,8 @@ final class HomeViewModelTests: XCTestCase {
                 playCount: 1,
                 isFavorite: false,
                 played: false,
-                lastPlayedDate: "2024-01-15T12:00:00Z"
+                lastPlayedDate: "2024-01-15T12:00:00Z",
+                unplayedItemCount: nil
             ), imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
@@ -105,7 +106,8 @@ final class HomeViewModelTests: XCTestCase {
                 playCount: 1,
                 isFavorite: false,
                 played: false,
-                lastPlayedDate: "2024-01-14T12:00:00Z"
+                lastPlayedDate: "2024-01-14T12:00:00Z",
+                unplayedItemCount: nil
             ), imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,

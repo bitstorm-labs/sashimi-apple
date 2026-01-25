@@ -1,5 +1,8 @@
 import SwiftUI
 
+// swiftlint:disable file_length
+// HomeView contains the main home screen with multiple tightly-coupled components
+
 // MARK: - Scroll Tracking
 private struct ScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -55,7 +58,7 @@ struct HomeView: View {
                             // Header with logo and profile avatar
                             AppHeader()
                                 .id("top")
-                                .padding(.bottom, -140)
+                                .padding(.bottom, -80)
 
                             // Render rows based on settings order
                             ForEach(homeSettings.rowConfigs) { config in
@@ -92,9 +95,10 @@ struct HomeView: View {
                 ContinueWatchingDetailView(
                     items: viewModel.continueWatchingItems,
                     onSelect: { item in
+                        let isYouTube = item.type == .episode && (item.parentBackdropImageTags ?? []).isEmpty
                         showContinueWatchingDetail = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            selectedItemIsYouTube = false
+                            selectedItemIsYouTube = isYouTube
                             selectedItem = item
                         }
                     }
@@ -151,18 +155,25 @@ struct HomeView: View {
                         libraryNames: viewModel.heroItemLibraryNames,
                         currentIndex: $heroIndex,
                         onSelect: { item in
-                            selectedItemIsYouTube = false
+                            // Check if item comes from a library named YouTube
+                            let libraryName = viewModel.heroItemLibraryNames[item.id] ?? ""
+                            selectedItemIsYouTube = libraryName.lowercased().contains("youtube")
                             selectedItem = item
                         }
                     )
+                    .padding(.top, 20)
                     .focusSection()
                 }
             case .continueWatching:
                 if !viewModel.continueWatchingItems.isEmpty {
                     ContinueWatchingRow(
                         items: viewModel.continueWatchingItems,
+                        libraryNames: viewModel.continueWatchingLibraryNames,
                         onSelect: { item in
-                            selectedItemIsYouTube = false
+                            // Check if item comes from a library named YouTube
+                            let libraryName = viewModel.continueWatchingLibraryNames[item.id] ?? ""
+                            let isYouTube = libraryName.lowercased().contains("youtube")
+                            selectedItemIsYouTube = isYouTube
                             selectedItem = item
                         },
                         onPlay: { item in
@@ -216,17 +227,30 @@ struct HeroSection: View {
         items[safeIndex]
     }
 
-    // Fallback image IDs for hero display
+    // Detect YouTube content by checking library name
+    private var isYouTubeContent: Bool {
+        guard let libraryName = libraryNames[currentItem.id] else { return false }
+        return libraryName.lowercased().contains("youtube")
+    }
+
+    // Fallback image IDs for hero display - prefer series backdrop for episodes
     private var heroFallbackIds: [String] {
         var ids: [String] = []
         if currentItem.type == .episode {
-            // For episodes: try episode, then season, then series
-            ids.append(currentItem.id)
-            if let seasonId = currentItem.seasonId {
-                ids.append(seasonId)
-            }
-            if let seriesId = currentItem.seriesId {
-                ids.append(seriesId)
+            // For YouTube: only use series banner, don't fall back to episode thumbnail
+            if isYouTubeContent {
+                if let seriesId = currentItem.seriesId {
+                    ids.append(seriesId)
+                }
+            } else {
+                // For regular episodes: try series first for high-res backdrop
+                if let seriesId = currentItem.seriesId {
+                    ids.append(seriesId)
+                }
+                if let seasonId = currentItem.seasonId {
+                    ids.append(seasonId)
+                }
+                ids.append(currentItem.id)
             }
         } else {
             ids.append(currentItem.id)
@@ -234,23 +258,21 @@ struct HeroSection: View {
         return ids
     }
 
-    // Image types to try for hero (landscape preference)
+    // Image types for hero - YouTube uses Banner, others use Backdrop
     private var heroImageTypes: [String] {
-        return ["Backdrop", "Primary", "Thumb"]
-    }
-
-    // Detect YouTube content by checking library name
-    private var isYouTubeContent: Bool {
-        guard let libraryName = libraryNames[currentItem.id] else { return false }
-        return libraryName.lowercased().contains("youtube")
-    }
-
-    // Display label for content type
-    private var contentTypeLabel: String {
         if isYouTubeContent {
-            return "YouTube"
+            // YouTube series have banner.jpg stored as Banner image type
+            return ["Banner", "Backdrop", "Art", "Thumb"]
         }
-        return currentItem.type?.rawValue.uppercased() ?? ""
+        return ["Backdrop", "Art", "Thumb", "Primary"]
+    }
+
+    // Display title (channel/series name for episodes, item name for movies)
+    private var displayTitle: String {
+        if currentItem.type == .episode {
+            return (currentItem.seriesName ?? currentItem.name).cleanedYouTubeTitle
+        }
+        return currentItem.name
     }
 
     // VoiceOver accessibility description
@@ -258,7 +280,7 @@ struct HeroSection: View {
         var parts: [String] = []
 
         if currentItem.type == .episode {
-            parts.append(currentItem.seriesName ?? currentItem.name)
+            parts.append((currentItem.seriesName ?? currentItem.name).cleanedYouTubeTitle)
             parts.append(formatEpisodeInfo(currentItem))
         } else {
             parts.append(currentItem.name)
@@ -284,133 +306,168 @@ struct HeroSection: View {
         Button {
             onSelect(currentItem)
         } label: {
-            ZStack(alignment: .bottomLeading) {
-                SmartPosterImage(
-                    itemIds: heroFallbackIds,
-                    maxWidth: 1920,
-                    imageTypes: heroImageTypes,
-                    contentMode: .fit
-                )
-                .id(currentItem.id)
-                .frame(maxWidth: .infinity)
-                .frame(height: 420)
-                .background(Color.black)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.5), value: currentItem.id)
-
-                // Gradient overlay
-                LinearGradient(
-                    colors: [
-                        .clear,
-                        .clear,
-                        SashimiTheme.background.opacity(0.7),
-                        SashimiTheme.background
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                // Vignette sides
-                HStack {
-                    LinearGradient(
-                        colors: [SashimiTheme.background.opacity(0.8), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
+            GeometryReader { geometry in
+                ZStack(alignment: .bottomLeading) {
+                    // Full-width backdrop image
+                    SmartPosterImage(
+                        itemIds: heroFallbackIds,
+                        maxWidth: 3840,
+                        imageTypes: heroImageTypes,
+                        contentMode: .fill
                     )
-                    .frame(width: 300)
-                    Spacer()
-                }
+                    .id(currentItem.id)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.6), value: currentItem.id)
 
+                    // Bottom gradient - Netflix style fade
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .clear, location: 0.3),
+                            .init(color: SashimiTheme.background.opacity(0.4), location: 0.5),
+                            .init(color: SashimiTheme.background.opacity(0.85), location: 0.75),
+                            .init(color: SashimiTheme.background, location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
 
-                // Content
-                VStack(alignment: .leading, spacing: 16) {
-                    if !contentTypeLabel.isEmpty {
-                        Text(contentTypeLabel)
-                            .font(.system(size: 16, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundStyle(SashimiTheme.accent)
+                    // Left side gradient for text readability
+                    HStack {
+                        LinearGradient(
+                            colors: [
+                                SashimiTheme.background.opacity(0.9),
+                                SashimiTheme.background.opacity(0.6),
+                                .clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 600)
+                        Spacer()
                     }
 
-                    Text(currentItem.type == .episode ? (currentItem.seriesName ?? currentItem.name) : currentItem.name)
-                        .font(.system(size: 48, weight: .bold))
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .lineLimit(2)
-                        .shadow(color: .black.opacity(0.8), radius: 8, x: 0, y: 3)
+                    // Content overlay
+                    VStack(alignment: .leading, spacing: 20) {
+                        Spacer()
 
-                    if currentItem.type == .episode {
-                        Text(formatEpisodeInfo(currentItem))
-                            .font(.system(size: 26, weight: .medium))
-                            .foregroundStyle(SashimiTheme.textSecondary)
-                    }
-
-                    HStack(spacing: 14) {
-                        if let year = currentItem.productionYear {
-                            Text(String(year))
-                                .foregroundStyle(SashimiTheme.textSecondary)
-                        }
-
-                        if let runtime = currentItem.runTimeTicks {
-                            Text(formatRuntime(runtime))
-                                .foregroundStyle(SashimiTheme.textSecondary)
-                        }
-
-                        if let rating = currentItem.communityRating {
-                            HStack(spacing: 6) {
-                                Image("TMDBLogo")
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(height: 26)
-                                Text(String(format: "%.1f", rating))
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-                            }
-                        }
-                    }
-                    .font(.system(size: 22))
-
-                    if let overview = currentItem.overview {
-                        Text(overview)
-                            .font(.system(size: 20))
-                            .foregroundStyle(SashimiTheme.textSecondary)
+                        // Title
+                        Text(displayTitle)
+                            .font(.system(size: 64, weight: .bold))
+                            .foregroundStyle(.white)
                             .lineLimit(2)
-                            .frame(maxWidth: 700, alignment: .leading)
-                    }
+                            .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 4)
 
-                    // Page indicators with progress
-                    if items.count > 1 {
-                        HStack(spacing: 8) {
-                            ForEach(0..<items.count, id: \.self) { index in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(SashimiTheme.textTertiary.opacity(0.5))
-                                        .frame(width: index == safeIndex ? 36 : 10, height: 4)
-                                    if index == safeIndex {
-                                        Capsule()
-                                            .fill(SashimiTheme.accent)
-                                            .frame(width: 36 * progress, height: 4)
-                                    } else if index < safeIndex {
-                                        Capsule()
-                                            .fill(SashimiTheme.accent)
-                                            .frame(width: 10, height: 4)
-                                    }
-                                }
-                                .frame(width: index == safeIndex ? 36 : 10, height: 4)
-                                .animation(.easeInOut(duration: 0.3), value: safeIndex)
+                        // Episode info for TV shows, video title for YouTube
+                        if currentItem.type == .episode {
+                            if isYouTubeContent {
+                                // YouTube: show video title
+                                Text(currentItem.name)
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
+                                    .lineLimit(2)
+                            } else {
+                                // Regular TV: show S:E info
+                                Text(formatEpisodeInfo(currentItem))
+                                    .font(.system(size: 28, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
                             }
                         }
-                        .padding(.top, 8)
+
+                        // Metadata row
+                        HStack(spacing: 20) {
+                            if let rating = currentItem.communityRating {
+                                HStack(spacing: 8) {
+                                    Image("TMDBLogo")
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(height: 24)
+                                    Text(String(format: "%.1f", rating))
+                                        .fontWeight(.semibold)
+                                }
+                            }
+
+                            if let criticRating = currentItem.criticRating {
+                                HStack(spacing: 6) {
+                                    Text("🍅")
+                                    Text("\(criticRating)%")
+                                        .fontWeight(.semibold)
+                                }
+                            }
+
+                            if isYouTubeContent {
+                                // Show full date for YouTube
+                                if let dateStr = currentItem.premiereDate {
+                                    Text(formatDate(dateStr))
+                                }
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.rectangle.fill")
+                                    Text("YouTube")
+                                }
+                                .foregroundStyle(.red)
+                            } else {
+                                if let year = currentItem.productionYear {
+                                    Text(String(year))
+                                }
+
+                                if let runtime = currentItem.runTimeTicks {
+                                    Text(formatRuntime(runtime))
+                                }
+                            }
+                        }
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+
+                        // Description
+                        if let overview = currentItem.overview, !overview.isEmpty {
+                            Text(overview)
+                                .font(.system(size: 22))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(2)
+                                .frame(maxWidth: 800, alignment: .leading)
+                                .padding(.top, 4)
+                        }
+
+                        // Page indicators
+                        if items.count > 1 {
+                            HStack(spacing: 10) {
+                                ForEach(0..<items.count, id: \.self) { index in
+                                    ZStack(alignment: .leading) {
+                                        Capsule()
+                                            .fill(.white.opacity(0.3))
+                                            .frame(width: index == safeIndex ? 48 : 12, height: 5)
+                                        if index == safeIndex {
+                                            Capsule()
+                                                .fill(.white)
+                                                .frame(width: 48 * progress, height: 5)
+                                        } else if index < safeIndex {
+                                            Capsule()
+                                                .fill(.white.opacity(0.7))
+                                                .frame(width: 12, height: 5)
+                                        }
+                                    }
+                                    .animation(.easeInOut(duration: 0.3), value: safeIndex)
+                                }
+                            }
+                            .padding(.top, 16)
+                        }
                     }
+                    .padding(.horizontal, 80)
+                    .padding(.bottom, 50)
                 }
-                .padding(.horizontal, 80)
-                .padding(.bottom, 35)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .frame(height: 380)
+            .clipShape(RoundedRectangle(cornerRadius: 24))
             .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 0.8 : 0), lineWidth: 4)
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(SashimiTheme.accent.opacity(isFocused ? 0.6 : 0), lineWidth: 4)
             )
-            .shadow(color: SashimiTheme.accent.opacity(isFocused ? 0.4 : 0), radius: 20)
-            .padding(.horizontal, 40)
-            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .padding(.horizontal, 50)
+            .scaleEffect(isFocused ? 1.01 : 1.0)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
@@ -426,7 +483,6 @@ struct HeroSection: View {
             stopAutoAdvance()
         }
         .onChange(of: currentIndex) { _, _ in
-            // Reset progress when index changes
             progress = 0
         }
     }
@@ -436,9 +492,9 @@ struct HeroSection: View {
         progress = 0
         autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             DispatchQueue.main.async {
-                progress += 0.1 / 5  // 5 seconds total
+                progress += 0.1 / 6  // 6 seconds per item
                 if progress >= 1.0 {
-                    withAnimation(.easeInOut(duration: 0.5)) {
+                    withAnimation(.easeInOut(duration: 0.6)) {
                         currentIndex = (currentIndex + 1) % items.count
                     }
                     progress = 0
@@ -466,6 +522,23 @@ struct HeroSection: View {
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"
+    }
+
+    private func formatDate(_ isoDate: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "MMMM d, yyyy"
+            return displayFormatter.string(from: date)
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "MMMM d, yyyy"
+            return displayFormatter.string(from: date)
+        }
+        return ""
     }
 }
 
@@ -535,13 +608,14 @@ struct RecentlyAddedLibraryRow: View {
                     LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
                         ForEach(items) { item in
                             let key = item.seriesId ?? item.id
-                            let count = episodeCounts[key] ?? 1
+                            // Use actual unplayed count from series (nil means no unwatched or not a series)
+                            let unplayedCount = episodeCounts[key]
                             MediaPosterButton(
                                 item: item,
                                 libraryType: library.collectionType,
                                 libraryName: library.name,
                                 isLandscape: isYouTubeLibrary,
-                                badgeCount: count > 1 ? count : nil
+                                badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
                             ) {
                                 onSelect(item)
                             }
@@ -574,9 +648,13 @@ struct RecentlyAddedLibraryRow: View {
                 collectionType: library.collectionType,
                 isYouTubeLibrary: isYouTubeLibrary
             )
-            let (dedupedItems, counts) = deduplicateBySeries(latestItems)
+            let dedupedItems = deduplicateBySeries(latestItems)
             items = dedupedItems
-            episodeCounts = counts
+
+            // Fetch actual unplayed counts from series (for TV shows)
+            if isTVLibrary {
+                await loadUnplayedCounts(for: dedupedItems)
+            }
         } catch is CancellationError {
             // Ignore cancellation errors - expected during navigation
         } catch {
@@ -586,27 +664,51 @@ struct RecentlyAddedLibraryRow: View {
         isLoading = false
     }
 
-    private func deduplicateBySeries(_ items: [BaseItemDto]) -> (items: [BaseItemDto], counts: [String: Int]) {
+    private func loadUnplayedCounts(for items: [BaseItemDto]) async {
         var counts: [String: Int] = [:]
+
+        // Collect unique series IDs (handles both regular TV episodes and YouTube videos)
+        let seriesIds = Set(items.compactMap { item -> String? in
+            if item.type == .episode { return item.seriesId }
+            if item.type == .video { return item.seriesId }
+            if item.type == .series { return item.id }
+            return nil
+        })
+
+        // Fetch each series to get its unplayed count
+        for seriesId in seriesIds {
+            do {
+                let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
+                if let unplayedCount = series.userData?.unplayedItemCount, unplayedCount > 0 {
+                    counts[seriesId] = unplayedCount
+                }
+            } catch {
+                // Ignore errors for individual series
+            }
+        }
+
+        episodeCounts = counts
+    }
+
+    private func deduplicateBySeries(_ items: [BaseItemDto]) -> [BaseItemDto] {
         var seen = Set<String>()
         var result: [BaseItemDto] = []
 
-        // First pass: count episodes per series
         for item in items {
-            let key = item.type == .episode ? (item.seriesId ?? item.id) : item.id
-            counts[key, default: 0] += 1
-        }
-
-        // Second pass: deduplicate
-        for item in items {
-            let key = item.type == .episode ? (item.seriesId ?? item.id) : item.id
+            // Group episodes and videos by their series
+            let key: String
+            if item.type == .episode || item.type == .video {
+                key = item.seriesId ?? item.id
+            } else {
+                key = item.id
+            }
             if !seen.contains(key) {
                 seen.insert(key)
                 result.append(item)
             }
         }
 
-        return (Array(result.prefix(20)), counts)
+        return Array(result.prefix(20))
     }
 }
 

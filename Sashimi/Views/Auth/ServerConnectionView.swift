@@ -1,5 +1,32 @@
 import SwiftUI
 
+// MARK: - Server Connection Types
+
+enum ServerConnectionField {
+    case serverAddress
+    case username
+    case password
+    case connectButton
+}
+
+enum ServerValidationState: Equatable {
+    case idle
+    case valid
+    case invalid(String)
+
+    var isValid: Bool {
+        if case .valid = self { return true }
+        return false
+    }
+
+    var errorMessage: String? {
+        if case .invalid(let message) = self { return message }
+        return nil
+    }
+}
+
+// MARK: - Server Connection View
+
 struct ServerConnectionView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @StateObject private var serverDiscovery = ServerDiscovery()
@@ -12,34 +39,11 @@ struct ServerConnectionView: View {
     @State private var showDiscoveredServers = false
 
     // Validation state
-    @State private var serverAddressValidation: ValidationState = .idle
-    @State private var usernameValidation: ValidationState = .idle
+    @State private var serverAddressValidation: ServerValidationState = .idle
+    @State private var usernameValidation: ServerValidationState = .idle
     @State private var hasAttemptedSubmit = false
 
-    @FocusState private var focusedField: Field?
-
-    enum Field {
-        case serverAddress
-        case username
-        case password
-        case connectButton
-    }
-
-    enum ValidationState: Equatable {
-        case idle
-        case valid
-        case invalid(String)
-
-        var isValid: Bool {
-            if case .valid = self { return true }
-            return false
-        }
-
-        var errorMessage: String? {
-            if case .invalid(let message) = self { return message }
-            return nil
-        }
-    }
+    @FocusState private var focusedField: ServerConnectionField?
 
     var body: some View {
         VStack(spacing: 60) {
@@ -294,7 +298,7 @@ struct ServerConnectionView: View {
     }
 
     @ViewBuilder
-    private func validationIcon(for state: ValidationState) -> some View {
+    private func validationIcon(for state: ServerValidationState) -> some View {
         switch state {
         case .idle:
             EmptyView()
@@ -309,7 +313,7 @@ struct ServerConnectionView: View {
         }
     }
 
-    private func validationFieldBackground(for state: ValidationState) -> Color {
+    private func validationFieldBackground(for state: ServerValidationState) -> Color {
         switch state {
         case .idle:
             return Color.white.opacity(0.1)
@@ -320,7 +324,7 @@ struct ServerConnectionView: View {
         }
     }
 
-    private func validationBorderColor(for state: ValidationState) -> Color {
+    private func validationBorderColor(for state: ServerValidationState) -> Color {
         switch state {
         case .idle:
             return .clear

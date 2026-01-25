@@ -2,7 +2,7 @@ import TVServices
 import Foundation
 
 class ContentProvider: TVTopShelfContentProvider {
-    private let appGroupIdentifier = "group.com.sashimi.app"
+    private let appGroupIdentifier = "group.com.mondominator.sashimi"
 
     override func loadTopShelfContent() async -> TVTopShelfContent? {
         guard let items = loadContinueWatchingItems(), !items.isEmpty else {

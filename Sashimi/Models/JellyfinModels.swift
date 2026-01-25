@@ -1,5 +1,17 @@
 import Foundation
 
+// MARK: - String Extensions
+
+extension String {
+    /// Cleans up YouTube channel titles by removing common suffixes like " - Videos"
+    var cleanedYouTubeTitle: String {
+        if hasSuffix(" - Videos") {
+            return String(dropLast(9))
+        }
+        return self
+    }
+}
+
 // swiftlint:disable discouraged_optional_boolean
 // Jellyfin API models use optional booleans - this matches the server response structure
 
@@ -36,6 +48,16 @@ struct UserDto: Codable, Identifiable {
     }
 }
 
+struct MediaUrl: Codable, Hashable {
+    let name: String?
+    let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name = "Name"
+        case url = "Url"
+    }
+}
+
 struct BaseItemDto: Codable, Identifiable, Hashable {
     let id: String
     let name: String
@@ -64,6 +86,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let premiereDate: String?
     let chapters: [ChapterInfo]?
     let path: String?
+    let remoteTrailers: [MediaUrl]?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -93,6 +116,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case premiereDate = "PremiereDate"
         case chapters = "Chapters"
         case path = "Path"
+        case remoteTrailers = "RemoteTrailers"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -147,6 +171,7 @@ struct UserItemDataDto: Codable {
     let isFavorite: Bool?
     let played: Bool?
     let lastPlayedDate: String?
+    let unplayedItemCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case playbackPositionTicks = "PlaybackPositionTicks"
@@ -154,6 +179,7 @@ struct UserItemDataDto: Codable {
         case isFavorite = "IsFavorite"
         case played = "Played"
         case lastPlayedDate = "LastPlayedDate"
+        case unplayedItemCount = "UnplayedItemCount"
     }
 }
 

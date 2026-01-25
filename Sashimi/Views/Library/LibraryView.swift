@@ -1,5 +1,8 @@
 import SwiftUI
 
+// swiftlint:disable file_length
+// LibraryView contains library browsing with filter/sort UI - splitting would fragment related UI code
+
 struct LibraryView: View {
     var onBackAtRoot: (() -> Void)?
     @State private var libraries: [LibraryView_Model] = []
@@ -263,6 +266,7 @@ struct LibraryDetailView: View {
     @State private var isLoading = true
     @State private var isLoadingMore = false
     @State private var selectedItem: BaseItemDto?
+    @State private var selectedItemIsYouTube = false
     @State private var totalCount = 0
     @State private var selectedLetter: String?
     @State private var sortOption: LibrarySortOption = .name
@@ -362,6 +366,7 @@ struct LibraryDetailView: View {
                             LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 40 : 60) {
                                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                                     MediaPosterButton(item: item, libraryName: library.name, isCircular: isYouTubeLibrary) {
+                                        selectedItemIsYouTube = isYouTubeLibrary
                                         selectedItem = item
                                     }
                                     .id(item.id)
@@ -421,7 +426,7 @@ struct LibraryDetailView: View {
             await loadItems()
         }
         .fullScreenCover(item: $selectedItem) { item in
-            MediaDetailView(item: item, forceYouTubeStyle: isYouTubeLibrary)
+            MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
         }
         .onChange(of: selectedItem) { oldValue, newValue in
             // Refresh item data when returning from detail view
@@ -443,11 +448,9 @@ struct LibraryDetailView: View {
                 }
             }
         } else {
-            for item in items {
-                if item.name.uppercased().hasPrefix(letter) {
-                    targetItem = item
-                    break
-                }
+            for item in items where item.name.uppercased().hasPrefix(letter) {
+                targetItem = item
+                break
             }
         }
 
@@ -458,8 +461,9 @@ struct LibraryDetailView: View {
         }
     }
 
-    // Convert filter option to API parameters
-    private var filterParams: (isPlayed: Bool?, isFavorite: Bool?) {
+    // Convert filter option to API parameters (nil = no filter, true/false = filter value)
+    // swiftlint:disable:next discouraged_optional_boolean
+    private var filterParams: (isPlayed: Bool?, isFavorite: Bool?) { // swiftlint:disable:this discouraged_optional_boolean
         switch filterOption {
         case .all:
             return (nil, nil)

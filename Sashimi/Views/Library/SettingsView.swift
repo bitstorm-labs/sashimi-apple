@@ -1,5 +1,8 @@
 import SwiftUI
 
+// swiftlint:disable file_length
+// SettingsView contains multiple related settings views - splitting would fragment related UI code
+
 struct SettingsView: View {
     var showSignOut: Bool = true
     var onBackAtRoot: (() -> Void)?
@@ -48,6 +51,14 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.certificates)
                             }
 
+                            SettingsOptionRow(
+                                icon: "app.badge",
+                                title: "App Icon",
+                                subtitle: "Change app icon"
+                            ) {
+                                navigationPath.append(SettingsDestination.appIcon)
+                            }
+
                             // About section
                             VStack(spacing: 12) {
                                 SettingsInfoRow(label: "Version", value: "1.0.0")
@@ -79,6 +90,8 @@ struct SettingsView: View {
                     ParentalControlsView()
                 case .certificates:
                     CertificateSettingsView()
+                case .appIcon:
+                    AppIconSettingsView()
                 }
             }
         }
@@ -109,6 +122,7 @@ enum SettingsDestination: Hashable {
     case playback
     case parentalControls
     case certificates
+    case appIcon
 }
 
 struct SettingsOptionRow: View {
@@ -543,58 +557,6 @@ struct SettingsContainer<Content: View>: View {
     }
 }
 
-// MARK: - Custom Settings Row Button Style
-
-struct SettingsRowButtonStyle: ButtonStyle {
-    @FocusState.Binding var isFocused: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isFocused ? SashimiTheme.accent.opacity(0.2) : SashimiTheme.cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.02 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-    }
-}
-
-// MARK: - Settings Row View (custom focus styling)
-
-struct SettingsRow<Content: View>: View {
-    let action: () -> Void
-    @ViewBuilder let content: () -> Content
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            content()
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        .focused($isFocused)
-    }
-}
-
 struct SettingsToggleRow: View {
     let title: String
     @Binding var isOn: Bool
@@ -984,4 +946,145 @@ struct LanguagePickerView: View {
 #Preview {
     SettingsView()
         .environmentObject(SessionManager.shared)
+}
+
+// MARK: - App Icon Settings
+
+private struct AppIconOption {
+    let id: String?
+    let name: String
+    let previewImage: String
+}
+
+struct AppIconSettingsView: View {
+    @State private var currentIcon: String? = UIApplication.shared.alternateIconName
+    @FocusState private var focusedIcon: String?
+    @State private var showingErrorAlert = false
+    @State private var showingSuccessAlert = false
+    @State private var alertMessage = ""
+    @State private var successIconName = ""
+
+    private let icons: [AppIconOption] = [
+        AppIconOption(id: nil, name: "Default", previewImage: "AppIconPreviewDefault"),
+        AppIconOption(id: "CatIcon", name: "Cat", previewImage: "AppIconPreviewCat"),
+        AppIconOption(id: "ChopsticksIcon", name: "Chopsticks", previewImage: "AppIconPreviewChopsticks"),
+        AppIconOption(id: "WhitefishIcon", name: "Whitefish", previewImage: "AppIconPreviewWhitefish"),
+        AppIconOption(id: "FoxIcon", name: "Fox", previewImage: "AppIconPreviewFoxIcon"),
+        AppIconOption(id: "PandaIcon", name: "Panda", previewImage: "AppIconPreviewPandaIcon"),
+        AppIconOption(id: "RacoonIcon", name: "Racoon", previewImage: "AppIconPreviewRacoonIcon"),
+        AppIconOption(id: "ShrimpIcon", name: "Shrimp", previewImage: "AppIconPreviewShrimpIcon"),
+        AppIconOption(id: "TunaIcon", name: "Tuna", previewImage: "AppIconPreviewTunaIcon")
+    ]
+
+    private let columns = [
+        GridItem(.fixed(180), spacing: 20),
+        GridItem(.fixed(180), spacing: 20),
+        GridItem(.fixed(180), spacing: 20)
+    ]
+
+    var body: some View {
+        SettingsContainer {
+            LazyVGrid(columns: columns, spacing: 20) {
+                ForEach(icons, id: \.name) { icon in
+                    AppIconButton(
+                        name: icon.name,
+                        previewImage: icon.previewImage,
+                        isSelected: currentIcon == icon.id,
+                        isFocused: focusedIcon == icon.name
+                    ) {
+                        changeIcon(to: icon.id, name: icon.name)
+                    }
+                    .focused($focusedIcon, equals: icon.name)
+                }
+            }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
+        }
+        .alert("Error", isPresented: $showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(alertMessage)
+        }
+        .alert("Icon Updated", isPresented: $showingSuccessAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("App icon changed to \(successIconName)")
+        }
+    }
+
+    private func changeIcon(to iconName: String?, name: String) {
+        // Use the private API to suppress the system alert (shows wrong icon preview)
+        // This is a known workaround used by many apps
+        guard UIApplication.shared.supportsAlternateIcons else { return }
+
+        // Attempt to use the private method that doesn't show an alert
+        let selector = NSSelectorFromString("_setAlternateIconName:completionHandler:")
+        if UIApplication.shared.responds(to: selector) {
+            // swiftlint:disable:next line_length
+            typealias SetIconMethod = @convention(c) (NSObject, Selector, NSString?, @escaping (NSError?) -> Void) -> Void
+            let method = unsafeBitCast(
+                UIApplication.shared.method(for: selector),
+                to: SetIconMethod.self
+            )
+            method(UIApplication.shared, selector, iconName as NSString?, { error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        self.alertMessage = error.localizedDescription
+                        self.showingErrorAlert = true
+                    } else {
+                        self.currentIcon = iconName
+                        self.successIconName = name
+                        self.showingSuccessAlert = true
+                    }
+                }
+            })
+        } else {
+            // Fallback to standard method (will show system alert)
+            UIApplication.shared.setAlternateIconName(iconName) { error in
+                if let error = error {
+                    alertMessage = error.localizedDescription
+                    showingErrorAlert = true
+                } else {
+                    currentIcon = iconName
+                    successIconName = name
+                    showingSuccessAlert = true
+                }
+            }
+        }
+    }
+}
+
+struct AppIconButton: View {
+    let name: String
+    let previewImage: String
+    let isSelected: Bool
+    let isFocused: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomTrailing) {
+                Image(previewImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 170, height: 102)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                    )
+                    .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.5) : .clear, radius: 8)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white, .green)
+                        .padding(6)
+                }
+            }
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3), value: isFocused)
+        }
+        .buttonStyle(.card)
+    }
 }

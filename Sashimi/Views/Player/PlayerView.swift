@@ -2,125 +2,6 @@ import SwiftUI
 import AVKit
 import Combine
 
-// MARK: - AVPlayerViewController Wrapper
-// Uses native tvOS player controls including swipe-down info panel for audio/subtitle selection
-
-struct TVPlayerViewController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    var isInteractionEnabled: Bool = true
-    var subtitleTracks: [SubtitleTrackOption] = []
-    var selectedSubtitleId: String?
-    var onSubtitleSelected: ((SubtitleTrackOption) -> Void)?
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        controller.allowsPictureInPicturePlayback = false
-
-        // Hide native subtitle/audio selection - we use our own
-        controller.requiresLinearPlayback = false
-
-        // Add playback speed and subtitle menus to transport bar
-        var menuItems: [UIMenuElement] = [createSpeedMenu(for: player, coordinator: context.coordinator)]
-
-        if !subtitleTracks.isEmpty {
-            menuItems.append(createSubtitleMenu(coordinator: context.coordinator))
-        }
-
-        controller.transportBarCustomMenuItems = menuItems
-
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        uiViewController.player = player
-        // Disable interaction when dialogs are showing to prevent focus stealing
-        uiViewController.view.isUserInteractionEnabled = isInteractionEnabled
-
-        // Update coordinator with current state
-        context.coordinator.subtitleTracks = subtitleTracks
-        context.coordinator.selectedSubtitleId = selectedSubtitleId
-        context.coordinator.onSubtitleSelected = onSubtitleSelected
-
-        // Update transport bar menus
-        var menuItems: [UIMenuElement] = [createSpeedMenu(for: player, coordinator: context.coordinator)]
-        if !subtitleTracks.isEmpty {
-            menuItems.append(createSubtitleMenu(coordinator: context.coordinator))
-        }
-        uiViewController.transportBarCustomMenuItems = menuItems
-    }
-
-    private func createSpeedMenu(for player: AVPlayer, coordinator: Coordinator) -> UIMenu {
-        let speeds: [(String, Float)] = [
-            ("0.5×", 0.5),
-            ("0.75×", 0.75),
-            ("1× (Normal)", 1.0),
-            ("1.25×", 1.25),
-            ("1.5×", 1.5),
-            ("2×", 2.0)
-        ]
-
-        let actions = speeds.map { title, rate in
-            UIAction(
-                title: title,
-                state: coordinator.currentSpeed == rate ? .on : .off
-            ) { _ in
-                player.rate = rate
-                coordinator.currentSpeed = rate
-            }
-        }
-
-        return UIMenu(
-            title: "Playback Speed",
-            image: UIImage(systemName: "speedometer"),
-            children: actions
-        )
-    }
-
-    private func createSubtitleMenu(coordinator: Coordinator) -> UIMenu {
-        let tracks = coordinator.subtitleTracks
-        let selectedId = coordinator.selectedSubtitleId
-
-        let actions = tracks.map { track in
-            UIAction(
-                title: track.displayName,
-                state: track.id == selectedId ? .on : .off
-            ) { [weak coordinator] _ in
-                coordinator?.onSubtitleSelected?(track)
-            }
-        }
-
-        return UIMenu(
-            title: "Subtitles",
-            image: UIImage(systemName: "captions.bubble"),
-            children: actions
-        )
-    }
-
-    class Coordinator {
-        var currentSpeed: Float = 1.0
-        var subtitleTracks: [SubtitleTrackOption] = []
-        var selectedSubtitleId: String?
-        var onSubtitleSelected: ((SubtitleTrackOption) -> Void)?
-
-        var speedTitle: String {
-            switch currentSpeed {
-            case 0.5: return "0.5×"
-            case 0.75: return "0.75×"
-            case 1.0: return "1×"
-            case 1.25: return "1.25×"
-            case 1.5: return "1.5×"
-            case 2.0: return "2×"
-            default: return "\(currentSpeed)×"
-            }
-        }
-    }
-}
-
 struct PlayerView: View {
     let item: BaseItemDto
     var startFromBeginning: Bool = false
@@ -128,521 +9,392 @@ struct PlayerView: View {
     @StateObject private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
 
+    @State private var showControls = true
+    @State private var controlsHideTask: Task<Void, Never>?
+    @State private var activeOverlay: PlayerOverlay?
+    @State private var currentSpeed: Float = 1.0
+    @State private var lastOpenedOverlay: PlayerOverlay?
+    @State private var overlayClosedAt: Date?
+
+    @FocusState private var hiddenControlsFocused: Bool
+
+    enum PlayerOverlay: Hashable {
+        case subtitles, chapters, speed, quality
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             if viewModel.isLoading {
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text("Loading \(item.displayTitle)...")
-                        .font(.headline)
-                }
-            } else if let error = viewModel.error ?? (viewModel.errorMessage != nil ? PlayerError.noStreamURL : nil) {
-                errorView(error: error)
-            } else if let player = viewModel.player {
-                ZStack {
-                    // Native AVPlayerViewController for full tvOS controls
-                    TVPlayerViewController(
-                        player: player,
-                        isInteractionEnabled: !viewModel.showingUpNext,
-                        subtitleTracks: viewModel.subtitleTracks,
-                        selectedSubtitleId: viewModel.selectedSubtitleTrackId,
-                        onSubtitleSelected: { track in
-                            viewModel.selectSubtitleTrack(track)
-                        }
-                    )
-                    .ignoresSafeArea()
-
-                    // Custom subtitle overlay
-                    SubtitleOverlay(manager: viewModel.subtitleManager)
-                }
-                .onAppear {
-                    viewModel.loadSubtitleTracks()
-                }
+                ProgressView().scaleEffect(1.5)
+            } else if viewModel.error != nil || viewModel.errorMessage != nil {
+                errorView
+            } else if viewModel.player != nil {
+                playerContent
             }
 
-            // Up Next overlay
-            if viewModel.showingUpNext, let nextEpisode = viewModel.nextEpisode {
-                UpNextOverlay(
-                    nextEpisode: nextEpisode,
-                    onPlayNow: {
-                        Task { await viewModel.playNextEpisode() }
-                    },
-                    onCancel: {
-                        viewModel.cancelUpNext()
-                    }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            if viewModel.showingUpNext, let next = viewModel.nextEpisode {
+                upNextOverlay(next)
             }
 
-            // Skip Intro/Credits button
             if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
-                SkipSegmentOverlay(
-                    segmentType: segment.type,
-                    onSkip: {
-                        viewModel.skipCurrentSegment()
-                    }
-                )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                skipOverlay(segment)
+            }
+
+            if let overlay = activeOverlay {
+                pickerOverlay(overlay)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: viewModel.showingUpNext)
-        .animation(.easeInOut(duration: 0.25), value: viewModel.showingSkipButton)
-        .task {
-            await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
-        }
+        .task { await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning) }
         .onDisappear {
-            Task {
-                await viewModel.stop()
-            }
+            controlsHideTask?.cancel()
+            Task { await viewModel.stop() }
         }
-        .onExitCommand {
-            if viewModel.showingUpNext {
-                viewModel.cancelUpNext()
-            } else {
-                Task {
-                    await viewModel.stop()
-                    dismiss()
-                }
-            }
-        }
-        .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended {
-                dismiss()
-            }
+        .onChange(of: viewModel.playbackEnded) { _, ended in if ended { dismiss() } }
+        .onPlayPauseCommand {
+            togglePlayPause()
+            if !showControls { showControlsAndResetTimer() }
         }
     }
 
-    private func errorView(error: Error) -> some View {
-        VStack(spacing: 20) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 60))
-                .foregroundStyle(.red)
-
-            Text("Playback Error")
-                .font(.title2)
-
-            Text(viewModel.errorMessage ?? error.localizedDescription)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Button("Dismiss") {
-                Task {
-                    await viewModel.stop()
-                    dismiss()
-                }
-            }
-        }
-    }
-}
-
-struct PlayerLayerView: UIViewRepresentable {
-    let player: AVPlayer
-
-    func makeUIView(context: Context) -> PlayerUIView {
-        let view = PlayerUIView()
-        view.player = player
-        return view
-    }
-
-    func updateUIView(_ uiView: PlayerUIView, context: Context) {
-        uiView.player = player
-    }
-}
-
-class PlayerUIView: UIView {
-    var player: AVPlayer? {
-        get { playerLayer.player }
-        set { playerLayer.player = newValue }
-    }
-
-    var playerLayer: AVPlayerLayer {
-        // swiftlint:disable:next force_cast
-        layer as! AVPlayerLayer  // Safe: layerClass returns AVPlayerLayer.self
-    }
-
-    override static var layerClass: AnyClass {
-        AVPlayerLayer.self
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        playerLayer.videoGravity = .resizeAspect
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-struct ControlButton: View {
-    let icon: String
-    let label: String
-    var isLarge: Bool = false
-    let action: () -> Void
-
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: isLarge ? 44 : 28))
-            if !label.isEmpty {
-                Text(label)
-                    .font(.caption)
-            }
-        }
-        .frame(width: isLarge ? 100 : 80, height: isLarge ? 100 : 80)
-        .background(isFocused ? Color.white.opacity(0.3) : Color.white.opacity(0.1))
-        .clipShape(Circle())
-        .scaleEffect(isFocused ? 1.15 : 1.0)
-        .animation(.spring(response: 0.3), value: isFocused)
-        .focusable(true) { _ in
-            // Focus changed
-        }
-        .onLongPressGesture(minimumDuration: 0.01, pressing: { pressing in
-            if !pressing {
-                action()
-            }
-        }, perform: {})
-    }
-}
-
-struct PlayerProgressBar: View {
-    let currentTime: Double
-    let duration: Double
-    let onSeek: (Double) -> Void
-
-    @FocusState private var isFocused: Bool
-    @State private var scrubPosition: Double?
-
-    private var progress: Double {
-        guard duration > 0 else { return 0 }
-        return (scrubPosition ?? currentTime) / duration
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                // Background
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white.opacity(0.3))
-
-                // Progress
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white)
-                    .frame(width: geometry.size.width * min(max(progress, 0), 1))
-            }
-        }
-        .frame(height: isFocused ? 12 : 6)
-        .animation(.spring(response: 0.3), value: isFocused)
-        .focused($isFocused)
-    }
-}
-
-struct AudioPickerSheet: View {
-    @ObservedObject var viewModel: PlayerViewModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List(viewModel.audioTracks) { track in
-                Button {
-                    viewModel.selectAudioTrack(track)
-                    dismiss()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(track.displayName)
-                                .font(.headline)
-                            if let lang = track.languageCode {
-                                Text(lang.uppercased())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if track.id == viewModel.selectedAudioTrackId {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .navigationTitle("Audio")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-struct SubtitlePickerSheet: View {
-    @ObservedObject var viewModel: PlayerViewModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List(viewModel.subtitleTracks) { track in
-                Button {
-                    viewModel.selectSubtitleTrack(track)
-                    dismiss()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(track.displayName)
-                                .font(.headline)
-                            if let lang = track.languageCode {
-                                Text(lang.uppercased())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if track.id == viewModel.selectedSubtitleTrackId {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .navigationTitle("Subtitles")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-private struct ResumeDialogButton: View {
-    let title: String
-    let icon: String
-    let isPrimary: Bool
-    let isFocused: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                Text(title)
-            }
-            .font(.headline)
-            .padding(.horizontal, isPrimary ? 40 : 32)
-            .padding(.vertical, 16)
-            .foregroundStyle(isPrimary ? .black : .white)
-            .background(isPrimary ? Color.white : Color.white.opacity(0.2))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(SashimiTheme.accent, lineWidth: isFocused ? 4 : 0)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3), value: isFocused)
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-    }
-}
-
-struct UpNextOverlay: View {
-    let nextEpisode: BaseItemDto
-    let onPlayNow: () -> Void
-    let onCancel: () -> Void
-
-    @State private var countdown = 10
-    @State private var countdownTask: Task<Void, Never>?
-    @FocusState private var focusedButton: UpNextButton?
-
-    private enum UpNextButton {
-        case playNow, cancel
-    }
-
-    var body: some View {
+    @ViewBuilder
+    private var playerContent: some View {
         ZStack {
-            // Semi-transparent background
-            LinearGradient(
-                colors: [Color.black.opacity(0.9), Color.black.opacity(0.7)],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-            .ignoresSafeArea()
+            if let player = viewModel.player {
+                PlayerLayerView(player: player).ignoresSafeArea()
+            }
 
-            HStack(spacing: 60) {
-                // Episode thumbnail
-                AsyncItemImage(
-                    itemId: nextEpisode.id,
-                    imageType: "Primary",
-                    maxWidth: 400
+            SubtitleOverlay(manager: viewModel.subtitleManager)
+
+            if showControls && activeOverlay == nil {
+                PlayerInfoOverlay(
+                    item: viewModel.currentItem ?? item,
+                    viewModel: viewModel,
+                    isVisible: .constant(true),
+                    onSeek: { seekTo($0); resetAutoHide() },
+                    onPlayPause: { togglePlayPause(); resetAutoHide() },
+                    onShowSubtitles: { lastOpenedOverlay = .subtitles; showOverlay(.subtitles) },
+                    onShowChapters: { lastOpenedOverlay = .chapters; showOverlay(.chapters) },
+                    onShowSpeed: { lastOpenedOverlay = .speed; showOverlay(.speed) },
+                    onShowQuality: { lastOpenedOverlay = .quality; showOverlay(.quality) },
+                    onUserInteraction: { resetAutoHide() },
+                    onExit: {
+                        // Ignore exit if we just closed an overlay (within 500ms)
+                        if let closedAt = overlayClosedAt, Date().timeIntervalSince(closedAt) < 0.5 {
+                            overlayClosedAt = nil
+                            return
+                        }
+                        hideControls()
+                    }
                 )
-                .frame(width: 400, height: 225)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .ignoresSafeArea()
+            }
 
-                // Episode info and controls
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Up Next")
-                        .font(.headline)
-                        .foregroundStyle(SashimiTheme.accent)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let seriesName = nextEpisode.seriesName {
-                            Text(seriesName)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                        }
-
-                        Text(nextEpisode.name)
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-
-                        if let season = nextEpisode.parentIndexNumber,
-                           let episode = nextEpisode.indexNumber {
-                            Text(verbatim: "S\(season):E\(episode)")
-                                .font(.subheadline)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-
-                    Spacer().frame(height: 20)
-
-                    HStack(spacing: 30) {
-                        ResumeDialogButton(
-                            title: "Play Now",
-                            icon: "play.fill",
-                            isPrimary: true,
-                            isFocused: focusedButton == .playNow
-                        ) {
-                            countdownTask?.cancel()
-                            onPlayNow()
-                        }
-                        .focused($focusedButton, equals: .playNow)
-
-                        ResumeDialogButton(
-                            title: "Cancel",
-                            icon: "xmark",
-                            isPrimary: false,
-                            isFocused: focusedButton == .cancel
-                        ) {
-                            countdownTask?.cancel()
-                            onCancel()
-                        }
-                        .focused($focusedButton, equals: .cancel)
-                    }
-
-                    Text("Starting in \(countdown) seconds...")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
+            // Invisible button when controls are hidden - handles select for play/pause
+            if !showControls && activeOverlay == nil {
+                Button {
+                    togglePlayPause()
+                    showControlsAndResetTimer()
+                } label: {
+                    Color.clear
+                }
+                .buttonStyle(InvisibleButtonStyle())
+                .focused($hiddenControlsFocused)
+                .onAppear { hiddenControlsFocused = true }
+                .onMoveCommand { _ in
+                    showControlsAndResetTimer()
+                }
+                .onExitCommand {
+                    // When controls are hidden and user presses back, exit player
+                    Task { await viewModel.stop(); dismiss() }
                 }
             }
-            .padding(80)
         }
         .onAppear {
-            countdown = 10  // Reset countdown each time overlay appears
-            focusedButton = .playNow
-            startCountdown()
-        }
-        .onDisappear {
-            countdownTask?.cancel()
+            viewModel.loadSubtitleTracks()
+            resetAutoHide()
         }
     }
 
-    private func startCountdown() {
-        countdownTask = Task {
-            while countdown > 0 {
-                try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled { return }
-                countdown -= 1
+    private var errorView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "exclamationmark.triangle").font(.system(size: 60)).foregroundStyle(.red)
+            Text("Playback Error").font(.title2)
+            Text(viewModel.errorMessage ?? "Unknown error").foregroundStyle(.secondary)
+            Button("Dismiss") { Task { await viewModel.stop(); dismiss() } }
+        }
+    }
+
+    @ViewBuilder
+    private func pickerOverlay(_ overlay: PlayerOverlay) -> some View {
+        ZStack {
+            Color.black.opacity(0.8).ignoresSafeArea()
+                .onTapGesture { closeOverlay() }
+
+            VStack(spacing: 0) {
+                Text(overlayTitle(overlay))
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.top, 30)
+                    .padding(.bottom, 20)
+
+                ScrollView {
+                    VStack(spacing: 4) {
+                        switch overlay {
+                        case .subtitles:
+                            ForEach(Array(viewModel.subtitleTracks.enumerated()), id: \.element.id) { index, track in
+                                PickerRow(title: track.displayName, isSelected: track.id == viewModel.selectedSubtitleTrackId, isFirstItem: index == 0, onExit: closeOverlay) {
+                                    viewModel.selectSubtitleTrack(track)
+                                    closeOverlay()
+                                }
+                            }
+                        case .chapters:
+                            ForEach(Array((viewModel.currentItem?.chapters ?? []).enumerated()), id: \.element.startPositionTicks) { index, chapter in
+                                PickerRow(title: chapter.name ?? "Chapter", subtitle: formatTime(chapter.startSeconds), isFirstItem: index == 0, onExit: closeOverlay) {
+                                    seekTo(chapter.startSeconds)
+                                    closeOverlay()
+                                }
+                            }
+                        case .speed:
+                            let speeds: [(String, Float)] = [("0.5×", 0.5), ("0.75×", 0.75), ("1× Normal", 1.0), ("1.25×", 1.25), ("1.5×", 1.5), ("2×", 2.0)]
+                            ForEach(Array(speeds.enumerated()), id: \.element.1) { index, item in
+                                PickerRow(title: item.0, isSelected: currentSpeed == item.1, isFirstItem: index == 0, onExit: closeOverlay) {
+                                    currentSpeed = item.1
+                                    viewModel.player?.rate = item.1
+                                    closeOverlay()
+                                }
+                            }
+                        case .quality:
+                            ForEach(Array(QualityOption.allCases.enumerated()), id: \.element.id) { index, quality in
+                                PickerRow(
+                                    title: quality.displayName,
+                                    isSelected: viewModel.selectedQuality == quality,
+                                    isFirstItem: index == 0,
+                                    onExit: closeOverlay
+                                ) {
+                                    Task {
+                                        await viewModel.changeQuality(quality)
+                                    }
+                                    closeOverlay()
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 30)
+                }
             }
-            if !Task.isCancelled {
-                onPlayNow()
-            }
+            .frame(width: 500, height: min(CGFloat(overlayItemCount(overlay)) * 70 + 120, 500))
+            .background(Color(white: 0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .onExitCommand { closeOverlay() }
+    }
+
+    private func closeOverlay() {
+        overlayClosedAt = Date()
+        activeOverlay = nil
+        resetAutoHide()
+    }
+
+    private func overlayItemCount(_ overlay: PlayerOverlay) -> Int {
+        switch overlay {
+        case .subtitles: return viewModel.subtitleTracks.count
+        case .chapters: return viewModel.currentItem?.chapters?.count ?? 0
+        case .speed: return 6
+        case .quality: return 4
         }
     }
-}
 
-struct SkipSegmentOverlay: View {
-    let segmentType: MediaSegmentType
-    let onSkip: () -> Void
-
-    @FocusState private var isFocused: Bool
-
-    private var buttonTitle: String {
-        "Skip \(segmentType.displayName)"
+    private func overlayTitle(_ overlay: PlayerOverlay) -> String {
+        switch overlay {
+        case .subtitles: return "Subtitles"
+        case .chapters: return "Chapters"
+        case .speed: return "Playback Speed"
+        case .quality: return "Quality"
+        }
     }
 
-    var body: some View {
+    private func upNextOverlay(_ next: BaseItemDto) -> some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            UpNextContent(nextEpisode: next, onPlayNow: {
+                Task { await viewModel.playNextEpisode() }
+            }, onCancel: { viewModel.cancelUpNext() })
+        }
+    }
+
+    private func skipOverlay(_ segment: MediaSegmentDto) -> some View {
         VStack {
             Spacer()
             HStack {
                 Spacer()
-                Button(action: onSkip) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "forward.fill")
-                        Text(buttonTitle)
-                    }
-                    .font(.system(size: 24, weight: .semibold))
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 16)
-                    .foregroundStyle(.black)
-                    .background(Color.white)
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(SashimiTheme.accent, lineWidth: isFocused ? 4 : 0)
-                    )
-                    .scaleEffect(isFocused ? 1.05 : 1.0)
-                    .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
-                    .animation(.spring(response: 0.3), value: isFocused)
-                }
-                .buttonStyle(PlainNoHighlightButtonStyle())
-                .focused($isFocused)
-                .padding(60)
+                Button("Skip \(segment.type.displayName)") { viewModel.skipCurrentSegment() }
+                    .padding(50)
             }
         }
-        .onAppear {
-            isFocused = true
+    }
+
+    private func showOverlay(_ overlay: PlayerOverlay) {
+        controlsHideTask?.cancel()
+        activeOverlay = overlay
+    }
+
+    private func togglePlayPause() {
+        guard let player = viewModel.player else { return }
+        if player.timeControlStatus == .playing { player.pause() } else { player.rate = currentSpeed }
+    }
+
+    private func seekTo(_ time: Double) {
+        viewModel.player?.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func formatTime(_ s: Double) -> String {
+        let t = Int(s), h = t / 3600, m = (t % 3600) / 60, sec = t % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
+    }
+
+    private func showControlsAndResetTimer() {
+        showControls = true
+        resetAutoHide()
+    }
+
+    private func resetAutoHide() {
+        controlsHideTask?.cancel()
+        controlsHideTask = Task {
+            try? await Task.sleep(for: .seconds(7))
+            if !Task.isCancelled && activeOverlay == nil {
+                hideControls()
+            }
+        }
+    }
+
+    private func hideControls() {
+        controlsHideTask?.cancel()
+        withAnimation(.easeOut(duration: 0.3)) {
+            showControls = false
         }
     }
 }
 
-#Preview {
-    PlayerView(item: BaseItemDto(
-        id: "test",
-        name: "Test Movie",
-        type: .movie,
-        seriesName: nil,
-        seriesId: nil,
-        seasonId: nil,
-        parentId: nil,
-        indexNumber: nil,
-        parentIndexNumber: nil,
-        overview: nil,
-        runTimeTicks: nil,
-        userData: nil,
-        imageTags: nil,
-        backdropImageTags: nil,
-        parentBackdropImageTags: nil,
-        primaryImageAspectRatio: nil,
-        mediaType: nil,
-        productionYear: nil,
-        communityRating: nil,
-        officialRating: nil,
-        genres: nil,
-        taglines: nil,
-        people: nil,
-        criticRating: nil,
-        premiereDate: nil,
-        chapters: nil,
-        path: nil
-    ))
+// MARK: - Invisible Button Style
+
+struct InvisibleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+// MARK: - Picker Row
+
+struct PickerRow: View {
+    let title: String
+    var subtitle: String?
+    var isSelected: Bool = false
+    var isFirstItem: Bool = false
+    var onExit: (() -> Void)?
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 26, weight: .medium)).foregroundStyle(.white)
+                    if let subtitle = subtitle {
+                        Text(subtitle).font(.system(size: 18)).foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark").font(.system(size: 22, weight: .bold)).foregroundStyle(SashimiTheme.accent)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(isFocused ? Color.white.opacity(0.2) : Color.clear)
+            .cornerRadius(10)
+        }
+        .buttonStyle(PickerRowButtonStyle())
+        .focused($isFocused)
+        .onExitCommand {
+            onExit?()
+        }
+        .onAppear {
+            if isFirstItem {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isFocused = true
+                }
+            }
+        }
+    }
+}
+
+struct PickerRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+    }
+}
+
+// MARK: - Up Next Content
+
+struct UpNextContent: View {
+    let nextEpisode: BaseItemDto
+    let onPlayNow: () -> Void
+    let onCancel: () -> Void
+    @State private var countdown = 10
+    @State private var task: Task<Void, Never>?
+
+    var body: some View {
+        HStack(spacing: 50) {
+            AsyncItemImage(itemId: nextEpisode.id, imageType: "Primary", maxWidth: 400)
+                .frame(width: 400, height: 225).clipShape(RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Up Next").font(.headline).foregroundStyle(SashimiTheme.accent)
+                if let s = nextEpisode.seriesName { Text(s).font(.title2).bold() }
+                Text(nextEpisode.name).font(.title3).foregroundStyle(.secondary)
+                if let sn = nextEpisode.parentIndexNumber, let ep = nextEpisode.indexNumber {
+                    Text(String(format: "S%d · E%d", sn, ep)).foregroundStyle(.tertiary)
+                }
+                HStack(spacing: 20) {
+                    Button("Play Now") { task?.cancel(); onPlayNow() }
+                    Button("Cancel") { task?.cancel(); onCancel() }
+                }.padding(.top, 20)
+                Text("Starting in \(countdown)s...").foregroundStyle(.secondary)
+            }
+        }.padding(60)
+        .onAppear {
+            countdown = 10
+            task = Task {
+                while countdown > 0 {
+                    try? await Task.sleep(for: .seconds(1)); if Task.isCancelled { return }; countdown -= 1
+                }
+                if !Task.isCancelled { onPlayNow() }
+            }
+        }
+        .onDisappear { task?.cancel() }
+    }
+}
+
+// MARK: - Supporting Views
+
+struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+    func makeUIView(context: Context) -> PlayerUIView { PlayerUIView(player: player) }
+    func updateUIView(_ uiView: PlayerUIView, context: Context) { uiView.player = player }
+}
+
+class PlayerUIView: UIView {
+    var player: AVPlayer? { get { playerLayer.player } set { playerLayer.player = newValue } }
+    var playerLayer: AVPlayerLayer {
+        // swiftlint:disable:next force_cast
+        layer as! AVPlayerLayer
+    }
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    init(player: AVPlayer) { super.init(frame: .zero); self.player = player; playerLayer.videoGravity = .resizeAspect }
+    override init(frame: CGRect) { super.init(frame: frame); playerLayer.videoGravity = .resizeAspect }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

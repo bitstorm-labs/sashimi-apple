@@ -100,8 +100,9 @@ final class ServerDiscovery: ObservableObject {
                             address: address,
                             port: Int(port.rawValue)
                         )
-                        if !self!.discoveredServers.contains(where: { $0.address == address && $0.port == server.port }) {
-                            self?.discoveredServers.append(server)
+                        if let strongSelf = self,
+                           !strongSelf.discoveredServers.contains(where: { $0.address == address && $0.port == server.port }) {
+                            strongSelf.discoveredServers.append(server)
                         }
                     }
                 }

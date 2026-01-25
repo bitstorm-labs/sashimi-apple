@@ -54,20 +54,26 @@ struct SmartPosterImage: View {
     }
 
     private func advanceToNext() {
-        // Try next image type for current item
-        if currentTypeIndex < imageTypes.count - 1 {
-            currentTypeIndex += 1
-            attemptId = UUID()
-            return
-        }
+        // Add small delay before fallback to allow slow images to load
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            await MainActor.run {
+                // Try next image type for current item
+                if currentTypeIndex < imageTypes.count - 1 {
+                    currentTypeIndex += 1
+                    attemptId = UUID()
+                    return
+                }
 
-        // Move to next item ID, reset to first image type
-        if currentIndex < itemIds.count - 1 {
-            currentIndex += 1
-            currentTypeIndex = 0
-            attemptId = UUID()
-        } else {
-            loadFailed = true
+                // Move to next item ID, reset to first image type
+                if currentIndex < itemIds.count - 1 {
+                    currentIndex += 1
+                    currentTypeIndex = 0
+                    attemptId = UUID()
+                } else {
+                    loadFailed = true
+                }
+            }
         }
     }
 

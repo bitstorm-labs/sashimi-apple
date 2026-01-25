@@ -62,27 +62,44 @@ struct MediaPosterButton: View {
         case .movie:
             return item.name
         case .series:
-            return item.name
+            return item.name.cleanedYouTubeTitle
         case .episode:
-            return item.seriesName ?? item.name
+            return (item.seriesName ?? item.name).cleanedYouTubeTitle
         default:
             return item.name
         }
     }
 
     private var subtitleText: String? {
-        if isLandscape, item.type == .episode {
-            // Show channel/series name for YouTube videos
-            return item.seriesName
+        // No subtitle for landscape (YouTube) - title only
+        if isLandscape {
+            return nil
         }
         return nil
+    }
+
+    private func formatDate(_ isoDate: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "M-d-yyyy"
+            return displayFormatter.string(from: date)
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "M-d-yyyy"
+            return displayFormatter.string(from: date)
+        }
+        return ""
     }
 
     // Fallback image IDs
     private var imageFallbackIds: [String] {
         var ids: [String] = []
         if isLandscape {
-            // Landscape mode: show item's own thumbnail first
+            // Landscape mode (YouTube): try item's thumbnail first, then series as last resort
             ids.append(item.id)
             if let seriesId = item.seriesId {
                 ids.append(seriesId)
@@ -105,7 +122,8 @@ struct MediaPosterButton: View {
     // Image types to try
     private var imageTypes: [String] {
         if isLandscape {
-            return ["Primary", "Thumb", "Backdrop"]
+            // For YouTube/landscape, try Thumb first (more likely to have video thumbnail)
+            return ["Thumb", "Primary", "Backdrop", "Screenshot"]
         }
         return ["Primary", "Thumb"]
     }
@@ -173,42 +191,38 @@ struct MediaPosterButton: View {
                         )
                         .frame(width: cardWidth, height: cardHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
 
-                    // Watched indicator (small corner checkmark)
-                    if item.userData?.played == true {
-                        VStack {
-                            HStack {
+                        // Watched indicator (small corner checkmark) - inside for non-circular
+                        if item.userData?.played == true {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 29))
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
+                                        .padding(6)
+                                }
                                 Spacer()
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(.green)
-                                    .background(
-                                        Circle()
-                                            .fill(.black.opacity(0.6))
-                                            .padding(-2)
-                                    )
-                                    .padding(6)
                             }
-                            Spacer()
                         }
-                    }
 
-                    // "X new" badge for multiple episodes
-                    if let count = badgeCount, count > 1 {
-                        VStack {
-                            HStack {
-                                Text("\(count) new")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(SashimiTheme.accent)
-                                    .clipShape(Capsule())
-                                    .padding(8)
+                        // "X new" badge for multiple episodes
+                        if let count = badgeCount, count > 1 {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    Text("\(count) new")
+                                        .font(.system(size: 19, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 11)
+                                        .padding(.vertical, 5)
+                                        .background(Color(red: 0.29, green: 0.55, blue: 0.73))
+                                        .clipShape(Capsule())
+                                        .padding(9)
+                                }
                                 Spacer()
                             }
-                            Spacer()
                         }
                     }
 
@@ -227,6 +241,16 @@ struct MediaPosterButton: View {
                 }
                 .frame(width: cardWidth, height: cardHeight)
                 .clipShape(isCircular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 12)))
+                // Watched indicator for circular images - outside the clip
+                .overlay(alignment: .topTrailing) {
+                    if isCircular && item.userData?.played == true {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 26))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
+                            .offset(x: -8, y: 8)
+                    }
+                }
                 .overlay(
                     Group {
                         if isCircular {
@@ -280,20 +304,6 @@ struct MediaPosterButton: View {
                 )
             }
 
-            // Add/remove from favorites
-            Button {
-                Task {
-                    await toggleFavorite()
-                }
-            } label: {
-                Label(
-                    item.userData?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites",
-                    systemImage: item.userData?.isFavorite == true ? "heart.slash" : "heart"
-                )
-            }
-
-            Divider()
-
             // Refresh metadata
             Button {
                 Task {
@@ -324,20 +334,6 @@ struct MediaPosterButton: View {
         }
     }
 
-    private func toggleFavorite() async {
-        do {
-            if item.userData?.isFavorite == true {
-                try await JellyfinClient.shared.removeFavorite(itemId: item.id)
-                ToastManager.shared.show("Removed from favorites", type: .success)
-            } else {
-                try await JellyfinClient.shared.markFavorite(itemId: item.id)
-                ToastManager.shared.show("Added to favorites", type: .success)
-            }
-        } catch {
-            ToastManager.shared.show("Failed to update favorites")
-        }
-    }
-
     private func refreshMetadata() async {
         do {
             try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
@@ -359,10 +355,14 @@ struct MarqueeText: View {
     let isScrolling: Bool
     var height: CGFloat = 28
     var alignment: HorizontalAlignment = .leading
+    var startDelay: Double = 0.5
+    var pingPong: Bool = false
 
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
+    @State private var scrollDirection: Bool = true // true = left, false = right
+    @State private var animationTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func baseOffset(for containerWidth: CGFloat) -> CGFloat {
@@ -376,6 +376,10 @@ struct MarqueeText: View {
         default:
             return 0
         }
+    }
+
+    private var scrollAmount: CGFloat {
+        max(0, textWidth - containerWidth + 20)
     }
 
     var body: some View {
@@ -398,18 +402,51 @@ struct MarqueeText: View {
                     // Skip animation if Reduce Motion is enabled
                     guard !reduceMotion else { return }
 
+                    animationTask?.cancel()
+
                     if scrolling && needsScroll {
-                        withAnimation(.linear(duration: Double(textWidth - containerWidth) / 30).delay(0.5)) {
-                            offset = -(textWidth - containerWidth + 20)
+                        if pingPong {
+                            animationTask = Task {
+                                await startPingPongAnimation()
+                            }
+                        } else {
+                            withAnimation(.linear(duration: Double(scrollAmount) / 30).delay(startDelay)) {
+                                offset = -scrollAmount
+                            }
                         }
                     } else {
                         withAnimation(.easeOut(duration: 0.3)) {
                             offset = 0
                         }
+                        scrollDirection = true
                     }
                 }
         }
         .frame(height: height)
         .clipped()
+    }
+
+    @MainActor
+    private func startPingPongAnimation() async {
+        // Initial delay
+        try? await Task.sleep(for: .milliseconds(Int(startDelay * 1000)))
+
+        while !Task.isCancelled {
+            let duration = Double(scrollAmount) / 30
+
+            // Scroll left
+            withAnimation(.linear(duration: duration)) {
+                offset = -scrollAmount
+            }
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 800))
+
+            guard !Task.isCancelled else { break }
+
+            // Scroll right (back)
+            withAnimation(.linear(duration: duration)) {
+                offset = 0
+            }
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 800))
+        }
     }
 }

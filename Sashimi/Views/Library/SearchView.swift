@@ -106,17 +106,15 @@ struct SearchView: View {
             do {
                 let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: item.id)
                 // Check if any ancestor has "youtube" in the name (the library folder)
-                for ancestor in ancestors {
-                    if ancestor.name.lowercased().contains("youtube") {
-                        // Mark this item as YouTube
-                        youtubeItemIds.insert(item.id)
-                        // Store the ancestor's ID for future matches
-                        youtubeLibraryIds.insert(ancestor.id)
-                        if let parentId = item.parentId {
-                            youtubeLibraryIds.insert(parentId)
-                        }
-                        break
+                for ancestor in ancestors where ancestor.name.lowercased().contains("youtube") {
+                    // Mark this item as YouTube
+                    youtubeItemIds.insert(item.id)
+                    // Store the ancestor's ID for future matches
+                    youtubeLibraryIds.insert(ancestor.id)
+                    if let parentId = item.parentId {
+                        youtubeLibraryIds.insert(parentId)
                     }
+                    break
                 }
             } catch {
                 // Ignore - ancestors might not be accessible

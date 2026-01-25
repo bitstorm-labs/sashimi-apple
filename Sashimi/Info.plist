@@ -8,6 +8,20 @@
 	<string>Sashimi</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<array>
+			<string>CatIcon</string>
+			<string>ChopsticksIcon</string>
+			<string>WhitefishIcon</string>
+			<string>FoxIcon</string>
+			<string>PandaIcon</string>
+			<string>RacoonIcon</string>
+			<string>ShrimpIcon</string>
+			<string>TunaIcon</string>
+		</array>
+	</dict>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>

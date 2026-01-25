@@ -2,8 +2,14 @@ import SwiftUI
 
 struct ContinueWatchingRow: View {
     let items: [BaseItemDto]
+    var libraryNames: [String: String] = [:]  // Item ID -> Library name mapping
     let onSelect: (BaseItemDto) -> Void
     var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
+
+    private func isYouTube(_ item: BaseItemDto) -> Bool {
+        guard let libraryName = libraryNames[item.id] else { return false }
+        return libraryName.lowercased().contains("youtube")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -17,6 +23,7 @@ struct ContinueWatchingRow: View {
                     ForEach(items) { item in
                         ContinueWatchingCard(
                             item: item,
+                            isYouTube: isYouTube(item),
                             onSelect: { onSelect(item) },
                             onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
                         )
@@ -31,6 +38,7 @@ struct ContinueWatchingRow: View {
 
 struct ContinueWatchingCard: View {
     let item: BaseItemDto
+    var isYouTube: Bool = false  // Whether this is YouTube content
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
@@ -77,18 +85,40 @@ struct ContinueWatchingCard: View {
         case .movie, .video:
             return item.name
         case .series:
-            return item.name
+            return item.name.cleanedYouTubeTitle
         case .episode:
-            return item.seriesName ?? item.name
+            return (item.seriesName ?? item.name).cleanedYouTubeTitle
         default:
             return item.name
         }
     }
 
     private var episodeInfoString: String {
+        // For YouTube, show date instead of S/E
+        if isYouTube, let dateStr = item.premiereDate {
+            return "\(formatDate(dateStr)) - \(item.name)"
+        }
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season):E\(episode) - \(item.name)"
+    }
+
+    private func formatDate(_ isoDate: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "M-d-yyyy"
+            return displayFormatter.string(from: date)
+        }
+        // Try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: isoDate) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "M-d-yyyy"
+            return displayFormatter.string(from: date)
+        }
+        return ""
     }
 
     var body: some View {
@@ -146,10 +176,13 @@ struct ContinueWatchingCard: View {
                     .foregroundStyle(SashimiTheme.textPrimary)
 
                     if item.type == .episode {
-                        Text(episodeInfoString)
-                            .font(.system(size: 20))
-                            .foregroundStyle(SashimiTheme.textSecondary)
-                            .lineLimit(1)
+                        MarqueeText(
+                            text: episodeInfoString,
+                            isScrolling: isFocused,
+                            height: 26
+                        )
+                        .font(.system(size: 20))
+                        .foregroundStyle(SashimiTheme.textSecondary)
                     } else if let year = item.productionYear {
                         Text(String(year))
                             .font(.system(size: 20))

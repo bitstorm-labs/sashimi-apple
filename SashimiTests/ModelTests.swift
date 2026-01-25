@@ -95,7 +95,8 @@ final class ModelTests: XCTestCase {
             playCount: 0,
             isFavorite: false,
             played: false,
-            lastPlayedDate: nil
+            lastPlayedDate: nil,
+            unplayedItemCount: nil
         )
 
         let item = BaseItemDto(

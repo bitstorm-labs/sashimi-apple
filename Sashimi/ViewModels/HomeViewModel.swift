@@ -5,6 +5,7 @@ import TVServices
 @MainActor
 final class HomeViewModel: ObservableObject {
     @Published var continueWatchingItems: [BaseItemDto] = []
+    @Published var continueWatchingLibraryNames: [String: String] = [:]  // itemId -> libraryName
     @Published var recentlyAddedItems: [BaseItemDto] = []
     @Published var heroItems: [BaseItemDto] = []
     @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
@@ -13,7 +14,19 @@ final class HomeViewModel: ObservableObject {
     @Published var error: Error?
 
     private let client = JellyfinClient.shared
-    private let appGroupIdentifier = "group.com.sashimi.app"
+    private let appGroupIdentifier = "group.com.mondominator.sashimi"
+
+    private let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private let dateFormatterNoFraction: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     func loadContent() async {
         isLoading = true
@@ -31,10 +44,8 @@ final class HomeViewModel: ObservableObject {
             recentlyAddedItems = latest
             libraries = libs.filter { isMediaLibrary($0) }
 
-            // Save continue watching items for TopShelf extension
             saveContinueWatchingForTopShelf()
-
-            // Load latest 5 from each library for hero rotation
+            await loadContinueWatchingLibraryNames()
             await loadHeroItems()
         } catch {
             self.error = error
@@ -43,16 +54,36 @@ final class HomeViewModel: ObservableObject {
         isLoading = false
     }
 
+    private func loadContinueWatchingLibraryNames() async {
+        var libraryNames: [String: String] = [:]
+
+        let seriesIds = Set(continueWatchingItems.compactMap { item -> String? in
+            if item.type == .episode { return item.seriesId }
+            return item.id
+        })
+
+        for seriesId in seriesIds {
+            do {
+                let ancestors = try await client.getItemAncestors(itemId: seriesId)
+                if let library = ancestors.first(where: { $0.type == .collectionFolder }) {
+                    for item in continueWatchingItems {
+                        if item.seriesId == seriesId || item.id == seriesId {
+                            libraryNames[item.id] = library.name
+                        }
+                    }
+                }
+            } catch { }
+        }
+
+        continueWatchingLibraryNames = libraryNames
+    }
+
     private func saveContinueWatchingForTopShelf() {
         guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
               let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return }
 
         let items: [[String: Any]] = continueWatchingItems.prefix(10).compactMap { item in
-            // Check if parent series has backdrop images (regular shows have it, YouTube doesn't)
             let seriesHasBackdrop = item.parentBackdropImageTags?.isEmpty == false
-
-            // For episodes with backdrops (regular shows), use series backdrop
-            // For episodes without backdrops (YouTube), use episode's own thumbnail
             let imageId: String
             let imageType: String
 
@@ -69,9 +100,7 @@ final class HomeViewModel: ObservableObject {
             }
 
             let imageURLString = "\(serverURL)/Items/\(imageId)/Images/\(imageType)?maxWidth=1920"
-            guard let imageURL = URL(string: imageURLString) else {
-                return nil
-            }
+            guard let imageURL = URL(string: imageURLString) else { return nil }
 
             var subtitle = ""
             if item.type == .episode {
@@ -94,8 +123,6 @@ final class HomeViewModel: ObservableObject {
         }
 
         defaults.set(items, forKey: "continueWatchingItems")
-
-        // Notify TopShelf to reload
         TVTopShelfContentProvider.topShelfContentDidChange()
     }
 
@@ -110,12 +137,9 @@ final class HomeViewModel: ObservableObject {
                     libraryNames[item.id] = library.name
                 }
                 allHeroItems.append(contentsOf: items)
-            } catch {
-                // Silently ignore hero items loading failures - not critical
-            }
+            } catch { }
         }
 
-        // Shuffle the combined items
         heroItems = allHeroItems.shuffled()
         heroItemLibraryNames = libraryNames
     }
@@ -125,58 +149,60 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
-        // Both APIs return items in correct order:
-        // - Resume: sorted by DatePlayed descending (most recently watched first)
-        // - NextUp: sorted by series last activity (most recently active series first)
+        // Both APIs return items sorted by activity:
+        // - Resume: by DatePlayed descending (most recently played partial episode first)
+        // - NextUp: by series activity (most recently finished series first)
         //
-        // Strategy: Interleave based on lastPlayedDate where available,
-        // falling back to original API position for NextUp items without dates
+        // Strategy: Merge using a two-pointer approach, comparing dates.
+        // For Resume items: use their lastPlayedDate
+        // For NextUp items: use current time based on position (trust the API order)
 
-        // Tag items with their source and original index for stable sorting
-        struct TaggedItem {
-            let item: BaseItemDto
-            let isResume: Bool
-            let originalIndex: Int
+        let now = Date()
+
+        // Get effective dates for Resume items
+        let resumeDates: [Date] = resume.map { item in
+            parseDate(item.userData?.lastPlayedDate) ?? now
         }
 
-        let taggedResume = resume.enumerated().map { TaggedItem(item: $0.element, isResume: true, originalIndex: $0.offset) }
-        let taggedNextUp = nextUp.enumerated().map { TaggedItem(item: $0.element, isResume: false, originalIndex: $0.offset) }
-        let allTagged = taggedResume + taggedNextUp
-
-        // Sort: items with lastPlayedDate first (by date), then items without (by original order)
-        let sorted = allTagged.sorted { a, b in
-            let dateA = parseDate(a.item.userData?.lastPlayedDate)
-            let dateB = parseDate(b.item.userData?.lastPlayedDate)
-
-            switch (dateA, dateB) {
-            case (.some(let d1), .some(let d2)):
-                return d1 > d2  // Both have dates: most recent first
-            case (.some, .none):
-                return true  // Item with date comes before item without
-            case (.none, .some):
-                return false  // Item without date comes after item with
-            case (.none, .none):
-                // Neither has date (both NextUp): use original API order
-                // Resume items should come first, then NextUp in API order
-                if a.isResume != b.isResume {
-                    return a.isResume  // Resume before NextUp
-                }
-                return a.originalIndex < b.originalIndex  // Preserve API order
-            }
+        // For NextUp, assign dates based on position: first item = now, each subsequent = 1 second earlier
+        // This trusts the NextUp API's sorting by series activity
+        let nextUpDates: [Date] = nextUp.indices.map { index in
+            now.addingTimeInterval(-Double(index))
         }
 
-        // Deduplicate: only keep the most recent episode per series (or movie)
-        var seenIds = Set<String>()
-        var seenSeriesIds = Set<String>()
+        // Merge the two sorted lists
         var merged: [BaseItemDto] = []
+        var seenSeriesIds = Set<String>()
+        var seenIds = Set<String>()
 
-        for tagged in sorted {
-            let item = tagged.item
+        var resumeIdx = 0
+        var nextUpIdx = 0
 
-            // Skip if we've already seen this exact item
+        while resumeIdx < resume.count || nextUpIdx < nextUp.count {
+            let useResume: Bool
+
+            if resumeIdx >= resume.count {
+                useResume = false
+            } else if nextUpIdx >= nextUp.count {
+                useResume = true
+            } else {
+                // Compare dates - take the more recent one
+                useResume = resumeDates[resumeIdx] >= nextUpDates[nextUpIdx]
+            }
+
+            let item: BaseItemDto
+            if useResume {
+                item = resume[resumeIdx]
+                resumeIdx += 1
+            } else {
+                item = nextUp[nextUpIdx]
+                nextUpIdx += 1
+            }
+
+            // Skip duplicates
             guard !seenIds.contains(item.id) else { continue }
 
-            // For episodes, dedupe by series - only keep the most recent episode per series
+            // Skip if we already have an item from this series
             if let seriesId = item.seriesId {
                 guard !seenSeriesIds.contains(seriesId) else { continue }
                 seenSeriesIds.insert(seriesId)
@@ -184,21 +210,19 @@ final class HomeViewModel: ObservableObject {
 
             seenIds.insert(item.id)
             merged.append(item)
+
+            if merged.count >= 20 { break }
         }
 
-        return Array(merged.prefix(20))
+        return merged
     }
 
     private func parseDate(_ dateString: String?) -> Date? {
         guard let dateString else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: dateString) {
+        if let date = dateFormatter.date(from: dateString) {
             return date
         }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: dateString)
+        return dateFormatterNoFraction.date(from: dateString)
     }
 
     private func isMediaLibrary(_ library: JellyfinLibrary) -> Bool {

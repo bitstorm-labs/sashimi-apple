@@ -10,6 +10,14 @@ struct SashimiApp: App {
 
     init() {
         configureAudioSession()
+        resetAppIconToDefault()
+    }
+
+    private func resetAppIconToDefault() {
+        // Reset to default icon in case a previous alternate icon attempt left it broken
+        if UIApplication.shared.alternateIconName != nil {
+            UIApplication.shared.setAlternateIconName(nil) { _ in }
+        }
     }
 
     private func configureAudioSession() {
