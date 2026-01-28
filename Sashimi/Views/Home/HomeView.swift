@@ -161,7 +161,7 @@ struct HomeView: View {
                             selectedItem = item
                         }
                     )
-                    .padding(.top, 20)
+                    .padding(.top, 2)
                     .focusSection()
                 }
             case .continueWatching:
@@ -258,13 +258,13 @@ struct HeroSection: View {
         return ids
     }
 
-    // Image types for hero - YouTube uses Banner, others use Backdrop
+    // Image types for hero - YouTube uses Banner, others use Backdrop only (no poster fallback)
     private var heroImageTypes: [String] {
         if isYouTubeContent {
             // YouTube series have banner.jpg stored as Banner image type
             return ["Banner", "Backdrop", "Art", "Thumb"]
         }
-        return ["Backdrop", "Art", "Thumb", "Primary"]
+        return ["Backdrop", "Art", "Thumb"]
     }
 
     // Display title (channel/series name for episodes, item name for movies)
@@ -308,46 +308,65 @@ struct HeroSection: View {
         } label: {
             GeometryReader { geometry in
                 ZStack(alignment: .bottomLeading) {
-                    // Full-width backdrop image
-                    SmartPosterImage(
-                        itemIds: heroFallbackIds,
-                        maxWidth: 3840,
-                        imageTypes: heroImageTypes,
-                        contentMode: .fill
-                    )
-                    .id(currentItem.id)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.6), value: currentItem.id)
+                    // Background color
+                    SashimiTheme.background
 
-                    // Bottom gradient - Netflix style fade
+                    // Backdrop image positioned on the right with soft left edge
+                    HStack(spacing: 0) {
+                        Spacer()
+                        SmartPosterImage(
+                            itemIds: heroFallbackIds,
+                            maxWidth: 3840,
+                            imageTypes: heroImageTypes,
+                            contentMode: .fill
+                        )
+                        .id(currentItem.id)
+                        .frame(width: geometry.size.width * 0.7, height: geometry.size.height)
+                        .clipped()
+                        .mask(
+                            HStack(spacing: 0) {
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: .white, location: 1.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: 80)
+                                Rectangle().fill(.white)
+                            }
+                        )
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.6), value: currentItem.id)
+                    }
+
+                    // Left side gradient for text area
+                    HStack(spacing: 0) {
+                        LinearGradient(
+                            stops: [
+                                .init(color: SashimiTheme.background, location: 0.0),
+                                .init(color: SashimiTheme.background, location: 0.85),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: geometry.size.width * 0.35)
+                        Spacer()
+                    }
+
+                    // Bottom gradient
                     LinearGradient(
                         stops: [
                             .init(color: .clear, location: 0.0),
-                            .init(color: .clear, location: 0.3),
-                            .init(color: SashimiTheme.background.opacity(0.4), location: 0.5),
-                            .init(color: SashimiTheme.background.opacity(0.85), location: 0.75),
+                            .init(color: .clear, location: 0.4),
+                            .init(color: SashimiTheme.background.opacity(0.6), location: 0.7),
                             .init(color: SashimiTheme.background, location: 1.0)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-
-                    // Left side gradient for text readability
-                    HStack {
-                        LinearGradient(
-                            colors: [
-                                SashimiTheme.background.opacity(0.9),
-                                SashimiTheme.background.opacity(0.6),
-                                .clear
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: 600)
-                        Spacer()
-                    }
 
                     // Content overlay
                     VStack(alignment: .leading, spacing: 20) {
@@ -460,7 +479,7 @@ struct HeroSection: View {
                     .padding(.bottom, 50)
                 }
             }
-            .frame(height: 380)
+            .aspectRatio(32/9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 24))
             .overlay(
                 RoundedRectangle(cornerRadius: 24)
