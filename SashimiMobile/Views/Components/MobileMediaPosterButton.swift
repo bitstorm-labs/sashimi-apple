@@ -1,28 +1,27 @@
 import SwiftUI
 import NukeUI
 
-struct MobileMediaPosterButton: View {
+// MARK: - Poster Card (View only, no button behavior)
+
+struct MobilePosterCard: View {
     let item: BaseItemDto
     let width: CGFloat
     let showTitle: Bool
     let showProgress: Bool
     let libraryName: String?
-    let onSelect: () -> Void
 
     init(
         item: BaseItemDto,
         width: CGFloat = MobileSizing.posterWidth,
         showTitle: Bool = true,
         showProgress: Bool = true,
-        libraryName: String? = nil,
-        onSelect: @escaping () -> Void
+        libraryName: String? = nil
     ) {
         self.item = item
         self.width = width
         self.showTitle = showTitle
         self.showProgress = showProgress
         self.libraryName = libraryName
-        self.onSelect = onSelect
     }
 
     private var height: CGFloat {
@@ -48,34 +47,28 @@ struct MobileMediaPosterButton: View {
     }
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: MobileSpacing.xs) {
-                // Poster image
-                ZStack(alignment: .bottomLeading) {
-                    posterImage
+        VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+            // Poster image
+            ZStack(alignment: .bottomLeading) {
+                posterImage
 
-                    // Progress bar overlay
-                    if showProgress, item.progressPercent > 0 {
-                        progressBar
-                    }
-
-                    // Unplayed badge
-                    if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount > 0 {
-                        unplayedBadge(count: unplayedCount)
-                    }
+                // Progress bar overlay
+                if showProgress, item.progressPercent > 0 {
+                    progressBar
                 }
-                .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
 
-                // Title
-                if showTitle {
-                    titleText
+                // Unplayed badge
+                if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount > 0 {
+                    unplayedBadge(count: unplayedCount)
                 }
             }
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            contextMenuItems
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+
+            // Title
+            if showTitle {
+                titleText
+            }
         }
     }
 
@@ -193,6 +186,49 @@ struct MobileMediaPosterButton: View {
             return nil
         default:
             return nil
+        }
+    }
+}
+
+// MARK: - Poster Button (for standalone use with tap action)
+
+struct MobileMediaPosterButton: View {
+    let item: BaseItemDto
+    let width: CGFloat
+    let showTitle: Bool
+    let showProgress: Bool
+    let libraryName: String?
+    let onSelect: () -> Void
+
+    init(
+        item: BaseItemDto,
+        width: CGFloat = MobileSizing.posterWidth,
+        showTitle: Bool = true,
+        showProgress: Bool = true,
+        libraryName: String? = nil,
+        onSelect: @escaping () -> Void
+    ) {
+        self.item = item
+        self.width = width
+        self.showTitle = showTitle
+        self.showProgress = showProgress
+        self.libraryName = libraryName
+        self.onSelect = onSelect
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            MobilePosterCard(
+                item: item,
+                width: width,
+                showTitle: showTitle,
+                showProgress: showProgress,
+                libraryName: libraryName
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            contextMenuItems
         }
     }
 

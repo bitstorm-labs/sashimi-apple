@@ -3,6 +3,7 @@ import NukeUI
 
 struct MobileDetailView: View {
     let item: BaseItemDto
+    @State private var playingItem: BaseItemDto?
 
     var body: some View {
         ScrollView {
@@ -34,6 +35,7 @@ struct MobileDetailView: View {
         .navigationTitle(item.name ?? "Details")
         .navigationBarTitleDisplayMode(.inline)
         .background(MobileColors.background)
+        .fullScreenPlayer(item: $playingItem)
     }
 
     private var heroSection: some View {
@@ -102,7 +104,7 @@ struct MobileDetailView: View {
         HStack(spacing: MobileSpacing.md) {
             // Play button
             Button {
-                // Will be implemented with player
+                playingItem = item
             } label: {
                 Label(item.userData?.playbackPositionTicks ?? 0 > 0 ? "Resume" : "Play", systemImage: "play.fill")
                     .font(MobileTypography.title)
