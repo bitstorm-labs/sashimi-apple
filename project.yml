@@ -136,9 +136,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: SashimiMobile/SashimiMobile.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.mondominator.sashimi
     dependencies:
       - package: Nuke
         products:
