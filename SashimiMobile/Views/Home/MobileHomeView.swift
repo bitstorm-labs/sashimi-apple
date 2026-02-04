@@ -5,67 +5,17 @@ struct MobileHomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
                 if viewModel.isLoading && viewModel.continueWatchingItems.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 200)
+                    loadingView
                 } else {
-                    // Continue Watching Section
-                    if !viewModel.continueWatchingItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Continue Watching")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 16) {
-                                    ForEach(viewModel.continueWatchingItems, id: \.id) { item in
-                                        PlaceholderCard(item: item)
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                        }
-                    }
-
-                    // Recently Added Section
-                    if !viewModel.recentlyAddedItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Recently Added")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 16) {
-                                    ForEach(viewModel.recentlyAddedItems, id: \.id) { item in
-                                        PlaceholderCard(item: item)
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                        }
-                    }
-
-                    // Library Sections
-                    ForEach(viewModel.libraries, id: \.id) { library in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(library.name)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-
-                            Text("Library content coming soon")
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal)
-                        }
-                    }
+                    contentView
                 }
             }
-            .padding(.vertical)
+            .padding(.vertical, MobileSpacing.md)
         }
         .navigationTitle("Home")
+        .background(MobileColors.background)
         .refreshable {
             await viewModel.loadContent()
         }
@@ -73,27 +23,61 @@ struct MobileHomeView: View {
             await viewModel.loadContent()
         }
     }
-}
 
-// Temporary placeholder card until we build the real components
-private struct PlaceholderCard: View {
-    let item: BaseItemDto
+    private var loadingView: some View {
+        ProgressView()
+            .frame(maxWidth: .infinity, minHeight: 300)
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 150, height: 225)
-                .overlay {
-                    Image(systemName: "photo")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                }
-
-            Text(item.name ?? "Unknown")
-                .font(.caption)
-                .lineLimit(2)
-                .frame(width: 150, alignment: .leading)
+    @ViewBuilder
+    private var contentView: some View {
+        // Continue Watching Section
+        if !viewModel.continueWatchingItems.isEmpty {
+            MobileMediaRow(
+                title: "Continue Watching",
+                items: viewModel.continueWatchingItems,
+                cardWidth: MobileSizing.continueWatchingWidth,
+                showProgress: true
+            ) { item in
+                MobileDetailView(item: item)
+            }
         }
+
+        // Recently Added Section
+        if !viewModel.recentlyAddedItems.isEmpty {
+            MobileMediaRow(
+                title: "Recently Added",
+                items: viewModel.recentlyAddedItems,
+                showProgress: false
+            ) { item in
+                MobileDetailView(item: item)
+            }
+        }
+
+        // Hero Items Section (if available)
+        if !viewModel.heroItems.isEmpty {
+            MobileMediaRow(
+                title: "Featured",
+                items: viewModel.heroItems,
+                cardWidth: MobileSizing.landscapeCardWidth,
+                showProgress: false
+            ) { item in
+                MobileDetailView(item: item)
+            }
+        }
+
+        // Libraries placeholder
+        if viewModel.continueWatchingItems.isEmpty && viewModel.recentlyAddedItems.isEmpty {
+            emptyStateView
+        }
+    }
+
+    private var emptyStateView: some View {
+        ContentUnavailableView(
+            "No Content",
+            systemImage: "tv",
+            description: Text("Start watching something to see it here.")
+        )
+        .frame(maxWidth: .infinity, minHeight: 300)
     }
 }
