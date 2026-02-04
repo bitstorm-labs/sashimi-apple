@@ -1,6 +1,8 @@
 import Foundation
 import Combine
+#if os(tvOS)
 import TVServices
+#endif
 
 @MainActor
 final class HomeViewModel: ObservableObject {
@@ -123,7 +125,9 @@ final class HomeViewModel: ObservableObject {
         }
 
         defaults.set(items, forKey: "continueWatchingItems")
+        #if os(tvOS)
         TVTopShelfContentProvider.topShelfContentDidChange()
+        #endif
     }
 
     private func loadHeroItems() async {

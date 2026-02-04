@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.sashimi
   deploymentTarget:
     tvOS: "17.0"
+    iOS: "17.0"
   xcodeVersion: "15.0"
   defaultConfig: Release
 
@@ -19,6 +20,13 @@ schemes:
       targets:
         - SashimiTests
 
+  SashimiMobile:
+    build:
+      targets:
+        SashimiMobile: all
+    run:
+      config: Release
+
 targets:
   Sashimi:
     type: application
@@ -33,6 +41,9 @@ targets:
           - "CatIcon@2x.png"
           - "ChopsticksIcon.png"
           - "ChopsticksIcon@2x.png"
+      - path: Shared
+        excludes:
+          - "**/.DS_Store"
     info:
       path: Sashimi/Info.plist
       properties:
@@ -81,6 +92,59 @@ targets:
     dependencies:
       - target: TopShelf
 
+  SashimiMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: SashimiMobile
+        excludes:
+          - "**/.DS_Store"
+      - path: Shared
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: SashimiMobile/Info.plist
+      properties:
+        CFBundleDisplayName: Sashimi
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - sashimi
+            CFBundleURLName: com.mondominator.sashimi.mobile
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        UIRequiresFullScreen: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.mobile
+        MARKETING_VERSION: 1.0.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 5.9
+        SDKROOT: iphoneos
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: false
+        TARGETED_DEVICE_FAMILY: "2"
+        DEVELOPMENT_TEAM: S6WU9SVVDW
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_SKIP_APP_STORE_DEPLOYMENT: NO
+        ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: SashimiMobile/SashimiMobile.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.mondominator.sashimi
+    dependencies:
+      - package: Nuke
+        products:
+          - Nuke
+          - NukeUI
+
   TopShelf:
     type: app-extension
     platform: tvOS
@@ -120,6 +184,9 @@ targets:
       - path: SashimiTests
         excludes:
           - "**/.DS_Store"
+      - path: Shared
+        excludes:
+          - "**/.DS_Store"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.tests
@@ -133,3 +200,8 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: Sashimi
+
+packages:
+  Nuke:
+    url: https://github.com/kean/Nuke.git
+    from: "12.0.0"

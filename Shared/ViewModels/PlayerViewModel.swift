@@ -666,6 +666,7 @@ final class PlayerViewModel: ObservableObject {
     // MARK: - Chapter Navigation
 
     private func setupChapterMarkers(on playerItem: AVPlayerItem, chapters: [ChapterInfo], duration: Double) {
+        #if os(tvOS)
         guard !chapters.isEmpty else { return }
 
         var timedGroups: [AVTimedMetadataGroup] = []
@@ -694,6 +695,10 @@ final class PlayerViewModel: ObservableObject {
         // nil title = chapter markers (vs event markers)
         let markerGroup = AVNavigationMarkersGroup(title: nil, timedNavigationMarkers: timedGroups)
         playerItem.navigationMarkerGroups = [markerGroup]
+        #else
+        // Chapter markers are tvOS-only; iOS uses AVPlayerViewController's built-in chapter UI
+        _ = (playerItem, chapters, duration)
+        #endif
     }
 
     // MARK: - Remote Control Commands (Bluetooth headsets)
