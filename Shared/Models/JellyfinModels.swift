@@ -316,7 +316,7 @@ struct PersonInfo: Codable, Identifiable, Hashable {
     }
 }
 
-struct JellyfinLibrary: Codable, Identifiable {
+struct JellyfinLibrary: Codable, Identifiable, Equatable {
     let id: String
     let name: String
     let collectionType: String?

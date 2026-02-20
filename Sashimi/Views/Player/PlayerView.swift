@@ -17,6 +17,7 @@ struct PlayerView: View {
     @State private var overlayClosedAt: Date?
 
     @FocusState private var hiddenControlsFocused: Bool
+    @FocusState private var skipButtonFocused: Bool
 
     enum PlayerOverlay: Hashable {
         case subtitles, chapters, speed, quality
@@ -231,8 +232,12 @@ struct PlayerView: View {
             HStack {
                 Spacer()
                 Button("Skip \(segment.type.displayName)") { viewModel.skipCurrentSegment() }
+                    .focused($skipButtonFocused)
                     .padding(50)
             }
+        }
+        .onAppear {
+            skipButtonFocused = true
         }
     }
 

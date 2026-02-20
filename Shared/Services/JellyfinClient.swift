@@ -125,7 +125,11 @@ actor JellyfinClient {
     private var userId: String?
 
     private let deviceId: String
+    #if os(tvOS)
     private let deviceName = "Sashimi tvOS"
+    #else
+    private let deviceName = "Sashimi iOS"
+    #endif
     private let clientName = "Sashimi"
     private let clientVersion = "1.0.0"
 
