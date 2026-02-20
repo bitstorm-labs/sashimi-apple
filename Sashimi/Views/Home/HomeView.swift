@@ -566,7 +566,7 @@ struct RecentlyAddedLibraryRow: View {
     @State private var loadError = false
 
     private var sectionTitle: String {
-        "Recently Added \(library.name)"
+        "Recently Added \(library.name)".cleanedYouTubeTitle
     }
 
     // Detect YouTube library by name
@@ -588,7 +588,7 @@ struct RecentlyAddedLibraryRow: View {
                         .tint(SashimiTheme.accent)
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else if loadError {
                 HStack {
                     Spacer()
@@ -607,7 +607,7 @@ struct RecentlyAddedLibraryRow: View {
                     }
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else if items.isEmpty {
                 HStack {
                     Spacer()
@@ -616,7 +616,7 @@ struct RecentlyAddedLibraryRow: View {
                         .foregroundStyle(SashimiTheme.textTertiary)
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
@@ -628,7 +628,7 @@ struct RecentlyAddedLibraryRow: View {
                                 item: item,
                                 libraryType: library.collectionType,
                                 libraryName: library.name,
-                                isLandscape: isYouTubeLibrary,
+                                isCircular: isYouTubeLibrary,
                                 badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
                             ) {
                                 onSelect(item)
