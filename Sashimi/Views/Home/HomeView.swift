@@ -237,11 +237,9 @@ struct HeroSection: View {
     private var heroFallbackIds: [String] {
         var ids: [String] = []
         if currentItem.type == .episode {
-            // For YouTube: only use series banner, don't fall back to episode thumbnail
+            // For YouTube: use episode thumbnail
             if isYouTubeContent {
-                if let seriesId = currentItem.seriesId {
-                    ids.append(seriesId)
-                }
+                ids.append(currentItem.id)
             } else {
                 // For regular episodes: try series first for high-res backdrop
                 if let seriesId = currentItem.seriesId {
@@ -258,11 +256,11 @@ struct HeroSection: View {
         return ids
     }
 
-    // Image types for hero - YouTube uses Banner, others use Backdrop only (no poster fallback)
+    // Image types for hero - YouTube uses episode thumbnail, others use Backdrop
     private var heroImageTypes: [String] {
         if isYouTubeContent {
-            // YouTube series have banner.jpg stored as Banner image type
-            return ["Banner", "Backdrop", "Art", "Thumb"]
+            // YouTube episodes have thumbnails as Primary or Thumb
+            return ["Primary", "Thumb", "Backdrop"]
         }
         return ["Backdrop", "Art", "Thumb"]
     }
@@ -318,25 +316,21 @@ struct HeroSection: View {
                             itemIds: heroFallbackIds,
                             maxWidth: 3840,
                             imageTypes: heroImageTypes,
-                            contentMode: .fill
+                            contentMode: .fit
                         )
                         .id(currentItem.id)
-                        .frame(width: geometry.size.width * 0.7, height: geometry.size.height)
-                        .clipped()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .mask(
-                            HStack(spacing: 0) {
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: .clear, location: 0.0),
-                                        .init(color: .white, location: 1.0)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                                .frame(width: 80)
-                                Rectangle().fill(.white)
-                            }
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0.0),
+                                    .init(color: .white, location: 0.25)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
+                        .frame(width: geometry.size.width * 0.7, height: geometry.size.height)
                         .transition(.opacity)
                         .animation(.easeInOut(duration: 0.6), value: currentItem.id)
                     }
@@ -474,9 +468,10 @@ struct HeroSection: View {
                             }
                             .padding(.top, 16)
                         }
+
+                        Spacer()
                     }
                     .padding(.horizontal, 80)
-                    .padding(.bottom, 50)
                 }
             }
             .aspectRatio(32/9, contentMode: .fit)
@@ -571,7 +566,7 @@ struct RecentlyAddedLibraryRow: View {
     @State private var loadError = false
 
     private var sectionTitle: String {
-        "Recently Added \(library.name)"
+        "Recently Added \(library.name)".cleanedYouTubeTitle
     }
 
     // Detect YouTube library by name
@@ -593,7 +588,7 @@ struct RecentlyAddedLibraryRow: View {
                         .tint(SashimiTheme.accent)
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else if loadError {
                 HStack {
                     Spacer()
@@ -612,7 +607,7 @@ struct RecentlyAddedLibraryRow: View {
                     }
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else if items.isEmpty {
                 HStack {
                     Spacer()
@@ -621,7 +616,7 @@ struct RecentlyAddedLibraryRow: View {
                         .foregroundStyle(SashimiTheme.textTertiary)
                     Spacer()
                 }
-                .frame(height: isYouTubeLibrary ? 220 : 340)
+                .frame(height: isYouTubeLibrary ? 260 : 340)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
@@ -633,7 +628,7 @@ struct RecentlyAddedLibraryRow: View {
                                 item: item,
                                 libraryType: library.collectionType,
                                 libraryName: library.name,
-                                isLandscape: isYouTubeLibrary,
+                                isCircular: isYouTubeLibrary,
                                 badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
                             ) {
                                 onSelect(item)

@@ -84,6 +84,7 @@ final class PlayerViewModel: ObservableObject {
 
     // Track when playback actually started (for quick-exit protection)
     private var playbackStartDate: Date?
+    private var isOfflinePlayback = false
 
     // Media source info for subtitle/audio selection
     private var currentMediaSource: MediaSourceInfo?
@@ -104,36 +105,47 @@ final class PlayerViewModel: ObservableObject {
     private let client = JellyfinClient.shared
     private let playbackSettings = PlaybackSettings.shared
 
-    func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false) async {
+    func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false, localFileURL: URL? = nil) async {
         isLoading = true
         error = nil
         errorMessage = nil
 
         do {
-            // Fetch fresh item data to get latest playback position
-            let freshItem = try await client.getItem(itemId: item.id)
-            currentItem = freshItem
+            let freshItem: BaseItemDto
+            let url: URL
 
-            let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id, maxBitrate: selectedQuality.maxBitrate)
-
-            guard let mediaSource = playbackInfo.mediaSources?.first else {
-                throw PlayerError.noMediaSource
-            }
-
-            // Store media source for subtitle/audio track info
-            currentMediaSource = mediaSource
-
-            let url: URL?
-            if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
-                url = await client.buildURL(path: transcodingPath)
-            } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
-                url = await client.buildURL(path: directPath)
+            if let localFileURL {
+                // Offline playback from local file
+                freshItem = item
+                currentItem = item
+                url = localFileURL
             } else {
-                url = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
-            }
+                // Online playback - fetch fresh data from server
+                freshItem = try await client.getItem(itemId: item.id)
+                currentItem = freshItem
 
-            guard let url else {
-                throw PlayerError.noStreamURL
+                let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id, maxBitrate: selectedQuality.maxBitrate)
+
+                guard let mediaSource = playbackInfo.mediaSources?.first else {
+                    throw PlayerError.noMediaSource
+                }
+
+                // Store media source for subtitle/audio track info
+                currentMediaSource = mediaSource
+
+                let resolvedURL: URL?
+                if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
+                    resolvedURL = await client.buildURL(path: transcodingPath)
+                } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
+                    resolvedURL = await client.buildURL(path: directPath)
+                } else {
+                    resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+                }
+
+                guard let resolvedURL else {
+                    throw PlayerError.noStreamURL
+                }
+                url = resolvedURL
             }
 
             attemptedURL = url.absoluteString
@@ -199,16 +211,23 @@ final class PlayerViewModel: ObservableObject {
 
             isLoading = false
 
-            // Fetch media segments for skip intro/credits (non-blocking)
-            await fetchSegments(itemId: freshItem.id)
+            isOfflinePlayback = localFileURL != nil
+            let isOffline = isOfflinePlayback
+
+            // Fetch media segments for skip intro/credits (skip when offline)
+            if !isOffline {
+                await fetchSegments(itemId: freshItem.id)
+            }
 
             // Check if there's saved progress to resume from
             let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
             if startFromBeginning {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
-                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
-                startProgressReporting()
+                if !isOffline {
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    startProgressReporting()
+                }
                 setupSegmentTracking()
                 playbackStartDate = Date()
                 player?.play()
@@ -217,16 +236,20 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = startTicks
                 let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
                 await player?.seek(to: startTime)
-                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks)
-                startProgressReporting()
+                if !isOffline {
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks)
+                    startProgressReporting()
+                }
                 setupSegmentTracking()
                 playbackStartDate = Date()
                 player?.play()
             } else {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
-                try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
-                startProgressReporting()
+                if !isOffline {
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    startProgressReporting()
+                }
                 setupSegmentTracking()
                 playbackStartDate = Date()
                 player?.play()
@@ -249,7 +272,8 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func reportProgress() async {
-        guard let item = currentItem,
+        guard !isOfflinePlayback,
+              let item = currentItem,
               let player,
               let currentTime = player.currentItem?.currentTime() else { return }
 
@@ -262,7 +286,7 @@ final class PlayerViewModel: ObservableObject {
     private func handlePlaybackEnded() async {
         progressReportTask?.cancel()
 
-        if let item = currentItem {
+        if let item = currentItem, !isOfflinePlayback {
             // Mark as watched by reporting position at the end
             if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
                 let endTicks = Int64(duration * 10_000_000)
@@ -476,7 +500,9 @@ final class PlayerViewModel: ObservableObject {
                 positionTicks = Int64(currentTime.seconds * 10_000_000)
             }
 
-            try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
+            if !isOfflinePlayback {
+                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
+            }
         }
 
         player?.pause()
@@ -666,6 +692,7 @@ final class PlayerViewModel: ObservableObject {
     // MARK: - Chapter Navigation
 
     private func setupChapterMarkers(on playerItem: AVPlayerItem, chapters: [ChapterInfo], duration: Double) {
+        #if os(tvOS)
         guard !chapters.isEmpty else { return }
 
         var timedGroups: [AVTimedMetadataGroup] = []
@@ -694,6 +721,10 @@ final class PlayerViewModel: ObservableObject {
         // nil title = chapter markers (vs event markers)
         let markerGroup = AVNavigationMarkersGroup(title: nil, timedNavigationMarkers: timedGroups)
         playerItem.navigationMarkerGroups = [markerGroup]
+        #else
+        // Chapter markers are tvOS-only; iOS uses AVPlayerViewController's built-in chapter UI
+        _ = (playerItem, chapters, duration)
+        #endif
     }
 
     // MARK: - Remote Control Commands (Bluetooth headsets)
