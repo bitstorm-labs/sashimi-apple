@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct MobileSettingsView: View {
-    @EnvironmentObject var sessionManager: SessionManager
+    @ObservedObject private var sessionManager = SessionManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
+    @State private var showingDeleteAllDownloads = false
 
     var body: some View {
         List {
@@ -14,6 +15,13 @@ struct MobileSettingsView: View {
 
                 if let username = sessionManager.currentUser?.name {
                     LabeledContent("Logged in as", value: username)
+                }
+            }
+
+            // Home Screen Section
+            Section("Home Screen") {
+                NavigationLink("Customize Row Order") {
+                    HomeRowOrderView()
                 }
             }
 
@@ -36,6 +44,18 @@ struct MobileSettingsView: View {
                 }
             }
 
+            // Downloads Section
+            Section("Downloads") {
+                LabeledContent("Storage Used", value: DownloadFileManager.formattedTotalSize())
+                LabeledContent("Available Space", value: ByteCountFormatter.string(
+                    fromByteCount: DownloadFileManager.availableDiskSpace(),
+                    countStyle: .file
+                ))
+                Button("Delete All Downloads", role: .destructive) {
+                    showingDeleteAllDownloads = true
+                }
+            }
+
             // About Section
             Section("About") {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
@@ -50,5 +70,48 @@ struct MobileSettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {
+            Button("Delete All", role: .destructive) {
+                Task { await DownloadManager.shared.deleteAllDownloads() }
+            }
+        } message: {
+            Text("This will remove all downloaded files from your device.")
+        }
+    }
+}
+
+struct HomeRowOrderView: View {
+    @ObservedObject private var settings = HomeRowSettings.shared
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(settings.rows) { row in
+                    HStack {
+                        Image(systemName: row.isEnabled ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(row.isEnabled ? .green : .gray)
+                            .onTapGesture {
+                                if let index = settings.rows.firstIndex(where: { $0.id == row.id }) {
+                                    settings.toggleRow(at: index)
+                                }
+                            }
+
+                        Text(row.displayName)
+
+                        Spacer()
+
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .onMove { source, destination in
+                    settings.moveRow(from: source, to: destination)
+                }
+            } header: {
+                Text("Drag to reorder, tap to enable/disable")
+            }
+        }
+        .navigationTitle("Row Order")
+        .environment(\.editMode, .constant(.active))
     }
 }

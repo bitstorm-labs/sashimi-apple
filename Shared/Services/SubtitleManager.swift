@@ -56,6 +56,23 @@ class SubtitleManager: ObservableObject {
         isLoading = false
     }
 
+    func loadLocalSubtitles(from fileURL: URL) async {
+        isLoading = true
+        currentCue = nil
+        cues = []
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            if let vttContent = String(data: data, encoding: .utf8) {
+                cues = parseWebVTT(vttContent)
+            }
+        } catch {
+            // Silently fail - no subtitles
+        }
+
+        isLoading = false
+    }
+
     func clear() {
         stopTracking()
         cues = []
