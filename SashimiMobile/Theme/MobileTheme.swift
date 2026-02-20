@@ -90,9 +90,9 @@ enum MobileSizing {
     static let landscapeCardWidth: CGFloat = 220
     static let landscapeCardHeight: CGFloat = 124
 
-    // Continue watching cards (larger for prominence)
-    static let continueWatchingWidth: CGFloat = 280
-    static let continueWatchingHeight: CGFloat = 158
+    // Continue watching cards (slightly larger for prominence)
+    static let continueWatchingWidth: CGFloat = 160
+    static let continueWatchingHeight: CGFloat = 90
 
     // Icon sizes
     static let iconSmall: CGFloat = 16

@@ -9,23 +9,60 @@ struct MobilePosterCard: View {
     let showTitle: Bool
     let showProgress: Bool
     let libraryName: String?
+    let isCircular: Bool
+    let isLandscape: Bool
+    let forceYouTube: Bool
 
     init(
         item: BaseItemDto,
         width: CGFloat = MobileSizing.posterWidth,
         showTitle: Bool = true,
         showProgress: Bool = true,
-        libraryName: String? = nil
+        libraryName: String? = nil,
+        isCircular: Bool = false,
+        isLandscape: Bool = false,
+        forceYouTube: Bool = false
     ) {
         self.item = item
         self.width = width
         self.showTitle = showTitle
         self.showProgress = showProgress
         self.libraryName = libraryName
+        self.isCircular = isCircular
+        self.isLandscape = isLandscape
+        self.forceYouTube = forceYouTube
+    }
+
+    // Detect YouTube content by library name, path, or forced flag
+    private var isYouTubeStyle: Bool {
+        if forceYouTube {
+            return true
+        }
+        if let name = libraryName, name.lowercased().contains("youtube") {
+            return true
+        }
+        if let path = item.path?.lowercased(), path.contains("youtube") {
+            return true
+        }
+        return false
+    }
+
+    private var effectiveIsLandscape: Bool {
+        isLandscape || (isYouTubeStyle && item.type == .episode)
+    }
+
+    private var effectiveIsCircular: Bool {
+        isCircular || (isYouTubeStyle && item.type == .series)
     }
 
     private var height: CGFloat {
-        width * (1 / PosterAspectRatio.portrait)
+        if effectiveIsCircular {
+            return width
+        } else if effectiveIsLandscape {
+            return width * (9 / 16) // 16:9 aspect ratio
+        } else {
+            return width * (1 / PosterAspectRatio.portrait)
+        }
     }
 
     private var imageURL: URL? {
@@ -34,8 +71,12 @@ struct MobilePosterCard: View {
         let imageId: String
         let imageType: String
 
-        // For episodes, use series poster
-        if item.type == .episode, let seriesId = item.seriesId {
+        if effectiveIsLandscape && item.type == .episode {
+            // YouTube episodes: use episode's own thumbnail
+            imageId = item.id
+            imageType = "Primary"
+        } else if item.type == .episode, let seriesId = item.seriesId {
+            // Regular episodes: use series poster
             imageId = seriesId
             imageType = "Primary"
         } else {
@@ -57,13 +98,19 @@ struct MobilePosterCard: View {
                     progressBar
                 }
 
-                // Unplayed badge
-                if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount > 0 {
+                // Watched checkmark (top-right, green)
+                if item.userData?.played == true {
+                    watchedCheckmark
+                }
+
+                // Unplayed badge (only show if > 1, shows "X new")
+                if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount > 1 {
                     unplayedBadge(count: unplayedCount)
                 }
             }
             .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+            .clipShape(effectiveIsCircular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium)))
+            .offlineIndicator(itemId: item.id)
 
             // Title
             if showTitle {
@@ -130,19 +177,34 @@ struct MobilePosterCard: View {
         }
     }
 
+    // Green checkmark for watched items
+    private var watchedCheckmark: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
+                    .padding(4)
+            }
+            Spacer()
+        }
+    }
+
+    // "X new" badge for unplayed items (like tvOS)
     private func unplayedBadge(count: Int) -> some View {
         VStack {
             HStack {
                 Spacer()
-                Text("\(count)")
-                    .font(MobileTypography.captionSmall)
-                    .fontWeight(.bold)
+                Text("\(count) new")
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(MobileColors.accent)
+                    .padding(.vertical, 3)
+                    .background(Color(red: 0.29, green: 0.55, blue: 0.73))
                     .clipShape(Capsule())
-                    .padding(6)
+                    .padding(4)
             }
             Spacer()
         }
@@ -166,15 +228,22 @@ struct MobilePosterCard: View {
     }
 
     private var displayTitle: String {
-        if item.type == .episode {
-            return item.seriesName ?? item.name ?? "Unknown"
+        if effectiveIsLandscape && item.type == .episode {
+            // YouTube: show video title
+            return (item.name ?? "Unknown").cleanedYouTubeTitle
+        } else if item.type == .episode {
+            return (item.seriesName ?? item.name ?? "Unknown").cleanedYouTubeTitle
         }
-        return item.name ?? "Unknown"
+        return (item.name ?? "Unknown").cleanedYouTubeTitle
     }
 
     private var displaySubtitle: String? {
         switch item.type {
         case .episode:
+            // For YouTube, show date instead of S#:E#
+            if isYouTubeStyle, let dateStr = item.premiereDate {
+                return formatYouTubeDate(dateStr)
+            }
             if let season = item.parentIndexNumber, let episode = item.indexNumber {
                 return "S\(season):E\(episode)"
             }
@@ -188,6 +257,24 @@ struct MobilePosterCard: View {
             return nil
         }
     }
+
+    private func formatYouTubeDate(_ dateString: String) -> String? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var date = formatter.date(from: dateString)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: dateString)
+        }
+
+        guard let date = date else { return nil }
+
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateStyle = .medium
+        displayFormatter.timeStyle = .none
+        return displayFormatter.string(from: date)
+    }
 }
 
 // MARK: - Poster Button (for standalone use with tap action)
@@ -198,6 +285,9 @@ struct MobileMediaPosterButton: View {
     let showTitle: Bool
     let showProgress: Bool
     let libraryName: String?
+    let isCircular: Bool
+    let isLandscape: Bool
+    let forceYouTube: Bool
     let onSelect: () -> Void
 
     init(
@@ -206,6 +296,9 @@ struct MobileMediaPosterButton: View {
         showTitle: Bool = true,
         showProgress: Bool = true,
         libraryName: String? = nil,
+        isCircular: Bool = false,
+        isLandscape: Bool = false,
+        forceYouTube: Bool = false,
         onSelect: @escaping () -> Void
     ) {
         self.item = item
@@ -213,6 +306,9 @@ struct MobileMediaPosterButton: View {
         self.showTitle = showTitle
         self.showProgress = showProgress
         self.libraryName = libraryName
+        self.isCircular = isCircular
+        self.isLandscape = isLandscape
+        self.forceYouTube = forceYouTube
         self.onSelect = onSelect
     }
 
@@ -223,7 +319,10 @@ struct MobileMediaPosterButton: View {
                 width: width,
                 showTitle: showTitle,
                 showProgress: showProgress,
-                libraryName: libraryName
+                libraryName: libraryName,
+                isCircular: isCircular,
+                isLandscape: isLandscape,
+                forceYouTube: forceYouTube
             )
         }
         .buttonStyle(.plain)

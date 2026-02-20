@@ -11,6 +11,7 @@ final class HomeViewModel: ObservableObject {
     @Published var recentlyAddedItems: [BaseItemDto] = []
     @Published var heroItems: [BaseItemDto] = []
     @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
+    @Published var libraryItems: [String: [BaseItemDto]] = [:]  // libraryId -> items
     @Published var libraries: [JellyfinLibrary] = []
     @Published var isLoading = false
     @Published var error: Error?
@@ -133,19 +134,22 @@ final class HomeViewModel: ObservableObject {
     private func loadHeroItems() async {
         var allHeroItems: [BaseItemDto] = []
         var libraryNames: [String: String] = [:]
+        var itemsPerLibrary: [String: [BaseItemDto]] = [:]
 
         for library in libraries {
             do {
-                let items = try await client.getLatestMedia(parentId: library.id, limit: 5)
+                let items = try await client.getLatestMedia(parentId: library.id, limit: 10)
+                itemsPerLibrary[library.id] = items
                 for item in items {
                     libraryNames[item.id] = library.name
                 }
-                allHeroItems.append(contentsOf: items)
+                allHeroItems.append(contentsOf: items.prefix(5))
             } catch { }
         }
 
         heroItems = allHeroItems.shuffled()
         heroItemLibraryNames = libraryNames
+        libraryItems = itemsPerLibrary
     }
 
     func refresh() async {

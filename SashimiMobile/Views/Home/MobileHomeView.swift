@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MobileHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
+    @StateObject private var rowSettings = HomeRowSettings.shared
 
     var body: some View {
         ScrollView {
@@ -14,13 +15,21 @@ struct MobileHomeView: View {
             }
             .padding(.vertical, MobileSpacing.md)
         }
-        .navigationTitle("Home")
         .background(MobileColors.background)
         .refreshable {
             await viewModel.loadContent()
         }
         .task {
             await viewModel.loadContent()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
+            Task {
+                try? await Task.sleep(for: .seconds(0.5))
+                await viewModel.loadContent()
+            }
+        }
+        .onChange(of: viewModel.libraries) { _, libraries in
+            rowSettings.updateLibraries(libraries)
         }
     }
 
@@ -31,44 +40,39 @@ struct MobileHomeView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        // Continue Watching Section
-        if !viewModel.continueWatchingItems.isEmpty {
-            MobileMediaRow(
-                title: "Continue Watching",
-                items: viewModel.continueWatchingItems,
-                cardWidth: MobileSizing.continueWatchingWidth,
-                showProgress: true
-            ) { item in
-                MobileDetailView(item: item)
-            }
+        ForEach(rowSettings.rows.filter { $0.isEnabled }) { row in
+            rowView(for: row)
         }
 
-        // Recently Added Section
-        if !viewModel.recentlyAddedItems.isEmpty {
-            MobileMediaRow(
-                title: "Recently Added",
-                items: viewModel.recentlyAddedItems,
-                showProgress: false
-            ) { item in
-                MobileDetailView(item: item)
-            }
-        }
-
-        // Hero Items Section (if available)
-        if !viewModel.heroItems.isEmpty {
-            MobileMediaRow(
-                title: "Featured",
-                items: viewModel.heroItems,
-                cardWidth: MobileSizing.landscapeCardWidth,
-                showProgress: false
-            ) { item in
-                MobileDetailView(item: item)
-            }
-        }
-
-        // Libraries placeholder
-        if viewModel.continueWatchingItems.isEmpty && viewModel.recentlyAddedItems.isEmpty {
+        // Empty state
+        if viewModel.continueWatchingItems.isEmpty && viewModel.libraries.isEmpty {
             emptyStateView
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(for row: HomeRowConfig) -> some View {
+        switch row.type {
+        case .builtIn(.continueWatching):
+            if !viewModel.continueWatchingItems.isEmpty {
+                let libNames = viewModel.continueWatchingLibraryNames
+                MobileContinueWatchingRow(
+                    items: viewModel.continueWatchingItems,
+                    libraryNames: libNames
+                ) { item in
+                    MobileDetailView(item: item, libraryName: libNames[item.id])
+                }
+            }
+
+        case .library(let libraryId, let libraryName):
+            let library = viewModel.libraries.first(where: { $0.id == libraryId })
+            MobileRecentlyAddedRow(
+                libraryId: libraryId,
+                libraryName: libraryName,
+                collectionType: library?.collectionType
+            ) { item in
+                MobileDetailView(item: item, libraryName: libraryName)
+            }
         }
     }
 
