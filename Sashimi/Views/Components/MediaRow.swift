@@ -241,14 +241,25 @@ struct MediaPosterButton: View {
                 }
                 .frame(width: cardWidth, height: cardHeight)
                 .clipShape(isCircular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 12)))
-                // Watched indicator for circular images - outside the clip
+                // Circular overlays (outside the clip shape)
                 .overlay(alignment: .topTrailing) {
-                    if isCircular && item.userData?.played == true {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 26))
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
-                            .offset(x: -8, y: 8)
+                    if isCircular {
+                        if let count = badgeCount, count > 1 {
+                            Text("\(count) new")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(Color(red: 0.29, green: 0.55, blue: 0.73))
+                                .clipShape(Capsule())
+                                .offset(x: -4, y: 4)
+                        } else if item.userData?.played == true {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 26))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
+                                .offset(x: -8, y: 8)
+                        }
                     }
                 }
                 .overlay(
