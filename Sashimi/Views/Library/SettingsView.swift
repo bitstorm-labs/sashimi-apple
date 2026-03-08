@@ -655,6 +655,11 @@ struct PlaybackSettingsView: View {
                         }
                     }
                 }
+
+                // Display Section
+                SettingsSection(title: "Display") {
+                    SettingsToggleRow(title: "24-Hour Time", isOn: $settings.use24HourTime)
+                }
             }
             .padding(.horizontal, 60)
             .padding(.bottom, 60)

@@ -78,9 +78,9 @@ final class PlayerViewModel: ObservableObject {
     @Published var subtitleManager = SubtitleManager()
     @Published var playbackEnded = false
     @Published var nextEpisode: BaseItemDto?
-    @Published var showingUpNext = false
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
+    @Published var videoResolution: String?
 
     // Track when playback actually started (for quick-exit protection)
     private var playbackStartDate: Date?
@@ -132,6 +132,7 @@ final class PlayerViewModel: ObservableObject {
 
                 // Store media source for subtitle/audio track info
                 currentMediaSource = mediaSource
+                videoResolution = mediaSource.videoResolution
 
                 let resolvedURL: URL?
                 if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
@@ -156,7 +157,9 @@ final class PlayerViewModel: ObservableObject {
             try audioSession.setActive(true)
 
             let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset)
+            // Only load playable + duration — exclude media selection groups
+            // so AVPlayerViewController won't show native subtitle/audio buttons
+            let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
 
             // Set up chapter markers immediately (before playback starts)
             if let chapters = freshItem.chapters, !chapters.isEmpty,
@@ -175,11 +178,15 @@ final class PlayerViewModel: ObservableObject {
             }
 
             player = AVPlayer(playerItem: playerItem)
+            player?.appliesMediaSelectionCriteriaAutomatically = false
             player?.volume = 1.0
             player?.isMuted = false
 
             // Set up remote control commands for Bluetooth headsets/remotes
+            // On tvOS, AVPlayerViewController handles MPRemoteCommandCenter automatically
+            #if os(iOS)
             setupRemoteCommands()
+            #endif
             updateNowPlayingInfo(item: freshItem)
 
             statusObserver = player?.observe(\.status) { [weak self] player, _ in
@@ -298,7 +305,7 @@ final class PlayerViewModel: ObservableObject {
             // Check for next episode/video if this is an episode or video
             if playbackSettings.autoPlayNextEpisode, let next = await fetchNextItem(for: item) {
                 nextEpisode = next
-                showingUpNext = true
+                await playNextEpisode()
                 return
             }
         }
@@ -349,16 +356,9 @@ final class PlayerViewModel: ObservableObject {
 
     func playNextEpisode() async {
         guard let next = nextEpisode else { return }
-        showingUpNext = false
         nextEpisode = nil
         playbackEnded = false
         await loadMedia(item: next)
-    }
-
-    func cancelUpNext() {
-        showingUpNext = false
-        nextEpisode = nil
-        playbackEnded = true
     }
 
     func changeQuality(_ quality: QualityOption) async {
@@ -409,7 +409,7 @@ final class PlayerViewModel: ObservableObject {
             }
 
             let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset)
+            let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
 
             // Set up chapter markers
             if let chapters = item.chapters, !chapters.isEmpty,
@@ -430,6 +430,7 @@ final class PlayerViewModel: ObservableObject {
             player = AVPlayer(playerItem: playerItem)
             player?.volume = 1.0
             player?.isMuted = false
+            player?.appliesMediaSelectionCriteriaAutomatically = false
 
             statusObserver = player?.observe(\.status) { [weak self] player, _ in
                 Task { @MainActor in
