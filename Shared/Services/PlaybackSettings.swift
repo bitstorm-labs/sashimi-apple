@@ -13,4 +13,5 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("preferredSubtitleLanguage") var preferredSubtitleLanguage = ""
     @AppStorage("subtitlesEnabled") var subtitlesEnabled = false
     @AppStorage("forceDirectPlay") var forceDirectPlay = false
+    @AppStorage("use24HourTime") var use24HourTime = false
 }

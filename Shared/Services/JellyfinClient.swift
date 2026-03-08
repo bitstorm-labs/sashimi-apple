@@ -335,8 +335,8 @@ actor JellyfinClient {
             if let collectionType = collectionType?.lowercased() {
                 switch collectionType {
                 case "tvshows":
-                    // Fetch episodes - caller will deduplicate by series with badge counts
-                    itemTypes = "Episode"
+                    // Fetch series directly sorted by when content was last added
+                    itemTypes = isYouTubeLibrary ? "Episode" : "Series"
                 case "movies":
                     itemTypes = "Movie"
                 default:
@@ -347,11 +347,15 @@ actor JellyfinClient {
             }
 
             // Use /Items endpoint with date sorting to include watched items
+            // For TV series, sort by DateLastContentAdded to show series with newest episodes first
+            let isTVSeries = collectionType?.lowercased() == "tvshows" && !isYouTubeLibrary
+            let sortBy = isTVSeries ? "DateLastContentAdded,SortName" : "DateCreated,SortName"
+
             var queryItems = [
                 URLQueryItem(name: "Limit", value: "\(limit)"),
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
-                URLQueryItem(name: "SortBy", value: "DateCreated,SortName"),
+                URLQueryItem(name: "SortBy", value: sortBy),
                 URLQueryItem(name: "SortOrder", value: "Descending"),
                 URLQueryItem(name: "Recursive", value: "true"),
                 URLQueryItem(name: "IncludeItemTypes", value: itemTypes)

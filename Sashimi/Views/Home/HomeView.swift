@@ -650,10 +650,8 @@ struct RecentlyAddedLibraryRow: View {
         loadError = false
 
         do {
-            // For TV libraries, fetch more items to ensure we get episodes from multiple series
-            // even if one series had many episodes added recently
             let isTVLibrary = library.collectionType?.lowercased() == "tvshows"
-            let fetchLimit = isTVLibrary && !isYouTubeLibrary ? 100 : 30
+            let fetchLimit = 30
 
             let latestItems = try await JellyfinClient.shared.getLatestMedia(
                 parentId: library.id,
