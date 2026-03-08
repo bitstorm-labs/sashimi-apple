@@ -151,7 +151,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
 
     private func loadItems() async {
         do {
-            let fetchLimit = isTVLibrary && !isYouTubeLibrary ? 100 : 30
+            let fetchLimit = 30
 
             let latestItems = try await JellyfinClient.shared.getLatestMedia(
                 parentId: libraryId,

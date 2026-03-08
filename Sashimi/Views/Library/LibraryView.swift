@@ -253,6 +253,8 @@ enum LibraryFilterOption: String, CaseIterable {
 }
 
 // MARK: - Library Detail View
+// swiftlint:disable type_body_length
+// LibraryDetailView manages grid display, pagination, filtering, sorting, and alphabet navigation
 struct LibraryDetailView: View {
     enum FocusArea: Hashable {
         case grid
@@ -437,28 +439,61 @@ struct LibraryDetailView: View {
     }
 
     private func scrollToLetter(_ letter: String, proxy: ScrollViewProxy) {
-        var targetItem: BaseItemDto?
-        if letter == "#" {
-            // Numbers and special characters
-            for item in items {
-                guard let firstChar = item.name.first else { continue }
-                if !firstChar.isLetter {
-                    targetItem = item
-                    break
-                }
-            }
-        } else {
-            for item in items where item.name.uppercased().hasPrefix(letter) {
-                targetItem = item
-                break
-            }
-        }
-
-        if let item = targetItem {
+        // Try to find in already-loaded items
+        if let item = findItem(for: letter) {
             withAnimation(.easeOut(duration: 0.5)) {
                 proxy.scrollTo(item.id, anchor: .top)
             }
+            return
         }
+
+        // Not found — load all remaining items, then retry
+        guard items.count < totalCount else { return }
+        Task {
+            await loadAllRemainingItems()
+            if let item = findItem(for: letter) {
+                withAnimation(.easeOut(duration: 0.5)) {
+                    proxy.scrollTo(item.id, anchor: .top)
+                }
+            }
+        }
+    }
+
+    private func findItem(for letter: String) -> BaseItemDto? {
+        if letter == "#" {
+            return items.first { item in
+                guard let firstChar = item.name.first else { return false }
+                return !firstChar.isLetter
+            }
+        }
+        return items.first { $0.name.uppercased().hasPrefix(letter) }
+    }
+
+    private func loadAllRemainingItems() async {
+        guard !isLoadingMore && items.count < totalCount else { return }
+        isLoadingMore = true
+        do {
+            let includeTypes: [ItemType]? = switch library.collectionType {
+            case "tvshows": [.series]
+            case "movies": [.movie]
+            default: nil
+            }
+            let filter = filterParams
+            let response = try await JellyfinClient.shared.getItems(
+                parentId: library.id,
+                includeTypes: includeTypes,
+                sortBy: sortOption.rawValue,
+                sortOrder: sortOrder.rawValue,
+                limit: totalCount - items.count,
+                startIndex: items.count,
+                isPlayed: filter.isPlayed,
+                isFavorite: filter.isFavorite
+            )
+            items.append(contentsOf: response.items)
+        } catch {
+            // Silent fail — alphabet jump is best-effort
+        }
+        isLoadingMore = false
     }
 
     // Convert filter option to API parameters (nil = no filter, true/false = filter value)
@@ -571,6 +606,7 @@ struct LibraryDetailView: View {
         }
     }
 }
+// swiftlint:enable type_body_length
 
 // MARK: - Alphabet Scroll Bar
 struct AlphabetScrollBar: View {
