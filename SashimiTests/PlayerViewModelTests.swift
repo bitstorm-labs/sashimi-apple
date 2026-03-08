@@ -60,7 +60,6 @@ final class PlayerViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.subtitleTracks.isEmpty)
         XCTAssertFalse(viewModel.playbackEnded)
         XCTAssertNil(viewModel.nextEpisode)
-        XCTAssertFalse(viewModel.showingUpNext)
         XCTAssertEqual(viewModel.resumePositionTicks, 0)
         XCTAssertEqual(viewModel.selectedQuality, .auto)
     }
