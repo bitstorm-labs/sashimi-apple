@@ -439,7 +439,6 @@ git commit -m "feat: add entry point (Main.bs) and MainScene with navigation sta
 
 **Files:**
 - Create: `source/utils/Registry.bs`
-- Create: `tests/source/utils/RegistryTests.bs`
 
 - [ ] **Step 1: Create source/utils/Registry.bs**
 
