@@ -17,7 +17,7 @@ Port Sashimi (tvOS Jellyfin client) to Roku as a new standalone app. The Roku ve
 - **IDE**: VSCode + BrightScript Language extension (debugging, breakpoints, variable inspection)
 - **Linting**: bslint
 
-No SGDEX — custom lightweight navigation stack for full UI control.
+No SGDEX — custom lightweight navigation stack. SGDEX views are too opinionated and hard to customize visually for a branded app like Sashimi. The existing Jellyfin Roku client also avoids SGDEX.
 
 ## Project Structure
 
@@ -64,8 +64,7 @@ sashimi-roku/
       ErrorDialog.xml/.bs           # Certification-required error dialogs
       SkipButton.xml/.bs            # Intro/credits skip overlay
       SubtitleOverlay.xml/.bs       # Custom subtitle rendering (fallback only)
-      ResumeDialog.xml/.bs          # Resume vs play from beginning
-      UpNextDialog.xml/.bs          # Up Next countdown overlay
+      ToastOverlay.xml/.bs           # Transient feedback messages (success, error, info)
 
     tasks/
       JellyfinApi.xml/.bs           # All Jellyfin REST calls (runs on Task thread)
@@ -84,7 +83,7 @@ sashimi-roku/
     splash_screen_hd.png            # HD splash (1280x720)
 
   locale/
-    en_US/translations.ts           # Localization strings
+    en_US/translations.tr           # Localization strings (Roku XML format)
 
   tests/                            # Rooibos test files
 ```
@@ -94,7 +93,7 @@ sashimi-roku/
 - **Tasks directory**: All networking must happen on Task threads (Roku requirement). Each major API concern gets its own Task node.
 - **No ViewModel layer**: SceneGraph's observer pattern replaces MVVM. Screen components observe fields on Task nodes directly.
 - **ContentNodeFactory**: Roku lists/grids consume ContentNode trees, so a translation layer converts JSON API responses to ContentNodes.
-- **16KB registry budget**: Only essential data stored locally — auth token, server URL, user ID, settings. All playback history stays server-side.
+- **16KB registry budget**: Only essential data stored locally. Estimated breakdown: auth token (~200B), server URL (~100B), user ID (36B), device ID (36B), playback settings JSON (~300B), home row config JSON (~200B), search history JSON (~500B), parental PIN (~10B) = ~1.4KB. Plenty of headroom within 16KB. All playback history stays server-side.
 - **SSDP instead of mDNS/Bonjour**: Roku doesn't support Bonjour, but Jellyfin broadcasts via SSDP.
 
 ## Architecture & Data Flow
@@ -180,7 +179,7 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
 
 | tvOS Feature | Roku Implementation |
 |---|---|
-| Hero carousel with autoplay timer | `HeroCarousel` widget — RowList with oversized row at top, Timer node for auto-rotation (8s). Background Poster for backdrop. |
+| Hero carousel with autoplay timer | `HeroCarousel` widget — RowList with oversized row at top, Timer node for auto-rotation (6s, matching tvOS). Background Poster for backdrop. |
 | Continue Watching row | Dedicated `PosterRow` — merge resume items + NextUp in Task, deduplicate by series ID, sort by last played. Green progress bar via Rectangle overlay on poster. |
 | Recently Added row | `PosterRow` populated by getLatestMedia call |
 | Library rows | One `PosterRow` per library, lazy-loaded as user scrolls down |
@@ -204,6 +203,7 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
 | Grid view with posters | MarkupGrid or PosterGrid node. Paginated — 50 items per batch, append ContentNodes on scroll. |
 | Sort options | Options (*) button opens dialog with sort choices (Name, Date, Rating, Play Count). Re-fetch with new sort param. |
 | Filters (watched, favorites, resumable) | Same Options dialog, separate filter section. |
+| Alphabet fast-scroll | Right-side letter index for jumping to items by first letter. Custom widget — LabelList of A-Z, selecting a letter re-fetches with `NameStartsWith` filter. |
 | Lazy loading / pagination | Track `itemFocused` on grid — trigger next page fetch at 80% of loaded items. |
 
 ### Media Detail
@@ -214,10 +214,11 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
 | Movie detail | Backdrop, title, overview, runtime, rating, genres, cast row |
 | Series detail | Poster, metadata, season picker (LabelList), episode list for selected season |
 | Episode detail | Episode thumbnail (or series backdrop), title, overview, air date, file info |
-| YouTube/Pinchflat handling | Detect via `libraryName` containing "youtube". Circular mask on channel posters, landscape episode thumbnails, date-based episode ordering. |
-| Play / Resume button | Focused Button. If resume position > threshold, show ResumeDialog. |
+| YouTube/Pinchflat handling | Detect via `libraryName` containing "youtube". Circular channel posters (pre-mask images server-side via Jellyfin's image API with `fillWidth`/`fillHeight` and render in a square Poster node with `cornerRadius`), landscape episode thumbnails, date-based episode ordering. |
+| Play / Resume button | Focused Button. Resume and Start Over buttons shown on detail screen when item has saved progress (matching tvOS behavior). |
+| Trailers | Button on movie detail that plays trailer URL via Video node. Uses `remoteTrailers` from API response. |
 | Mark watched/unwatched | Button triggers Task API call. Toggle icon on completion. |
-| Favorites | Same pattern as watched toggle. |
+| Favorites | Toggle on detail screen via API call (POST/DELETE FavoriteItems). Also available as library filter. |
 | Cast & crew | Horizontal PosterRow with person images + name Labels. |
 | File info | Dialog showing codec, resolution, audio, subtitle info. |
 | Item deletion / metadata refresh | Admin actions behind Options (*) menu with confirmation dialog. |
@@ -227,7 +228,7 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
 | tvOS Feature | Roku Implementation |
 |---|---|
 | Text search with keyboard | Roku's built-in Keyboard node |
-| Debounced query-as-you-type | Timer node with 500ms delay. Reset on keystroke, fire search Task on completion. |
+| Debounced query-as-you-type | Timer node with 300ms delay (matching tvOS). Reset on keystroke, fire search Task on completion. |
 | Results grid | MarkupGrid split into Movies + Series sections |
 | Search history | Last 10 queries in Registry as JSON array. Show as LabelList. |
 
@@ -236,9 +237,14 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
 | tvOS Feature | Roku Implementation |
 |---|---|
 | Playback quality | RadioButtonList — Auto, 1080p, 720p, 480p. Maps to maxBitrate in Registry. |
+| Force direct play | Toggle — skip transcoding when possible. |
+| Playback speed | Selection list (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x). Applied to Video node's `playbackSpeed` field. |
 | Auto-play next episode | Toggle |
 | Skip intro/credits | Toggle for auto-skip. Manual skip button always available. |
-| Resume threshold | Selection list (15s, 30s, 60s, 120s) |
+| Resume threshold | Selection list (Always ask, 30s, 1min, 2min, 5min, 10min — matching tvOS) |
+| Preferred audio language | Language picker (stored in Registry) |
+| Preferred subtitle language | Language picker (stored in Registry) |
+| 24-hour time display | Toggle for time formatting in player overlay |
 | Parental controls | PIN entry dialog -> content rating filter in Registry |
 | SSL certificate trust | Toggle for self-signed/expired cert trust |
 | Sign out | Clear Registry auth section, navigate to ServerConnectionScreen |
@@ -252,10 +258,11 @@ Roku's `m.global` (GlobalNode) replaces environment objects:
    - DirectPlay: mp4/mkv, h264/hevc video, aac/ac3/eac3 audio
    - Transcoding: HLS with h264 video + aac audio
 
-2. Select source by priority:
-   - Transcoding URL (HLS) -> most reliable on Roku
+2. Select source by priority (same as tvOS — Jellyfin returns transcoding URL
+   when it determines the client can't direct-play the source):
+   - Transcoding URL (HLS) -> checked first (server determined transcoding is needed)
    - Direct stream URL -> server-side remux
-   - Direct play URL -> native container playback
+   - Direct play URL -> native container playback (preferred when available)
 
 3. Build ContentNode with:
    - url = selected stream URL
@@ -278,11 +285,11 @@ PlaybackReporter (Task node with repeating Timer):
 Two paths:
 
 1. **In-stream (HLS)**: Roku handles WebVTT in HLS manifests natively. User selects via Options (*) button -> built-in caption picker. Preferred path.
-2. **Sideloaded (external)**: Populate `SubtitleTracks` on ContentNode with URLs pointing to `/Videos/{id}/Subtitles/{index}/Stream.srt`. Request SRT format (Roku doesn't support sideloaded WebVTT, only SRT and TTML).
+2. **Sideloaded (external)**: Populate `SubtitleTracks` on ContentNode with URLs pointing to Jellyfin's subtitle endpoint. Roku supports sideloaded SRT, TTML, and WebVTT (Roku OS 10+). Request SRT as the most widely compatible format.
 
 ### Audio Track Selection
 
-Let the server handle audio track selection (Roku's audio track API is unreliable). When user picks a different audio track: re-request PlaybackInfo with preferred audio stream index, get new transcoding URL, reload player at saved position.
+Primary approach: use Roku's `audioTrack` field on the Video node to switch audio tracks directly (works reliably for HLS streams with multiple audio renditions). Fallback for cases where the track API doesn't work (some codecs/containers): re-request PlaybackInfo with preferred audio stream index, get new transcoding URL, reload player at saved position.
 
 ### Intro/Credits Skip
 
@@ -301,27 +308,18 @@ No native Roku chapter API. Custom chapter overlay:
 
 ### Trick Play (Certification Required)
 
-Required for VOD content. Two options:
-1. Jellyfin trickplay images served as BIF format or HLS I-Frame playlists
-2. Fallback: the existing Jellyfin Roku client has trickplay support — follow that approach
-
-Set `HDBIFSURL`/`SDBIFSURL` on ContentNode for BIF, or use HLS I-Frame playlists (Roku OS 9.3+).
+Required for VOD content. Jellyfin serves trickplay as sprite sheets (tile-based images), not BIF format natively. The existing Jellyfin Roku client has working trickplay support that converts Jellyfin's trickplay tiles to a format Roku can display — follow that approach. Alternatively, use HLS I-Frame playlists (Roku OS 9.3+) if Jellyfin's HLS output includes them.
 
 ### Up Next / Auto-Play
 
 When `Video.state = "finished"`:
-- If autoPlayNextEpisode enabled: show UpNextDialog with 10-second countdown
-- Shows next episode title + thumbnail
-- User can cancel (Back) or confirm (OK)
-- On countdown complete or OK: load next episode
+- If autoPlayNextEpisode enabled: automatically load and play the next episode (matching tvOS behavior — no countdown dialog)
 - Next episode resolution: sequential indexNumber for TV, first higher index for YouTube (date-based)
+- If autoPlayNextEpisode disabled: return to detail screen
 
-### Resume Dialog
+### Resume Handling
 
-On media load, if `playbackPositionTicks > resumeThreshold`:
-- Show ResumeDialog: "Resume from XX:XX" / "Play from Beginning"
-- Resume: `Video.seek = savedPositionSeconds` after playback starts
-- Play from beginning: start normally
+Resume is handled on the detail screen (matching tvOS): when an item has saved progress beyond the resume threshold, the detail screen shows both a "Resume from XX:XX" button and a "Start Over" button. The selected action is passed to PlayerScreen, which either seeks to the saved position or starts from the beginning. No separate resume dialog during playback.
 
 ## Performance & Low-End Device Strategy
 
@@ -424,19 +422,20 @@ Same rules as tvOS repo: main branch protected, all changes via PRs, CI checks r
 ### Phase 1 — Foundation & Auth
 - Project scaffolding, manifest, splash screen
 - Registry helpers, HTTP utilities, JellyfinApi Task
-- ServerConnectionScreen (manual URL + login)
+- ServerConnectionScreen (manual URL + login + SSDP server discovery)
 - Session persistence and restore
 - MainScene with nav stack
+- Toast overlay for transient feedback
 
 ### Phase 2 — Home & Browsing
 - HomeScreen with library rows, continue watching, recently added
 - Hero carousel
-- LibraryScreen with grid, pagination, sort/filter
+- LibraryScreen with grid, pagination, sort/filter, alphabet fast-scroll
 - MediaPosterButton widget with YouTube detection
 
 ### Phase 3 — Detail & Search
 - MediaDetailScreen (movie, series, season, episode, YouTube)
-- Cast/crew display
+- Cast/crew display, trailers
 - Watched/favorite/delete actions
 - SearchScreen with history and debounce
 
@@ -453,15 +452,13 @@ Same rules as tvOS repo: main branch protected, all changes via PRs, CI checks r
 - Up Next / auto-play
 - Trick play thumbnails
 - Quality selection
+- Playback speed control
 
 ### Phase 6 — Settings & Polish
-- SettingsScreen (all preferences)
-- Parental controls with PIN
-- SSL certificate trust
+- SettingsScreen (all preferences: quality, force direct play, speed, auto-play, skip, resume threshold, preferred languages, 24-hour time, parental controls, SSL trust)
 - Deep linking
 - Accessibility pass
 - Low-end device optimization
-- SSDP server discovery
 
 ### Phase 7 — Certification Prep
 - Certification checklist audit
