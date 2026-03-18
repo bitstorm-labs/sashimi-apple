@@ -56,7 +56,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: - Public API
 
-    func startDownload(item: BaseItemDto, quality: DownloadQuality) async {
+    func startDownload(item: BaseItemDto, quality: DownloadQuality, downloadAssets: Bool = true) async {
         guard let container = modelContainer else { return }
 
         let itemId = item.id
@@ -127,7 +127,9 @@ final class DownloadManager: NSObject, ObservableObject {
         activeDownloads[itemId] = 0
 
         // Download images and subtitles concurrently (non-background, best-effort)
-        downloadAssets(for: item)
+        if downloadAssets {
+            self.downloadAssets(for: item)
+        }
     }
 
     func pauseDownload(itemId: String) {
@@ -267,9 +269,14 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
         Task {
+            // Queue all video downloads quickly without asset fetching
             for episode in episodes {
-                await startDownload(item: episode, quality: quality)
-                try? await Task.sleep(for: .milliseconds(100))
+                await startDownload(item: episode, quality: quality, downloadAssets: false)
+            }
+            // Then fetch assets one at a time so we don't flood the main actor
+            for episode in episodes {
+                downloadAssets(for: episode)
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
