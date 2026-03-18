@@ -520,9 +520,7 @@ struct MobileDetailView: View {
                 .confirmationDialog("Download Season", isPresented: $showingSeasonDownload) {
                     ForEach(DownloadQuality.allCases) { quality in
                         Button("\(quality.displayName) — \(quality.subtitle)") {
-                            Task {
-                                await DownloadManager.shared.downloadSeason(episodes: episodes, quality: quality)
-                            }
+                            DownloadManager.shared.downloadSeason(episodes: episodes, quality: quality)
                         }
                     }
                     Button("Cancel", role: .cancel) {}

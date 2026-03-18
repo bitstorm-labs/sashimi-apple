@@ -97,9 +97,7 @@ struct DownloadButton: View {
     private var qualityOptions: some View {
         ForEach(DownloadQuality.allCases) { option in
             Button("\(option.displayName) — \(option.subtitle)") {
-                Task {
-                    await downloadManager.startDownload(item: item, quality: option)
-                }
+                downloadManager.enqueueDownload(item: item, quality: option)
             }
         }
         Button("Cancel", role: .cancel) {}
@@ -111,7 +109,7 @@ struct DownloadButton: View {
             if showQualityPicker {
                 showingQualitySheet = true
             } else if let quality {
-                Task { await downloadManager.startDownload(item: item, quality: quality.wrappedValue) }
+                downloadManager.enqueueDownload(item: item, quality: quality.wrappedValue)
             } else {
                 showingQualitySheet = true
             }
