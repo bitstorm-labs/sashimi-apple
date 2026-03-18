@@ -33,6 +33,7 @@ struct SashimiMobileApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(sessionManager)
+                .tint(MobileColors.accent)
         }
         .modelContainer(modelContainer)
     }
