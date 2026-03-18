@@ -11,8 +11,10 @@ final class DownloadManager: NSObject, ObservableObject {
     private static let sessionIdentifier = "com.mondominator.sashimi.mobile.downloads"
     private static let taskMapKey = "downloadTaskMap"
 
-    @Published var activeDownloads: [String: Double] = [:] // itemId -> progress
+    @Published var activeDownloads: [String: Double] = [:] // itemId -> progress (throttled updates)
     @Published var stateVersion: Int = 0 // bumped on any download state change
+    private var pendingProgress: [String: Double] = [:] // raw progress, published on timer
+    private var progressTimer: Timer?
 
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
@@ -42,6 +44,14 @@ final class DownloadManager: NSObject, ObservableObject {
         config.isDiscretionary = false
         config.allowsCellularAccess = true
         backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+
+        // Publish progress updates at a fixed interval instead of per-callback
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.pendingProgress.isEmpty else { return }
+                self.activeDownloads = self.pendingProgress
+            }
+        }
 
         // Reconnect any in-flight downloads from previous launch
         reconnectTasks()
@@ -125,7 +135,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         task.resume()
         await updateStatus(itemId: itemId, status: .downloading)
-        activeDownloads[itemId] = 0
+        pendingProgress[itemId] = 0
 
         // Download images and subtitles concurrently (non-background, best-effort)
         if downloadAssets {
@@ -144,7 +154,8 @@ final class DownloadManager: NSObject, ObservableObject {
                 }
                 Task { @MainActor in
                     await self.updateStatus(itemId: itemId, status: .paused)
-                    self.activeDownloads.removeValue(forKey: itemId)
+                    self.pendingProgress.removeValue(forKey: itemId)
+                self.activeDownloads.removeValue(forKey: itemId)
                 }
                 break
             }
@@ -165,6 +176,7 @@ final class DownloadManager: NSObject, ObservableObject {
         pendingAssetTasks[itemId]?.forEach { $0.cancel() }
         pendingAssetTasks.removeValue(forKey: itemId)
 
+        pendingProgress.removeValue(forKey: itemId)
         activeDownloads.removeValue(forKey: itemId)
 
         // Delete files
@@ -403,8 +415,6 @@ final class DownloadManager: NSObject, ObservableObject {
         record.downloadedBytes = downloadedBytes
         record.totalBytes = totalBytes
         try? context.save()
-
-        activeDownloads[itemId] = progress
     }
 
     private func deleteRecord(itemId: String) async {
@@ -568,7 +578,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 }
             }
 
-            self.activeDownloads.removeValue(forKey: itemId)
+            self.pendingProgress.removeValue(forKey: itemId)
+                self.activeDownloads.removeValue(forKey: itemId)
             self.stateVersion += 1
 
             var map = self.taskIdMap
@@ -591,8 +602,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
         Task { @MainActor in
             guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
-            // Always update in-memory progress (cheap, drives UI)
-            self.activeDownloads[itemId] = progress
+            // Update pending progress (published to UI on timer, not per-callback)
+            self.pendingProgress[itemId] = progress
             // Only write to SwiftData every 5 seconds per item
             let now = Date()
             let lastSave = self.lastProgressSave[itemId] ?? .distantPast
@@ -624,6 +635,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         Task { @MainActor in
             guard let itemId = taskIdMap[taskKey(taskId)] else { return }
             await updateStatus(itemId: itemId, status: .failed, errorMessage: error.localizedDescription)
+            pendingProgress.removeValue(forKey: itemId)
             activeDownloads.removeValue(forKey: itemId)
 
             var map = taskIdMap
