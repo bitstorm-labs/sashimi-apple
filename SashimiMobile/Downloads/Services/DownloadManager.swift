@@ -265,9 +265,11 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: - Season Downloads
 
-    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) async {
+    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
         for episode in episodes {
-            await startDownload(item: episode, quality: quality)
+            Task {
+                await startDownload(item: episode, quality: quality)
+            }
         }
     }
 
