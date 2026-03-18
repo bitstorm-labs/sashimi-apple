@@ -278,6 +278,7 @@ struct MobilePlayerView: View {
                 } label: {
                     Label(skipLabel(for: segment.type), systemImage: "forward.fill")
                         .font(.headline)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 12)
                         .background(.ultraThinMaterial)
@@ -358,6 +359,7 @@ struct MobilePlayerView: View {
                         dismiss()
                     }
                     .buttonStyle(.bordered)
+                    .foregroundStyle(.white)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
