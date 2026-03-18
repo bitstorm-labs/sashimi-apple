@@ -11,16 +11,13 @@ final class DownloadManager: NSObject, ObservableObject {
     private static let sessionIdentifier = "com.mondominator.sashimi.mobile.downloads"
     private static let taskMapKey = "downloadTaskMap"
 
-    @Published var activeDownloads: [String: Double] = [:] // itemId -> progress (throttled updates)
+    @Published var activeDownloads: [String: Double] = [:] // itemId -> progress
     @Published var stateVersion: Int = 0 // bumped on any download state change
-    private var pendingProgress: [String: Double] = [:] // raw progress, published on timer
-    private var progressTimer: Timer?
 
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
     private var modelContainer: ModelContainer?
-    private var lastProgressSave: [String: Date] = [:] // throttle SwiftData writes per item
 
     // Maps URLSessionTask.taskIdentifier (as String) -> itemId for surviving app relaunches
     // UserDefaults plist format requires String keys, so we store Int taskIdentifiers as Strings
@@ -45,14 +42,6 @@ final class DownloadManager: NSObject, ObservableObject {
         config.allowsCellularAccess = true
         backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
 
-        // Publish progress updates at a fixed interval instead of per-callback
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, !self.pendingProgress.isEmpty else { return }
-                self.activeDownloads = self.pendingProgress
-            }
-        }
-
         // Reconnect any in-flight downloads from previous launch
         reconnectTasks()
     }
@@ -67,7 +56,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: - Public API
 
-    func startDownload(item: BaseItemDto, quality: DownloadQuality, downloadAssets: Bool = true) async {
+    func startDownload(item: BaseItemDto, quality: DownloadQuality) async {
         guard let container = modelContainer else { return }
 
         let itemId = item.id
@@ -135,12 +124,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
         task.resume()
         await updateStatus(itemId: itemId, status: .downloading)
-        pendingProgress[itemId] = 0
+        activeDownloads[itemId] = 0
 
         // Download images and subtitles concurrently (non-background, best-effort)
-        if downloadAssets {
-            self.downloadAssets(for: item)
-        }
+        downloadAssets(for: item)
     }
 
     func pauseDownload(itemId: String) {
@@ -154,8 +141,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 }
                 Task { @MainActor in
                     await self.updateStatus(itemId: itemId, status: .paused)
-                    self.pendingProgress.removeValue(forKey: itemId)
-                self.activeDownloads.removeValue(forKey: itemId)
+                    self.activeDownloads.removeValue(forKey: itemId)
                 }
                 break
             }
@@ -176,7 +162,6 @@ final class DownloadManager: NSObject, ObservableObject {
         pendingAssetTasks[itemId]?.forEach { $0.cancel() }
         pendingAssetTasks.removeValue(forKey: itemId)
 
-        pendingProgress.removeValue(forKey: itemId)
         activeDownloads.removeValue(forKey: itemId)
 
         // Delete files
@@ -280,70 +265,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: - Season Downloads
 
-    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
-        guard let container = modelContainer else { return }
-
-        // Check disk space once upfront
-        let availableSpace = DownloadFileManager.availableDiskSpace()
-        let minimumRequired: Int64 = 500 * 1024 * 1024
-        guard availableSpace >= minimumRequired else { return }
-
-        // Batch: create all records in a single context + save
-        let context = ModelContext(container)
-        var toDownload: [(item: BaseItemDto, url: URL)] = []
-
+    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) async {
         for episode in episodes {
-            let itemId = episode.id
-            let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-            if let existing = try? context.fetch(descriptor).first {
-                if existing.status == .completed || existing.status == .downloading || existing.status == .queued {
-                    continue
-                }
-                context.delete(existing)
-            }
-
-            guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality) else { continue }
-            try? DownloadFileManager.createItemDirectory(for: itemId)
-
-            let record = DownloadedItem(
-                itemId: itemId,
-                name: episode.name,
-                itemType: episode.type ?? .unknown,
-                quality: quality,
-                seriesName: episode.seriesName,
-                seasonNumber: episode.parentIndexNumber,
-                episodeNumber: episode.indexNumber,
-                overview: episode.overview,
-                runTimeTicks: episode.runTimeTicks,
-                productionYear: episode.productionYear,
-                seriesId: episode.seriesId,
-                seasonId: episode.seasonId
-            )
-            record.status = .downloading
-            context.insert(record)
-            toDownload.append((item: episode, url: downloadURL))
-        }
-
-        try? context.save()
-
-        // Start all background download tasks
-        var map = taskIdMap
-        for (episode, downloadURL) in toDownload {
-            let task = backgroundSession.downloadTask(with: downloadURL)
-            map[taskKey(task.taskIdentifier)] = episode.id
-            task.resume()
-            activeDownloads[episode.id] = 0
-        }
-        taskIdMap = map
-        stateVersion += 1
-
-        // Fetch assets gradually in the background
-        Task {
-            for (episode, _) in toDownload {
-                downloadAssets(for: episode)
-                try? await Task.sleep(for: .seconds(1))
-            }
+            await startDownload(item: episode, quality: quality)
         }
     }
 
@@ -415,6 +339,8 @@ final class DownloadManager: NSObject, ObservableObject {
         record.downloadedBytes = downloadedBytes
         record.totalBytes = totalBytes
         try? context.save()
+
+        activeDownloads[itemId] = progress
     }
 
     private func deleteRecord(itemId: String) async {
@@ -578,8 +504,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 }
             }
 
-            self.pendingProgress.removeValue(forKey: itemId)
-                self.activeDownloads.removeValue(forKey: itemId)
+            self.activeDownloads.removeValue(forKey: itemId)
             self.stateVersion += 1
 
             var map = self.taskIdMap
@@ -601,21 +526,13 @@ extension DownloadManager: URLSessionDownloadDelegate {
             : 0
 
         Task { @MainActor in
-            guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
-            // Update pending progress (published to UI on timer, not per-callback)
-            self.pendingProgress[itemId] = progress
-            // Only write to SwiftData every 5 seconds per item
-            let now = Date()
-            let lastSave = self.lastProgressSave[itemId] ?? .distantPast
-            if now.timeIntervalSince(lastSave) >= 5 {
-                self.lastProgressSave[itemId] = now
-                await self.updateProgress(
-                    itemId: itemId,
-                    progress: progress,
-                    downloadedBytes: totalBytesWritten,
-                    totalBytes: totalBytesExpectedToWrite
-                )
-            }
+            guard let itemId = taskIdMap[taskKey(taskId)] else { return }
+            await updateProgress(
+                itemId: itemId,
+                progress: progress,
+                downloadedBytes: totalBytesWritten,
+                totalBytes: totalBytesExpectedToWrite
+            )
         }
     }
 
@@ -635,7 +552,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
         Task { @MainActor in
             guard let itemId = taskIdMap[taskKey(taskId)] else { return }
             await updateStatus(itemId: itemId, status: .failed, errorMessage: error.localizedDescription)
-            pendingProgress.removeValue(forKey: itemId)
             activeDownloads.removeValue(forKey: itemId)
 
             var map = taskIdMap
