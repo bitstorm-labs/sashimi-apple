@@ -164,6 +164,14 @@ struct DownloadsListView: View {
             Text("Waiting...")
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textSecondary)
+        case .preparing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Preparing...")
+                    .font(MobileTypography.caption)
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
         case .downloading:
             let pct = Int((downloadManager.activeDownloads[item.itemId] ?? item.progress) * 100)
             Text("Downloading \(pct)%")
@@ -186,7 +194,7 @@ struct DownloadsListView: View {
     @ViewBuilder
     private func actionButton(for item: DownloadedItem) -> some View {
         switch item.status {
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             Button {
                 Task { await downloadManager.cancelDownload(itemId: item.itemId) }
             } label: {
