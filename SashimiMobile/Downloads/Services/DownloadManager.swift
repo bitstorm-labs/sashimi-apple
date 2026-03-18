@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import UIKit
 
+// swiftlint:disable type_body_length
 // DownloadManager coordinates background downloads, URLSession delegate, and SwiftData persistence
 
 @MainActor
@@ -290,10 +291,8 @@ final class DownloadManager: NSObject, ObservableObject {
         let inserted = persistence.batchInsertQueued(episodes: episodePairs)
         guard !inserted.isEmpty else { return }
 
-        for episode in episodes {
-            if inserted.contains(where: { $0.itemId == episode.id }) {
-                downloadQueue.append((item: episode, quality: quality))
-            }
+        for episode in episodes where inserted.contains(where: { $0.itemId == episode.id }) {
+            downloadQueue.append((item: episode, quality: quality))
         }
 
         stateVersion += 1
