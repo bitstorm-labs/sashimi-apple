@@ -268,13 +268,66 @@ final class DownloadManager: NSObject, ObservableObject {
     // MARK: - Season Downloads
 
     func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
-        Task {
-            // Queue all video downloads quickly without asset fetching
-            for episode in episodes {
-                await startDownload(item: episode, quality: quality, downloadAssets: false)
+        guard let container = modelContainer else { return }
+
+        // Check disk space once upfront
+        let availableSpace = DownloadFileManager.availableDiskSpace()
+        let minimumRequired: Int64 = 500 * 1024 * 1024
+        guard availableSpace >= minimumRequired else { return }
+
+        // Batch: create all records in a single context + save
+        let context = ModelContext(container)
+        var toDownload: [(item: BaseItemDto, url: URL)] = []
+
+        for episode in episodes {
+            let itemId = episode.id
+            let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
+            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+            if let existing = try? context.fetch(descriptor).first {
+                if existing.status == .completed || existing.status == .downloading || existing.status == .queued {
+                    continue
+                }
+                context.delete(existing)
             }
-            // Then fetch assets one at a time so we don't flood the main actor
-            for episode in episodes {
+
+            guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality) else { continue }
+            try? DownloadFileManager.createItemDirectory(for: itemId)
+
+            let record = DownloadedItem(
+                itemId: itemId,
+                name: episode.name,
+                itemType: episode.type ?? .unknown,
+                quality: quality,
+                seriesName: episode.seriesName,
+                seasonNumber: episode.parentIndexNumber,
+                episodeNumber: episode.indexNumber,
+                overview: episode.overview,
+                runTimeTicks: episode.runTimeTicks,
+                productionYear: episode.productionYear,
+                seriesId: episode.seriesId,
+                seasonId: episode.seasonId
+            )
+            record.status = .downloading
+            context.insert(record)
+            toDownload.append((item: episode, url: downloadURL))
+        }
+
+        try? context.save()
+
+        // Start all background download tasks
+        var map = taskIdMap
+        for (episode, downloadURL) in toDownload {
+            let task = backgroundSession.downloadTask(with: downloadURL)
+            map[taskKey(task.taskIdentifier)] = episode.id
+            task.resume()
+            activeDownloads[episode.id] = 0
+        }
+        taskIdMap = map
+        stateVersion += 1
+
+        // Fetch assets gradually in the background
+        Task {
+            for (episode, _) in toDownload {
                 downloadAssets(for: episode)
                 try? await Task.sleep(for: .seconds(1))
             }
