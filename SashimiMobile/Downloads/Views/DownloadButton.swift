@@ -17,6 +17,7 @@ struct DownloadButton: View {
     private enum DownloadButtonState {
         case notDownloaded
         case queued
+        case preparing
         case downloading
         case paused
         case completed
@@ -56,6 +57,15 @@ struct DownloadButton: View {
             Label("Queued", systemImage: "clock")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MobileColors.textSecondary)
+
+        case .preparing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Preparing...")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundStyle(MobileColors.textSecondary)
 
         case .downloading:
             HStack(spacing: 6) {
@@ -106,7 +116,7 @@ struct DownloadButton: View {
                 showingQualitySheet = true
             }
 
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             Task { await downloadManager.cancelDownload(itemId: item.id) }
 
         case .paused:
@@ -130,6 +140,8 @@ struct DownloadButton: View {
         switch record.status {
         case .queued:
             downloadState = .queued
+        case .preparing:
+            downloadState = .preparing
         case .downloading:
             downloadState = .downloading
             progress = downloadManager.activeDownloads[item.id] ?? record.progress

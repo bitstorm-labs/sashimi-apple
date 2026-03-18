@@ -66,7 +66,7 @@ final class DownloadManager: NSObject, ObservableObject {
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
         if let existing = try? context.fetch(descriptor).first {
-            if existing.status == .completed || existing.status == .downloading || existing.status == .queued {
+            if existing.status == .completed || existing.status == .downloading || existing.status == .preparing || existing.status == .queued {
                 return // Already exists
             }
             // Re-download failed item
