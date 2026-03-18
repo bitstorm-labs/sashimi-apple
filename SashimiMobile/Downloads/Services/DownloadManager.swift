@@ -18,6 +18,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
     private var modelContainer: ModelContainer?
+    private var lastProgressSave: [String: Date] = [:] // throttle SwiftData writes per item
 
     // Maps URLSessionTask.taskIdentifier (as String) -> itemId for surviving app relaunches
     // UserDefaults plist format requires String keys, so we store Int taskIdentifiers as Strings
@@ -589,13 +590,21 @@ extension DownloadManager: URLSessionDownloadDelegate {
             : 0
 
         Task { @MainActor in
-            guard let itemId = taskIdMap[taskKey(taskId)] else { return }
-            await updateProgress(
-                itemId: itemId,
-                progress: progress,
-                downloadedBytes: totalBytesWritten,
-                totalBytes: totalBytesExpectedToWrite
-            )
+            guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
+            // Always update in-memory progress (cheap, drives UI)
+            self.activeDownloads[itemId] = progress
+            // Only write to SwiftData every 5 seconds per item
+            let now = Date()
+            let lastSave = self.lastProgressSave[itemId] ?? .distantPast
+            if now.timeIntervalSince(lastSave) >= 5 {
+                self.lastProgressSave[itemId] = now
+                await self.updateProgress(
+                    itemId: itemId,
+                    progress: progress,
+                    downloadedBytes: totalBytesWritten,
+                    totalBytes: totalBytesExpectedToWrite
+                )
+            }
         }
     }
 
