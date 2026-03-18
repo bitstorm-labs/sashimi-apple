@@ -21,6 +21,11 @@ struct MobileDetailView: View {
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var showingSeasonDownload = false
+    @State private var downloadScope: DownloadScope?
+    @State private var showingDownloadQuality = false
+    @State private var showingNextNAlert = false
+    @State private var showingNoUnwatchedAlert = false
+    @State private var nextNInput = ""
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var isSeries: Bool { item.type == .series }
@@ -41,6 +46,24 @@ struct MobileDetailView: View {
 
     private var isYouTubeChannelEpisode: Bool {
         isEpisode && isYouTubeStyle
+    }
+
+    private enum DownloadScope {
+        case all
+        case unwatched
+        case nextN(Int)
+    }
+
+    private var episodesForDownload: [BaseItemDto] {
+        guard let scope = downloadScope else { return [] }
+        switch scope {
+        case .all:
+            return episodes
+        case .unwatched:
+            return episodes.filter { !($0.userData?.played ?? false) }
+        case .nextN(let n):
+            return Array(episodes.filter { !($0.userData?.played ?? false) }.prefix(n))
+        }
     }
 
     var body: some View {
