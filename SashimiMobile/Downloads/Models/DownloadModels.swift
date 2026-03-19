@@ -43,6 +43,7 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
 
 enum DownloadStatus: String, Codable {
     case queued
+    case preparing
     case downloading
     case paused
     case completed

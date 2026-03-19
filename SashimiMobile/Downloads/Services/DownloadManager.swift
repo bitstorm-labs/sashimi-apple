@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import UIKit
 
+// swiftlint:disable type_body_length
 // DownloadManager coordinates background downloads, URLSession delegate, and SwiftData persistence
 
 @MainActor
@@ -33,6 +34,23 @@ final class DownloadManager: NSObject, ObservableObject {
     // Pending image/subtitle downloads (non-background, fire-and-forget)
     private var pendingAssetTasks: [String: [Task<Void, Never>]] = [:]
 
+    private let persistence = DownloadPersistence()
+
+    // Serial download queue
+    private var downloadQueue: [(item: BaseItemDto, quality: DownloadQuality)] = []
+    private var currentDownloadItemId: String?
+
+    // Progress throttling
+    private var pendingProgress: [String: Double] = [:]
+    private var lastProgressSave: [String: Date] = [:]
+    private var progressTimer: Timer?
+
+    // In-memory preparing state (items waiting for first bytes from server)
+    @Published var preparingItems: Set<String> = []
+
+    // Toast notification
+    @Published var toastMessage: String?
+
     override private init() {
         super.init()
 
@@ -48,33 +66,60 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+        persistence.setModelContainer(container)
     }
 
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
         backgroundCompletionHandler = handler
     }
 
+    // MARK: - Progress Timer
+
+    private func startProgressTimer() {
+        guard progressTimer == nil else { return }
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.publishProgress()
+            }
+        }
+    }
+
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    private func publishProgress() {
+        guard !pendingProgress.isEmpty else { return }
+        activeDownloads = pendingProgress
+    }
+
     // MARK: - Public API
 
-    func startDownload(item: BaseItemDto, quality: DownloadQuality) async {
-        guard let container = modelContainer else { return }
+    func enqueueDownload(item: BaseItemDto, quality: DownloadQuality) {
+        guard insertQueuedRecord(item: item, quality: quality) else { return }
+        downloadQueue.append((item: item, quality: quality))
+        stateVersion += 1
+        if currentDownloadItemId == nil {
+            startNextDownload()
+        }
+    }
 
-        let itemId = item.id
+    /// Insert a queued download record on the main actor's context so @Query sees it immediately.
+    private func insertQueuedRecord(item: BaseItemDto, quality: DownloadQuality) -> Bool {
+        guard let container = modelContainer else { return false }
         let context = ModelContext(container)
-
-        // Check if already downloaded or downloading
+        let itemId = item.id
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
         if let existing = try? context.fetch(descriptor).first {
-            if existing.status == .completed || existing.status == .downloading || existing.status == .queued {
-                return // Already exists
+            if existing.status == .completed || existing.status == .downloading
+                || existing.status == .preparing || existing.status == .queued {
+                return false
             }
-            // Re-download failed item
             context.delete(existing)
         }
-
-        // Create download record
-        let downloadedItem = DownloadedItem(
+        let record = DownloadedItem(
             itemId: itemId,
             name: item.name,
             itemType: item.type ?? .unknown,
@@ -88,32 +133,47 @@ final class DownloadManager: NSObject, ObservableObject {
             seriesId: item.seriesId,
             seasonId: item.seasonId
         )
-
-        context.insert(downloadedItem)
+        context.insert(record)
         try? context.save()
+        return true
+    }
 
-        // Check available disk space (require at least 500MB)
+    private func startNextDownload() {
+        guard !downloadQueue.isEmpty else {
+            currentDownloadItemId = nil
+            stopProgressTimer()
+            return
+        }
+
+        let (item, quality) = downloadQueue.removeFirst()
+        let itemId = item.id
+
+        // Check disk space
         let availableSpace = DownloadFileManager.availableDiskSpace()
-        let minimumRequired: Int64 = 500 * 1024 * 1024
-        if availableSpace < minimumRequired {
-            await updateStatus(
+        if availableSpace < 500 * 1024 * 1024 {
+            persistence.updateStatus(
                 itemId: itemId,
                 status: .failed,
                 errorMessage: "Not enough disk space. Available: \(ByteCountFormatter.string(fromByteCount: availableSpace, countStyle: .file))"
             )
+            stateVersion += 1
+            startNextDownload()
             return
         }
 
-        // Start the video download
         guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality) else {
-            await updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not build download URL")
+            persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not build download URL")
+            stateVersion += 1
+            startNextDownload()
             return
         }
 
         do {
             try DownloadFileManager.createItemDirectory(for: itemId)
         } catch {
-            await updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not create directory: \(error.localizedDescription)")
+            persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not create directory: \(error.localizedDescription)")
+            stateVersion += 1
+            startNextDownload()
             return
         }
 
@@ -122,12 +182,32 @@ final class DownloadManager: NSObject, ObservableObject {
         map[taskKey(task.taskIdentifier)] = itemId
         taskIdMap = map
 
+        currentDownloadItemId = itemId
         task.resume()
-        await updateStatus(itemId: itemId, status: .downloading)
-        activeDownloads[itemId] = 0
+        persistence.updateStatus(itemId: itemId, status: .downloading)
+        preparingItems.insert(itemId)
+        pendingProgress[itemId] = 0
+        stateVersion += 1
+        startProgressTimer()
 
-        // Download images and subtitles concurrently (non-background, best-effort)
+        // Download assets in background
         downloadAssets(for: item)
+    }
+
+    private func dequeueNext() {
+        currentDownloadItemId = nil
+        startNextDownload()
+    }
+
+    private func deleteRecordFromMainContext(itemId: String) {
+        guard let container = modelContainer else { return }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        if let record = try? context.fetch(descriptor).first {
+            context.delete(record)
+            try? context.save()
+        }
     }
 
     func pauseDownload(itemId: String) {
@@ -140,8 +220,10 @@ final class DownloadManager: NSObject, ObservableObject {
                     task.cancel()
                 }
                 Task { @MainActor in
-                    await self.updateStatus(itemId: itemId, status: .paused)
+                    self.persistence.updateStatus(itemId: itemId, status: .paused)
+                    self.pendingProgress.removeValue(forKey: itemId)
                     self.activeDownloads.removeValue(forKey: itemId)
+                    self.preparingItems.remove(itemId)
                 }
                 break
             }
@@ -149,7 +231,6 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func cancelDownload(itemId: String) async {
-        // Cancel background task
         let tasks = await backgroundSession.allTasks
         for task in tasks where taskIdMap[taskKey(task.taskIdentifier)] == itemId {
             task.cancel()
@@ -158,17 +239,23 @@ final class DownloadManager: NSObject, ObservableObject {
             taskIdMap = map
         }
 
-        // Cancel asset tasks
         pendingAssetTasks[itemId]?.forEach { $0.cancel() }
         pendingAssetTasks.removeValue(forKey: itemId)
 
+        pendingProgress.removeValue(forKey: itemId)
         activeDownloads.removeValue(forKey: itemId)
+        preparingItems.remove(itemId)
+        lastProgressSave.removeValue(forKey: itemId)
 
-        // Delete files
         try? DownloadFileManager.deleteItemDirectory(for: itemId)
+        deleteRecordFromMainContext(itemId: itemId)
 
-        // Delete SwiftData record
-        await deleteRecord(itemId: itemId)
+        // Manage queue
+        if itemId == currentDownloadItemId {
+            dequeueNext()
+        } else {
+            downloadQueue.removeAll { $0.item.id == itemId }
+        }
     }
 
     func deleteDownload(itemId: String) async {
@@ -177,23 +264,15 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func retryDownload(itemId: String) async {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        guard let quality = persistence.fetchQuality(itemId: itemId) else { return }
 
-        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-        guard let record = try? context.fetch(descriptor).first else { return }
-
-        // Re-fetch the item from Jellyfin for fresh metadata
         guard let freshItem = try? await JellyfinClient.shared.getItem(itemId: itemId) else {
-            await updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not fetch item info")
+            persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not fetch item info")
             return
         }
 
-        let quality = record.downloadQuality
-        // Delete old record and restart
         await cancelDownload(itemId: itemId)
-        await startDownload(item: freshItem, quality: quality)
+        enqueueDownload(item: freshItem, quality: quality)
     }
 
     func downloadStatus(for itemId: String) -> DownloadedItem? {
@@ -213,50 +292,30 @@ final class DownloadManager: NSObject, ObservableObject {
         return record.videoFileURL
     }
 
-    /// Get the last saved offline playback position for a downloaded item
     func offlinePlaybackPosition(for itemId: String) -> Int64? {
         guard let container = modelContainer else { return nil }
         let context = ModelContext(container)
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-
         guard let record = try? context.fetch(descriptor).first else { return nil }
         return record.lastPlaybackPositionTicks > 0 ? record.lastPlaybackPositionTicks : nil
     }
 
     // MARK: - Offline Progress Tracking
 
-    /// Save playback position for a downloaded item (called when player stops)
     func savePlaybackPosition(itemId: String, positionTicks: Int64) {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-
-        guard let record = try? context.fetch(descriptor).first else { return }
-        record.lastPlaybackPositionTicks = positionTicks
-        record.needsProgressSync = true
-        try? context.save()
+        persistence.savePlaybackPosition(itemId: itemId, positionTicks: positionTicks)
     }
 
-    /// Sync any pending offline progress back to the Jellyfin server
     func syncPendingProgress() async {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.needsProgressSync == true }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-
-        guard let pendingItems = try? context.fetch(descriptor), !pendingItems.isEmpty else { return }
-
+        let pendingItems = persistence.fetchPendingSync()
         for item in pendingItems {
             do {
                 try await JellyfinClient.shared.reportPlaybackStopped(
                     itemId: item.itemId,
-                    positionTicks: item.lastPlaybackPositionTicks
+                    positionTicks: item.positionTicks
                 )
-                // Successfully synced — clear the flag
-                item.needsProgressSync = false
-                try? context.save()
+                persistence.clearSyncFlag(itemId: item.itemId)
             } catch {
                 // Server unreachable — will retry next launch
             }
@@ -265,33 +324,45 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // MARK: - Season Downloads
 
-    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) async {
+    func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
+        var insertedCount = 0
         for episode in episodes {
-            await startDownload(item: episode, quality: quality)
+            if insertQueuedRecord(item: episode, quality: quality) {
+                downloadQueue.append((item: episode, quality: quality))
+                insertedCount += 1
+            }
+        }
+        guard insertedCount > 0 else { return }
+
+        stateVersion += 1
+        toastMessage = "Downloading \(insertedCount) episode\(insertedCount == 1 ? "" : "s")..."
+
+        if currentDownloadItemId == nil {
+            startNextDownload()
         }
     }
 
     // MARK: - Delete All
 
     func deleteAllDownloads() async {
-        guard let container = modelContainer else { return }
-
         // Cancel all active tasks
         let tasks = await backgroundSession.allTasks
         tasks.forEach { $0.cancel() }
         taskIdMap = [:]
         activeDownloads = [:]
 
+        downloadQueue.removeAll()
+        currentDownloadItemId = nil
+        pendingProgress.removeAll()
+        preparingItems.removeAll()
+        lastProgressSave.removeAll()
+        stopProgressTimer()
+
         // Delete all files
         try? DownloadFileManager.deleteAllDownloads()
 
         // Delete all records
-        let context = ModelContext(container)
-        let descriptor = FetchDescriptor<DownloadedItem>()
-        if let items = try? context.fetch(descriptor) {
-            items.forEach { context.delete($0) }
-            try? context.save()
-        }
+        persistence.deleteAllRecords()
     }
 
     // MARK: - Private Helpers
@@ -300,58 +371,54 @@ final class DownloadManager: NSObject, ObservableObject {
         backgroundSession.getAllTasks { [weak self] tasks in
             Task { @MainActor in
                 guard let self else { return }
+                var activeTaskItemIds: Set<String> = []
                 for task in tasks {
                     if let itemId = self.taskIdMap[self.taskKey(task.taskIdentifier)] {
                         if task.state == .running {
+                            self.pendingProgress[itemId] = 0
                             self.activeDownloads[itemId] = 0
-                            await self.updateStatus(itemId: itemId, status: .downloading)
+                            self.persistence.updateStatus(itemId: itemId, status: .downloading)
+                            self.currentDownloadItemId = itemId
+                            self.startProgressTimer()
+                            activeTaskItemIds.insert(itemId)
                         }
                     }
                 }
+
+                // Mark any "downloading"/"preparing" records without active tasks as failed
+                // (stale from previous install/crash)
+                self.cleanupStaleDownloads(activeTaskItemIds: activeTaskItemIds)
             }
         }
     }
 
-    private func updateStatus(itemId: String, status: DownloadStatus, errorMessage: String? = nil) async {
+    private func cleanupStaleDownloads(activeTaskItemIds: Set<String>) {
         guard let container = modelContainer else { return }
         let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        let descriptor = FetchDescriptor<DownloadedItem>()
+        guard let items = try? context.fetch(descriptor) else { return }
 
-        guard let record = try? context.fetch(descriptor).first else { return }
-        record.status = status
-        record.errorMessage = errorMessage
-        if status == .completed {
-            record.dateCompleted = Date()
-            record.progress = 1.0
+        for item in items {
+            let status = item.status
+            let isIncomplete = status == .downloading || status == .preparing || status == .queued
+            if isIncomplete && !activeTaskItemIds.contains(item.itemId) {
+                item.status = .failed
+                item.errorMessage = "Download interrupted. Tap retry to restart."
+            }
         }
         try? context.save()
+        stateVersion += 1
     }
 
-    private func updateProgress(itemId: String, progress: Double, downloadedBytes: Int64, totalBytes: Int64) async {
+    func restartAllFailed() async {
         guard let container = modelContainer else { return }
         let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        let descriptor = FetchDescriptor<DownloadedItem>()
+        guard let items = try? context.fetch(descriptor) else { return }
 
-        guard let record = try? context.fetch(descriptor).first else { return }
-        record.progress = progress
-        record.downloadedBytes = downloadedBytes
-        record.totalBytes = totalBytes
-        try? context.save()
-
-        activeDownloads[itemId] = progress
-    }
-
-    private func deleteRecord(itemId: String) async {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-
-        if let record = try? context.fetch(descriptor).first {
-            context.delete(record)
-            try? context.save()
+        let failedItems = items.filter { $0.status == .failed }
+        for item in failedItems {
+            await retryDownload(itemId: item.itemId)
         }
     }
 
@@ -390,27 +457,17 @@ final class DownloadManager: NSObject, ObservableObject {
         do {
             let (tempURL, _) = try await URLSession.shared.download(from: url)
             try DownloadFileManager.moveFile(from: tempURL, to: destination)
-
-            // Update record
-            guard let container = modelContainer else { return }
-            let context = ModelContext(container)
-            let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-            guard let record = try? context.fetch(descriptor).first else { return }
-
             if keyPath == "posterFileName" {
-                record.posterFileName = fileName
+                persistence.updatePosterFileName(itemId: itemId, fileName: fileName)
             } else if keyPath == "backdropFileName" {
-                record.backdropFileName = fileName
+                persistence.updateBackdropFileName(itemId: itemId, fileName: fileName)
             }
-            try? context.save()
         } catch {
             // Best-effort: images are not critical
         }
     }
 
     private func downloadSubtitles(for item: BaseItemDto) async {
-        // Get playback info to find subtitle streams
         guard let playbackInfo = try? await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, maxBitrate: nil) else {
             return
         }
@@ -437,22 +494,13 @@ final class DownloadManager: NSObject, ObservableObject {
             do {
                 let (tempURL, _) = try await URLSession.shared.download(from: url)
                 try DownloadFileManager.moveFile(from: tempURL, to: destination)
-
-                // Save subtitle record
-                guard let container = modelContainer else { return }
-                let context = ModelContext(container)
-                let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-                let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-                guard let record = try? context.fetch(descriptor).first else { return }
-
-                let subtitle = DownloadedSubtitle(
+                persistence.addSubtitle(
+                    itemId: itemId,
                     language: language,
                     displayTitle: stream.displayTitle ?? language,
                     subtitleIndex: index,
                     fileName: fileName
                 )
-                record.subtitles.append(subtitle)
-                try? context.save()
             } catch {
                 // Best-effort: skip failed subtitles
             }
@@ -484,32 +532,28 @@ extension DownloadManager: URLSessionDownloadDelegate {
             moveError = error
         }
 
-        // Now dispatch to main actor for SwiftData updates
         Task { @MainActor in
             if let moveError {
-                await self.updateStatus(itemId: itemId, status: .failed, errorMessage: "File move failed: \(moveError.localizedDescription)")
+                self.persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "File move failed: \(moveError.localizedDescription)")
             } else {
-                guard let container = self.modelContainer else { return }
-                let context = ModelContext(container)
-                let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-                let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-
-                if let record = try? context.fetch(descriptor).first {
-                    record.videoFileName = "video.\(ext)"
-                    record.totalBytes = DownloadFileManager.itemSize(for: itemId)
-                    record.status = .completed
-                    record.dateCompleted = Date()
-                    record.progress = 1.0
-                    try? context.save()
-                }
+                self.persistence.markCompleted(
+                    itemId: itemId,
+                    videoFileName: "video.\(ext)",
+                    totalBytes: DownloadFileManager.itemSize(for: itemId)
+                )
             }
 
+            self.pendingProgress.removeValue(forKey: itemId)
             self.activeDownloads.removeValue(forKey: itemId)
+            self.preparingItems.remove(itemId)
+            self.lastProgressSave.removeValue(forKey: itemId)
             self.stateVersion += 1
 
             var map = self.taskIdMap
             map.removeValue(forKey: self.taskKey(taskId))
             self.taskIdMap = map
+
+            self.dequeueNext()
         }
     }
 
@@ -521,18 +565,34 @@ extension DownloadManager: URLSessionDownloadDelegate {
         totalBytesExpectedToWrite: Int64
     ) {
         let taskId = downloadTask.taskIdentifier
+        // totalBytesExpectedToWrite is -1 for transcoded content (unknown size)
         let progress = totalBytesExpectedToWrite > 0
             ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-            : 0
+            : -1 // negative signals unknown total
 
         Task { @MainActor in
-            guard let itemId = taskIdMap[taskKey(taskId)] else { return }
-            await updateProgress(
-                itemId: itemId,
-                progress: progress,
-                downloadedBytes: totalBytesWritten,
-                totalBytes: totalBytesExpectedToWrite
-            )
+            guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
+
+            // Update in-memory progress (published on timer)
+            self.pendingProgress[itemId] = progress
+
+            // Clear preparing state once any bytes flow
+            if totalBytesWritten > 0 {
+                self.preparingItems.remove(itemId)
+            }
+
+            // Throttle SwiftData writes to every 5s per item
+            let now = Date()
+            let lastSave = self.lastProgressSave[itemId] ?? .distantPast
+            if now.timeIntervalSince(lastSave) >= 5 {
+                self.lastProgressSave[itemId] = now
+                self.persistence.updateProgress(
+                    itemId: itemId,
+                    progress: progress,
+                    downloadedBytes: totalBytesWritten,
+                    totalBytes: totalBytesExpectedToWrite
+                )
+            }
         }
     }
 
@@ -550,13 +610,17 @@ extension DownloadManager: URLSessionDownloadDelegate {
         if nsError.code == NSURLErrorCancelled { return }
 
         Task { @MainActor in
-            guard let itemId = taskIdMap[taskKey(taskId)] else { return }
-            await updateStatus(itemId: itemId, status: .failed, errorMessage: error.localizedDescription)
-            activeDownloads.removeValue(forKey: itemId)
+            guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
+            self.persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: error.localizedDescription)
+            self.pendingProgress.removeValue(forKey: itemId)
+            self.activeDownloads.removeValue(forKey: itemId)
+            self.preparingItems.remove(itemId)
 
-            var map = taskIdMap
-            map.removeValue(forKey: taskKey(taskId))
-            taskIdMap = map
+            var map = self.taskIdMap
+            map.removeValue(forKey: self.taskKey(taskId))
+            self.taskIdMap = map
+
+            self.dequeueNext()
         }
     }
 

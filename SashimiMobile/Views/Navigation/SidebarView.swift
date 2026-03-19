@@ -40,6 +40,7 @@ struct MainNavigationView: View {
     @State private var sidebarVisible = false
     @State private var libraries: [JellyfinLibrary] = []
     @ObservedObject private var sessionManager = SessionManager.shared
+    @ObservedObject private var downloadManager = DownloadManager.shared
 
     private let sidebarWidth: CGFloat = 280
 
@@ -82,6 +83,37 @@ struct MainNavigationView: View {
         .task {
             await loadLibraries()
         }
+        .overlay(alignment: .top) {
+            if let message = downloadManager.toastMessage {
+                Button {
+                    selection = .downloads
+                    downloadManager.toastMessage = nil
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text(message)
+                            .font(MobileTypography.body)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onAppear {
+                    Task {
+                        try? await Task.sleep(for: .seconds(3))
+                        withAnimation {
+                            downloadManager.toastMessage = nil
+                        }
+                    }
+                }
+            }
+        }
+        .animation(.easeInOut, value: downloadManager.toastMessage)
     }
 
     private var sidebarContent: some View {
