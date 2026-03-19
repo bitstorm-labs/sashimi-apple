@@ -20,7 +20,11 @@ struct MobileDetailView: View {
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
-    @State private var showingSeasonDownload = false
+    @State private var downloadScope: DownloadScope?
+    @State private var showingDownloadQuality = false
+    @State private var showingNextNAlert = false
+    @State private var showingNoUnwatchedAlert = false
+    @State private var nextNInput = ""
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var isSeries: Bool { item.type == .series }
@@ -41,6 +45,24 @@ struct MobileDetailView: View {
 
     private var isYouTubeChannelEpisode: Bool {
         isEpisode && isYouTubeStyle
+    }
+
+    private enum DownloadScope {
+        case all
+        case unwatched
+        case nextN(Int)
+    }
+
+    private var episodesForDownload: [BaseItemDto] {
+        guard let scope = downloadScope else { return [] }
+        switch scope {
+        case .all:
+            return episodes
+        case .unwatched:
+            return episodes.filter { !($0.userData?.played ?? false) }
+        case .nextN(let count):
+            return Array(episodes.filter { !($0.userData?.played ?? false) }.prefix(count))
+        }
     }
 
     var body: some View {
@@ -508,22 +530,67 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            // Download season button (downloads all episodes in selected season)
+            // Download menu with scope options
             if !episodes.isEmpty {
-                Button {
-                    showingSeasonDownload = true
+                Menu {
+                    Button("All Episodes") {
+                        downloadScope = .all
+                        showingDownloadQuality = true
+                    }
+                    Button("Unwatched Only") {
+                        let unwatched = episodes.filter { !($0.userData?.played ?? false) }
+                        if unwatched.isEmpty {
+                            showingNoUnwatchedAlert = true
+                        } else {
+                            downloadScope = .unwatched
+                            showingDownloadQuality = true
+                        }
+                    }
+                    Button("Next N Unwatched...") {
+                        let unwatched = episodes.filter { !($0.userData?.played ?? false) }
+                        if unwatched.isEmpty {
+                            showingNoUnwatchedAlert = true
+                        } else {
+                            nextNInput = ""
+                            showingNextNAlert = true
+                        }
+                    }
                 } label: {
-                    Label("Download Season", systemImage: "arrow.down.circle")
+                    Label("Download", systemImage: "arrow.down.circle")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
-                .confirmationDialog("Download Season", isPresented: $showingSeasonDownload) {
+                .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
                     ForEach(DownloadQuality.allCases) { quality in
                         Button("\(quality.displayName) — \(quality.subtitle)") {
-                            DownloadManager.shared.downloadSeason(episodes: episodes, quality: quality)
+                            DownloadManager.shared.downloadSeason(
+                                episodes: episodesForDownload, quality: quality
+                            )
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {
+                        downloadScope = nil
+                    }
+                }
+                .alert("Download Next N Unwatched", isPresented: $showingNextNAlert) {
+                    TextField("Number of episodes", text: $nextNInput)
+                        .keyboardType(.numberPad)
+                    Button("OK") {
+                        if let n = Int(nextNInput), n > 0 {
+                            downloadScope = .nextN(n)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                showingDownloadQuality = true
+                            }
                         }
                     }
                     Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("How many unwatched episodes would you like to download?")
+                }
+                .alert("No Unwatched Episodes", isPresented: $showingNoUnwatchedAlert) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("All episodes in this season are already watched.")
                 }
             }
 
