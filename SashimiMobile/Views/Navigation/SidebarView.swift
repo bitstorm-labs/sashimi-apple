@@ -118,6 +118,21 @@ struct MainNavigationView: View {
 
     private var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Logo at very top
+            HStack {
+                Image("SidebarLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Text("Sashimi")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(MobileColors.textPrimary)
+            }
+            .padding(.horizontal, MobileSpacing.md)
+            .padding(.top, MobileSpacing.md)
+            .padding(.bottom, MobileSpacing.md)
+
             // Home
             sidebarRow(item: .home)
 
@@ -161,9 +176,8 @@ struct MainNavigationView: View {
             sidebarRow(item: .settings)
                 .padding(.bottom, MobileSpacing.md)
         }
-        .padding(.top, MobileSpacing.xl + 44)
         .frame(maxHeight: .infinity)
-        .background(MobileColors.cardBackground)
+        .background(MobileColors.cardBackground.ignoresSafeArea())
     }
 
     private func sidebarRow(item: SidebarSelection) -> some View {
