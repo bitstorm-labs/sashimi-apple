@@ -235,7 +235,7 @@ struct MobileDetailView: View {
                     .foregroundStyle(MobileColors.textPrimary)
             }
 
-            // Metadata row
+            // Metadata + ratings row
             HStack(spacing: MobileSpacing.sm) {
                 if let year = item.productionYear {
                     Text(String(year))
@@ -255,12 +255,11 @@ struct MobileDetailView: View {
                         .background(MobileColors.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
+
+                ratingsRow
             }
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
-
-            // Ratings row
-            ratingsRow
 
             // Genres
             if let genres = item.genres, !genres.isEmpty {
