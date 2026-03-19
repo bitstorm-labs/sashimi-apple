@@ -17,6 +17,7 @@ struct DownloadButton: View {
     private enum DownloadButtonState {
         case notDownloaded
         case queued
+        case preparing
         case downloading
         case paused
         case completed
@@ -57,13 +58,31 @@ struct DownloadButton: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MobileColors.textSecondary)
 
-        case .downloading:
+        case .preparing:
             HStack(spacing: 6) {
-                ProgressView(value: progress)
-                    .progressViewStyle(.circular)
+                ProgressView()
                     .scaleEffect(0.7)
-                Text("\(Int(progress * 100))%")
+                Text("Preparing...")
                     .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundStyle(MobileColors.textSecondary)
+
+        case .downloading:
+            if progress < 0 {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Downloading...")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.7)
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 14, weight: .semibold))
+                }
             }
 
         case .paused:
@@ -87,9 +106,7 @@ struct DownloadButton: View {
     private var qualityOptions: some View {
         ForEach(DownloadQuality.allCases) { option in
             Button("\(option.displayName) — \(option.subtitle)") {
-                Task {
-                    await downloadManager.startDownload(item: item, quality: option)
-                }
+                downloadManager.enqueueDownload(item: item, quality: option)
             }
         }
         Button("Cancel", role: .cancel) {}
@@ -101,12 +118,12 @@ struct DownloadButton: View {
             if showQualityPicker {
                 showingQualitySheet = true
             } else if let quality {
-                Task { await downloadManager.startDownload(item: item, quality: quality.wrappedValue) }
+                downloadManager.enqueueDownload(item: item, quality: quality.wrappedValue)
             } else {
                 showingQualitySheet = true
             }
 
-        case .queued, .downloading:
+        case .queued, .preparing, .downloading:
             Task { await downloadManager.cancelDownload(itemId: item.id) }
 
         case .paused:
@@ -130,9 +147,13 @@ struct DownloadButton: View {
         switch record.status {
         case .queued:
             downloadState = .queued
-        case .downloading:
-            downloadState = .downloading
-            progress = downloadManager.activeDownloads[item.id] ?? record.progress
+        case .preparing, .downloading:
+            if downloadManager.preparingItems.contains(item.id) {
+                downloadState = .preparing
+            } else {
+                downloadState = .downloading
+                progress = downloadManager.activeDownloads[item.id] ?? record.progress
+            }
         case .paused:
             downloadState = .paused
         case .completed:
