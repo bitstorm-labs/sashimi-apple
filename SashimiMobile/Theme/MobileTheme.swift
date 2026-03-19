@@ -104,6 +104,16 @@ enum MobileSizing {
     static let heroTitleSize: CGFloat = 40
 }
 
+// MARK: - Phone Sizing
+
+enum PhoneSizing {
+    static let posterWidth: CGFloat = 110
+    static let posterHeight: CGFloat = 165
+    static let heroHeight: CGFloat = 250
+    static let continueWatchingWidth: CGFloat = 200
+    static let episodeCardHeight: CGFloat = 80
+}
+
 // MARK: - Poster Aspect Ratios
 
 enum PosterAspectRatio {

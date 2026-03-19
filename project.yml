@@ -118,6 +118,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
     settings:
       base:
@@ -128,7 +132,7 @@ targets:
         SDKROOT: iphoneos
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
         SUPPORTS_MACCATALYST: false
-        TARGETED_DEVICE_FAMILY: "2"
+        TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_SKIP_APP_STORE_DEPLOYMENT: NO
