@@ -29,7 +29,7 @@ struct MobileSearchView: View {
             } else {
                 ForEach(searchResults, id: \.id) { item in
                     NavigationLink {
-                        MobileDetailView(item: item)
+                        AdaptiveDetailView(item: item)
                     } label: {
                         SearchResultRow(item: item)
                     }

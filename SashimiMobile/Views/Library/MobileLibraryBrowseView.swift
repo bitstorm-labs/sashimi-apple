@@ -49,7 +49,7 @@ struct MobileLibraryBrowseView: View {
                     LazyVGrid(columns: columns, spacing: MobileSpacing.md) {
                         ForEach(items, id: \.id) { item in
                             NavigationLink {
-                                MobileDetailView(item: item, libraryName: libraryName)
+                                AdaptiveDetailView(item: item, libraryName: libraryName)
                             } label: {
                                 MobileRecentlyAddedCard(
                                     item: item,
