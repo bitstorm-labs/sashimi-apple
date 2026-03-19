@@ -68,12 +68,21 @@ struct DownloadButton: View {
             .foregroundStyle(MobileColors.textSecondary)
 
         case .downloading:
-            HStack(spacing: 6) {
-                ProgressView(value: progress)
-                    .progressViewStyle(.circular)
-                    .scaleEffect(0.7)
-                Text("\(Int(progress * 100))%")
-                    .font(.system(size: 14, weight: .semibold))
+            if progress < 0 {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Downloading...")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.7)
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 14, weight: .semibold))
+                }
             }
 
         case .paused:
@@ -138,11 +147,13 @@ struct DownloadButton: View {
         switch record.status {
         case .queued:
             downloadState = .queued
-        case .preparing:
-            downloadState = .preparing
-        case .downloading:
-            downloadState = .downloading
-            progress = downloadManager.activeDownloads[item.id] ?? record.progress
+        case .preparing, .downloading:
+            if downloadManager.preparingItems.contains(item.id) {
+                downloadState = .preparing
+            } else {
+                downloadState = .downloading
+                progress = downloadManager.activeDownloads[item.id] ?? record.progress
+            }
         case .paused:
             downloadState = .paused
         case .completed:

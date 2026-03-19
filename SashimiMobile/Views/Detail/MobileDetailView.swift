@@ -545,7 +545,7 @@ struct MobileDetailView: View {
                             showingDownloadQuality = true
                         }
                     }
-                    Button("Next N Unwatched...") {
+                    Button("Custom...") {
                         let unwatched = episodes.filter { !($0.userData?.played ?? false) }
                         if unwatched.isEmpty {
                             showingNoUnwatchedAlert = true
@@ -571,29 +571,29 @@ struct MobileDetailView: View {
                         downloadScope = nil
                     }
                 }
-                .alert("Download Next N Unwatched", isPresented: $showingNextNAlert) {
-                    TextField("Number of episodes", text: $nextNInput)
-                        .keyboardType(.numberPad)
-                    Button("OK") {
-                        if let n = Int(nextNInput), n > 0 {
-                            downloadScope = .nextN(n)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                showingDownloadQuality = true
-                            }
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("How many unwatched episodes would you like to download?")
-                }
-                .alert("No Unwatched Episodes", isPresented: $showingNoUnwatchedAlert) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text("All episodes in this season are already watched.")
-                }
             }
 
             Spacer()
+        }
+        .alert("Download Unwatched Episodes", isPresented: $showingNextNAlert) {
+            TextField("Number of episodes", text: $nextNInput)
+                .keyboardType(.numberPad)
+            Button("OK") {
+                if let n = Int(nextNInput), n > 0 {
+                    downloadScope = .nextN(n)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showingDownloadQuality = true
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("How many unwatched episodes would you like to download?")
+        }
+        .alert("No Unwatched Episodes", isPresented: $showingNoUnwatchedAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("All episodes in this season are already watched.")
         }
     }
 
