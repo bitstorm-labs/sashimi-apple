@@ -304,20 +304,15 @@ struct PhoneDetailView: View {
     }
 
     private var seriesActionButtons: some View {
-        HStack(spacing: MobileSpacing.md) {
+        HStack(spacing: MobileSpacing.sm) {
             if let nextEp = nextEpisodeToPlay {
                 let epHasProgress = (nextEp.userData?.playbackPositionTicks ?? 0) > 0
-                let seasonNum = nextEp.parentIndexNumber ?? 1
-                let epNum = nextEp.indexNumber ?? 1
 
                 Button {
                     playingItem = nextEp
                 } label: {
-                    Label(
-                        epHasProgress ? "Resume S\(seasonNum):E\(epNum)" : "Play S\(seasonNum):E\(epNum)",
-                        systemImage: "play.fill"
-                    )
-                    .font(.system(size: 14, weight: .semibold))
+                    Label(epHasProgress ? "Resume" : "Play", systemImage: "play.fill")
+                        .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -349,8 +344,8 @@ struct PhoneDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                        .font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 20))
                 }
                 .buttonStyle(.bordered)
                 .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
@@ -392,7 +387,7 @@ struct PhoneDetailView: View {
     }
 
     private var episodeActionButtons: some View {
-        HStack(spacing: MobileSpacing.md) {
+        HStack(spacing: MobileSpacing.sm) {
             Button {
                 playingItem = item
             } label: {
@@ -413,8 +408,8 @@ struct PhoneDetailView: View {
                         ProgressView()
                     }
                 } label: {
-                    Label("Series", systemImage: "tv")
-                        .font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "tv")
+                        .font(.system(size: 16))
                 }
                 .buttonStyle(.bordered)
             }
@@ -424,7 +419,7 @@ struct PhoneDetailView: View {
     }
 
     private var movieActionButtons: some View {
-        HStack(spacing: MobileSpacing.md) {
+        HStack(spacing: MobileSpacing.sm) {
             Button {
                 playingItem = item
             } label: {
@@ -704,7 +699,7 @@ struct PhoneDetailView: View {
         }
 
         if isYouTubeSeriesStyle {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
+            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=800")
         }
 
         let imageId: String

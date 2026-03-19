@@ -18,6 +18,15 @@ struct PhoneHomeView: View {
         }
         .background(MobileColors.background)
         .navigationTitle("Home")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Image("SidebarLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+            }
+        }
         .refreshable {
             await viewModel.loadContent()
         }
