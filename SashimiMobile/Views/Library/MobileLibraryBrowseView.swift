@@ -5,6 +5,7 @@ struct MobileLibraryBrowseView: View {
     let libraryId: String
     let libraryName: String
     let collectionType: String?
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
@@ -27,7 +28,8 @@ struct MobileLibraryBrowseView: View {
     }
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: MobileSizing.posterWidth), spacing: MobileSpacing.md)]
+        let minWidth = sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
+        return [GridItem(.adaptive(minimum: minWidth), spacing: MobileSpacing.md)]
     }
 
     var body: some View {
@@ -51,7 +53,7 @@ struct MobileLibraryBrowseView: View {
                             } label: {
                                 MobileRecentlyAddedCard(
                                     item: item,
-                                    width: MobileSizing.posterWidth,
+                                    width: sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth,
                                     libraryName: libraryName,
                                     isCircular: isYouTubeLibrary && item.type == .series,
                                     isLandscape: false,

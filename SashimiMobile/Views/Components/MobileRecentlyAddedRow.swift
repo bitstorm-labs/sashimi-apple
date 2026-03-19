@@ -17,7 +17,7 @@ private struct RecentlyAddedMarqueeText: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
+        GeometryReader { _ in
             Text(text)
                 .font(font)
                 .foregroundStyle(color)
@@ -59,7 +59,22 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
     let libraryId: String
     let libraryName: String
     let collectionType: String?
+    let cardWidth: CGFloat
     let destination: (BaseItemDto) -> Destination
+
+    init(
+        libraryId: String,
+        libraryName: String,
+        collectionType: String?,
+        cardWidth: CGFloat = MobileSizing.posterWidth,
+        @ViewBuilder destination: @escaping (BaseItemDto) -> Destination
+    ) {
+        self.libraryId = libraryId
+        self.libraryName = libraryName
+        self.collectionType = collectionType
+        self.cardWidth = cardWidth
+        self.destination = destination
+    }
 
     @State private var items: [BaseItemDto] = []
     @State private var episodeCounts: [String: Int] = [:]  // seriesId -> unplayed count
@@ -141,7 +156,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
 
         return MobileRecentlyAddedCard(
             item: item,
-            width: MobileSizing.posterWidth,
+            width: cardWidth,
             libraryName: libraryName,
             isCircular: isYouTubeLibrary,
             isLandscape: false,
