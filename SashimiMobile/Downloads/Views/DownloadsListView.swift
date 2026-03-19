@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
+import NukeUI
 
+// swiftlint:disable type_body_length
 struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
@@ -42,192 +44,318 @@ struct DownloadsListView: View {
     }
 
     private var downloadsList: some View {
-        List {
-            // Storage summary
-            Section {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Storage Used")
-                            .font(MobileTypography.caption)
-                            .foregroundStyle(MobileColors.textSecondary)
-                        Text(DownloadFileManager.formattedTotalSize())
-                            .font(MobileTypography.title)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Available")
-                            .font(MobileTypography.caption)
-                            .foregroundStyle(MobileColors.textSecondary)
-                        Text(ByteCountFormatter.string(
-                            fromByteCount: DownloadFileManager.availableDiskSpace(),
-                            countStyle: .file
-                        ))
-                        .font(MobileTypography.title)
-                    }
-                }
-            }
+        ScrollView {
+            VStack(spacing: MobileSpacing.lg) {
+                // Storage bar
+                storageSection
+                    .padding(.horizontal, MobileSpacing.md)
 
-            // Active downloads
-            let active = downloads.filter { !$0.isComplete }
-            if !active.isEmpty {
-                Section("Downloading") {
-                    ForEach(active, id: \.itemId) { item in
-                        downloadRow(item)
-                    }
-                }
-            }
+                // Active downloads
+                let active = downloads.filter { isActive($0) }.sorted { $0.dateAdded < $1.dateAdded }
+                if !active.isEmpty {
+                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+                        Text("Active")
+                            .font(MobileTypography.headline)
+                            .foregroundStyle(MobileColors.textPrimary)
+                            .padding(.horizontal, MobileSpacing.md)
 
-            // Completed downloads
-            let completed = downloads.filter { $0.isComplete }
-            if !completed.isEmpty {
-                Section("Downloaded") {
-                    ForEach(completed, id: \.itemId) { item in
-                        downloadRow(item)
-                    }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            let item = completed[index]
-                            Task { await downloadManager.deleteDownload(itemId: item.itemId) }
+                        VStack(spacing: 1) {
+                            ForEach(active, id: \.itemId) { item in
+                                activeDownloadRow(item)
+                            }
                         }
+                        .background(MobileColors.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+                        .padding(.horizontal, MobileSpacing.md)
                     }
                 }
-            }
 
-            // Delete all
-            if !downloads.isEmpty {
-                Section {
-                    Button("Delete All Downloads", role: .destructive) {
-                        showingDeleteAll = true
+                // Completed downloads
+                let completed = downloads.filter { $0.isComplete }
+                if !completed.isEmpty {
+                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+                        Text("Completed")
+                            .font(MobileTypography.headline)
+                            .foregroundStyle(MobileColors.textPrimary)
+                            .padding(.horizontal, MobileSpacing.md)
+
+                        VStack(spacing: 1) {
+                            ForEach(completed, id: \.itemId) { item in
+                                completedDownloadRow(item)
+                            }
+                        }
+                        .background(MobileColors.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+                        .padding(.horizontal, MobileSpacing.md)
                     }
                 }
+
+                // Failed downloads
+                let failed = downloads.filter { $0.status == .failed }
+                if !failed.isEmpty {
+                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+                        HStack {
+                            Text("Failed")
+                                .font(MobileTypography.headline)
+                                .foregroundStyle(MobileColors.textPrimary)
+                            Spacer()
+                            Button("Retry All") {
+                                Task { await downloadManager.restartAllFailed() }
+                            }
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(MobileColors.accent)
+                        }
+                        .padding(.horizontal, MobileSpacing.md)
+
+                        VStack(spacing: 1) {
+                            ForEach(failed, id: \.itemId) { item in
+                                failedDownloadRow(item)
+                            }
+                        }
+                        .background(MobileColors.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+                        .padding(.horizontal, MobileSpacing.md)
+                    }
+                }
+
+                // Delete all
+                if !downloads.isEmpty {
+                    Button(role: .destructive) {
+                        showingDeleteAll = true
+                    } label: {
+                        Text("Delete All Downloads")
+                            .font(MobileTypography.body)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(MobileColors.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+                    }
+                    .padding(.horizontal, MobileSpacing.md)
+                }
+
+                Spacer().frame(height: 40)
             }
+            .padding(.top, MobileSpacing.md)
         }
+        .frame(maxWidth: 700)
+        .frame(maxWidth: .infinity)
     }
 
-    private func downloadRow(_ item: DownloadedItem) -> some View {
-        HStack(spacing: MobileSpacing.md) {
-            // Poster thumbnail
-            if let posterFileName = item.posterFileName {
-                let posterURL = DownloadFileManager.itemDirectory(for: item.itemId)
-                    .appendingPathComponent(posterFileName)
-                AsyncImage(url: posterURL) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Rectangle().fill(MobileColors.cardBackground)
+    // MARK: - Storage
+
+    private var storageSection: some View {
+        let completedCount = downloads.filter { $0.isComplete }.count
+
+        return HStack {
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(ByteCountFormatter.string(fromByteCount: DownloadFileManager.availableDiskSpace(), countStyle: .file)) available")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
+                if completedCount > 0 {
+                    Text("\(completedCount) item\(completedCount == 1 ? "" : "s") · \(DownloadFileManager.formattedTotalSize())")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MobileColors.textTertiary)
                 }
-                .frame(width: 60, height: 90)
-                .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-            } else {
-                Rectangle()
-                    .fill(MobileColors.cardBackground)
-                    .frame(width: 60, height: 90)
-                    .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-                    .overlay {
-                        Image(systemName: "film")
-                            .foregroundStyle(MobileColors.textTertiary)
-                    }
             }
 
-            // Info
+            Image(systemName: "internaldrive")
+                .font(.system(size: 18))
+                .foregroundStyle(MobileColors.textTertiary)
+        }
+        .padding(MobileSpacing.md)
+    }
+
+    // MARK: - Active Download Row
+
+    private func activeDownloadRow(_ item: DownloadedItem) -> some View {
+        let isPreparing = downloadManager.preparingItems.contains(item.itemId)
+        let isDownloading = downloadManager.activeDownloads[item.itemId] != nil && !isPreparing
+        let progress = downloadManager.activeDownloads[item.itemId] ?? 0
+
+        return HStack(spacing: MobileSpacing.md) {
+            posterImage(for: item)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
-                    .font(MobileTypography.title)
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(2)
+                    .lineLimit(1)
 
-                if item.isComplete {
-                    Text(item.formattedSize)
+                if item.seriesName != nil {
+                    Text(item.name)
                         .font(MobileTypography.caption)
                         .foregroundStyle(MobileColors.textSecondary)
-                } else {
-                    statusLabel(for: item)
-                }
-
-                if item.status == .downloading {
-                    ProgressView(value: downloadManager.activeDownloads[item.itemId] ?? item.progress)
-                        .tint(MobileColors.accent)
+                        .lineLimit(1)
                 }
             }
 
             Spacer()
 
-            // Action button
-            actionButton(for: item)
-        }
-        .padding(.vertical, 4)
-    }
-
-    @ViewBuilder
-    private func statusLabel(for item: DownloadedItem) -> some View {
-        switch item.status {
-        case .queued:
-            Text("Waiting...")
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textSecondary)
-        case .preparing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                Text("Preparing...")
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textSecondary)
+            if isPreparing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("Preparing...")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MobileColors.textSecondary)
+                }
+            } else if isDownloading && progress < 0 {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("Downloading...")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MobileColors.accent)
+                }
+            } else if isDownloading {
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MobileColors.accent)
+            } else {
+                Text("Queued")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MobileColors.textTertiary)
             }
-        case .downloading:
-            let pct = Int((downloadManager.activeDownloads[item.itemId] ?? item.progress) * 100)
-            Text("Downloading \(pct)%")
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.accent)
-        case .paused:
-            Text("Paused")
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.warning)
-        case .failed:
-            Text(item.errorMessage ?? "Failed")
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.error)
-                .lineLimit(1)
-        case .completed:
-            EmptyView()
-        }
-    }
 
-    @ViewBuilder
-    private func actionButton(for item: DownloadedItem) -> some View {
-        switch item.status {
-        case .queued, .preparing, .downloading:
             Button {
                 Task { await downloadManager.cancelDownload(itemId: item.itemId) }
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(MobileColors.textSecondary)
+                    .font(.system(size: 22))
+                    .foregroundStyle(MobileColors.textTertiary)
             }
             .buttonStyle(.plain)
+        }
+        .padding(MobileSpacing.md)
+    }
 
-        case .paused:
+    // MARK: - Completed Download Row
+
+    private func completedDownloadRow(_ item: DownloadedItem) -> some View {
+        HStack(spacing: MobileSpacing.md) {
+            posterImage(for: item)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.displayTitle)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(1)
+
+                if item.seriesName != nil {
+                    Text(item.name)
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Text(item.formattedSize)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+
+            Spacer()
+
             Button {
-                Task { await downloadManager.retryDownload(itemId: item.itemId) }
+                Task { await downloadManager.deleteDownload(itemId: item.itemId) }
             } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(MobileColors.accent)
+                Image(systemName: "trash.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(MobileColors.textTertiary)
             }
             .buttonStyle(.plain)
+        }
+        .padding(MobileSpacing.md)
+    }
 
-        case .failed:
-            Button {
-                Task { await downloadManager.retryDownload(itemId: item.itemId) }
-            } label: {
-                Image(systemName: "arrow.clockwise.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(MobileColors.warning)
+    // MARK: - Failed Download Row
+
+    private func failedDownloadRow(_ item: DownloadedItem) -> some View {
+        HStack(spacing: MobileSpacing.md) {
+            posterImage(for: item)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.displayTitle)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(1)
+
+                Text(item.errorMessage ?? "Download failed")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MobileColors.error)
+                    .lineLimit(1)
             }
-            .buttonStyle(.plain)
 
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.title3)
-                .foregroundStyle(MobileColors.success)
+            Spacer()
+
+            HStack(spacing: 12) {
+                Button {
+                    Task { await downloadManager.retryDownload(itemId: item.itemId) }
+                } label: {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(MobileColors.accent)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await downloadManager.deleteDownload(itemId: item.itemId) }
+                } label: {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(MobileColors.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(MobileSpacing.md)
+    }
+
+    // MARK: - Poster Image
+
+    @ViewBuilder
+    private func posterImage(for item: DownloadedItem) -> some View {
+        if let serverURL = serverPosterURL(for: item) {
+            LazyImage(url: serverURL) { state in
+                if let image = state.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    posterPlaceholder
+                }
+            }
+            .frame(width: 60, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            posterPlaceholder
         }
     }
+
+    private var posterPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(MobileColors.background)
+            .frame(width: 60, height: 90)
+            .overlay {
+                Image(systemName: "film")
+                    .font(.system(size: 16))
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+    }
+
+    private func serverPosterURL(for item: DownloadedItem) -> URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        // For episodes, use the series poster if available
+        let imageItemId = item.seriesId ?? item.itemId
+        return URL(string: "\(serverURL)/Items/\(imageItemId)/Images/Primary?maxWidth=200")
+    }
+
+    // MARK: - Helpers
+
+    private func isActive(_ item: DownloadedItem) -> Bool {
+        if downloadManager.preparingItems.contains(item.itemId) { return true }
+        if downloadManager.activeDownloads[item.itemId] != nil { return true }
+        let status = item.status
+        return status == .queued || status == .downloading || status == .preparing
+    }
 }
+

@@ -118,21 +118,21 @@ final class DownloadPersistence {
 
     // MARK: - Queries
 
-    func fetchRecord(itemId: String) -> DownloadedItem? {
+    func fetchStatus(itemId: String) -> DownloadStatus? {
         queue.sync {
             guard let context = modelContext else { return nil }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-            return try? context.fetch(descriptor).first
+            return try? context.fetch(descriptor).first?.status
         }
     }
 
-    func fetchQueuedItems() -> [DownloadedItem] {
+    func fetchQuality(itemId: String) -> DownloadQuality? {
         queue.sync {
-            guard let context = modelContext else { return [] }
-            let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "queued" }
-            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate, sortBy: [SortDescriptor(\DownloadedItem.dateAdded)])
-            return (try? context.fetch(descriptor)) ?? []
+            guard let context = modelContext else { return nil }
+            let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
+            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+            return try? context.fetch(descriptor).first?.downloadQuality
         }
     }
 
