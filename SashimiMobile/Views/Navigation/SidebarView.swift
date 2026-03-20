@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import NukeUI
 
 enum SidebarSelection: Hashable {
@@ -238,6 +239,11 @@ struct MainNavigationView: View {
 
             Spacer()
 
+            // Download activity indicator
+            if selection != .downloads {
+                downloadIndicator
+            }
+
             userAvatarView
         }
         .padding(.horizontal, MobileSpacing.md)
@@ -311,6 +317,93 @@ struct MainNavigationView: View {
                 )
             }
         }
+    }
+
+    @ViewBuilder
+    private var downloadIndicator: some View {
+        let activeCount = downloadQueueCount()
+        let failedCount = downloadFailedCount()
+        let completedCount = downloadCompletedCount()
+
+        HStack(spacing: 8) {
+            if activeCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(MobileColors.accent)
+                        .symbolEffect(.pulse)
+                    Text("\(activeCount)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MobileColors.accent)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(MobileColors.accent.opacity(0.15))
+                .clipShape(Capsule())
+            }
+
+            if completedCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(MobileColors.success)
+                    Text("\(completedCount)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MobileColors.success)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(MobileColors.success.opacity(0.15))
+                .clipShape(Capsule())
+            }
+
+            if failedCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(MobileColors.error)
+                        .symbolEffect(.pulse)
+                    Text("\(failedCount)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MobileColors.error)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(MobileColors.error.opacity(0.15))
+                .clipShape(Capsule())
+            }
+        }
+        .onTapGesture { selection = .downloads }
+    }
+
+    private func downloadQueueCount() -> Int {
+        // Re-read on stateVersion changes
+        _ = downloadManager.stateVersion
+        guard let container = DownloadManager.shared.modelContainer else { return 0 }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> {
+            $0.statusRaw == "queued" || $0.statusRaw == "downloading" || $0.statusRaw == "preparing"
+        }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
+    private func downloadCompletedCount() -> Int {
+        _ = downloadManager.stateVersion
+        guard let container = DownloadManager.shared.modelContainer else { return 0 }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "completed" }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
+    private func downloadFailedCount() -> Int {
+        _ = downloadManager.stateVersion
+        guard let container = DownloadManager.shared.modelContainer else { return 0 }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "failed" }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        return (try? context.fetchCount(descriptor)) ?? 0
     }
 
     private func loadLibraries() async {

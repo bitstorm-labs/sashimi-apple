@@ -18,7 +18,7 @@ final class DownloadManager: NSObject, ObservableObject {
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
-    private var modelContainer: ModelContainer?
+    private(set) var modelContainer: ModelContainer?
     private var cachedContext: ModelContext?
 
     // Maps URLSessionTask.taskIdentifier (as String) -> itemId for surviving app relaunches
@@ -446,11 +446,27 @@ final class DownloadManager: NSObject, ObservableObject {
             )
         }
 
+        // For episodes, also save the series poster for offline browsing
+        let seriesPosterTask = Task {
+            if item.type == .episode, let seriesId = item.seriesId {
+                let seriesPosterDest = DownloadFileManager.itemDirectory(for: itemId)
+                    .appendingPathComponent("series_poster.jpg")
+                guard !FileManager.default.fileExists(atPath: seriesPosterDest.path) else { return }
+                await downloadImage(
+                    url: DownloadURLBuilder.posterURL(itemId: seriesId),
+                    destination: seriesPosterDest,
+                    itemId: itemId,
+                    keyPath: "",
+                    fileName: ""
+                )
+            }
+        }
+
         let subtitleTask = Task {
             await downloadSubtitles(for: item)
         }
 
-        pendingAssetTasks[itemId] = [posterTask, backdropTask, subtitleTask]
+        pendingAssetTasks[itemId] = [posterTask, backdropTask, seriesPosterTask, subtitleTask]
     }
 
     private func downloadImage(url: URL?, destination: URL, itemId: String, keyPath: String, fileName: String) async {

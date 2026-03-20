@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import NukeUI
 
 // swiftlint:disable file_length type_body_length
@@ -186,8 +187,8 @@ struct MobileDetailView: View {
             }
         }
         .task {
-            // Fetch fresh data so resume state is accurate even if item passed from home is stale
-            if let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+            if NetworkMonitor.shared.isConnected,
+               let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
                 isWatched = freshItem.userData?.played ?? false
                 hasProgress = freshItem.progressPercent > 0
             } else {
@@ -530,7 +531,7 @@ struct MobileDetailView: View {
             watchedButton
 
             // Download menu with scope options
-            if !episodes.isEmpty {
+            if !episodes.isEmpty && NetworkMonitor.shared.isConnected {
                 Menu {
                     Button("All Episodes") {
                         downloadScope = .all
@@ -610,9 +611,11 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
-            if isEpisode, item.seriesId != nil {
+            if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
                         MobileDetailView(item: seriesItem, libraryName: libraryName)
@@ -643,7 +646,9 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
             Spacer()
         }
@@ -779,12 +784,12 @@ struct MobileDetailView: View {
             await loadEpisodeContent()
         }
 
-        // Load media info for non-series items
+        guard NetworkMonitor.shared.isConnected else { return }
+
         if !isSeries {
             await loadMediaInfo()
         }
 
-        // Load series item for navigation
         if isEpisode, let seriesId = item.seriesId {
             navigateToSeriesItem = try? await JellyfinClient.shared.getItem(itemId: seriesId)
         }
@@ -800,6 +805,10 @@ struct MobileDetailView: View {
     }
 
     private func loadSeriesContent() async {
+        guard NetworkMonitor.shared.isConnected else {
+            await loadOfflineSeriesContent()
+            return
+        }
         do {
             seasons = try await JellyfinClient.shared.getSeasons(seriesId: item.id)
             await findNextEpisodeToPlay()
@@ -814,8 +823,51 @@ struct MobileDetailView: View {
                 await loadEpisodesForSeason(seriesId: item.id, season: firstSeason)
             }
         } catch {
-            // Silently fail
+            await loadOfflineSeriesContent()
         }
+    }
+
+    private func loadOfflineSeriesContent() async {
+        let downloaded = offlineEpisodes(for: item.id)
+        guard !downloaded.isEmpty else { return }
+
+        // Build synthetic season items from downloaded episodes
+        let seasonNumbers = Array(Set(downloaded.compactMap { $0.seasonNumber })).sorted()
+        seasons = seasonNumbers.map { num in
+            BaseItemDto(
+                id: "offline-season-\(num)",
+                name: "Season \(num)",
+                type: .season,
+                seriesName: nil, seriesId: item.id, seasonId: nil, parentId: nil,
+                indexNumber: num, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
+                userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
+                people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
+                path: nil, remoteTrailers: nil
+            )
+        }
+
+        if let firstSeason = seasons.first {
+            selectedSeason = firstSeason
+            episodes = downloaded
+                .filter { $0.seasonNumber == firstSeason.indexNumber }
+                .map { $0.asBaseItemDto }
+        }
+    }
+
+    private func offlineEpisodes(for seriesId: String) -> [DownloadedItem] {
+        guard let container = DownloadManager.shared.modelContainer else { return [] }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "completed" }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        guard let items = try? context.fetch(descriptor) else { return [] }
+        return items
+            .filter { $0.seriesId == seriesId || $0.seriesName == item.name }
+            .sorted {
+                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
+                    ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
+            }
     }
 
     private func loadEpisodeContent() async {
@@ -836,11 +888,19 @@ struct MobileDetailView: View {
 
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
-        do {
-            episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
-        } catch {
-            // Silently fail
+        if NetworkMonitor.shared.isConnected {
+            do {
+                episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
+                isLoadingEpisodes = false
+                return
+            } catch {
+                // Fall through to offline
+            }
         }
+        let downloaded = offlineEpisodes(for: seriesId)
+        episodes = downloaded
+            .filter { $0.seasonNumber == season.indexNumber }
+            .map { $0.asBaseItemDto }
         isLoadingEpisodes = false
     }
 
@@ -893,26 +953,36 @@ struct MobileDetailView: View {
     // MARK: - URLs
 
     private var backdropImageURL: URL? {
+        // Offline: use local files
+        if !NetworkMonitor.shared.isConnected {
+            // For series, check first downloaded episode's backdrop
+            if isSeries {
+                let downloaded = offlineEpisodes(for: item.id)
+                if let firstEp = downloaded.first {
+                    return OfflineImageHelper.backdropURL(for: firstEp.itemId)
+                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId)
+                }
+            }
+            return OfflineImageHelper.backdropURL(for: item.id)
+                ?? OfflineImageHelper.thumbnailURL(for: item.id)
+        }
+
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
 
-        // For episodes, use their own thumbnail (Primary) as backdrop
         if isEpisode {
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
         }
 
-        // YouTube series: use Banner image (channel banner art)
         if isYouTubeSeriesStyle {
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
         }
 
-        // For series/movies, use Backdrop image
         let imageId: String
         if item.backdropImageTags?.isEmpty == false {
             imageId = item.id
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
             imageId = seriesId
         } else {
-            // Fallback to Primary if no backdrop
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
         }
 
@@ -920,11 +990,13 @@ struct MobileDetailView: View {
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
+        guard NetworkMonitor.shared.isConnected else { return nil }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(itemId)/Images/Logo?maxWidth=500")
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
+        guard NetworkMonitor.shared.isConnected else { return nil }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(itemId)/Images/Primary?maxWidth=240")
     }
@@ -959,6 +1031,9 @@ struct MobileEpisodeCard: View {
     let action: () -> Void
 
     private var imageURL: URL? {
+        if !NetworkMonitor.shared.isConnected {
+            return OfflineImageHelper.thumbnailURL(for: episode.id)
+        }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(episode.id)/Images/Primary?maxWidth=400")
     }

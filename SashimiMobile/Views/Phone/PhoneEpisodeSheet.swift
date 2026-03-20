@@ -59,7 +59,9 @@ struct PhoneEpisodeSheet: View {
                             }
                             .buttonStyle(.borderedProminent)
 
-                            DownloadButton(item: episode, quality: nil)
+                            if NetworkMonitor.shared.isConnected {
+                                DownloadButton(item: episode, quality: nil)
+                            }
 
                             Spacer()
                         }
