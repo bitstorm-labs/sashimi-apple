@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import NukeUI
 
 // swiftlint:disable file_length type_body_length
@@ -107,7 +108,8 @@ struct PhoneDetailView: View {
             PhoneEpisodeSheet(episode: episode, libraryName: libraryName)
         }
         .task {
-            if let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+            if NetworkMonitor.shared.isConnected,
+               let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
                 isWatched = freshItem.userData?.played ?? false
                 hasProgress = freshItem.progressPercent > 0
             } else {
@@ -645,6 +647,8 @@ struct PhoneDetailView: View {
             await loadEpisodeContent()
         }
 
+        guard NetworkMonitor.shared.isConnected else { return }
+
         if !isSeries {
             await loadMediaInfo()
         }
@@ -664,6 +668,10 @@ struct PhoneDetailView: View {
     }
 
     private func loadSeriesContent() async {
+        guard NetworkMonitor.shared.isConnected else {
+            await loadOfflineSeriesContent()
+            return
+        }
         do {
             seasons = try await JellyfinClient.shared.getSeasons(seriesId: item.id)
             await findNextEpisodeToPlay()
@@ -678,8 +686,48 @@ struct PhoneDetailView: View {
                 await loadEpisodesForSeason(seriesId: item.id, season: firstSeason)
             }
         } catch {
-            // Silently fail
+            await loadOfflineSeriesContent()
         }
+    }
+
+    private func loadOfflineSeriesContent() async {
+        let downloaded = offlineEpisodes(for: item.id)
+        guard !downloaded.isEmpty else { return }
+
+        let seasonNumbers = Array(Set(downloaded.compactMap { $0.seasonNumber })).sorted()
+        seasons = seasonNumbers.map { num in
+            BaseItemDto(
+                id: "offline-season-\(num)", name: "Season \(num)", type: .season,
+                seriesName: nil, seriesId: item.id, seasonId: nil, parentId: nil,
+                indexNumber: num, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
+                userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
+                people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
+                path: nil, remoteTrailers: nil
+            )
+        }
+
+        if let firstSeason = seasons.first {
+            selectedSeason = firstSeason
+            episodes = downloaded
+                .filter { $0.seasonNumber == firstSeason.indexNumber }
+                .map { $0.asBaseItemDto }
+        }
+    }
+
+    private func offlineEpisodes(for seriesId: String) -> [DownloadedItem] {
+        guard let container = DownloadManager.shared.modelContainer else { return [] }
+        let context = ModelContext(container)
+        let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "completed" }
+        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+        guard let items = try? context.fetch(descriptor) else { return [] }
+        return items
+            .filter { $0.seriesId == seriesId || $0.seriesName == item.name }
+            .sorted {
+                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
+                    ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
+            }
     }
 
     private func loadEpisodeContent() async {
@@ -699,11 +747,19 @@ struct PhoneDetailView: View {
 
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
-        do {
-            episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
-        } catch {
-            // Silently fail
+        if NetworkMonitor.shared.isConnected {
+            do {
+                episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
+                isLoadingEpisodes = false
+                return
+            } catch {
+                // Fall through to offline
+            }
         }
+        let downloaded = offlineEpisodes(for: seriesId)
+        episodes = downloaded
+            .filter { $0.seasonNumber == season.indexNumber }
+            .map { $0.asBaseItemDto }
         isLoadingEpisodes = false
     }
 
