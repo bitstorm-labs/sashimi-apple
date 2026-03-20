@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import NukeUI
 
+// swiftlint:disable type_body_length
 struct OfflineHomeView: View {
     @Query(
         filter: #Predicate<DownloadedItem> { $0.statusRaw == "completed" },
@@ -9,51 +10,280 @@ struct OfflineHomeView: View {
         order: .reverse
     ) private var downloads: [DownloadedItem]
     @State private var playingItem: BaseItemDto?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    private var continueWatchingItems: [DownloadedItem] {
+        downloads.filter { $0.lastPlaybackPositionTicks > 0 }
+    }
+
+    private var movieItems: [DownloadedItem] {
+        downloads.filter { $0.itemType == .movie }
+    }
+
+    private var seriesGroups: [(name: String, representative: DownloadedItem, episodes: [DownloadedItem])] {
+        let episodes = downloads.filter { $0.itemType == .episode }
+        let grouped = Dictionary(grouping: episodes) { $0.seriesName ?? "Unknown" }
+        return grouped.keys.sorted().compactMap { name in
+            guard let eps = grouped[name], let first = eps.first else { return nil }
+            let sorted = eps.sorted {
+                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
+                    ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
+            }
+            return (name: name, representative: first, episodes: sorted)
+        }
+    }
+
+    private var posterWidth: CGFloat {
+        sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MobileSpacing.lg) {
-                // Offline banner
+            LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
                 offlineBanner
 
                 if downloads.isEmpty {
                     emptyState
                 } else {
-                    // Group by type
-                    let movies = downloads.filter { $0.itemType == .movie }
-                    let episodes = downloads.filter { $0.itemType == .episode }
-
-                    if !movies.isEmpty {
-                        downloadSection(title: "Movies", items: movies)
+                    // Continue Watching
+                    if !continueWatchingItems.isEmpty {
+                        continueWatchingSection
                     }
 
-                    if !episodes.isEmpty {
-                        // Group episodes by series
-                        let grouped = Dictionary(grouping: episodes) { $0.seriesName ?? "Unknown" }
-                        let sortedSeries = grouped.keys.sorted()
+                    // Movies
+                    if !movieItems.isEmpty {
+                        movieSection
+                    }
 
-                        ForEach(sortedSeries, id: \.self) { seriesName in
-                            if let seriesEpisodes = grouped[seriesName] {
-                                downloadSection(
-                                    title: seriesName,
-                                    items: seriesEpisodes.sorted {
-                                        ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
-                                            ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
-                                    }
-                                )
-                            }
-                        }
+                    // TV Shows
+                    if !seriesGroups.isEmpty {
+                        tvShowsSection
                     }
                 }
 
                 Spacer().frame(height: 40)
             }
-            .padding(.top, MobileSpacing.md)
+            .padding(.vertical, MobileSpacing.md)
         }
         .background(MobileColors.background)
         .navigationTitle("Downloads")
         .fullScreenPlayer(item: $playingItem)
     }
+
+    // MARK: - Continue Watching
+
+    private var continueWatchingSection: some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text("Continue Watching")
+                .font(MobileTypography.headline)
+                .foregroundStyle(MobileColors.textPrimary)
+                .padding(.horizontal, MobileSpacing.md)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: MobileSpacing.md) {
+                    ForEach(continueWatchingItems, id: \.itemId) { item in
+                        Button { playingItem = item.asBaseItemDto } label: {
+                            offlineContinueCard(item)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, MobileSpacing.md)
+            }
+        }
+    }
+
+    private func offlineContinueCard(_ item: DownloadedItem) -> some View {
+        let width: CGFloat = sizeClass == .compact ? PhoneSizing.continueWatchingWidth : 280
+        let height = width * (9 / 16)
+
+        return VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+            ZStack(alignment: .bottom) {
+                localImage(itemId: item.itemId, fileNames: ["backdrop.jpg", "poster.jpg"])
+                    .frame(width: width, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
+
+                // Progress overlay
+                if let total = item.runTimeTicks, total > 0 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        let remaining = total - item.lastPlaybackPositionTicks
+                        let minutes = remaining / 10_000_000 / 60
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(MobileColors.accent)
+                            Text("\(minutes)m left")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(MobileColors.textSecondary)
+                        }
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(MobileColors.progressBackground)
+                                Capsule()
+                                    .fill(MobileColors.accent)
+                                    .frame(width: geo.size.width * CGFloat(item.lastPlaybackPositionTicks) / CGFloat(total))
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                    .frame(width: width, alignment: .leading)
+                    .background(
+                        LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 60)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    )
+                }
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
+
+            Text(item.displayTitle)
+                .font(MobileTypography.title)
+                .foregroundStyle(MobileColors.textPrimary)
+                .lineLimit(1)
+                .frame(width: width, alignment: .leading)
+
+            if item.seriesName != nil {
+                Text(item.name)
+                    .font(MobileTypography.caption)
+                    .foregroundStyle(MobileColors.textSecondary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
+        }
+    }
+
+    // MARK: - Movies
+
+    private var movieSection: some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text("Movies")
+                .font(MobileTypography.headline)
+                .foregroundStyle(MobileColors.textPrimary)
+                .padding(.horizontal, MobileSpacing.md)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: MobileSpacing.sm) {
+                    ForEach(movieItems, id: \.itemId) { item in
+                        Button { playingItem = item.asBaseItemDto } label: {
+                            offlinePosterCard(itemId: item.itemId, title: item.name)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, MobileSpacing.md)
+            }
+        }
+    }
+
+    // MARK: - TV Shows (one card per series, navigates to detail)
+
+    private var tvShowsSection: some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text("TV Shows")
+                .font(MobileTypography.headline)
+                .foregroundStyle(MobileColors.textPrimary)
+                .padding(.horizontal, MobileSpacing.md)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: MobileSpacing.sm) {
+                    ForEach(seriesGroups, id: \.name) { group in
+                        NavigationLink {
+                            AdaptiveDetailView(
+                                item: group.representative.asSeriesDto
+                            )
+                        } label: {
+                            offlineSeriesCard(group: group)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, MobileSpacing.md)
+            }
+        }
+    }
+
+    private func offlineSeriesCard(group: (name: String, representative: DownloadedItem, episodes: [DownloadedItem])) -> some View {
+        let height = posterWidth * (1 / PosterAspectRatio.portrait)
+
+        return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
+            ZStack(alignment: .topTrailing) {
+                // Use series_poster.jpg if available, fall back to episode poster
+                localImage(itemId: group.representative.itemId, fileNames: ["series_poster.jpg", "poster.jpg"])
+                    .frame(width: posterWidth, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
+
+                Text("\(group.episodes.count)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(MobileColors.accent)
+                    .clipShape(Capsule())
+                    .padding(6)
+            }
+
+            Text(group.name)
+                .font(MobileTypography.caption)
+                .foregroundStyle(MobileColors.textPrimary)
+                .lineLimit(1)
+                .frame(width: posterWidth, alignment: .leading)
+        }
+    }
+
+    // MARK: - Poster Card
+
+    private func offlinePosterCard(itemId: String, title: String) -> some View {
+        let height = posterWidth * (1 / PosterAspectRatio.portrait)
+
+        return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
+            localImage(itemId: itemId, fileNames: ["poster.jpg"])
+                .frame(width: posterWidth, height: height)
+                .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
+
+            Text(title)
+                .font(MobileTypography.caption)
+                .foregroundStyle(MobileColors.textPrimary)
+                .lineLimit(1)
+                .frame(width: posterWidth, alignment: .leading)
+        }
+    }
+
+    // MARK: - Local Image Helper (UIImage for reliable file:// loading)
+
+    @ViewBuilder
+    private func localImage(itemId: String, fileNames: [String]) -> some View {
+        if let uiImage = loadLocalImage(itemId: itemId, fileNames: fileNames) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            Rectangle()
+                .fill(MobileColors.cardBackground)
+                .overlay {
+                    Image(systemName: "film")
+                        .font(.title2)
+                        .foregroundStyle(MobileColors.textTertiary)
+                }
+        }
+    }
+
+    private func loadLocalImage(itemId: String, fileNames: [String]) -> UIImage? {
+        let dir = DownloadFileManager.itemDirectory(for: itemId)
+        for fileName in fileNames {
+            let path = dir.appendingPathComponent(fileName).path
+            if let image = UIImage(contentsOfFile: path) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Offline Banner
 
     private var offlineBanner: some View {
         HStack(spacing: MobileSpacing.sm) {
@@ -70,118 +300,7 @@ struct OfflineHomeView: View {
         .padding(.horizontal, MobileSpacing.md)
     }
 
-    private func downloadSection(title: String, items: [DownloadedItem]) -> some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text(title)
-                .font(MobileTypography.headline)
-                .foregroundStyle(MobileColors.textPrimary)
-                .padding(.horizontal, MobileSpacing.md)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: MobileSpacing.sm) {
-                    ForEach(items, id: \.itemId) { item in
-                        offlineCard(item)
-                    }
-                }
-                .padding(.horizontal, MobileSpacing.md)
-            }
-        }
-    }
-
-    private func offlineCard(_ item: DownloadedItem) -> some View {
-        // Build a minimal BaseItemDto for playback
-        let playableItem = BaseItemDto(
-            id: item.itemId,
-            name: item.name,
-            type: item.itemType,
-            seriesName: item.seriesName,
-            seriesId: item.seriesId,
-            seasonId: item.seasonId,
-            parentId: nil,
-            indexNumber: item.episodeNumber,
-            parentIndexNumber: item.seasonNumber,
-            overview: item.overview,
-            runTimeTicks: item.runTimeTicks,
-            userData: nil,
-            imageTags: nil,
-            backdropImageTags: nil,
-            parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil,
-            mediaType: nil,
-            productionYear: item.productionYear,
-            communityRating: nil,
-            officialRating: nil,
-            genres: nil,
-            taglines: nil,
-            people: nil,
-            criticRating: nil,
-            premiereDate: nil,
-            chapters: nil,
-            path: nil,
-            remoteTrailers: nil
-        )
-
-        return Button {
-            playingItem = playableItem
-        } label: {
-            VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-                // Poster
-                posterImage(for: item)
-
-                // Title
-                Text(item.displayTitle)
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(2)
-
-                // Episode name for series
-                if item.seriesName != nil {
-                    Text(item.name)
-                        .font(MobileTypography.captionSmall)
-                        .foregroundStyle(MobileColors.textSecondary)
-                        .lineLimit(1)
-                }
-
-                // Runtime
-                if let ticks = item.runTimeTicks {
-                    let minutes = ticks / 10_000_000 / 60
-                    Text("\(minutes) min")
-                        .font(MobileTypography.captionSmall)
-                        .foregroundStyle(MobileColors.textTertiary)
-                }
-            }
-            .frame(width: MobileSizing.posterWidth)
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func posterImage(for item: DownloadedItem) -> some View {
-        let posterPath = DownloadFileManager.itemDirectory(for: item.itemId)
-            .appendingPathComponent("poster.jpg")
-        if FileManager.default.fileExists(atPath: posterPath.path) {
-            AsyncImage(url: posterPath) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                posterPlaceholder
-            }
-            .frame(width: MobileSizing.posterWidth, height: MobileSizing.posterHeight)
-            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-        } else {
-            posterPlaceholder
-        }
-    }
-
-    private var posterPlaceholder: some View {
-        RoundedRectangle(cornerRadius: MobileCornerRadius.small)
-            .fill(MobileColors.cardBackground)
-            .frame(width: MobileSizing.posterWidth, height: MobileSizing.posterHeight)
-            .overlay {
-                Image(systemName: "film")
-                    .font(.title2)
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-    }
+    // MARK: - Empty State
 
     private var emptyState: some View {
         VStack(spacing: MobileSpacing.md) {
@@ -198,5 +317,67 @@ struct OfflineHomeView: View {
                 .frame(maxWidth: 300)
         }
         .frame(maxWidth: .infinity, minHeight: 300)
+    }
+}
+
+// MARK: - DownloadedItem → BaseItemDto
+
+extension DownloadedItem {
+    /// Create a series-type DTO from an episode (for navigating to series detail offline)
+    var asSeriesDto: BaseItemDto {
+        BaseItemDto(
+            id: seriesId ?? itemId,
+            name: seriesName ?? name,
+            type: .series,
+            seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
+            indexNumber: nil, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
+            userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
+            people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
+            path: nil, remoteTrailers: nil
+        )
+    }
+
+    var asBaseItemDto: BaseItemDto {
+        BaseItemDto(
+            id: itemId,
+            name: name,
+            type: itemType,
+            seriesName: seriesName,
+            seriesId: seriesId,
+            seasonId: seasonId,
+            parentId: nil,
+            indexNumber: episodeNumber,
+            parentIndexNumber: seasonNumber,
+            overview: overview,
+            runTimeTicks: runTimeTicks,
+            userData: lastPlaybackPositionTicks > 0
+                ? UserItemDataDto(
+                    playbackPositionTicks: lastPlaybackPositionTicks,
+                    playCount: 0,
+                    isFavorite: false,
+                    played: false,
+                    lastPlayedDate: nil,
+                    unplayedItemCount: nil
+                )
+                : nil,
+            imageTags: nil,
+            backdropImageTags: nil,
+            parentBackdropImageTags: nil,
+            primaryImageAspectRatio: nil,
+            mediaType: nil,
+            productionYear: productionYear,
+            communityRating: nil,
+            officialRating: nil,
+            genres: nil,
+            taglines: nil,
+            people: nil,
+            criticRating: nil,
+            premiereDate: nil,
+            chapters: nil,
+            path: nil,
+            remoteTrailers: nil
+        )
     }
 }
