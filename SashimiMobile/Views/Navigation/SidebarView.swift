@@ -321,11 +321,15 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var downloadIndicator: some View {
-        let activeCount = downloadQueueCount()
+        // Use in-memory state for active (always current), SwiftData for completed/failed
+        let activeCount = downloadManager.activeDownloads.count
+            + downloadManager.preparingItems.count
+            + downloadManager.queuedCount
         let failedCount = downloadFailedCount()
         let completedCount = downloadCompletedCount()
+        let speed = downloadManager.downloadSpeed
 
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             if activeCount > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.down.circle")
@@ -335,6 +339,11 @@ struct MainNavigationView: View {
                     Text("\(activeCount)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(MobileColors.accent)
+                    if !speed.isEmpty {
+                        Text("(\(speed))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MobileColors.accent.opacity(0.8))
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -374,18 +383,6 @@ struct MainNavigationView: View {
             }
         }
         .onTapGesture { selection = .downloads }
-    }
-
-    private func downloadQueueCount() -> Int {
-        // Re-read on stateVersion changes
-        _ = downloadManager.stateVersion
-        guard let container = DownloadManager.shared.modelContainer else { return 0 }
-        let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> {
-            $0.statusRaw == "queued" || $0.statusRaw == "downloading" || $0.statusRaw == "preparing"
-        }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-        return (try? context.fetchCount(descriptor)) ?? 0
     }
 
     private func downloadCompletedCount() -> Int {
