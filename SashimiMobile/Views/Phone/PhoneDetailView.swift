@@ -365,7 +365,7 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            if !episodes.isEmpty {
+            if !episodes.isEmpty && NetworkMonitor.shared.isConnected {
                 Menu {
                     Button("All Episodes") {
                         downloadScope = .all
@@ -445,9 +445,11 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
-            if isEpisode, item.seriesId != nil {
+            if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
                         PhoneDetailView(item: seriesItem, libraryName: libraryName)
@@ -478,7 +480,9 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
             Spacer()
         }
@@ -811,6 +815,18 @@ struct PhoneDetailView: View {
     // MARK: - URLs
 
     private var backdropImageURL: URL? {
+        if !NetworkMonitor.shared.isConnected {
+            if isSeries {
+                let downloaded = offlineEpisodes(for: item.id)
+                if let firstEp = downloaded.first {
+                    return OfflineImageHelper.backdropURL(for: firstEp.itemId)
+                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId)
+                }
+            }
+            return OfflineImageHelper.backdropURL(for: item.id)
+                ?? OfflineImageHelper.thumbnailURL(for: item.id)
+        }
+
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
 
         if isEpisode {
@@ -834,6 +850,9 @@ struct PhoneDetailView: View {
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
+        if !NetworkMonitor.shared.isConnected {
+            return OfflineImageHelper.thumbnailURL(for: episode.id)
+        }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(episode.id)/Images/Primary?maxWidth=400")
     }

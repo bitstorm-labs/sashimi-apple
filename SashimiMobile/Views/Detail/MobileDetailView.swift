@@ -531,7 +531,7 @@ struct MobileDetailView: View {
             watchedButton
 
             // Download menu with scope options
-            if !episodes.isEmpty {
+            if !episodes.isEmpty && NetworkMonitor.shared.isConnected {
                 Menu {
                     Button("All Episodes") {
                         downloadScope = .all
@@ -611,9 +611,11 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
-            if isEpisode, item.seriesId != nil {
+            if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
                         MobileDetailView(item: seriesItem, libraryName: libraryName)
@@ -644,7 +646,9 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            DownloadButton(item: item, quality: nil)
+            if NetworkMonitor.shared.isConnected {
+                DownloadButton(item: item, quality: nil)
+            }
 
             Spacer()
         }
@@ -949,26 +953,36 @@ struct MobileDetailView: View {
     // MARK: - URLs
 
     private var backdropImageURL: URL? {
+        // Offline: use local files
+        if !NetworkMonitor.shared.isConnected {
+            // For series, check first downloaded episode's backdrop
+            if isSeries {
+                let downloaded = offlineEpisodes(for: item.id)
+                if let firstEp = downloaded.first {
+                    return OfflineImageHelper.backdropURL(for: firstEp.itemId)
+                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId)
+                }
+            }
+            return OfflineImageHelper.backdropURL(for: item.id)
+                ?? OfflineImageHelper.thumbnailURL(for: item.id)
+        }
+
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
 
-        // For episodes, use their own thumbnail (Primary) as backdrop
         if isEpisode {
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
         }
 
-        // YouTube series: use Banner image (channel banner art)
         if isYouTubeSeriesStyle {
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
         }
 
-        // For series/movies, use Backdrop image
         let imageId: String
         if item.backdropImageTags?.isEmpty == false {
             imageId = item.id
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
             imageId = seriesId
         } else {
-            // Fallback to Primary if no backdrop
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
         }
 
@@ -976,11 +990,13 @@ struct MobileDetailView: View {
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
+        guard NetworkMonitor.shared.isConnected else { return nil }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(itemId)/Images/Logo?maxWidth=500")
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
+        guard NetworkMonitor.shared.isConnected else { return nil }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(itemId)/Images/Primary?maxWidth=240")
     }
@@ -1015,6 +1031,9 @@ struct MobileEpisodeCard: View {
     let action: () -> Void
 
     private var imageURL: URL? {
+        if !NetworkMonitor.shared.isConnected {
+            return OfflineImageHelper.thumbnailURL(for: episode.id)
+        }
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(episode.id)/Images/Primary?maxWidth=400")
     }
