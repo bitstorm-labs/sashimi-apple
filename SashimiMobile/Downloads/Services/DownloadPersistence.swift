@@ -4,6 +4,8 @@ import SwiftData
 /// Background SwiftData helper for download operations.
 /// Owns a dedicated serial DispatchQueue and ModelContext to keep
 /// all database work off the main actor.
+/// Write operations use queue.async (non-blocking). Read operations
+/// that return values use queue.sync (blocking but fast).
 final class DownloadPersistence {
     private let queue = DispatchQueue(label: "com.mondominator.sashimi.downloadPersistence")
     private var modelContext: ModelContext?
@@ -14,55 +16,11 @@ final class DownloadPersistence {
         }
     }
 
-    // MARK: - Batch Insert (for bulk downloads)
-
-    func batchInsertQueued(
-        episodes: [(item: BaseItemDto, quality: DownloadQuality)]
-    ) -> [(itemId: String, quality: DownloadQuality)] {
-        queue.sync {
-            guard let context = modelContext else { return [] }
-            var inserted: [(itemId: String, quality: DownloadQuality)] = []
-
-            for (item, quality) in episodes {
-                let itemId = item.id
-                let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
-                let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-                if let existing = try? context.fetch(descriptor).first {
-                    if existing.status == .completed || existing.status == .downloading
-                        || existing.status == .preparing || existing.status == .queued {
-                        continue
-                    }
-                    context.delete(existing)
-                }
-
-                let record = DownloadedItem(
-                    itemId: itemId,
-                    name: item.name,
-                    itemType: item.type ?? .unknown,
-                    quality: quality,
-                    seriesName: item.seriesName,
-                    seasonNumber: item.parentIndexNumber,
-                    episodeNumber: item.indexNumber,
-                    overview: item.overview,
-                    runTimeTicks: item.runTimeTicks,
-                    productionYear: item.productionYear,
-                    seriesId: item.seriesId,
-                    seasonId: item.seasonId
-                )
-                context.insert(record)
-                inserted.append((itemId: itemId, quality: quality))
-            }
-
-            try? context.save()
-            return inserted
-        }
-    }
-
-    // MARK: - Status Updates
+    // MARK: - Status Updates (async — non-blocking)
 
     func updateStatus(itemId: String, status: DownloadStatus, errorMessage: String? = nil) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -77,8 +35,8 @@ final class DownloadPersistence {
     }
 
     func updateProgress(itemId: String, progress: Double, downloadedBytes: Int64, totalBytes: Int64) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -90,8 +48,8 @@ final class DownloadPersistence {
     }
 
     func markCompleted(itemId: String, videoFileName: String, totalBytes: Int64) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -105,8 +63,8 @@ final class DownloadPersistence {
     }
 
     func deleteRecord(itemId: String) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             if let record = try? context.fetch(descriptor).first {
@@ -116,7 +74,7 @@ final class DownloadPersistence {
         }
     }
 
-    // MARK: - Queries
+    // MARK: - Queries (sync — returns values, but fast)
 
     func fetchStatus(itemId: String) -> DownloadStatus? {
         queue.sync {
@@ -136,11 +94,11 @@ final class DownloadPersistence {
         }
     }
 
-    // MARK: - Asset Updates
+    // MARK: - Asset Updates (async — non-blocking)
 
     func updatePosterFileName(itemId: String, fileName: String) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -150,8 +108,8 @@ final class DownloadPersistence {
     }
 
     func updateBackdropFileName(itemId: String, fileName: String) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -161,8 +119,8 @@ final class DownloadPersistence {
     }
 
     func addSubtitle(itemId: String, language: String, displayTitle: String, subtitleIndex: Int, fileName: String) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -177,11 +135,11 @@ final class DownloadPersistence {
         }
     }
 
-    // MARK: - Offline Progress
+    // MARK: - Offline Progress (async writes, sync reads)
 
     func savePlaybackPosition(itemId: String, positionTicks: Int64) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -202,8 +160,8 @@ final class DownloadPersistence {
     }
 
     func clearSyncFlag(itemId: String) {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
             let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
             guard let record = try? context.fetch(descriptor).first else { return }
@@ -213,8 +171,8 @@ final class DownloadPersistence {
     }
 
     func deleteAllRecords() {
-        queue.sync {
-            guard let context = modelContext else { return }
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
             let descriptor = FetchDescriptor<DownloadedItem>()
             if let items = try? context.fetch(descriptor) {
                 items.forEach { context.delete($0) }

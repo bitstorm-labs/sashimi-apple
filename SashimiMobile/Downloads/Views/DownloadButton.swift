@@ -13,8 +13,6 @@ struct DownloadButton: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    @Environment(\.modelContext) private var modelContext
-
     private enum DownloadButtonState {
         case notDownloaded
         case queued
@@ -34,7 +32,6 @@ struct DownloadButton: View {
         .buttonStyle(.bordered)
         .tint(.white)
         .onAppear { refreshState() }
-        .onChange(of: downloadManager.activeDownloads) { _, _ in refreshState() }
         .onChange(of: downloadManager.stateVersion) { _, _ in refreshState() }
         .confirmationDialog("Download Quality", isPresented: $showingQualitySheet) {
             qualityOptions

@@ -22,6 +22,12 @@ struct MobileHomeView: View {
         .task {
             await viewModel.loadContent()
         }
+        .onAppear {
+            // Refresh when navigating back to home (e.g. after watching something)
+            if !viewModel.continueWatchingItems.isEmpty || !viewModel.libraries.isEmpty {
+                Task { await viewModel.loadContent() }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
                 try? await Task.sleep(for: .seconds(0.5))
