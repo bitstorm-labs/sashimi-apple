@@ -155,6 +155,7 @@ struct MobileMediaGridView<Destination: View>: View {
     let libraryName: String?
     let libraryNames: [String: String]?
     let destination: (BaseItemDto) -> Destination
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(
         title: String,
@@ -199,7 +200,8 @@ struct MobileMediaGridView<Destination: View>: View {
     }
 
     private var columns: [GridItem] {
-        let minWidth = isYouTubeLibrary && !isCircularStyle ? MobileSizing.landscapeCardWidth : MobileSizing.posterWidth
+        let defaultWidth = sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
+        let minWidth = isYouTubeLibrary && !isCircularStyle ? MobileSizing.landscapeCardWidth : defaultWidth
         return [GridItem(.adaptive(minimum: minWidth), spacing: MobileSpacing.md)]
     }
 

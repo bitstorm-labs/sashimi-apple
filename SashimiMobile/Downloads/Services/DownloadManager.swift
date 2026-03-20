@@ -19,6 +19,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
     private var modelContainer: ModelContainer?
+    private var cachedContext: ModelContext?
 
     // Maps URLSessionTask.taskIdentifier (as String) -> itemId for surviving app relaunches
     // UserDefaults plist format requires String keys, so we store Int taskIdentifiers as Strings
@@ -66,7 +67,13 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+        self.cachedContext = ModelContext(container)
         persistence.setModelContainer(container)
+    }
+
+    /// Reusable main-actor context for reads. Avoids creating throwaway ModelContexts per call.
+    private var mainContext: ModelContext? {
+        cachedContext
     }
 
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
@@ -77,11 +84,13 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func startProgressTimer() {
         guard progressTimer == nil else { return }
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.publishProgress()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
     }
 
     private func stopProgressTimer() {
@@ -107,8 +116,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Insert a queued download record on the main actor's context so @Query sees it immediately.
     private func insertQueuedRecord(item: BaseItemDto, quality: DownloadQuality) -> Bool {
-        guard let container = modelContainer else { return false }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return false }
         let itemId = item.id
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
@@ -200,8 +208,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func deleteRecordFromMainContext(itemId: String) {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return }
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
         if let record = try? context.fetch(descriptor).first {
@@ -276,8 +283,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func downloadStatus(for itemId: String) -> DownloadedItem? {
-        guard let container = modelContainer else { return nil }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return nil }
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
         return try? context.fetch(descriptor).first
@@ -293,8 +299,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func offlinePlaybackPosition(for itemId: String) -> Int64? {
-        guard let container = modelContainer else { return nil }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return nil }
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
         let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
         guard let record = try? context.fetch(descriptor).first else { return nil }
@@ -325,13 +330,11 @@ final class DownloadManager: NSObject, ObservableObject {
     // MARK: - Season Downloads
 
     func downloadSeason(episodes: [BaseItemDto], quality: DownloadQuality) {
-        var insertedCount = 0
-        for episode in episodes {
-            if insertQueuedRecord(item: episode, quality: quality) {
-                downloadQueue.append((item: episode, quality: quality))
-                insertedCount += 1
-            }
+        let inserted = episodes.filter { insertQueuedRecord(item: $0, quality: quality) }
+        for episode in inserted {
+            downloadQueue.append((item: episode, quality: quality))
         }
+        let insertedCount = inserted.count
         guard insertedCount > 0 else { return }
 
         stateVersion += 1
@@ -393,8 +396,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func cleanupStaleDownloads(activeTaskItemIds: Set<String>) {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return }
         let descriptor = FetchDescriptor<DownloadedItem>()
         guard let items = try? context.fetch(descriptor) else { return }
 
@@ -411,8 +413,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func restartAllFailed() async {
-        guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        guard let context = mainContext else { return }
         let descriptor = FetchDescriptor<DownloadedItem>()
         guard let items = try? context.fetch(descriptor) else { return }
 

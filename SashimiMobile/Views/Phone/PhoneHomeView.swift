@@ -1,32 +1,44 @@
 import SwiftUI
 
-struct MobileHomeView: View {
+struct PhoneHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var rowSettings = HomeRowSettings.shared
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
+            LazyVStack(alignment: .leading, spacing: MobileSpacing.lg) {
                 if viewModel.isLoading && viewModel.continueWatchingItems.isEmpty {
-                    loadingView
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 300)
                 } else {
                     contentView
                 }
             }
-            .padding(.vertical, MobileSpacing.md)
+            .padding(.vertical, MobileSpacing.sm)
         }
         .background(MobileColors.background)
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: 8) {
+                Image("SidebarLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 32, height: 32)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                Text("Sashimi")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(MobileColors.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, MobileSpacing.md)
+            .padding(.vertical, MobileSpacing.xs)
+            .background(MobileColors.background)
+        }
         .refreshable {
             await viewModel.loadContent()
         }
         .task {
             await viewModel.loadContent()
-        }
-        .onAppear {
-            // Refresh when navigating back to home (e.g. after watching something)
-            if !viewModel.continueWatchingItems.isEmpty || !viewModel.libraries.isEmpty {
-                Task { await viewModel.loadContent() }
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
@@ -39,20 +51,19 @@ struct MobileHomeView: View {
         }
     }
 
-    private var loadingView: some View {
-        ProgressView()
-            .frame(maxWidth: .infinity, minHeight: 300)
-    }
-
     @ViewBuilder
     private var contentView: some View {
         ForEach(rowSettings.rows.filter { $0.isEnabled }) { row in
             rowView(for: row)
         }
 
-        // Empty state
         if viewModel.continueWatchingItems.isEmpty && viewModel.libraries.isEmpty {
-            emptyStateView
+            ContentUnavailableView(
+                "No Content",
+                systemImage: "tv",
+                description: Text("Start watching something to see it here.")
+            )
+            .frame(maxWidth: .infinity, minHeight: 300)
         }
     }
 
@@ -64,9 +75,10 @@ struct MobileHomeView: View {
                 let libNames = viewModel.continueWatchingLibraryNames
                 MobileContinueWatchingRow(
                     items: viewModel.continueWatchingItems,
-                    libraryNames: libNames
+                    libraryNames: libNames,
+                    cardWidth: PhoneSizing.continueWatchingWidth
                 ) { item in
-                    MobileDetailView(item: item, libraryName: libNames[item.id])
+                    PhoneDetailView(item: item, libraryName: libNames[item.id])
                 }
             }
 
@@ -75,19 +87,11 @@ struct MobileHomeView: View {
             MobileRecentlyAddedRow(
                 libraryId: libraryId,
                 libraryName: libraryName,
-                collectionType: library?.collectionType
+                collectionType: library?.collectionType,
+                cardWidth: PhoneSizing.posterWidth
             ) { item in
-                MobileDetailView(item: item, libraryName: libraryName)
+                PhoneDetailView(item: item, libraryName: libraryName)
             }
         }
-    }
-
-    private var emptyStateView: some View {
-        ContentUnavailableView(
-            "No Content",
-            systemImage: "tv",
-            description: Text("Start watching something to see it here.")
-        )
-        .frame(maxWidth: .infinity, minHeight: 300)
     }
 }

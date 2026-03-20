@@ -40,15 +40,21 @@ struct SashimiMobileApp: App {
 
 struct ContentView: View {
     @EnvironmentObject var sessionManager: SessionManager
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         Group {
             if sessionManager.isAuthenticated {
-                MainNavigationView()
-                    .task {
-                        // Sync any offline playback progress back to server
-                        await DownloadManager.shared.syncPendingProgress()
+                Group {
+                    if sizeClass == .compact {
+                        PhoneTabView()
+                    } else {
+                        MainNavigationView()
                     }
+                }
+                .task {
+                    await DownloadManager.shared.syncPendingProgress()
+                }
             } else {
                 MobileAuthView()
             }

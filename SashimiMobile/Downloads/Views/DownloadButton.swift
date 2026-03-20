@@ -11,8 +11,7 @@ struct DownloadButton: View {
     @State private var showingQualitySheet = false
     @State private var showingDeleteConfirmation = false
     @ObservedObject private var downloadManager = DownloadManager.shared
-
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private enum DownloadButtonState {
         case notDownloaded
@@ -31,8 +30,8 @@ struct DownloadButton: View {
             label
         }
         .buttonStyle(.bordered)
+        .tint(.white)
         .onAppear { refreshState() }
-        .onChange(of: downloadManager.activeDownloads) { _, _ in refreshState() }
         .onChange(of: downloadManager.stateVersion) { _, _ in refreshState() }
         .confirmationDialog("Download Quality", isPresented: $showingQualitySheet) {
             qualityOptions
@@ -50,49 +49,41 @@ struct DownloadButton: View {
     private var label: some View {
         switch downloadState {
         case .notDownloaded:
-            Label("Download", systemImage: "arrow.down.circle")
-                .font(.system(size: 14, weight: .semibold))
+            if sizeClass == .compact {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 20))
+            } else {
+                Label("Download", systemImage: "arrow.down.circle")
+                    .font(.system(size: 14, weight: .semibold))
+            }
 
         case .queued:
-            Label("Queued", systemImage: "clock")
-                .font(.system(size: 14, weight: .semibold))
+            Image(systemName: "clock")
+                .font(.system(size: 20))
                 .foregroundStyle(MobileColors.textSecondary)
 
         case .preparing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                Text("Preparing...")
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            .foregroundStyle(MobileColors.textSecondary)
+            ProgressView()
+                .scaleEffect(0.7)
 
         case .downloading:
             if progress < 0 {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                    Text("Downloading...")
-                        .font(.system(size: 14, weight: .semibold))
-                }
+                ProgressView()
+                    .scaleEffect(0.7)
             } else {
-                HStack(spacing: 6) {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.circular)
-                        .scaleEffect(0.7)
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 14, weight: .semibold))
-                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.7)
             }
 
         case .paused:
-            Label("Paused", systemImage: "pause.circle")
-                .font(.system(size: 14, weight: .semibold))
+            Image(systemName: "pause.circle")
+                .font(.system(size: 20))
                 .foregroundStyle(MobileColors.warning)
 
         case .completed:
-            Label("Downloaded", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .semibold))
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 20))
                 .foregroundStyle(MobileColors.success)
 
         case .failed:

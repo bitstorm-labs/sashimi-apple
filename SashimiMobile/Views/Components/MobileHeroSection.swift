@@ -5,6 +5,19 @@ struct MobileHeroSection<Destination: View>: View {
     let items: [BaseItemDto]
     let libraryNames: [String: String]
     let destination: (BaseItemDto) -> Destination
+    let height: CGFloat
+
+    init(
+        items: [BaseItemDto],
+        libraryNames: [String: String],
+        height: CGFloat = 180,
+        @ViewBuilder destination: @escaping (BaseItemDto) -> Destination
+    ) {
+        self.items = items
+        self.libraryNames = libraryNames
+        self.height = height
+        self.destination = destination
+    }
 
     @State private var currentIndex: Int = 0
     @State private var autoAdvanceTimer: Timer?
@@ -195,7 +208,7 @@ struct MobileHeroSection<Destination: View>: View {
                 }
             }
             .frame(maxWidth: 720)
-            .frame(height: 180)
+            .frame(height: height)
             .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
             .overlay(
                 RoundedRectangle(cornerRadius: MobileCornerRadius.large)

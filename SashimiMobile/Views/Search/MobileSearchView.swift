@@ -1,3 +1,4 @@
+import NukeUI
 import SwiftUI
 
 struct MobileSearchView: View {
@@ -27,7 +28,11 @@ struct MobileSearchView: View {
                 )
             } else {
                 ForEach(searchResults, id: \.id) { item in
-                    SearchResultRow(item: item)
+                    NavigationLink {
+                        AdaptiveDetailView(item: item)
+                    } label: {
+                        SearchResultRow(item: item)
+                    }
                 }
             }
         }
@@ -61,35 +66,69 @@ struct MobileSearchView: View {
 private struct SearchResultRow: View {
     let item: BaseItemDto
 
-    var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 60, height: 90)
-                .overlay {
-                    Image(systemName: "photo")
-                        .foregroundStyle(.secondary)
-                }
+    private var posterURL: URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=200")
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.name ?? "Unknown")
-                    .font(.headline)
+    private func iconForType(_ type: ItemType) -> String {
+        switch type {
+        case .movie:
+            return "film"
+        case .series:
+            return "tv"
+        case .episode:
+            return "play.rectangle"
+        case .season:
+            return "tv"
+        case .boxSet:
+            return "square.stack"
+        default:
+            return "photo"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: MobileSpacing.sm) {
+            LazyImage(url: posterURL) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    RoundedRectangle(cornerRadius: MobileCornerRadius.small)
+                        .fill(MobileColors.cardBackground)
+                        .overlay {
+                            Image(systemName: iconForType(item.type ?? .unknown))
+                                .font(.system(size: 20))
+                                .foregroundStyle(MobileColors.textTertiary)
+                        }
+                }
+            }
+            .frame(width: 60, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
+
+            VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
+                Text(item.name)
+                    .font(MobileTypography.title)
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(2)
 
                 if let year = item.productionYear {
                     Text(String(year))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(MobileTypography.bodySmall)
+                        .foregroundStyle(MobileColors.textSecondary)
                 }
 
                 if let type = item.type {
-                    Text(type.rawValue.capitalized)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label(type.rawValue.capitalized, systemImage: iconForType(type))
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.textTertiary)
                 }
             }
 
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, MobileSpacing.xxs)
     }
 }
