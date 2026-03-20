@@ -1,60 +1,6 @@
 import SwiftUI
 import NukeUI
 
-// MARK: - Marquee Text for Recently Added
-
-private struct RecentlyAddedMarqueeText: View {
-    let text: String
-    let font: Font
-    let color: Color
-    let width: CGFloat
-
-    @State private var textWidth: CGFloat = 0
-    @State private var offset: CGFloat = 0
-
-    private var needsScroll: Bool {
-        textWidth > width + 10
-    }
-
-    var body: some View {
-        GeometryReader { _ in
-            Text(text)
-                .font(font)
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(GeometryReader { textGeo in
-                    Color.clear.onAppear {
-                        textWidth = textGeo.size.width
-                        if needsScroll {
-                            startScrolling()
-                        }
-                    }
-                })
-                .offset(x: offset)
-        }
-        .clipped()
-    }
-
-    private func startScrolling() {
-        guard needsScroll else { return }
-
-        let scrollDistance = textWidth - width + 20
-        let duration = Double(scrollDistance) / 25.0
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            withAnimation(.linear(duration: duration)) {
-                offset = -scrollDistance
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 2.0) {
-                offset = 0
-                startScrolling()
-            }
-        }
-    }
-}
-
 struct MobileRecentlyAddedRow<Destination: View>: View {
     let libraryId: String
     let libraryName: String
