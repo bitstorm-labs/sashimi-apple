@@ -39,13 +39,13 @@ struct MainNavigationView: View {
     @State private var selection: SidebarSelection = .home
     @State private var sidebarVisible = false
     @State private var libraries: [JellyfinLibrary] = []
+    @State private var sidebarWidth: CGFloat = 200
     @ObservedObject private var sessionManager = SessionManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
 
-    private let sidebarWidth: CGFloat = 280
-
     var body: some View {
         GeometryReader { geometry in
+            let _ = 0 // sidebarWidth is measured from content
             ZStack(alignment: .leading) {
                 // Main content with custom header
                 VStack(spacing: 0) {
@@ -76,7 +76,15 @@ struct MainNavigationView: View {
 
                 // Sidebar
                 sidebarContent
-                    .frame(width: sidebarWidth)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background(GeometryReader { sidebarGeo in
+                        Color.clear.onAppear {
+                            sidebarWidth = sidebarGeo.size.width
+                        }
+                        .onChange(of: sidebarGeo.size.width) { _, newWidth in
+                            sidebarWidth = newWidth
+                        }
+                    })
                     .offset(x: sidebarVisible ? 0 : -sidebarWidth)
             }
         }
@@ -193,9 +201,9 @@ struct MainNavigationView: View {
                     .frame(width: 24)
                 Text(item.displayName)
                     .font(MobileTypography.body)
-                Spacer()
             }
             .foregroundStyle(selection == item ? MobileColors.accent : MobileColors.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, MobileSpacing.md)
             .padding(.vertical, MobileSpacing.sm)
             .background(selection == item ? MobileColors.accent.opacity(0.15) : Color.clear)
