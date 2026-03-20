@@ -17,15 +17,22 @@ struct PhoneHomeView: View {
             .padding(.vertical, MobileSpacing.sm)
         }
         .background(MobileColors.background)
-        .navigationTitle("Home")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: 8) {
                 Image("SidebarLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
+                Text("Sashimi")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(MobileColors.textPrimary)
+                Spacer()
             }
+            .padding(.horizontal, MobileSpacing.md)
+            .padding(.vertical, MobileSpacing.xs)
+            .background(MobileColors.background)
         }
         .refreshable {
             await viewModel.loadContent()

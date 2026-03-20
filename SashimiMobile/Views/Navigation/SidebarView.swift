@@ -40,6 +40,7 @@ struct MainNavigationView: View {
     @State private var sidebarVisible = false
     @State private var libraries: [JellyfinLibrary] = []
     @State private var sidebarWidth: CGFloat = 200
+    @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
@@ -57,7 +58,7 @@ struct MainNavigationView: View {
                         detailView
                             .navigationBarHidden(true)
                     }
-                    .id(selection)
+                    .id("\(selection)-\(navigationResetId)")
                 }
                 .frame(width: geometry.size.width)
                 .offset(x: sidebarVisible ? sidebarWidth : 0)
@@ -186,11 +187,23 @@ struct MainNavigationView: View {
         }
         .frame(maxHeight: .infinity)
         .background(MobileColors.cardBackground.ignoresSafeArea())
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: MobileCornerRadius.xl,
+                topTrailingRadius: MobileCornerRadius.xl
+            )
+        )
     }
 
     private func sidebarRow(item: SidebarSelection) -> some View {
         Button {
-            selection = item
+            if selection == item {
+                navigationResetId += 1
+            } else {
+                selection = item
+            }
             withAnimation(.easeInOut(duration: 0.25)) {
                 sidebarVisible = false
             }
