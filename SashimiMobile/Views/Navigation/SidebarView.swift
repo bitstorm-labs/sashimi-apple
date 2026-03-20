@@ -57,7 +57,7 @@ struct MainNavigationView: View {
                     // Content area
                     NavigationStack {
                         detailView
-                            .navigationBarHidden(true)
+                            .navigationBarHidden(selection == .search ? false : true)
                     }
                     .id("\(selection)-\(navigationResetId)")
                 }
