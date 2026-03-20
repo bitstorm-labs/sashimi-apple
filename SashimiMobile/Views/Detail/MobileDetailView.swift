@@ -559,6 +559,7 @@ struct MobileDetailView: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
+                .tint(.white)
                 .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
                     ForEach(DownloadQuality.allCases) { quality in
                         Button("\(quality.displayName) — \(quality.subtitle)") {
@@ -623,6 +624,7 @@ struct MobileDetailView: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
+                .tint(.white)
             }
 
             Spacer()
@@ -656,6 +658,7 @@ struct MobileDetailView: View {
                 .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
         }
         .buttonStyle(.bordered)
+        .tint(.white)
     }
 
     // MARK: - Seasons Section
