@@ -154,9 +154,8 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private var titleSection: some View {
         if isEpisode {
-            // Show series name above episode title
             if let seriesName = item.seriesName {
-                Text(seriesName)
+                Text(isYouTubeStyle ? seriesName.cleanedYouTubeTitle : seriesName)
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
             }
@@ -168,7 +167,7 @@ struct PhoneDetailView: View {
             }
         }
 
-        Text(item.name)
+        Text(isYouTubeSeriesStyle ? item.name.cleanedYouTubeTitle : item.name)
             .font(.system(size: 22, weight: .bold))
             .foregroundStyle(MobileColors.textPrimary)
     }
@@ -348,6 +347,7 @@ struct PhoneDetailView: View {
                         .font(.system(size: 20))
                 }
                 .buttonStyle(.bordered)
+                .tint(.white)
                 .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
                     ForEach(DownloadQuality.allCases) { quality in
                         Button("\(quality.displayName) \u{2014} \(quality.subtitle)") {
@@ -412,6 +412,7 @@ struct PhoneDetailView: View {
                         .font(.system(size: 16))
                 }
                 .buttonStyle(.bordered)
+                .tint(.white)
             }
 
             Spacer()
@@ -445,6 +446,7 @@ struct PhoneDetailView: View {
                 .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
         }
         .buttonStyle(.bordered)
+        .tint(.white)
     }
 
     // MARK: - Overview Section
@@ -699,7 +701,7 @@ struct PhoneDetailView: View {
         }
 
         if isYouTubeSeriesStyle {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=800")
+            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
         }
 
         let imageId: String
