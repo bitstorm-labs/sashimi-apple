@@ -43,6 +43,20 @@ struct MobileDetailView: View {
         isSeries && isYouTubeStyle
     }
 
+    private var seriesMetadataParts: [String] {
+        var parts: [String] = []
+        if let year = item.productionYear {
+            parts.append(String(year))
+        }
+        if seasons.count > 0 {
+            parts.append(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
+        }
+        if let rating = item.officialRating {
+            parts.append(rating)
+        }
+        return parts
+    }
+
     private var isYouTubeChannelEpisode: Bool {
         isEpisode && isYouTubeStyle
     }
@@ -237,23 +251,9 @@ struct MobileDetailView: View {
 
             // Metadata + ratings row
             HStack(spacing: MobileSpacing.sm) {
-                if let year = item.productionYear {
-                    Text(String(year))
-                }
-
-                let seasonCount = seasons.count
-                if seasonCount > 0 {
-                    Text("•")
-                    Text(seasonCount == 1 ? "1 Season" : "\(seasonCount) Seasons")
-                }
-
-                if let rating = item.officialRating {
-                    Text("•")
-                    Text(rating)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(MobileColors.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                let metaParts = seriesMetadataParts
+                if !metaParts.isEmpty {
+                    Text(metaParts.joined(separator: " • "))
                 }
 
                 ratingsRow

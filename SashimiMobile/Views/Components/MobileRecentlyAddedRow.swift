@@ -330,22 +330,12 @@ struct MobileRecentlyAddedCard: View {
                 }
             }
 
-            // Title only with marquee (matches tvOS - no subtitle)
-            if isCircular {
-                Text(displayTitle)
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-                    .frame(width: width, height: 16, alignment: .center)
-            } else {
-                RecentlyAddedMarqueeText(
-                    text: displayTitle,
-                    font: MobileTypography.caption,
-                    color: MobileColors.textPrimary,
-                    width: width
-                )
-                .frame(width: width, height: 16, alignment: .leading)
-            }
+            // Title
+            Text(displayTitle)
+                .font(MobileTypography.caption)
+                .foregroundStyle(MobileColors.textPrimary)
+                .lineLimit(1)
+                .frame(width: width, height: 16, alignment: isCircular ? .center : .leading)
         }
     }
 

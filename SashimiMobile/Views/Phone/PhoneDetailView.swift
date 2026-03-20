@@ -73,9 +73,10 @@ struct PhoneDetailView: View {
     // MARK: - Body
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 backdropSection
+                    .clipped()
 
                 VStack(alignment: .leading, spacing: MobileSpacing.md) {
                     titleSection
@@ -96,7 +97,9 @@ struct PhoneDetailView: View {
                 .padding(.horizontal, MobileSpacing.md)
                 .padding(.top, MobileSpacing.sm)
             }
+            .frame(maxWidth: .infinity)
         }
+        .clipped()
         .background(MobileColors.background)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenPlayer(item: $playingItem)
@@ -125,28 +128,69 @@ struct PhoneDetailView: View {
 
     // MARK: - Backdrop Section
 
+    @ViewBuilder
     private var backdropSection: some View {
-        ZStack(alignment: .bottom) {
-            LazyImage(url: backdropImageURL) { state in
-                if let image = state.image {
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Rectangle().fill(MobileColors.cardBackground)
-                }
-            }
-            .frame(height: 220)
-            .frame(maxWidth: .infinity)
-            .clipped()
+        if isYouTubeSeriesStyle {
+            VStack(spacing: 0) {
+                // Banner
+                ZStack(alignment: .bottom) {
+                    LazyImage(url: backdropImageURL) { state in
+                        if let image = state.image {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Rectangle().fill(MobileColors.cardBackground)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: 120)
+                    .clipped()
 
-            LinearGradient(
-                colors: [.clear, MobileColors.background],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 80)
+                    LinearGradient(
+                        colors: [.clear, MobileColors.background],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 60)
+                }
+
+                // Channel avatar overlapping banner
+                LazyImage(url: channelAvatarURL) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Circle().fill(MobileColors.cardBackground)
+                    }
+                }
+                .frame(width: 72, height: 72)
+                .clipShape(Circle())
+                .offset(y: -36)
+                .padding(.bottom, -24)
+            }
+        } else {
+            ZStack(alignment: .bottom) {
+                LazyImage(url: backdropImageURL) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Rectangle().fill(MobileColors.cardBackground)
+                    }
+                }
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+                LinearGradient(
+                    colors: [.clear, MobileColors.background],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 80)
+            }
         }
+    }
+
+    private var channelAvatarURL: URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=240")
     }
 
     // MARK: - Title Section
@@ -170,40 +214,23 @@ struct PhoneDetailView: View {
         Text(isYouTubeSeriesStyle ? item.name.cleanedYouTubeTitle : item.name)
             .font(.system(size: 22, weight: .bold))
             .foregroundStyle(MobileColors.textPrimary)
+            .lineLimit(3)
+            .frame(maxWidth: .infinity, alignment: isYouTubeSeriesStyle ? .center : .leading)
+            .clipped()
     }
 
     // MARK: - Metadata Row
 
     @ViewBuilder
     private var metadataRow: some View {
-        HStack(spacing: MobileSpacing.sm) {
-            if let year = item.productionYear {
-                Text(String(year))
-            }
-
-            if isSeries {
-                let seasonCount = seasons.count
-                if seasonCount > 0 {
-                    Text("\u{2022}")
-                    Text(seasonCount == 1 ? "1 Season" : "\(seasonCount) Seasons")
-                }
-            }
-
-            if let runtime = item.runTimeTicks {
-                Text("\u{2022}")
-                Text(formatRuntime(runtime))
-            }
-
-            if let rating = item.officialRating {
-                Text(rating)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(MobileColors.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
+        // Metadata line
+        let parts = metadataParts
+        if !parts.isEmpty {
+            Text(parts.joined(separator: " \u{2022} "))
+                .font(MobileTypography.caption)
+                .foregroundStyle(MobileColors.textSecondary)
+                .lineLimit(1)
         }
-        .font(MobileTypography.caption)
-        .foregroundStyle(MobileColors.textSecondary)
 
         // Ratings row
         ratingsRow
@@ -218,7 +245,25 @@ struct PhoneDetailView: View {
             Text(genres.prefix(3).joined(separator: " \u{2022} "))
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textSecondary)
+                .lineLimit(1)
         }
+    }
+
+    private var metadataParts: [String] {
+        var parts: [String] = []
+        if let year = item.productionYear {
+            parts.append(String(year))
+        }
+        if isSeries, seasons.count > 0 {
+            parts.append(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
+        }
+        if let runtime = item.runTimeTicks {
+            parts.append(formatRuntime(runtime))
+        }
+        if let rating = item.officialRating {
+            parts.append(rating)
+        }
+        return parts
     }
 
     // MARK: - Ratings Row
@@ -451,18 +496,34 @@ struct PhoneDetailView: View {
 
     // MARK: - Overview Section
 
+    private func stripURLs(_ text: String) -> String {
+        // swiftlint:disable:next force_try
+        let regex = try! NSRegularExpression(pattern: "https?://\\S+", options: [])
+        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     @ViewBuilder
     private var overviewSection: some View {
-        if let overview = item.overview, !overview.isEmpty {
-            Text(overview)
-                .font(MobileTypography.body)
-                .foregroundStyle(MobileColors.textSecondary)
-                .lineLimit(overviewExpanded ? nil : 3)
-                .onTapGesture {
+        let cleanOverview = stripURLs(item.overview ?? "")
+        if !cleanOverview.isEmpty {
+            VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+                Text(cleanOverview)
+                    .font(MobileTypography.body)
+                    .foregroundStyle(MobileColors.textSecondary)
+                    .lineLimit(overviewExpanded ? 50 : 2)
+
+                Button {
                     withAnimation(.easeInOut(duration: MobileAnimation.normal)) {
                         overviewExpanded.toggle()
                     }
+                } label: {
+                    Text(overviewExpanded ? "Show Less" : "Show More")
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.accent)
                 }
+            }
         }
     }
 

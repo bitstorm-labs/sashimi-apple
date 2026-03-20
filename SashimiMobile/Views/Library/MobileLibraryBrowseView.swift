@@ -34,51 +34,40 @@ struct MobileLibraryBrowseView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileSpacing.md) {
-                if isLoading && items.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 300)
-                } else if items.isEmpty {
-                    ContentUnavailableView(
-                        "No Items",
-                        systemImage: "rectangle.stack",
-                        description: Text("This library is empty.")
-                    )
+            if isLoading && items.isEmpty {
+                ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 300)
-                } else {
-                    LazyVGrid(columns: columns, spacing: MobileSpacing.md) {
-                        ForEach(items, id: \.id) { item in
-                            NavigationLink {
-                                AdaptiveDetailView(item: item, libraryName: libraryName)
-                            } label: {
-                                MobileRecentlyAddedCard(
-                                    item: item,
-                                    width: sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth,
-                                    libraryName: libraryName,
-                                    isCircular: isYouTubeLibrary && item.type == .series,
-                                    isLandscape: false,
-                                    badgeCount: nil
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                ItemContextMenu(item: item)
-                            }
+            } else if items.isEmpty {
+                ContentUnavailableView(
+                    "No Items",
+                    systemImage: "rectangle.stack",
+                    description: Text("This library is empty.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 300)
+            } else {
+                LazyVGrid(columns: columns, spacing: MobileSpacing.md) {
+                    ForEach(items, id: \.id) { item in
+                        NavigationLink {
+                            AdaptiveDetailView(item: item, libraryName: libraryName)
+                        } label: {
+                            MobileRecentlyAddedCard(
+                                item: item,
+                                width: sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth,
+                                libraryName: libraryName,
+                                isCircular: isYouTubeLibrary && item.type == .series,
+                                isLandscape: false,
+                                badgeCount: nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            ItemContextMenu(item: item)
                         }
                     }
-                    .padding(.horizontal, MobileSpacing.md)
-
-                    // Load more
-                    if items.count < totalCount {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .task {
-                                await loadMore()
-                            }
-                    }
                 }
+                .padding(.horizontal, MobileSpacing.md)
+                .padding(.vertical, MobileSpacing.md)
             }
-            .padding(.vertical, MobileSpacing.md)
         }
         .background(MobileColors.background)
         .task {
@@ -93,31 +82,28 @@ struct MobileLibraryBrowseView: View {
                 includeTypes: includeTypes,
                 sortBy: "SortName",
                 sortOrder: "Ascending",
-                limit: 60,
+                limit: 100,
                 startIndex: 0
             )
             items = response.items
             totalCount = response.totalRecordCount
+
+            // Load remaining items in background
+            while items.count < totalCount {
+                let more = try await JellyfinClient.shared.getItems(
+                    parentId: libraryId,
+                    includeTypes: includeTypes,
+                    sortBy: "SortName",
+                    sortOrder: "Ascending",
+                    limit: 100,
+                    startIndex: items.count
+                )
+                guard !more.items.isEmpty else { break }
+                items.append(contentsOf: more.items)
+            }
         } catch {
-            // Silently fail
+            // Show what we have
         }
         isLoading = false
-    }
-
-    private func loadMore() async {
-        do {
-            let response = try await JellyfinClient.shared.getItems(
-                parentId: libraryId,
-                includeTypes: includeTypes,
-                sortBy: "SortName",
-                sortOrder: "Ascending",
-                limit: 60,
-                startIndex: items.count
-            )
-            items.append(contentsOf: response.items)
-            totalCount = response.totalRecordCount
-        } catch {
-            // Silently fail
-        }
     }
 }

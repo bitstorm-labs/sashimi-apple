@@ -14,7 +14,8 @@ struct PhoneEpisodeSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            GeometryReader { proxy in
+              ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: MobileSpacing.md) {
                     LazyImage(url: imageURL) { state in
                         if let image = state.image {
@@ -67,10 +68,13 @@ struct PhoneEpisodeSheet: View {
                             Text(overview)
                                 .font(MobileTypography.body)
                                 .foregroundStyle(MobileColors.textSecondary)
+                                .lineLimit(10)
                         }
                     }
                     .padding(.horizontal, MobileSpacing.md)
                 }
+                .frame(width: proxy.size.width)
+              }
             }
             .background(MobileColors.background)
             .navigationBarTitleDisplayMode(.inline)
