@@ -8,6 +8,7 @@ struct OfflineHomeView: View {
         sort: \DownloadedItem.dateCompleted,
         order: .reverse
     ) private var downloads: [DownloadedItem]
+    @State private var playingItem: BaseItemDto?
 
     var body: some View {
         ScrollView {
@@ -51,6 +52,7 @@ struct OfflineHomeView: View {
         }
         .background(MobileColors.background)
         .navigationTitle("Downloads")
+        .fullScreenPlayer(item: $playingItem)
     }
 
     private var offlineBanner: some View {
@@ -119,8 +121,8 @@ struct OfflineHomeView: View {
             remoteTrailers: nil
         )
 
-        return NavigationLink {
-            MobilePlayerView(item: playableItem)
+        return Button {
+            playingItem = playableItem
         } label: {
             VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                 // Poster
