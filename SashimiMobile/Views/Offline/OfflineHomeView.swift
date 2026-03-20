@@ -124,7 +124,7 @@ struct OfflineHomeView: View {
         return Button {
             playingItem = playableItem
         } label: {
-            VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+            VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
                 // Poster
                 posterImage(for: item)
 
@@ -141,6 +141,14 @@ struct OfflineHomeView: View {
                         .foregroundStyle(MobileColors.textSecondary)
                         .lineLimit(1)
                 }
+
+                // Runtime
+                if let ticks = item.runTimeTicks {
+                    let minutes = ticks / 10_000_000 / 60
+                    Text("\(minutes) min")
+                        .font(MobileTypography.captionSmall)
+                        .foregroundStyle(MobileColors.textTertiary)
+                }
             }
             .frame(width: MobileSizing.posterWidth)
         }
@@ -149,10 +157,10 @@ struct OfflineHomeView: View {
 
     @ViewBuilder
     private func posterImage(for item: DownloadedItem) -> some View {
-        if let posterFileName = item.posterFileName {
-            let posterURL = DownloadFileManager.itemDirectory(for: item.itemId)
-                .appendingPathComponent(posterFileName)
-            AsyncImage(url: posterURL) { image in
+        let posterPath = DownloadFileManager.itemDirectory(for: item.itemId)
+            .appendingPathComponent("poster.jpg")
+        if FileManager.default.fileExists(atPath: posterPath.path) {
+            AsyncImage(url: posterPath) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 posterPlaceholder
