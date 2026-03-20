@@ -14,6 +14,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @Published var activeDownloads: [String: Double] = [:] // itemId -> progress
     @Published var stateVersion: Int = 0 // bumped on any download state change
+    @Published var downloadSpeed: String = "" // human-readable bandwidth
 
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
@@ -40,11 +41,16 @@ final class DownloadManager: NSObject, ObservableObject {
     // Serial download queue
     private var downloadQueue: [(item: BaseItemDto, quality: DownloadQuality)] = []
     private var currentDownloadItemId: String?
+    var queuedCount: Int { downloadQueue.count }
 
     // Progress throttling
     private var pendingProgress: [String: Double] = [:]
     private var lastProgressSave: [String: Date] = [:]
     private var progressTimer: Timer?
+
+    // Bandwidth tracking
+    private var lastBytesWritten: Int64 = 0
+    private var lastSpeedCheck: Date = .distantPast
 
     // In-memory preparing state (items waiting for first bytes from server)
     @Published var preparingItems: Set<String> = []
@@ -150,8 +156,13 @@ final class DownloadManager: NSObject, ObservableObject {
         guard !downloadQueue.isEmpty else {
             currentDownloadItemId = nil
             stopProgressTimer()
+            downloadSpeed = ""
             return
         }
+
+        // Reset speed tracking for new download
+        lastBytesWritten = 0
+        lastSpeedCheck = .distantPast
 
         let (item, quality) = downloadQueue.removeFirst()
         let itemId = item.id
@@ -598,8 +609,22 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 self.preparingItems.remove(itemId)
             }
 
-            // Throttle SwiftData writes to every 5s per item
+            // Bandwidth tracking
             let now = Date()
+            let elapsed = now.timeIntervalSince(self.lastSpeedCheck)
+            if elapsed >= 1.0 {
+                let bytesDelta = totalBytesWritten - self.lastBytesWritten
+                if bytesDelta > 0 {
+                    let bytesPerSecond = Double(bytesDelta) / elapsed
+                    self.downloadSpeed = ByteCountFormatter.string(
+                        fromByteCount: Int64(bytesPerSecond), countStyle: .file
+                    ) + "/s"
+                }
+                self.lastBytesWritten = totalBytesWritten
+                self.lastSpeedCheck = now
+            }
+
+            // Throttle SwiftData writes to every 5s per item
             let lastSave = self.lastProgressSave[itemId] ?? .distantPast
             if now.timeIntervalSince(lastSave) >= 5 {
                 self.lastProgressSave[itemId] = now
