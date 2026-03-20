@@ -42,10 +42,10 @@ struct MainNavigationView: View {
     @State private var sidebarWidth: CGFloat = 200
     @ObservedObject private var sessionManager = SessionManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
         GeometryReader { geometry in
-            let _ = 0 // sidebarWidth is measured from content
             ZStack(alignment: .leading) {
                 // Main content with custom header
                 VStack(spacing: 0) {
@@ -278,21 +278,25 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selection {
-        case .home:
-            MobileHomeView()
-        case .search:
-            MobileSearchView()
-        case .downloads:
-            DownloadsListView()
-        case .settings:
-            MobileSettingsView()
-        case .library(let id, let name, let collectionType):
-            MobileLibraryBrowseView(
-                libraryId: id,
-                libraryName: name,
-                collectionType: collectionType
-            )
+        if !networkMonitor.isConnected && selection != .downloads && selection != .settings {
+            OfflineHomeView()
+        } else {
+            switch selection {
+            case .home:
+                MobileHomeView()
+            case .search:
+                MobileSearchView()
+            case .downloads:
+                DownloadsListView()
+            case .settings:
+                MobileSettingsView()
+            case .library(let id, let name, let collectionType):
+                MobileLibraryBrowseView(
+                    libraryId: id,
+                    libraryName: name,
+                    collectionType: collectionType
+                )
+            }
         }
     }
 

@@ -1,27 +1,35 @@
 import SwiftUI
 
 struct PhoneTabView: View {
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
+
     var body: some View {
         TabView {
             NavigationStack {
-                PhoneHomeView()
+                if networkMonitor.isConnected {
+                    PhoneHomeView()
+                } else {
+                    OfflineHomeView()
+                }
             }
             .tabItem {
                 Label("Home", systemImage: "house")
             }
 
-            NavigationStack {
-                PhoneLibrariesTab()
-            }
-            .tabItem {
-                Label("Libraries", systemImage: "folder")
-            }
+            if networkMonitor.isConnected {
+                NavigationStack {
+                    PhoneLibrariesTab()
+                }
+                .tabItem {
+                    Label("Libraries", systemImage: "folder")
+                }
 
-            NavigationStack {
-                MobileSearchView()
-            }
-            .tabItem {
-                Label("Search", systemImage: "magnifyingglass")
+                NavigationStack {
+                    MobileSearchView()
+                }
+                .tabItem {
+                    Label("Search", systemImage: "magnifyingglass")
+                }
             }
 
             NavigationStack {
