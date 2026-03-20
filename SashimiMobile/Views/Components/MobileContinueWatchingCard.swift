@@ -213,20 +213,18 @@ struct MobileContinueWatchingCard: View {
 
             // Title and episode info
             VStack(alignment: .leading, spacing: 3) {
-                MobileMarqueeText(
-                    text: displayTitle,
-                    font: MobileTypography.title,
-                    color: MobileColors.textPrimary
-                )
-                .frame(height: 20)
+                Text(displayTitle)
+                    .font(MobileTypography.title)
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(1)
+                    .frame(height: 20)
 
                 if let episodeInfo = episodeInfoText {
-                    MobileMarqueeText(
-                        text: episodeInfo,
-                        font: MobileTypography.caption,
-                        color: MobileColors.textSecondary
-                    )
-                    .frame(height: 16)
+                    Text(episodeInfo)
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.textSecondary)
+                        .lineLimit(1)
+                        .frame(height: 16)
                 } else if let year = yearText {
                     Text(year)
                         .font(MobileTypography.caption)

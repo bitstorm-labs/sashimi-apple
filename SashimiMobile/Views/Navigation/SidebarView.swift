@@ -39,10 +39,11 @@ struct MainNavigationView: View {
     @State private var selection: SidebarSelection = .home
     @State private var sidebarVisible = false
     @State private var libraries: [JellyfinLibrary] = []
+    @State private var sidebarWidth: CGFloat = 200
+    @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
-
-    private let sidebarWidth: CGFloat = 280
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     var body: some View {
         GeometryReader { geometry in
@@ -57,7 +58,7 @@ struct MainNavigationView: View {
                         detailView
                             .navigationBarHidden(true)
                     }
-                    .id(selection)
+                    .id("\(selection)-\(navigationResetId)")
                 }
                 .frame(width: geometry.size.width)
                 .offset(x: sidebarVisible ? sidebarWidth : 0)
@@ -76,7 +77,15 @@ struct MainNavigationView: View {
 
                 // Sidebar
                 sidebarContent
-                    .frame(width: sidebarWidth)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background(GeometryReader { sidebarGeo in
+                        Color.clear.onAppear {
+                            sidebarWidth = sidebarGeo.size.width
+                        }
+                        .onChange(of: sidebarGeo.size.width) { _, newWidth in
+                            sidebarWidth = newWidth
+                        }
+                    })
                     .offset(x: sidebarVisible ? 0 : -sidebarWidth)
             }
         }
@@ -178,11 +187,23 @@ struct MainNavigationView: View {
         }
         .frame(maxHeight: .infinity)
         .background(MobileColors.cardBackground.ignoresSafeArea())
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: MobileCornerRadius.xl,
+                topTrailingRadius: MobileCornerRadius.xl
+            )
+        )
     }
 
     private func sidebarRow(item: SidebarSelection) -> some View {
         Button {
-            selection = item
+            if selection == item {
+                navigationResetId += 1
+            } else {
+                selection = item
+            }
             withAnimation(.easeInOut(duration: 0.25)) {
                 sidebarVisible = false
             }
@@ -193,9 +214,9 @@ struct MainNavigationView: View {
                     .frame(width: 24)
                 Text(item.displayName)
                     .font(MobileTypography.body)
-                Spacer()
             }
             .foregroundStyle(selection == item ? MobileColors.accent : MobileColors.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, MobileSpacing.md)
             .padding(.vertical, MobileSpacing.sm)
             .background(selection == item ? MobileColors.accent.opacity(0.15) : Color.clear)
@@ -270,21 +291,25 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selection {
-        case .home:
-            MobileHomeView()
-        case .search:
-            MobileSearchView()
-        case .downloads:
-            DownloadsListView()
-        case .settings:
-            MobileSettingsView()
-        case .library(let id, let name, let collectionType):
-            MobileLibraryBrowseView(
-                libraryId: id,
-                libraryName: name,
-                collectionType: collectionType
-            )
+        if !networkMonitor.isConnected && selection != .downloads && selection != .settings {
+            OfflineHomeView()
+        } else {
+            switch selection {
+            case .home:
+                MobileHomeView()
+            case .search:
+                MobileSearchView()
+            case .downloads:
+                DownloadsListView()
+            case .settings:
+                MobileSettingsView()
+            case .library(let id, let name, let collectionType):
+                MobileLibraryBrowseView(
+                    libraryId: id,
+                    libraryName: name,
+                    collectionType: collectionType
+                )
+            }
         }
     }
 
