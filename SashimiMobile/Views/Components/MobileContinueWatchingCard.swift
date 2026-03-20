@@ -1,64 +1,6 @@
 import SwiftUI
 import NukeUI
 
-// MARK: - Mobile Marquee Text
-
-struct MobileMarqueeText: View {
-    let text: String
-    let font: Font
-    let color: Color
-
-    @State private var textWidth: CGFloat = 0
-    @State private var containerWidth: CGFloat = 0
-    @State private var offset: CGFloat = 0
-    @State private var isAnimating = false
-
-    private var needsScroll: Bool {
-        textWidth > containerWidth + 10
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            Text(text)
-                .font(font)
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(GeometryReader { textGeo in
-                    Color.clear.onAppear {
-                        textWidth = textGeo.size.width
-                        containerWidth = geo.size.width
-                        if needsScroll {
-                            startScrolling()
-                        }
-                    }
-                })
-                .offset(x: offset)
-        }
-        .clipped()
-    }
-
-    private func startScrolling() {
-        guard needsScroll else { return }
-
-        let scrollDistance = textWidth - containerWidth + 40
-        let duration = Double(scrollDistance) / 30.0  // 30 points per second
-
-        // Initial delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.linear(duration: duration)) {
-                offset = -scrollDistance
-            }
-
-            // Reset after animation
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 2.0) {
-                offset = 0
-                startScrolling()
-            }
-        }
-    }
-}
-
 // MARK: - Continue Watching Card
 
 struct MobileContinueWatchingCard: View {
