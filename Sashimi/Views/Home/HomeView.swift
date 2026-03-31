@@ -42,6 +42,16 @@ struct HomeView: View {
         }
     }
 
+    /// When multiple servers are connected, append the server name to the library name
+    /// so users can distinguish "Movies -- JellyPal" from "Movies -- Plex".
+    private func libraryDisplayName(_ library: MediaLibrary) -> String {
+        if serverManager.servers.count > 1,
+           let server = serverManager.server(forId: library.serverId) {
+            return "\(library.name) \u{2014} \(server.name)"
+        }
+        return library.name
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .topLeading) {
@@ -169,6 +179,7 @@ struct HomeView: View {
                     ContinueWatchingRow(
                         items: viewModel.continueWatchingItems,
                         libraryNames: viewModel.continueWatchingLibraryNames,
+                        showServerBadges: serverManager.servers.count > 1,
                         onSelect: { item in
                             // Check if item comes from a library named YouTube
                             let libraryName = viewModel.continueWatchingLibraryNames[item.rawId] ?? ""
@@ -185,10 +196,14 @@ struct HomeView: View {
             }
         } else if let libraryId = config.libraryId,
                   let library = viewModel.libraries.first(where: { $0.rawId == libraryId }) {
-            RecentlyAddedLibraryRow(library: library, onSelect: { item in
-                selectedItemIsYouTube = library.name.lowercased().contains("youtube")
-                selectedItem = item
-            })
+            RecentlyAddedLibraryRow(
+                library: library,
+                displayName: libraryDisplayName(library),
+                onSelect: { item in
+                    selectedItemIsYouTube = library.name.lowercased().contains("youtube")
+                    selectedItem = item
+                }
+            )
             .focusSection()
         }
     }
@@ -557,6 +572,7 @@ struct HeroSection: View {
 // MARK: - Recently Added Library Row
 struct RecentlyAddedLibraryRow: View {
     let library: MediaLibrary
+    var displayName: String?  // Override for multi-server display (e.g. "Movies -- ServerName")
     let onSelect: (MediaItem) -> Void
     @State private var items: [MediaItem] = []
     @State private var episodeCounts: [String: Int] = [:]  // seriesId -> count of new episodes
@@ -564,7 +580,7 @@ struct RecentlyAddedLibraryRow: View {
     @State private var loadError = false
 
     private var sectionTitle: String {
-        "Recently Added \(library.name)".cleanedYouTubeTitle
+        "Recently Added \(displayName ?? library.name)".cleanedYouTubeTitle
     }
 
     // Detect YouTube library by name
@@ -648,29 +664,18 @@ struct RecentlyAddedLibraryRow: View {
         loadError = false
 
         do {
+            guard let server = ServerManager.shared.server(forId: library.serverId) else { return }
+
+            // Use the MediaServer protocol for multi-server support
+            let latestItems = try await server.getLatestMedia(libraryId: library.rawId, limit: 30)
+
+            // Deduplicate by series for TV libraries
             let isTVLibrary = library.collectionType?.lowercased() == "tvshows"
-            let fetchLimit = 30
+            items = deduplicateMediaItemsBySeries(latestItems)
 
-            let latestItems = try await JellyfinClient.shared.getLatestMedia(
-                parentId: library.rawId,
-                limit: fetchLimit,
-                includeWatched: true,
-                collectionType: library.collectionType,
-                isYouTubeLibrary: isYouTubeLibrary
-            )
-            let dedupedDtos = deduplicateBySeries(latestItems)
-
-            // Convert to MediaItem using the server
-            guard let server = ServerManager.shared.primaryServer else { return }
-            items = dedupedDtos.map { dto in
-                // Use raw mapping via the server's getItem for consistency
-                // But since we already have the DTOs, map locally
-                mapDtoToMediaItem(dto, serverId: server.id)
-            }
-
-            // Fetch actual unplayed counts from series (for TV shows)
-            if isTVLibrary {
-                await loadUnplayedCounts(for: dedupedDtos)
+            // Fetch actual unplayed counts from series (for Jellyfin TV shows)
+            if isTVLibrary && server.serverType == .jellyfin {
+                await loadUnplayedCounts(for: items)
             }
         } catch is CancellationError {
             // Ignore cancellation errors - expected during navigation
@@ -681,18 +686,18 @@ struct RecentlyAddedLibraryRow: View {
         isLoading = false
     }
 
-    private func loadUnplayedCounts(for dtos: [BaseItemDto]) async {
+    private func loadUnplayedCounts(for mediaItems: [MediaItem]) async {
         var counts: [String: Int] = [:]
 
         // Collect unique series IDs
-        let seriesIds = Set(dtos.compactMap { item -> String? in
+        let seriesIds = Set(mediaItems.compactMap { item -> String? in
             if item.type == .episode { return item.seriesId }
             if item.type == .video { return item.seriesId }
-            if item.type == .series { return item.id }
+            if item.type == .series { return item.rawId }
             return nil
         })
 
-        // Fetch each series to get its unplayed count
+        // Fetch each series to get its unplayed count (Jellyfin-specific)
         for seriesId in seriesIds {
             do {
                 let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
@@ -707,16 +712,16 @@ struct RecentlyAddedLibraryRow: View {
         episodeCounts = counts
     }
 
-    private func deduplicateBySeries(_ items: [BaseItemDto]) -> [BaseItemDto] {
+    private func deduplicateMediaItemsBySeries(_ items: [MediaItem]) -> [MediaItem] {
         var seen = Set<String>()
-        var result: [BaseItemDto] = []
+        var result: [MediaItem] = []
 
         for item in items {
             let key: String
             if item.type == .episode || item.type == .video {
-                key = item.seriesId ?? item.id
+                key = item.seriesId ?? item.rawId
             } else {
-                key = item.id
+                key = item.rawId
             }
             if !seen.contains(key) {
                 seen.insert(key)
@@ -725,10 +730,6 @@ struct RecentlyAddedLibraryRow: View {
         }
 
         return Array(result.prefix(20))
-    }
-
-    private func mapDtoToMediaItem(_ dto: BaseItemDto, serverId: String) -> MediaItem {
-        MediaItemMapper.map(dto, serverId: serverId)
     }
 }
 

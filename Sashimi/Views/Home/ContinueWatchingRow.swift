@@ -3,12 +3,19 @@ import SwiftUI
 struct ContinueWatchingRow: View {
     let items: [MediaItem]
     var libraryNames: [String: String] = [:]  // rawId -> Library name mapping
+    var showServerBadges: Bool = false  // Whether to show server type badges on cards
     let onSelect: (MediaItem) -> Void
     var onPlay: ((MediaItem) -> Void)?  // Optional: immediate playback on Play button
 
     private func isYouTube(_ item: MediaItem) -> Bool {
         guard let libraryName = libraryNames[item.rawId] else { return false }
         return libraryName.lowercased().contains("youtube")
+    }
+
+    private func serverBadge(for item: MediaItem) -> String? {
+        guard showServerBadges,
+              let server = ServerManager.shared.server(forId: item.serverId) else { return nil }
+        return server.name
     }
 
     var body: some View {
@@ -24,6 +31,7 @@ struct ContinueWatchingRow: View {
                         ContinueWatchingCard(
                             item: item,
                             isYouTube: isYouTube(item),
+                            serverBadge: serverBadge(for: item),
                             onSelect: { onSelect(item) },
                             onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
                         )
@@ -39,6 +47,7 @@ struct ContinueWatchingRow: View {
 struct ContinueWatchingCard: View {
     let item: MediaItem
     var isYouTube: Bool = false  // Whether this is YouTube content
+    var serverBadge: String?  // Short label when multiple servers connected (e.g. "J" or "P")
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
@@ -160,6 +169,17 @@ struct ContinueWatchingCard: View {
                     .frame(width: 440, alignment: .leading)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(alignment: .topTrailing) {
+                    if let badge = serverBadge {
+                        Text(badge)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(SashimiTheme.accent.opacity(0.85)))
+                            .padding(8)
+                    }
+                }
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
