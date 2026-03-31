@@ -32,22 +32,36 @@ final class HomeViewModel: ObservableObject {
     }()
 
     func loadContent() async {
-        guard let server = serverManager.primaryServer else { return }
+        guard !serverManager.servers.isEmpty else { return }
 
         isLoading = true
         error = nil
 
         do {
-            async let resumeItems = server.getResumeItems(limit: 20)
-            async let nextUpItems = server.getNextUp(limit: 50)
-            async let latestItems = server.getLatestMedia(libraryId: nil, limit: 30)
-            async let libraryViews = server.getLibraries()
+            // Continue watching merged from all servers
+            async let resumeTask = serverManager.getAllResumeItems()
+            async let nextUpTask = serverManager.getAllNextUp()
 
-            let (resume, nextUp, latest, libs) = try await (resumeItems, nextUpItems, latestItems, libraryViews)
+            let resumeItems = await resumeTask
+            let nextUpItems = await nextUpTask
 
-            continueWatchingItems = mergeAndSortContinueItems(resume: resume, nextUp: nextUp)
-            recentlyAddedItems = latest
-            libraries = libs.filter { isMediaLibrary($0) }
+            continueWatchingItems = mergeAndSortContinueItems(resume: resumeItems, nextUp: nextUpItems)
+
+            // Libraries from ALL servers
+            var allLibraries: [MediaLibrary] = []
+            for server in serverManager.servers {
+                let libs = (try? await server.getLibraries()) ?? []
+                allLibraries.append(contentsOf: libs)
+            }
+            libraries = allLibraries.filter { isMediaLibrary($0) }
+
+            // Recently added from all servers
+            var allLatest: [MediaItem] = []
+            for server in serverManager.servers {
+                let items = (try? await server.getLatestMedia(libraryId: nil, limit: 30)) ?? []
+                allLatest.append(contentsOf: items)
+            }
+            recentlyAddedItems = allLatest
 
             saveContinueWatchingForTopShelf()
             await loadContinueWatchingLibraryNames()
@@ -60,35 +74,50 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadContinueWatchingLibraryNames() async {
-        guard let server = serverManager.primaryServer else { return }
         var libraryNames: [String: String] = [:]
 
-        let seriesIds = Set(continueWatchingItems.compactMap { item -> String? in
-            if item.type == .episode { return item.seriesId }
-            return item.rawId
-        })
+        // Group items by server so we can resolve ancestors per-server
+        var itemsByServer: [String: [MediaItem]] = [:]
+        for item in continueWatchingItems {
+            itemsByServer[item.serverId, default: []].append(item)
+        }
 
-        for seriesId in seriesIds {
-            do {
-                let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: seriesId)
-                if let library = ancestors.first(where: { $0.type == .collectionFolder }) {
-                    for item in continueWatchingItems {
-                        if item.seriesId == seriesId || item.rawId == seriesId {
-                            libraryNames[item.rawId] = library.name
+        for (serverId, items) in itemsByServer {
+            guard let server = serverManager.server(forId: serverId) else { continue }
+
+            // For Jellyfin servers, use ancestor lookup for library names
+            if server.serverType == .jellyfin {
+                let seriesIds = Set(items.compactMap { item -> String? in
+                    if item.type == .episode { return item.seriesId }
+                    return item.rawId
+                })
+
+                for seriesId in seriesIds {
+                    do {
+                        let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: seriesId)
+                        if let library = ancestors.first(where: { $0.type == .collectionFolder }) {
+                            for item in items {
+                                if item.seriesId == seriesId || item.rawId == seriesId {
+                                    libraryNames[item.rawId] = library.name
+                                }
+                            }
                         }
-                    }
+                    } catch { }
                 }
-            } catch { }
+            }
+            // For non-Jellyfin servers, library name resolution can be added later
         }
 
         continueWatchingLibraryNames = libraryNames
     }
 
     private func saveContinueWatchingForTopShelf() {
-        guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
-              let serverURL = serverManager.primaryServer?.serverURL else { return }
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else { return }
 
         let items: [[String: Any]] = continueWatchingItems.prefix(10).compactMap { item in
+            guard let server = serverManager.server(forId: item.serverId) else { return nil }
+            let serverURL = server.serverURL
+
             let seriesHasBackdrop = item.parentBackdropImageTags?.isEmpty == false
             let imageId: String
             let imageType: String
@@ -114,7 +143,7 @@ final class HomeViewModel: ObservableObject {
                 let episode = item.episodeNumber ?? 1
                 subtitle = "S\(season):E\(episode)"
                 if let seriesName = item.seriesName {
-                    subtitle = "\(seriesName) • \(subtitle)"
+                    subtitle = "\(seriesName) \u{2022} \(subtitle)"
                 }
             }
 
@@ -135,20 +164,22 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadHeroItems() async {
-        guard let server = serverManager.primaryServer else { return }
         var allHeroItems: [MediaItem] = []
         var libraryNames: [String: String] = [:]
         var itemsPerLibrary: [String: [MediaItem]] = [:]
 
-        for library in libraries {
-            do {
-                let items = try await server.getLatestMedia(libraryId: library.rawId, limit: 10)
-                itemsPerLibrary[library.rawId] = items
-                for item in items {
-                    libraryNames[item.rawId] = library.name
-                }
-                allHeroItems.append(contentsOf: items.prefix(5))
-            } catch { }
+        for server in serverManager.servers {
+            let serverLibs = libraries.filter { $0.serverId == server.id }
+            for library in serverLibs {
+                do {
+                    let items = try await server.getLatestMedia(libraryId: library.rawId, limit: 10)
+                    itemsPerLibrary[library.rawId] = items
+                    for item in items {
+                        libraryNames[item.rawId] = library.name
+                    }
+                    allHeroItems.append(contentsOf: items.prefix(5))
+                } catch { }
+            }
         }
 
         heroItems = allHeroItems.shuffled()
