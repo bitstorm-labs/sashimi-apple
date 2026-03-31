@@ -191,6 +191,14 @@ final class ServerManager: ObservableObject {
         servers.first { $0.id == item.serverId }
     }
 
+    func server(forId id: String) -> (any MediaServer)? {
+        servers.first { $0.id == id }
+    }
+
+    func account(forId id: String) -> ServerAccount? {
+        accounts.first { $0.id == id }
+    }
+
     // MARK: - Multi-Server Aggregation
 
     func getAllResumeItems(limit: Int = 20) async -> [MediaItem] {
