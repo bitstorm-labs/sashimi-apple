@@ -8,6 +8,7 @@ struct SettingsView: View {
     var onBackAtRoot: (() -> Void)?
     @EnvironmentObject private var serverManager: ServerManager
     @State private var showingLogoutConfirmation = false
+    @State private var showingAddServer = false
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
@@ -58,6 +59,12 @@ struct SettingsView: View {
                             ) {
                                 navigationPath.append(SettingsDestination.appIcon)
                             }
+
+                            // Connected Servers section
+                            ConnectedServersSection(
+                                showAddServer: $showingAddServer
+                            )
+                            .padding(.top, 20)
 
                             // About section
                             VStack(spacing: 12) {
@@ -113,6 +120,9 @@ struct SettingsView: View {
             } else {
                 onBackAtRoot?()
             }
+        }
+        .fullScreenCover(isPresented: $showingAddServer) {
+            ServerConnectionView()
         }
     }
 }
@@ -529,6 +539,153 @@ struct HomeRowToggleButton: View {
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focused($isFocused)
+    }
+}
+
+// MARK: - Connected Servers Section
+
+struct ConnectedServersSection: View {
+    @EnvironmentObject private var serverManager: ServerManager
+    @Binding var showAddServer: Bool
+    @State private var serverToRemove: ServerAccount?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Connected Servers")
+                .font(Typography.headline)
+                .foregroundStyle(SashimiTheme.textPrimary)
+                .padding(.bottom, 4)
+
+            ForEach(serverManager.accounts) { account in
+                ConnectedServerRow(
+                    account: account,
+                    onRemove: { serverToRemove = account }
+                )
+            }
+
+            // Add Server button
+            ConnectedServerAddButton {
+                showAddServer = true
+            }
+        }
+        .confirmationDialog(
+            "Remove Server",
+            isPresented: Binding(
+                get: { serverToRemove != nil },
+                set: { if !$0 { serverToRemove = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let account = serverToRemove {
+                Button("Remove \(account.serverName)", role: .destructive) {
+                    serverManager.removeServer(id: account.id)
+                    serverToRemove = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    serverToRemove = nil
+                }
+            }
+        } message: {
+            Text("This will disconnect the server. You can add it back later.")
+        }
+    }
+}
+
+struct ConnectedServerRow: View {
+    let account: ServerAccount
+    let onRemove: () -> Void
+    @FocusState private var isFocused: Bool
+    @FocusState private var removeIsFocused: Bool
+
+    private var serverTypeIcon: String {
+        switch account.serverType {
+        case .jellyfin: return "server.rack"
+        case .plex: return "play.square.stack"
+        }
+    }
+
+    private var serverTypeName: String {
+        switch account.serverType {
+        case .jellyfin: return "Jellyfin"
+        case .plex: return "Plex"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: serverTypeIcon)
+                .font(Typography.title)
+                .foregroundStyle(SashimiTheme.accent)
+                .frame(width: 50)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(account.serverName)
+                    .font(Typography.body)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+
+                HStack(spacing: 8) {
+                    Text(serverTypeName)
+                        .font(Typography.captionSmall)
+                        .foregroundStyle(SashimiTheme.accent.opacity(0.8))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(SashimiTheme.accent.opacity(0.15)))
+
+                    Text(account.userName)
+                        .font(Typography.caption)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onRemove) {
+                Image(systemName: "trash")
+                    .font(Typography.bodySmall)
+                    .foregroundStyle(removeIsFocused ? .white : .red.opacity(0.7))
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(removeIsFocused ? Color.red : Color.red.opacity(0.1))
+                    )
+            }
+            .buttonStyle(PlainNoHighlightButtonStyle())
+            .focused($removeIsFocused)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(isFocused ? SashimiTheme.accent.opacity(0.08) : SashimiTheme.cardBackground)
+        )
+        .focused($isFocused)
+    }
+}
+
+struct ConnectedServerAddButton: View {
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "plus.circle.fill")
+                    .font(Typography.titleSmall)
+                Text("Add Server")
+                    .font(Typography.titleSmall)
+            }
+            .foregroundStyle(isFocused ? .white : SashimiTheme.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isFocused ? SashimiTheme.accent : SashimiTheme.accent.opacity(0.1))
+            )
+            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
     }
 }
