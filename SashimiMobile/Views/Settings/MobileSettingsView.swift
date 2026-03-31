@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MobileSettingsView: View {
-    @ObservedObject private var sessionManager = SessionManager.shared
+    @ObservedObject private var serverManager = ServerManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
     @State private var showingDeleteAllDownloads = false
 
@@ -13,7 +13,7 @@ struct MobileSettingsView: View {
                     LabeledContent("Server URL", value: serverURL)
                 }
 
-                if let username = sessionManager.currentUser?.name {
+                if let username = serverManager.currentUserName {
                     LabeledContent("Logged in as", value: username)
                 }
             }
@@ -65,7 +65,7 @@ struct MobileSettingsView: View {
             // Sign Out
             Section {
                 Button("Sign Out", role: .destructive) {
-                    sessionManager.logout()
+                    serverManager.logout()
                 }
             }
         }

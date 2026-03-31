@@ -6,7 +6,7 @@ import SwiftUI
 struct SettingsView: View {
     var showSignOut: Bool = true
     var onBackAtRoot: (() -> Void)?
-    @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var serverManager: ServerManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
 
@@ -101,7 +101,7 @@ struct SettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Sign Out", role: .destructive) {
-                sessionManager.logout()
+                serverManager.logout()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -286,7 +286,7 @@ class HomeScreenSettings: ObservableObject {
         needsRefresh = true
     }
 
-    func updateWithLibraries(_ libraries: [JellyfinLibrary]) {
+    func updateWithLibraries(_ libraries: [MediaLibrary]) {
         var newConfigs: [HomeRowConfig] = []
 
         // Add built-in rows if not already present
@@ -298,24 +298,24 @@ class HomeScreenSettings: ObservableObject {
             }
         }
 
-        // Add library rows
+        // Add library rows (use rawId for backward compat with saved settings)
         for library in libraries {
-            if let existing = rowConfigs.first(where: { $0.libraryId == library.id }) {
+            if let existing = rowConfigs.first(where: { $0.libraryId == library.rawId }) {
                 // Update name in case it changed
                 var updated = existing
                 if updated.libraryName != library.name {
-                    updated = .library(id: library.id, name: library.name, visible: existing.isVisible)
+                    updated = .library(id: library.rawId, name: library.name, visible: existing.isVisible)
                 }
                 newConfigs.append(updated)
             } else {
-                newConfigs.append(.library(id: library.id, name: library.name))
+                newConfigs.append(.library(id: library.rawId, name: library.name))
             }
         }
 
         // Remove library rows that no longer exist
         rowConfigs = newConfigs.filter { config in
             if config.libraryId != nil {
-                return libraries.contains { $0.id == config.libraryId }
+                return libraries.contains { $0.rawId == config.libraryId }
             }
             return true
         }
@@ -935,7 +935,7 @@ struct LanguagePickerView: View {
 
 #Preview {
     SettingsView()
-        .environmentObject(SessionManager.shared)
+        .environmentObject(ServerManager.shared)
 }
 
 // MARK: - App Icon Settings
