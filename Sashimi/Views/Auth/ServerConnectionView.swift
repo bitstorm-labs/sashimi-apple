@@ -7,6 +7,8 @@ enum ServerConnectionField {
     case username
     case password
     case connectButton
+    case plexSignIn
+    case plexCancel
 }
 
 enum ServerValidationState: Equatable {
@@ -31,6 +33,10 @@ struct ServerConnectionView: View {
     @EnvironmentObject private var serverManager: ServerManager
     @StateObject private var serverDiscovery = ServerDiscovery()
 
+    // Server type selector
+    @State private var selectedServerType: ServerType = .jellyfin
+
+    // Jellyfin state
     @State private var serverAddress = ""
     @State private var username = ""
     @State private var password = ""
@@ -38,7 +44,7 @@ struct ServerConnectionView: View {
     @State private var errorMessage: String?
     @State private var showDiscoveredServers = false
 
-    // Validation state
+    // Jellyfin validation state
     @State private var serverAddressValidation: ServerValidationState = .idle
     @State private var usernameValidation: ServerValidationState = .idle
     @State private var hasAttemptedSubmit = false
@@ -47,165 +53,107 @@ struct ServerConnectionView: View {
 
     var body: some View {
         VStack(spacing: 60) {
+            // Header
             VStack(spacing: 16) {
                 Text("Sashimi")
                     .font(.system(size: 76, weight: .bold))
 
-                Text("Jellyfin Client")
+                Text("Media Client")
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }
 
-            VStack(spacing: 40) {
-                if serverManager.logoutReason == .sessionExpired {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
-                        Text("Your session has expired. Please log in again.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding()
-                    .background(Color.yellow.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Server type selector
+            HStack(spacing: 20) {
+                serverTypeButton(.jellyfin, label: "Jellyfin", icon: "server.rack")
+                serverTypeButton(.plex, label: "Plex", icon: "play.square.stack")
+            }
+
+            // Content based on selected server type
+            if selectedServerType == .jellyfin {
+                jellyfinLoginForm
+            } else {
+                PlexAuthView()
+            }
+        }
+        .padding(80)
+        .onAppear {
+            focusedField = .serverAddress
+        }
+    }
+
+    // MARK: - Server Type Selector Button
+
+    @ViewBuilder
+    private func serverTypeButton(_ type: ServerType, label: String, icon: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedServerType = type
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 24))
+                Text(label)
+                    .font(.system(size: 24, weight: .semibold))
+            }
+            .frame(maxWidth: 260)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 30)
+            .background(selectedServerType == type ? SashimiTheme.accent.opacity(0.3) : Color.white.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(selectedServerType == type ? SashimiTheme.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Jellyfin Login Form
+
+    private var jellyfinLoginForm: some View {
+        VStack(spacing: 40) {
+            if serverManager.logoutReason == .sessionExpired {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text("Your session has expired. Please log in again.")
+                        .foregroundStyle(.secondary)
                 }
+                .padding()
+                .background(Color.yellow.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
 
-                VStack(spacing: 16) {
-                    // Server Address Field with validation
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 12) {
-                            TextField("Server Address (e.g., http://192.168.1.100:8096)", text: $serverAddress)
-                                .textFieldStyle(.plain)
-                                .focused($focusedField, equals: .serverAddress)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .onChange(of: serverAddress) { _, newValue in
-                                    validateServerAddress(newValue)
-                                }
-
-                            // Validation status icon
-                            if !serverAddress.isEmpty {
-                                validationIcon(for: serverAddressValidation)
-                            }
-                        }
-                        .padding()
-                        .background(validationFieldBackground(for: serverAddressValidation))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(validationBorderColor(for: serverAddressValidation), lineWidth: 2)
-                        )
-
-                        // Inline validation message
-                        if let error = serverAddressValidation.errorMessage, hasAttemptedSubmit || !serverAddress.isEmpty {
-                            HStack(spacing: 6) {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                    .font(.caption)
-                                Text(error)
-                                    .font(.caption)
-                            }
-                            .foregroundStyle(.red)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.2), value: serverAddressValidation)
-
-                    // Server discovery button
-                    Button {
-                        showDiscoveredServers = true
-                        serverDiscovery.startDiscovery()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                            Text("Find Servers on Network")
-                        }
-                        .font(.callout)
-                        .foregroundStyle(SashimiTheme.accent)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // Discovered servers list
-                if showDiscoveredServers {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Discovered Servers")
-                                .font(.headline)
-                                .foregroundStyle(SashimiTheme.textSecondary)
-
-                            if serverDiscovery.isSearching {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            }
-                        }
-
-                        if serverDiscovery.discoveredServers.isEmpty && !serverDiscovery.isSearching {
-                            Text("No servers found on your network")
-                                .font(.callout)
-                                .foregroundStyle(SashimiTheme.textTertiary)
-                                .padding(.vertical, 8)
-                        } else {
-                            ForEach(serverDiscovery.discoveredServers) { server in
-                                Button {
-                                    if let url = server.url {
-                                        serverAddress = url.absoluteString
-                                        showDiscoveredServers = false
-                                        focusedField = .username
-                                    }
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "server.rack")
-                                            .foregroundStyle(SashimiTheme.accent)
-                                        VStack(alignment: .leading) {
-                                            Text(server.name)
-                                                .foregroundStyle(SashimiTheme.textPrimary)
-                                            Text("\(server.address):\(server.port)")
-                                                .font(.caption)
-                                                .foregroundStyle(SashimiTheme.textTertiary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .foregroundStyle(SashimiTheme.textTertiary)
-                                    }
-                                    .padding()
-                                    .background(SashimiTheme.cardBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color.white.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-
-                // Username Field with validation
+            VStack(spacing: 16) {
+                // Server Address Field with validation
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 12) {
-                        TextField("Username", text: $username)
+                        TextField("Server Address (e.g., http://192.168.1.100:8096)", text: $serverAddress)
                             .textFieldStyle(.plain)
-                            .focused($focusedField, equals: .username)
+                            .focused($focusedField, equals: .serverAddress)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                            .onChange(of: username) { _, newValue in
-                                validateUsername(newValue)
+                            .onChange(of: serverAddress) { _, newValue in
+                                validateServerAddress(newValue)
                             }
 
                         // Validation status icon
-                        if !username.isEmpty || hasAttemptedSubmit {
-                            validationIcon(for: usernameValidation)
+                        if !serverAddress.isEmpty {
+                            validationIcon(for: serverAddressValidation)
                         }
                     }
                     .padding()
-                    .background(validationFieldBackground(for: usernameValidation))
+                    .background(validationFieldBackground(for: serverAddressValidation))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(validationBorderColor(for: usernameValidation), lineWidth: 2)
+                            .stroke(validationBorderColor(for: serverAddressValidation), lineWidth: 2)
                     )
 
                     // Inline validation message
-                    if let error = usernameValidation.errorMessage, hasAttemptedSubmit {
+                    if let error = serverAddressValidation.errorMessage, hasAttemptedSubmit || !serverAddress.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .font(.caption)
@@ -216,48 +164,152 @@ struct ServerConnectionView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
-                .animation(.easeInOut(duration: 0.2), value: usernameValidation)
+                .animation(.easeInOut(duration: 0.2), value: serverAddressValidation)
 
-                SecureField("Password", text: $password)
-                    .textFieldStyle(.plain)
-                    .padding()
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .focused($focusedField, equals: .password)
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.callout)
-                }
-
+                // Server discovery button
                 Button {
-                    connect()
+                    showDiscoveredServers = true
+                    serverDiscovery.startDiscovery()
                 } label: {
-                    if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                        Text("Find Servers on Network")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(SashimiTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Discovered servers list
+            if showDiscoveredServers {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Discovered Servers")
+                            .font(.headline)
+                            .foregroundStyle(SashimiTheme.textSecondary)
+
+                        if serverDiscovery.isSearching {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                    }
+
+                    if serverDiscovery.discoveredServers.isEmpty && !serverDiscovery.isSearching {
+                        Text("No servers found on your network")
+                            .font(.callout)
+                            .foregroundStyle(SashimiTheme.textTertiary)
+                            .padding(.vertical, 8)
                     } else {
-                        Text("Connect")
-                            .frame(maxWidth: .infinity)
+                        ForEach(serverDiscovery.discoveredServers) { server in
+                            Button {
+                                if let url = server.url {
+                                    serverAddress = url.absoluteString
+                                    showDiscoveredServers = false
+                                    focusedField = .username
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "server.rack")
+                                        .foregroundStyle(SashimiTheme.accent)
+                                    VStack(alignment: .leading) {
+                                        Text(server.name)
+                                            .foregroundStyle(SashimiTheme.textPrimary)
+                                        Text("\(server.address):\(server.port)")
+                                            .font(.caption)
+                                            .foregroundStyle(SashimiTheme.textTertiary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(SashimiTheme.textTertiary)
+                                }
+                                .padding()
+                                .background(SashimiTheme.cardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
-                .disabled(isLoading || !isFormValid)
-                .focused($focusedField, equals: .connectButton)
+                .padding()
+                .background(Color.white.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .frame(maxWidth: 600)
+
+            // Username Field with validation
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    TextField("Username", text: $username)
+                        .textFieldStyle(.plain)
+                        .focused($focusedField, equals: .username)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: username) { _, newValue in
+                            validateUsername(newValue)
+                        }
+
+                    // Validation status icon
+                    if !username.isEmpty || hasAttemptedSubmit {
+                        validationIcon(for: usernameValidation)
+                    }
+                }
+                .padding()
+                .background(validationFieldBackground(for: usernameValidation))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(validationBorderColor(for: usernameValidation), lineWidth: 2)
+                )
+
+                // Inline validation message
+                if let error = usernameValidation.errorMessage, hasAttemptedSubmit {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption)
+                        Text(error)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.red)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: usernameValidation)
+
+            SecureField("Password", text: $password)
+                .textFieldStyle(.plain)
+                .padding()
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .focused($focusedField, equals: .password)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .font(.callout)
+            }
+
+            Button {
+                connect()
+            } label: {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Connect")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .disabled(isLoading || !isFormValid)
+            .focused($focusedField, equals: .connectButton)
         }
-        .padding(80)
-        .onAppear {
-            focusedField = .serverAddress
-        }
+        .frame(maxWidth: 600)
     }
+
+    // MARK: - Jellyfin Validation
 
     private var isFormValid: Bool {
         serverAddressValidation.isValid && usernameValidation.isValid
     }
-
-    // MARK: - Validation Functions
 
     private func validateServerAddress(_ address: String) {
         if address.isEmpty {
