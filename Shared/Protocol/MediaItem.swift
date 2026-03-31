@@ -17,6 +17,7 @@ struct MediaItem: Identifiable, Hashable {
     let isPlayed: Bool
     let isFavorite: Bool
     let communityRating: Double?
+    let criticRating: Int?
     let officialRating: String?
     let genres: [String]
     let year: Int?
@@ -31,6 +32,27 @@ struct MediaItem: Identifiable, Hashable {
     let primaryImageAspectRatio: Double?
     let imageItemId: String?
     let backdropItemId: String?
+
+    // Additional display fields needed by views
+    let premiereDate: String?
+    let lastPlayedDate: String?
+    let parentBackdropImageTags: [String]?
+    let backdropImageTags: [String]?
+    let path: String?
+
+    // Computed helpers
+    var progressPercent: Double {
+        guard let playedPercentage else { return 0 }
+        return min(max(playedPercentage / 100.0, 0), 1)
+    }
+
+    var durationTicks: Int64? {
+        durationSeconds.map { Int64($0 * 10_000_000) }
+    }
+
+    var positionTicks: Int64? {
+        playbackPositionSeconds.map { Int64($0 * 10_000_000) }
+    }
 
     static func == (lhs: MediaItem, rhs: MediaItem) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

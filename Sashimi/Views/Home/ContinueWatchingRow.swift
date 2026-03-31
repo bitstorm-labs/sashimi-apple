@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct ContinueWatchingRow: View {
-    let items: [BaseItemDto]
-    var libraryNames: [String: String] = [:]  // Item ID -> Library name mapping
-    let onSelect: (BaseItemDto) -> Void
-    var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
+    let items: [MediaItem]
+    var libraryNames: [String: String] = [:]  // rawId -> Library name mapping
+    let onSelect: (MediaItem) -> Void
+    var onPlay: ((MediaItem) -> Void)?  // Optional: immediate playback on Play button
 
-    private func isYouTube(_ item: BaseItemDto) -> Bool {
-        guard let libraryName = libraryNames[item.id] else { return false }
+    private func isYouTube(_ item: MediaItem) -> Bool {
+        guard let libraryName = libraryNames[item.rawId] else { return false }
         return libraryName.lowercased().contains("youtube")
     }
 
@@ -37,7 +37,7 @@ struct ContinueWatchingRow: View {
 }
 
 struct ContinueWatchingCard: View {
-    let item: BaseItemDto
+    let item: MediaItem
     var isYouTube: Bool = false  // Whether this is YouTube content
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
@@ -56,9 +56,9 @@ struct ContinueWatchingCard: View {
         // For episodes with backdrops (regular shows), use series backdrop
         // For episodes without backdrops (YouTube), use episode's own thumbnail
         if item.type == .episode {
-            return seriesHasBackdrop ? (item.seriesId ?? item.id) : item.id
+            return seriesHasBackdrop ? (item.seriesId ?? item.rawId) : item.rawId
         }
-        return item.id
+        return item.rawId
     }
 
     private var imageType: String {
@@ -83,24 +83,24 @@ struct ContinueWatchingCard: View {
     private var displayTitle: String {
         switch item.type {
         case .movie, .video:
-            return item.name
+            return item.title
         case .series:
-            return item.name.cleanedYouTubeTitle
+            return item.title.cleanedYouTubeTitle
         case .episode:
-            return (item.seriesName ?? item.name).cleanedYouTubeTitle
+            return (item.seriesName ?? item.title).cleanedYouTubeTitle
         default:
-            return item.name
+            return item.title
         }
     }
 
     private var episodeInfoString: String {
         // For YouTube, show date instead of S/E
         if isYouTube, let dateStr = item.premiereDate {
-            return "\(formatDate(dateStr)) - \(item.name)"
+            return "\(formatDate(dateStr)) - \(item.title)"
         }
-        let season = item.parentIndexNumber ?? 1
-        let episode = item.indexNumber ?? 1
-        return "S\(season):E\(episode) - \(item.name)"
+        let season = item.seasonNumber ?? 1
+        let episode = item.episodeNumber ?? 1
+        return "S\(season):E\(episode) - \(item.title)"
     }
 
     private func formatDate(_ isoDate: String) -> String {
@@ -183,7 +183,7 @@ struct ContinueWatchingCard: View {
                         )
                         .font(.system(size: 20))
                         .foregroundStyle(SashimiTheme.textSecondary)
-                    } else if let year = item.productionYear {
+                    } else if let year = item.year {
                         Text(String(year))
                             .font(.system(size: 20))
                             .foregroundStyle(SashimiTheme.textTertiary)
@@ -219,9 +219,9 @@ struct ContinueWatchingCard: View {
     }
 
     private func formatRemainingTime() -> String {
-        guard let total = item.runTimeTicks else { return "" }
-        let played = item.userData?.playbackPositionTicks ?? 0
-        let remaining = total - played
+        guard let durationTicks = item.durationTicks else { return "" }
+        let positionTicks = item.positionTicks ?? 0
+        let remaining = durationTicks - positionTicks
         let seconds = remaining / 10_000_000
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
@@ -236,8 +236,8 @@ struct ContinueWatchingCard: View {
 // MARK: - Continue Watching Detail View (See All)
 
 struct ContinueWatchingDetailView: View {
-    let items: [BaseItemDto]
-    let onSelect: (BaseItemDto) -> Void
+    let items: [MediaItem]
+    let onSelect: (MediaItem) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

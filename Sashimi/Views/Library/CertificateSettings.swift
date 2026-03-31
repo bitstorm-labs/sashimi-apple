@@ -4,12 +4,12 @@ import SwiftUI
 
 struct CertificateSettingsView: View {
     @StateObject private var certSettings = CertificateTrustSettings.shared
-    @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var serverManager: ServerManager
     @State private var showingWarning = false
     @State private var pendingToggle: (() -> Void)?
 
     private var isHTTPS: Bool {
-        sessionManager.serverURL?.scheme?.lowercased() == "https"
+        serverManager.primaryServer?.serverURL.scheme?.lowercased() == "https"
     }
 
     private var hasValidCert: Bool {

@@ -234,6 +234,7 @@ final class JellyfinServer: MediaServer, @unchecked Sendable {
             isPlayed: dto.userData?.played ?? false,
             isFavorite: dto.userData?.isFavorite ?? false,
             communityRating: dto.communityRating,
+            criticRating: dto.criticRating,
             officialRating: dto.officialRating,
             genres: dto.genres ?? [],
             year: dto.productionYear,
@@ -247,7 +248,12 @@ final class JellyfinServer: MediaServer, @unchecked Sendable {
             hasSubtitles: false,
             primaryImageAspectRatio: dto.primaryImageAspectRatio,
             imageItemId: dto.id,
-            backdropItemId: dto.seriesId ?? dto.id
+            backdropItemId: dto.seriesId ?? dto.id,
+            premiereDate: dto.premiereDate,
+            lastPlayedDate: dto.userData?.lastPlayedDate,
+            parentBackdropImageTags: dto.parentBackdropImageTags,
+            backdropImageTags: dto.backdropImageTags,
+            path: dto.path
         )
     }
 
@@ -282,7 +288,8 @@ final class JellyfinServer: MediaServer, @unchecked Sendable {
             serverId: id,
             rawId: library.id,
             name: library.name,
-            type: mapLibraryType(library.collectionType)
+            type: mapLibraryType(library.collectionType),
+            collectionType: library.collectionType
         )
     }
 

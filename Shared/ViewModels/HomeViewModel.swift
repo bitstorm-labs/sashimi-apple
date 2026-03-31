@@ -6,17 +6,17 @@ import TVServices
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    @Published var continueWatchingItems: [BaseItemDto] = []
-    @Published var continueWatchingLibraryNames: [String: String] = [:]  // itemId -> libraryName
-    @Published var recentlyAddedItems: [BaseItemDto] = []
-    @Published var heroItems: [BaseItemDto] = []
-    @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
-    @Published var libraryItems: [String: [BaseItemDto]] = [:]  // libraryId -> items
-    @Published var libraries: [JellyfinLibrary] = []
+    @Published var continueWatchingItems: [MediaItem] = []
+    @Published var continueWatchingLibraryNames: [String: String] = [:]  // rawId -> libraryName
+    @Published var recentlyAddedItems: [MediaItem] = []
+    @Published var heroItems: [MediaItem] = []
+    @Published var heroItemLibraryNames: [String: String] = [:]  // rawId -> libraryName
+    @Published var libraryItems: [String: [MediaItem]] = [:]  // libraryRawId -> items
+    @Published var libraries: [MediaLibrary] = []
     @Published var isLoading = false
     @Published var error: Error?
 
-    private let client = JellyfinClient.shared
+    private let serverManager = ServerManager.shared
     private let appGroupIdentifier = "group.com.mondominator.sashimi"
 
     private let dateFormatter: ISO8601DateFormatter = {
@@ -32,14 +32,16 @@ final class HomeViewModel: ObservableObject {
     }()
 
     func loadContent() async {
+        guard let server = serverManager.primaryServer else { return }
+
         isLoading = true
         error = nil
 
         do {
-            async let resumeItems = client.getResumeItems()
-            async let nextUpItems = client.getNextUp()
-            async let latestItems = client.getLatestMedia()
-            async let libraryViews = client.getLibraryViews()
+            async let resumeItems = server.getResumeItems(limit: 20)
+            async let nextUpItems = server.getNextUp(limit: 50)
+            async let latestItems = server.getLatestMedia(libraryId: nil, limit: 30)
+            async let libraryViews = server.getLibraries()
 
             let (resume, nextUp, latest, libs) = try await (resumeItems, nextUpItems, latestItems, libraryViews)
 
@@ -58,20 +60,21 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadContinueWatchingLibraryNames() async {
+        guard let server = serverManager.primaryServer else { return }
         var libraryNames: [String: String] = [:]
 
         let seriesIds = Set(continueWatchingItems.compactMap { item -> String? in
             if item.type == .episode { return item.seriesId }
-            return item.id
+            return item.rawId
         })
 
         for seriesId in seriesIds {
             do {
-                let ancestors = try await client.getItemAncestors(itemId: seriesId)
+                let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: seriesId)
                 if let library = ancestors.first(where: { $0.type == .collectionFolder }) {
                     for item in continueWatchingItems {
-                        if item.seriesId == seriesId || item.id == seriesId {
-                            libraryNames[item.id] = library.name
+                        if item.seriesId == seriesId || item.rawId == seriesId {
+                            libraryNames[item.rawId] = library.name
                         }
                     }
                 }
@@ -83,7 +86,7 @@ final class HomeViewModel: ObservableObject {
 
     private func saveContinueWatchingForTopShelf() {
         guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
-              let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return }
+              let serverURL = serverManager.primaryServer?.serverURL else { return }
 
         let items: [[String: Any]] = continueWatchingItems.prefix(10).compactMap { item in
             let seriesHasBackdrop = item.parentBackdropImageTags?.isEmpty == false
@@ -92,23 +95,23 @@ final class HomeViewModel: ObservableObject {
 
             switch item.type {
             case .episode:
-                imageId = seriesHasBackdrop ? (item.seriesId ?? item.id) : item.id
+                imageId = seriesHasBackdrop ? (item.seriesId ?? item.rawId) : item.rawId
                 imageType = seriesHasBackdrop ? "Backdrop" : "Primary"
             case .video:
-                imageId = item.id
+                imageId = item.rawId
                 imageType = "Primary"
             default:
-                imageId = item.id
+                imageId = item.rawId
                 imageType = "Backdrop"
             }
 
-            let imageURLString = "\(serverURL)/Items/\(imageId)/Images/\(imageType)?maxWidth=1920"
+            let imageURLString = "\(serverURL.absoluteString)/Items/\(imageId)/Images/\(imageType)?maxWidth=1920"
             guard let imageURL = URL(string: imageURLString) else { return nil }
 
             var subtitle = ""
             if item.type == .episode {
-                let season = item.parentIndexNumber ?? 1
-                let episode = item.indexNumber ?? 1
+                let season = item.seasonNumber ?? 1
+                let episode = item.episodeNumber ?? 1
                 subtitle = "S\(season):E\(episode)"
                 if let seriesName = item.seriesName {
                     subtitle = "\(seriesName) • \(subtitle)"
@@ -116,11 +119,11 @@ final class HomeViewModel: ObservableObject {
             }
 
             return [
-                "id": item.id,
-                "name": item.type == .episode ? (item.seriesName ?? item.name) : item.name,
+                "id": item.rawId,
+                "name": item.type == .episode ? (item.seriesName ?? item.title) : item.title,
                 "subtitle": subtitle,
                 "imageURL": imageURL.absoluteString,
-                "type": item.type?.rawValue ?? "unknown",
+                "type": item.type.rawValue,
                 "progress": item.progressPercent
             ]
         }
@@ -132,16 +135,17 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func loadHeroItems() async {
-        var allHeroItems: [BaseItemDto] = []
+        guard let server = serverManager.primaryServer else { return }
+        var allHeroItems: [MediaItem] = []
         var libraryNames: [String: String] = [:]
-        var itemsPerLibrary: [String: [BaseItemDto]] = [:]
+        var itemsPerLibrary: [String: [MediaItem]] = [:]
 
         for library in libraries {
             do {
-                let items = try await client.getLatestMedia(parentId: library.id, limit: 10)
-                itemsPerLibrary[library.id] = items
+                let items = try await server.getLatestMedia(libraryId: library.rawId, limit: 10)
+                itemsPerLibrary[library.rawId] = items
                 for item in items {
-                    libraryNames[item.id] = library.name
+                    libraryNames[item.rawId] = library.name
                 }
                 allHeroItems.append(contentsOf: items.prefix(5))
             } catch { }
@@ -156,30 +160,18 @@ final class HomeViewModel: ObservableObject {
         await loadContent()
     }
 
-    private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
-        // Both APIs return items sorted by activity:
-        // - Resume: by DatePlayed descending (most recently played partial episode first)
-        // - NextUp: by series activity (most recently finished series first)
-        //
-        // Strategy: Merge using a two-pointer approach, comparing dates.
-        // For Resume items: use their lastPlayedDate
-        // For NextUp items: use current time based on position (trust the API order)
-
+    private func mergeAndSortContinueItems(resume: [MediaItem], nextUp: [MediaItem]) -> [MediaItem] {
         let now = Date()
 
-        // Get effective dates for Resume items
         let resumeDates: [Date] = resume.map { item in
-            parseDate(item.userData?.lastPlayedDate) ?? now
+            parseDate(item.lastPlayedDate) ?? now
         }
 
-        // For NextUp, assign dates based on position: first item = now, each subsequent = 1 second earlier
-        // This trusts the NextUp API's sorting by series activity
         let nextUpDates: [Date] = nextUp.indices.map { index in
             now.addingTimeInterval(-Double(index))
         }
 
-        // Merge the two sorted lists
-        var merged: [BaseItemDto] = []
+        var merged: [MediaItem] = []
         var seenSeriesIds = Set<String>()
         var seenIds = Set<String>()
 
@@ -194,11 +186,10 @@ final class HomeViewModel: ObservableObject {
             } else if nextUpIdx >= nextUp.count {
                 useResume = true
             } else {
-                // Compare dates - take the more recent one
                 useResume = resumeDates[resumeIdx] >= nextUpDates[nextUpIdx]
             }
 
-            let item: BaseItemDto
+            let item: MediaItem
             if useResume {
                 item = resume[resumeIdx]
                 resumeIdx += 1
@@ -207,16 +198,14 @@ final class HomeViewModel: ObservableObject {
                 nextUpIdx += 1
             }
 
-            // Skip duplicates
-            guard !seenIds.contains(item.id) else { continue }
+            guard !seenIds.contains(item.rawId) else { continue }
 
-            // Skip if we already have an item from this series
             if let seriesId = item.seriesId {
                 guard !seenSeriesIds.contains(seriesId) else { continue }
                 seenSeriesIds.insert(seriesId)
             }
 
-            seenIds.insert(item.id)
+            seenIds.insert(item.rawId)
             merged.append(item)
 
             if merged.count >= 20 { break }
@@ -233,7 +222,7 @@ final class HomeViewModel: ObservableObject {
         return dateFormatterNoFraction.date(from: dateString)
     }
 
-    private func isMediaLibrary(_ library: JellyfinLibrary) -> Bool {
+    private func isMediaLibrary(_ library: MediaLibrary) -> Bool {
         guard let collectionType = library.collectionType?.lowercased() else { return true }
         return ["movies", "tvshows", "music", "mixed", "homevideos"].contains(collectionType)
     }
