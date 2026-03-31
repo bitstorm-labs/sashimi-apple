@@ -104,7 +104,11 @@ final class ServerManager: ObservableObject {
             let server = JellyfinServer(account: account, client: client)
             servers.append(server)
         case .plex:
-            break // Not yet supported
+            let client = PlexClient()
+            await client.configure(serverURL: account.serverURL, authToken: account.accessToken)
+            await client.persistForSync()
+            let server = PlexServer(account: account, client: client)
+            servers.append(server)
         }
     }
 
@@ -131,6 +135,39 @@ final class ServerManager: ObservableObject {
 
         logoutReason = nil
         isAuthenticated = true
+    }
+
+    func addPlexServer(token: String, resource: PlexResource) async throws {
+        guard let connection = resource.connections.first(where: { !$0.local }) ?? resource.connections.first,
+              let url = URL(string: connection.uri) else {
+            throw NSError(
+                domain: "ServerManager",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No connection available"]
+            )
+        }
+
+        let client = PlexClient()
+        await client.configure(serverURL: url, authToken: token)
+        await client.persistForSync()
+
+        let account = ServerAccount(
+            id: UUID().uuidString,
+            serverType: .plex,
+            serverURL: url,
+            serverName: resource.name,
+            userId: "plex",
+            userName: "Plex User",
+            accessToken: token
+        )
+
+        accounts.append(account)
+        saveAccounts()
+
+        let server = PlexServer(account: account, client: client)
+        servers.append(server)
+        isAuthenticated = true
+        logoutReason = nil
     }
 
     func removeServer(id: String) {
