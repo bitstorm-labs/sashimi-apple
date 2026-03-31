@@ -1,6 +1,6 @@
 import Foundation
 
-// swiftlint:disable type_body_length file_length
+// swiftlint:disable type_body_length
 // PlexClient handles all Plex API endpoints - splitting would fragment the API layer
 
 // MARK: - Plex API Models
@@ -106,6 +106,7 @@ struct PlexStream: Codable {
     let language: String?
     let displayTitle: String?
     let channels: Int?
+    // swiftlint:disable:next discouraged_optional_boolean
     let selected: Bool?
     let index: Int?
 }
@@ -269,7 +270,7 @@ actor PlexClient {
 
     /// Request a new PIN for device linking at https://plex.tv/link
     func requestPin() async throws -> PlexPin {
-        let plexTV = URL(string: "https://plex.tv")!
+        guard let plexTV = URL(string: "https://plex.tv") else { throw PlexError.invalidURL }
         let bodyString = "strong=true&X-Plex-Product=Sashimi&X-Plex-Client-Identifier=\(clientIdentifier)"
         let bodyData = bodyString.data(using: .utf8)
 
@@ -291,7 +292,7 @@ actor PlexClient {
 
     /// Check if a PIN has been authorized by the user
     func checkPin(pinId: Int) async throws -> PlexPin {
-        let plexTV = URL(string: "https://plex.tv")!
+        guard let plexTV = URL(string: "https://plex.tv") else { throw PlexError.invalidURL }
 
         let data = try await request(
             baseURL: plexTV,
@@ -308,7 +309,7 @@ actor PlexClient {
 
     /// Get available Plex servers for the authenticated user
     func getServers(token: String) async throws -> [PlexResource] {
-        let plexTV = URL(string: "https://plex.tv")!
+        guard let plexTV = URL(string: "https://plex.tv") else { throw PlexError.invalidURL }
 
         // Temporarily set token for this request
         let previousToken = authToken
@@ -597,4 +598,4 @@ actor PlexClient {
     }
 }
 
-// swiftlint:enable type_body_length file_length
+// swiftlint:enable type_body_length
