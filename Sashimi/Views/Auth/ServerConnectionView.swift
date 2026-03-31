@@ -28,7 +28,7 @@ enum ServerValidationState: Equatable {
 // MARK: - Server Connection View
 
 struct ServerConnectionView: View {
-    @EnvironmentObject private var sessionManager: SessionManager
+    @EnvironmentObject private var serverManager: ServerManager
     @StateObject private var serverDiscovery = ServerDiscovery()
 
     @State private var serverAddress = ""
@@ -57,7 +57,7 @@ struct ServerConnectionView: View {
             }
 
             VStack(spacing: 40) {
-                if sessionManager.logoutReason == .sessionExpired {
+                if serverManager.logoutReason == .sessionExpired {
                     HStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.yellow)
@@ -357,7 +357,7 @@ struct ServerConnectionView: View {
 
         Task {
             do {
-                try await sessionManager.login(serverURL: url, username: username, password: password)
+                try await serverManager.addJellyfinServer(url: url, username: username, password: password)
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -368,5 +368,5 @@ struct ServerConnectionView: View {
 
 #Preview {
     ServerConnectionView()
-        .environmentObject(SessionManager.shared)
+        .environmentObject(ServerManager.shared)
 }

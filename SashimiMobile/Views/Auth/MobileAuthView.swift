@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MobileAuthView: View {
-    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var serverManager: ServerManager
     @State private var serverURL = ""
     @State private var username = ""
     @State private var password = ""
@@ -146,7 +146,7 @@ struct MobileAuthView: View {
 
         Task {
             do {
-                try await sessionManager.login(serverURL: url, username: username, password: password)
+                try await serverManager.addJellyfinServer(url: url, username: username, password: password)
                 await MainActor.run {
                     isConnecting = false
                 }

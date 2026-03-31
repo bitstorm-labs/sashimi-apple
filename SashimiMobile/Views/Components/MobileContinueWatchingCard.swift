@@ -4,12 +4,12 @@ import NukeUI
 // MARK: - Continue Watching Card
 
 struct MobileContinueWatchingCard: View {
-    let item: BaseItemDto
+    let item: MediaItem
     let libraryName: String?
     let width: CGFloat
 
     init(
-        item: BaseItemDto,
+        item: MediaItem,
         libraryName: String? = nil,
         width: CGFloat = 280
     ) {
@@ -41,9 +41,9 @@ struct MobileContinueWatchingCard: View {
         // For episodes with backdrops (regular shows), use series backdrop
         // For episodes without backdrops (YouTube), use episode's own thumbnail
         if item.type == .episode {
-            return seriesHasBackdrop ? (item.seriesId ?? item.id) : item.id
+            return seriesHasBackdrop ? (item.seriesId ?? item.rawId) : item.rawId
         }
-        return item.id
+        return item.rawId
     }
 
     private var imageType: String {
@@ -69,13 +69,13 @@ struct MobileContinueWatchingCard: View {
     private var displayTitle: String {
         switch item.type {
         case .movie, .video:
-            return item.name
+            return item.title
         case .series:
-            return item.name.cleanedYouTubeTitle
+            return item.title.cleanedYouTubeTitle
         case .episode:
-            return (item.seriesName ?? item.name).cleanedYouTubeTitle
+            return (item.seriesName ?? item.title).cleanedYouTubeTitle
         default:
-            return item.name
+            return item.title
         }
     }
 
@@ -84,27 +84,27 @@ struct MobileContinueWatchingCard: View {
         guard item.type == .episode else { return nil }
 
         if isYouTube, let dateStr = item.premiereDate {
-            return "\(formatDate(dateStr)) - \(item.name)"
+            return "\(formatDate(dateStr)) - \(item.title)"
         }
 
-        let season = item.parentIndexNumber ?? 1
-        let episode = item.indexNumber ?? 1
-        return "S\(season):E\(episode) - \(item.name)"
+        let season = item.seasonNumber ?? 1
+        let episode = item.episodeNumber ?? 1
+        return "S\(season):E\(episode) - \(item.title)"
     }
 
     // For non-episodes (movies), show year
     private var yearText: String? {
         guard item.type != .episode else { return nil }
-        if let year = item.productionYear {
+        if let year = item.year {
             return String(year)
         }
         return nil
     }
 
     private var remainingTimeText: String {
-        guard let total = item.runTimeTicks else { return "" }
-        let played = item.userData?.playbackPositionTicks ?? 0
-        let remaining = total - played
+        guard let totalTicks = item.durationTicks else { return "" }
+        let playedTicks = item.positionTicks ?? 0
+        let remaining = totalTicks - playedTicks
         let seconds = remaining / 10_000_000
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
@@ -225,7 +225,7 @@ struct MobileContinueWatchingCard: View {
                     .fill(MobileColors.progressBackground)
                 Capsule()
                     .fill(MobileColors.accent)
-                    .frame(width: geometry.size.width * CGFloat(item.progressPercent / 100))
+                    .frame(width: geometry.size.width * CGFloat(item.progressPercent))
             }
         }
         .frame(height: 4)
@@ -253,17 +253,17 @@ struct MobileContinueWatchingCard: View {
 
 struct MobileContinueWatchingRow<Destination: View>: View {
     let title: String
-    let items: [BaseItemDto]
+    let items: [MediaItem]
     let libraryNames: [String: String]?
     let cardWidth: CGFloat
-    let destination: (BaseItemDto) -> Destination
+    let destination: (MediaItem) -> Destination
 
     init(
         title: String = "Continue Watching",
-        items: [BaseItemDto],
+        items: [MediaItem],
         libraryNames: [String: String]? = nil,
         cardWidth: CGFloat = 280,
-        @ViewBuilder destination: @escaping (BaseItemDto) -> Destination
+        @ViewBuilder destination: @escaping (MediaItem) -> Destination
     ) {
         self.title = title
         self.items = items
@@ -289,14 +289,11 @@ struct MobileContinueWatchingRow<Destination: View>: View {
                         } label: {
                             MobileContinueWatchingCard(
                                 item: item,
-                                libraryName: libraryNames?[item.id],
+                                libraryName: libraryNames?[item.rawId],
                                 width: cardWidth
                             )
                         }
                         .buttonStyle(.plain)
-                        .contextMenu {
-                            ItemContextMenu(item: item)
-                        }
                     }
                 }
                 .padding(.horizontal, MobileSpacing.md)
