@@ -42,7 +42,7 @@ struct MainNavigationView: View {
     @State private var libraries: [JellyfinLibrary] = []
     @State private var sidebarWidth: CGFloat = 200
     @State private var navigationResetId: Int = 0
-    @ObservedObject private var serverManager = ServerManager.shared
+    @ObservedObject private var sessionManager = SessionManager.shared
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
@@ -253,22 +253,23 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var userAvatarView: some View {
-        if let avatarURL = serverManager.primaryServer?.userImageURL(maxWidth: 64) {
+        if let user = sessionManager.currentUser,
+           let avatarURL = userAvatarURL(for: user) {
             LazyImage(url: avatarURL) { state in
                 if let image = state.image {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 } else if state.error != nil {
-                    defaultAvatarNameView
+                    defaultAvatarView(for: user)
                 } else {
-                    defaultAvatarNameView
+                    defaultAvatarView(for: user)
                 }
             }
             .frame(width: 40, height: 40)
             .clipShape(Circle())
-        } else if serverManager.currentUserName != nil {
-            defaultAvatarNameView
+        } else if let user = sessionManager.currentUser {
+            defaultAvatarView(for: user)
         } else {
             Image(systemName: "person.circle")
                 .font(.title2)
@@ -276,15 +277,22 @@ struct MainNavigationView: View {
         }
     }
 
-    private var defaultAvatarNameView: some View {
+    private func defaultAvatarView(for user: UserDto) -> some View {
         Circle()
             .fill(MobileColors.accent)
             .frame(width: 40, height: 40)
             .overlay {
-                Text(String((serverManager.currentUserName ?? "U").prefix(1)).uppercased())
+                Text(String(user.name.prefix(1)).uppercased())
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
             }
+    }
+
+    private func userAvatarURL(for user: UserDto) -> URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
+            return nil
+        }
+        return URL(string: "\(serverURL)/Users/\(user.id)/Images/Primary?maxWidth=64")
     }
 
     @ViewBuilder

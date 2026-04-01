@@ -94,7 +94,6 @@ struct AsyncItemImage: View {
     let maxWidth: Int
     var contentMode: ContentMode = .fill
     var fallbackImageTypes: [String] = []
-    var server: (any MediaServer)?
 
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
@@ -104,37 +103,11 @@ struct AsyncItemImage: View {
         [imageType] + fallbackImageTypes
     }
 
-    private var resolvedServer: (any MediaServer)? {
-        if let server { return server }
-        // Auto-resolve: if itemId contains ":" it's a composite "{serverId}:{rawId}"
-        if itemId.contains(":") {
-            let parts = itemId.split(separator: ":", maxSplits: 1)
-            if parts.count == 2 {
-                return ServerManager.shared.server(forId: String(parts[0]))
-            }
-        }
-        return nil
-    }
-
-    private var resolvedItemId: String {
-        // Strip serverId prefix if present
-        if itemId.contains(":") {
-            let parts = itemId.split(separator: ":", maxSplits: 1)
-            if parts.count == 2 { return String(parts[1]) }
-        }
-        return itemId
-    }
-
     private var currentURL: URL? {
         guard currentTypeIndex < allImageTypes.count else { return nil }
-        let type = allImageTypes[currentTypeIndex]
-        if let server = resolvedServer {
-            let imageT: ImageType = type == "Backdrop" ? .backdrop : type == "Thumb" ? .thumb : .primary
-            return server.imageURL(itemId: resolvedItemId, type: imageT, maxWidth: maxWidth)
-        }
         return JellyfinClient.shared.syncImageURL(
             itemId: itemId,
-            imageType: type,
+            imageType: allImageTypes[currentTypeIndex],
             maxWidth: maxWidth
         )
     }
