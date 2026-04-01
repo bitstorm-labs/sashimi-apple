@@ -19,6 +19,7 @@ struct PlexResource: Codable {
     let name: String
     let provides: String
     let clientIdentifier: String
+    let accessToken: String?
     let connections: [PlexConnection]
 }
 
@@ -138,7 +139,7 @@ enum PlexError: LocalizedError {
     case invalidResponse
     case invalidURL
     case httpError(statusCode: Int)
-    case decodingError
+    case decodingError(Error?)
     case pinNotAuthorized
 
     var errorDescription: String? {
@@ -147,7 +148,7 @@ enum PlexError: LocalizedError {
         case .invalidResponse: return "Invalid response from Plex server"
         case .invalidURL: return "Invalid URL"
         case .httpError(let code): return "HTTP error \(code)"
-        case .decodingError: return "Failed to decode Plex response"
+        case .decodingError(let err): return "Failed to decode Plex response: \(err?.localizedDescription ?? "unknown")"
         case .pinNotAuthorized: return "PIN has not been authorized yet"
         }
     }
@@ -271,7 +272,7 @@ actor PlexClient {
     /// Request a new PIN for device linking at https://plex.tv/link
     func requestPin() async throws -> PlexPin {
         guard let plexTV = URL(string: "https://plex.tv") else { throw PlexError.invalidURL }
-        let bodyString = "strong=true&X-Plex-Product=Sashimi&X-Plex-Client-Identifier=\(clientIdentifier)"
+        let bodyString = "strong=false&X-Plex-Product=Sashimi&X-Plex-Client-Identifier=\(clientIdentifier)"
         let bodyData = bodyString.data(using: .utf8)
 
         let data = try await request(
@@ -286,7 +287,7 @@ actor PlexClient {
             let pin = try JSONDecoder().decode(PlexPin.self, from: data)
             return pin
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -303,7 +304,7 @@ actor PlexClient {
             let pin = try JSONDecoder().decode(PlexPin.self, from: data)
             return pin
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -326,7 +327,7 @@ actor PlexClient {
             let resources = try JSONDecoder().decode([PlexResource].self, from: data)
             return resources.filter { $0.provides.contains("server") }
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -347,7 +348,7 @@ actor PlexClient {
             let response = try JSONDecoder().decode(LibraryResponse.self, from: data)
             return response.MediaContainer.Directory ?? []
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -384,7 +385,7 @@ actor PlexClient {
             let total = response.MediaContainer.totalSize ?? response.MediaContainer.size ?? items.count
             return (items, total)
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -403,7 +404,7 @@ actor PlexClient {
         } catch let error as PlexError {
             throw error
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -417,7 +418,7 @@ actor PlexClient {
             )
             return response.MediaContainer.Metadata ?? []
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -431,7 +432,7 @@ actor PlexClient {
             )
             return response.MediaContainer.Metadata ?? []
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -455,7 +456,7 @@ actor PlexClient {
             )
             return response.MediaContainer.Metadata ?? []
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 
@@ -490,7 +491,7 @@ actor PlexClient {
             }
             return results
         } catch {
-            throw PlexError.decodingError
+            print("Plex decode error:", error); throw PlexError.decodingError(error)
         }
     }
 

@@ -77,6 +77,8 @@ struct ServerConnectionView: View {
             }
         }
         .padding(80)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SashimiTheme.background.ignoresSafeArea())
         .onAppear {
             focusedField = .serverAddress
         }
