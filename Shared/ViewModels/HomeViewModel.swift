@@ -255,6 +255,7 @@ final class HomeViewModel: ObservableObject {
 
     private func isMediaLibrary(_ library: MediaLibrary) -> Bool {
         guard let collectionType = library.collectionType?.lowercased() else { return true }
-        return ["movies", "tvshows", "music", "mixed", "homevideos"].contains(collectionType)
+        // Jellyfin: "movies", "tvshows", "music" — Plex: "movie", "show", "artist"
+        return ["movies", "tvshows", "music", "mixed", "homevideos", "movie", "show", "artist"].contains(collectionType)
     }
 }

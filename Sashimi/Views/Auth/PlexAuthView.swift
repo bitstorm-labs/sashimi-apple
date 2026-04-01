@@ -8,6 +8,7 @@ enum PlexAuthState: Equatable {
     case waitingForLink(code: String, pinId: Int)
     case authenticated(token: String)
     case selectingServer
+    case connecting
     case error(String)
 
     static func == (lhs: PlexAuthState, rhs: PlexAuthState) -> Bool {
@@ -17,6 +18,7 @@ enum PlexAuthState: Equatable {
         case (.waitingForLink(let a, let b), .waitingForLink(let c, let d)): return a == c && b == d
         case (.authenticated(let a), .authenticated(let b)): return a == b
         case (.selectingServer, .selectingServer): return true
+        case (.connecting, .connecting): return true
         case (.error(let a), .error(let b)): return a == b
         default: return false
         }
@@ -26,6 +28,7 @@ enum PlexAuthState: Equatable {
 // MARK: - Plex Auth View
 
 struct PlexAuthView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var serverManager: ServerManager
 
     @FocusState private var focusedField: ServerConnectionField?
@@ -60,6 +63,13 @@ struct PlexAuthView: View {
 
             case .selectingServer:
                 plexServerSelectionView
+
+            case .connecting:
+                ProgressView()
+                    .scaleEffect(1.5)
+                Text("Connecting to server...")
+                    .font(.title3)
+                    .foregroundStyle(SashimiTheme.textSecondary)
 
             case .error(let message):
                 plexErrorView(message: message)
@@ -113,11 +123,12 @@ struct PlexAuthView: View {
                     .foregroundStyle(SashimiTheme.textSecondary)
             }
 
-            Text(code)
-                .font(.system(size: 72, weight: .bold, design: .monospaced))
+            Text(code.uppercased())
+                .font(.system(size: 56, weight: .bold, design: .monospaced))
+                .tracking(12)
                 .foregroundStyle(SashimiTheme.textPrimary)
                 .padding(.horizontal, 40)
-                .padding(.vertical, 20)
+                .padding(.vertical, 16)
                 .background(Color.white.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(
@@ -293,9 +304,13 @@ struct PlexAuthView: View {
     private func selectPlexServer(_ resource: PlexResource) {
         guard let token = plexAuthToken else { return }
 
+        plexAuthState = .connecting
+
         Task {
             do {
                 try await serverManager.addPlexServer(token: token, resource: resource)
+                // ServerManager sets isAuthenticated = true, dismiss the auth flow
+                dismiss()
             } catch {
                 plexAuthState = .error("Failed to connect: \(error.localizedDescription)")
             }
