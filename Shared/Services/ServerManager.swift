@@ -138,17 +138,44 @@ final class ServerManager: ObservableObject {
     }
 
     func addPlexServer(token: String, resource: PlexResource) async throws {
-        guard let connection = resource.connections.first(where: { !$0.local }) ?? resource.connections.first,
-              let url = URL(string: connection.uri) else {
+        // Use the server-specific access token (not the PIN auth token)
+        let serverToken = resource.accessToken ?? token
+
+        // Try connections: remote first (relay/external), then local. 3s timeout each.
+        let sortedConnections = resource.connections.sorted { !$0.local && $1.local }
+        var workingURL: URL?
+        for connection in sortedConnections {
+            guard let url = URL(string: connection.uri) else { continue }
+            let testClient = PlexClient()
+            await testClient.configure(serverURL: url, authToken: serverToken)
+            let success = await withTaskGroup(of: Bool.self) { group in
+                group.addTask {
+                    (try? await testClient.getLibraries()) != nil
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    return false
+                }
+                let result = await group.next() ?? false
+                group.cancelAll()
+                return result
+            }
+            if success {
+                workingURL = url
+                break
+            }
+        }
+
+        guard let url = workingURL else {
             throw NSError(
                 domain: "ServerManager",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "No connection available"]
+                userInfo: [NSLocalizedDescriptionKey: "Could not connect to any server address"]
             )
         }
 
         let client = PlexClient()
-        await client.configure(serverURL: url, authToken: token)
+        await client.configure(serverURL: url, authToken: serverToken)
         await client.persistForSync()
 
         let account = ServerAccount(
@@ -158,7 +185,7 @@ final class ServerManager: ObservableObject {
             serverName: resource.name,
             userId: "plex",
             userName: "Plex User",
-            accessToken: token
+            accessToken: serverToken
         )
 
         accounts.append(account)
