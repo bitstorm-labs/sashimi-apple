@@ -6,9 +6,8 @@ import SwiftUI
 struct SettingsView: View {
     var showSignOut: Bool = true
     var onBackAtRoot: (() -> Void)?
-    @EnvironmentObject private var serverManager: ServerManager
+    @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
-    @State private var showingAddServer = false
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
@@ -60,12 +59,6 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.appIcon)
                             }
 
-                            // Connected Servers section
-                            ConnectedServersSection(
-                                showAddServer: $showingAddServer
-                            )
-                            .padding(.top, 20)
-
                             // About section
                             VStack(spacing: 12) {
                                 SettingsInfoRow(label: "Version", value: "1.0.0")
@@ -108,7 +101,7 @@ struct SettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Sign Out", role: .destructive) {
-                serverManager.logout()
+                sessionManager.logout()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -120,9 +113,6 @@ struct SettingsView: View {
             } else {
                 onBackAtRoot?()
             }
-        }
-        .fullScreenCover(isPresented: $showingAddServer) {
-            ServerConnectionView()
         }
     }
 }
@@ -296,7 +286,7 @@ class HomeScreenSettings: ObservableObject {
         needsRefresh = true
     }
 
-    func updateWithLibraries(_ libraries: [MediaLibrary]) {
+    func updateWithLibraries(_ libraries: [JellyfinLibrary]) {
         var newConfigs: [HomeRowConfig] = []
 
         // Add built-in rows if not already present
@@ -308,24 +298,24 @@ class HomeScreenSettings: ObservableObject {
             }
         }
 
-        // Add library rows (use rawId for backward compat with saved settings)
+        // Add library rows
         for library in libraries {
-            if let existing = rowConfigs.first(where: { $0.libraryId == library.rawId }) {
+            if let existing = rowConfigs.first(where: { $0.libraryId == library.id }) {
                 // Update name in case it changed
                 var updated = existing
                 if updated.libraryName != library.name {
-                    updated = .library(id: library.rawId, name: library.name, visible: existing.isVisible)
+                    updated = .library(id: library.id, name: library.name, visible: existing.isVisible)
                 }
                 newConfigs.append(updated)
             } else {
-                newConfigs.append(.library(id: library.rawId, name: library.name))
+                newConfigs.append(.library(id: library.id, name: library.name))
             }
         }
 
         // Remove library rows that no longer exist
         rowConfigs = newConfigs.filter { config in
             if config.libraryId != nil {
-                return libraries.contains { $0.rawId == config.libraryId }
+                return libraries.contains { $0.id == config.libraryId }
             }
             return true
         }
@@ -539,153 +529,6 @@ struct HomeRowToggleButton: View {
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        .focused($isFocused)
-    }
-}
-
-// MARK: - Connected Servers Section
-
-struct ConnectedServersSection: View {
-    @EnvironmentObject private var serverManager: ServerManager
-    @Binding var showAddServer: Bool
-    @State private var serverToRemove: ServerAccount?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Connected Servers")
-                .font(Typography.headline)
-                .foregroundStyle(SashimiTheme.textPrimary)
-                .padding(.bottom, 4)
-
-            ForEach(serverManager.accounts) { account in
-                ConnectedServerRow(
-                    account: account,
-                    onRemove: { serverToRemove = account }
-                )
-            }
-
-            // Add Server button
-            ConnectedServerAddButton {
-                showAddServer = true
-            }
-        }
-        .confirmationDialog(
-            "Remove Server",
-            isPresented: Binding(
-                get: { serverToRemove != nil },
-                set: { if !$0 { serverToRemove = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let account = serverToRemove {
-                Button("Remove \(account.serverName)", role: .destructive) {
-                    serverManager.removeServer(id: account.id)
-                    serverToRemove = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    serverToRemove = nil
-                }
-            }
-        } message: {
-            Text("This will disconnect the server. You can add it back later.")
-        }
-    }
-}
-
-struct ConnectedServerRow: View {
-    let account: ServerAccount
-    let onRemove: () -> Void
-    @FocusState private var isFocused: Bool
-    @FocusState private var removeIsFocused: Bool
-
-    private var serverTypeIcon: String {
-        switch account.serverType {
-        case .jellyfin: return "server.rack"
-        case .plex: return "play.square.stack"
-        }
-    }
-
-    private var serverTypeName: String {
-        switch account.serverType {
-        case .jellyfin: return "Jellyfin"
-        case .plex: return "Plex"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: serverTypeIcon)
-                .font(Typography.title)
-                .foregroundStyle(SashimiTheme.accent)
-                .frame(width: 50)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(account.serverName)
-                    .font(Typography.body)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                HStack(spacing: 8) {
-                    Text(serverTypeName)
-                        .font(Typography.captionSmall)
-                        .foregroundStyle(SashimiTheme.accent.opacity(0.8))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(SashimiTheme.accent.opacity(0.15)))
-
-                    Text(account.userName)
-                        .font(Typography.caption)
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                }
-            }
-
-            Spacer()
-
-            Button(action: onRemove) {
-                Image(systemName: "trash")
-                    .font(Typography.bodySmall)
-                    .foregroundStyle(removeIsFocused ? .white : .red.opacity(0.7))
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(removeIsFocused ? Color.red : Color.red.opacity(0.1))
-                    )
-            }
-            .buttonStyle(PlainNoHighlightButtonStyle())
-            .focused($removeIsFocused)
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.08) : SashimiTheme.cardBackground)
-        )
-        .focused($isFocused)
-    }
-}
-
-struct ConnectedServerAddButton: View {
-    let action: () -> Void
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: "plus.circle.fill")
-                    .font(Typography.titleSmall)
-                Text("Add Server")
-                    .font(Typography.titleSmall)
-            }
-            .foregroundStyle(isFocused ? .white : SashimiTheme.accent)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(isFocused ? SashimiTheme.accent : SashimiTheme.accent.opacity(0.1))
-            )
-            .scaleEffect(isFocused ? 1.02 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
     }
 }
@@ -1092,7 +935,7 @@ struct LanguagePickerView: View {
 
 #Preview {
     SettingsView()
-        .environmentObject(ServerManager.shared)
+        .environmentObject(SessionManager.shared)
 }
 
 // MARK: - App Icon Settings

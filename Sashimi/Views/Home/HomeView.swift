@@ -14,13 +14,13 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
-    @EnvironmentObject private var serverManager: ServerManager
-    @State private var selectedItem: MediaItem?
+    @EnvironmentObject private var sessionManager: SessionManager
+    @State private var selectedItem: BaseItemDto?
     @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var showContinueWatchingDetail = false
-    @State private var playingItem: MediaItem?  // For immediate playback via Play button
+    @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
     @Binding var resetTrigger: Bool
     @Binding var isAtDefaultState: Bool
 
@@ -30,26 +30,16 @@ struct HomeView: View {
     }
 
     // Order libraries according to settings
-    private var orderedLibraries: [MediaLibrary] {
+    private var orderedLibraries: [JellyfinLibrary] {
         let orderedIds = homeSettings.orderedLibraryIds()
         if orderedIds.isEmpty {
             return viewModel.libraries
         }
         return viewModel.libraries.sorted { lib1, lib2 in
-            let index1 = orderedIds.firstIndex(of: lib1.rawId) ?? Int.max
-            let index2 = orderedIds.firstIndex(of: lib2.rawId) ?? Int.max
+            let index1 = orderedIds.firstIndex(of: lib1.id) ?? Int.max
+            let index2 = orderedIds.firstIndex(of: lib2.id) ?? Int.max
             return index1 < index2
         }
-    }
-
-    /// When multiple servers are connected, append the server name to the library name
-    /// so users can distinguish "Movies -- JellyPal" from "Movies -- Plex".
-    private func libraryDisplayName(_ library: MediaLibrary) -> String {
-        if serverManager.servers.count > 1,
-           let server = serverManager.server(forId: library.serverId) {
-            return "\(library.name) \u{2014} \(server.name)"
-        }
-        return library.name
     }
 
     var body: some View {
@@ -96,10 +86,10 @@ struct HomeView: View {
                 }
             }
             .fullScreenCover(item: $selectedItem) { item in
-                MediaItemDetailBridge(mediaItem: item, forceYouTubeStyle: selectedItemIsYouTube)
+                MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
             }
             .fullScreenCover(item: $playingItem) { item in
-                MediaItemPlayerBridge(mediaItem: item, startFromBeginning: false)
+                PlayerView(item: item, startFromBeginning: false)
             }
             .fullScreenCover(isPresented: $showContinueWatchingDetail) {
                 ContinueWatchingDetailView(
@@ -166,7 +156,7 @@ struct HomeView: View {
                         currentIndex: $heroIndex,
                         onSelect: { item in
                             // Check if item comes from a library named YouTube
-                            let libraryName = viewModel.heroItemLibraryNames[item.rawId] ?? ""
+                            let libraryName = viewModel.heroItemLibraryNames[item.id] ?? ""
                             selectedItemIsYouTube = libraryName.lowercased().contains("youtube")
                             selectedItem = item
                         }
@@ -179,10 +169,9 @@ struct HomeView: View {
                     ContinueWatchingRow(
                         items: viewModel.continueWatchingItems,
                         libraryNames: viewModel.continueWatchingLibraryNames,
-                        showServerBadges: serverManager.servers.count > 1,
                         onSelect: { item in
                             // Check if item comes from a library named YouTube
-                            let libraryName = viewModel.continueWatchingLibraryNames[item.rawId] ?? ""
+                            let libraryName = viewModel.continueWatchingLibraryNames[item.id] ?? ""
                             let isYouTube = libraryName.lowercased().contains("youtube")
                             selectedItemIsYouTube = isYouTube
                             selectedItem = item
@@ -195,15 +184,11 @@ struct HomeView: View {
                 }
             }
         } else if let libraryId = config.libraryId,
-                  let library = viewModel.libraries.first(where: { $0.rawId == libraryId }) {
-            RecentlyAddedLibraryRow(
-                library: library,
-                displayName: libraryDisplayName(library),
-                onSelect: { item in
-                    selectedItemIsYouTube = library.name.lowercased().contains("youtube")
-                    selectedItem = item
-                }
-            )
+                  let library = viewModel.libraries.first(where: { $0.id == libraryId }) {
+            RecentlyAddedLibraryRow(library: library, onSelect: { item in
+                selectedItemIsYouTube = library.name.lowercased().contains("youtube")
+                selectedItem = item
+            })
             .focusSection()
         }
     }
@@ -224,10 +209,10 @@ struct HomeView: View {
 
 // MARK: - Hero Section
 struct HeroSection: View {
-    let items: [MediaItem]
+    let items: [BaseItemDto]
     let libraryNames: [String: String]
     @Binding var currentIndex: Int
-    let onSelect: (MediaItem) -> Void
+    let onSelect: (BaseItemDto) -> Void
 
     @FocusState private var isFocused: Bool
     @State private var autoAdvanceTimer: Timer?
@@ -238,13 +223,13 @@ struct HeroSection: View {
         return min(currentIndex, items.count - 1)
     }
 
-    private var currentItem: MediaItem {
+    private var currentItem: BaseItemDto {
         items[safeIndex]
     }
 
     // Detect YouTube content by checking library name
     private var isYouTubeContent: Bool {
-        guard let libraryName = libraryNames[currentItem.rawId] else { return false }
+        guard let libraryName = libraryNames[currentItem.id] else { return false }
         return libraryName.lowercased().contains("youtube")
     }
 
@@ -254,7 +239,7 @@ struct HeroSection: View {
         if currentItem.type == .episode {
             // For YouTube: use episode thumbnail
             if isYouTubeContent {
-                ids.append(currentItem.rawId)
+                ids.append(currentItem.id)
             } else {
                 // For regular episodes: try series first for high-res backdrop
                 if let seriesId = currentItem.seriesId {
@@ -263,10 +248,10 @@ struct HeroSection: View {
                 if let seasonId = currentItem.seasonId {
                     ids.append(seasonId)
                 }
-                ids.append(currentItem.rawId)
+                ids.append(currentItem.id)
             }
         } else {
-            ids.append(currentItem.rawId)
+            ids.append(currentItem.id)
         }
         return ids
     }
@@ -283,9 +268,9 @@ struct HeroSection: View {
     // Display title (channel/series name for episodes, item name for movies)
     private var displayTitle: String {
         if currentItem.type == .episode {
-            return (currentItem.seriesName ?? currentItem.title).cleanedYouTubeTitle
+            return (currentItem.seriesName ?? currentItem.name).cleanedYouTubeTitle
         }
-        return currentItem.title
+        return currentItem.name
     }
 
     // VoiceOver accessibility description
@@ -293,15 +278,17 @@ struct HeroSection: View {
         var parts: [String] = []
 
         if currentItem.type == .episode {
-            parts.append((currentItem.seriesName ?? currentItem.title).cleanedYouTubeTitle)
+            parts.append((currentItem.seriesName ?? currentItem.name).cleanedYouTubeTitle)
             parts.append(formatEpisodeInfo(currentItem))
         } else {
-            parts.append(currentItem.title)
+            parts.append(currentItem.name)
         }
 
-        parts.append(currentItem.type.rawValue)
+        if let type = currentItem.type {
+            parts.append(type.rawValue)
+        }
 
-        if let year = currentItem.year {
+        if let year = currentItem.productionYear {
             parts.append("from \(year)")
         }
 
@@ -331,7 +318,7 @@ struct HeroSection: View {
                             imageTypes: heroImageTypes,
                             contentMode: .fit
                         )
-                        .id(currentItem.rawId)
+                        .id(currentItem.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .mask(
                             LinearGradient(
@@ -345,7 +332,7 @@ struct HeroSection: View {
                         )
                         .frame(width: geometry.size.width * 0.7, height: geometry.size.height)
                         .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.6), value: currentItem.rawId)
+                        .animation(.easeInOut(duration: 0.6), value: currentItem.id)
                     }
 
                     // Left side gradient for text area
@@ -390,7 +377,7 @@ struct HeroSection: View {
                         if currentItem.type == .episode {
                             if isYouTubeContent {
                                 // YouTube: show video title
-                                Text(currentItem.title)
+                                Text(currentItem.name)
                                     .font(.system(size: 28, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.9))
                                     .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 2)
@@ -419,7 +406,7 @@ struct HeroSection: View {
 
                             if let criticRating = currentItem.criticRating {
                                 HStack(spacing: 6) {
-                                    Text("\u{1F345}")
+                                    Text("🍅")
                                     Text("\(criticRating)%")
                                         .fontWeight(.semibold)
                                 }
@@ -436,12 +423,12 @@ struct HeroSection: View {
                                 }
                                 .foregroundStyle(.red)
                             } else {
-                                if let year = currentItem.year {
+                                if let year = currentItem.productionYear {
                                     Text(String(year))
                                 }
 
-                                if let durationTicks = currentItem.durationTicks {
-                                    Text(formatRuntime(durationTicks))
+                                if let runtime = currentItem.runTimeTicks {
+                                    Text(formatRuntime(runtime))
                                 }
                             }
                         }
@@ -545,10 +532,10 @@ struct HeroSection: View {
         return "\(minutes)m"
     }
 
-    private func formatEpisodeInfo(_ item: MediaItem) -> String {
-        let season = item.seasonNumber ?? 1
-        let episode = item.episodeNumber ?? 1
-        return "S\(season) E\(episode) \u{2022} \(item.title)"
+    private func formatEpisodeInfo(_ item: BaseItemDto) -> String {
+        let season = item.parentIndexNumber ?? 1
+        let episode = item.indexNumber ?? 1
+        return "S\(season) E\(episode) • \(item.name)"
     }
 
     private func formatDate(_ isoDate: String) -> String {
@@ -571,16 +558,15 @@ struct HeroSection: View {
 
 // MARK: - Recently Added Library Row
 struct RecentlyAddedLibraryRow: View {
-    let library: MediaLibrary
-    var displayName: String?  // Override for multi-server display (e.g. "Movies -- ServerName")
-    let onSelect: (MediaItem) -> Void
-    @State private var items: [MediaItem] = []
+    let library: JellyfinLibrary
+    let onSelect: (BaseItemDto) -> Void
+    @State private var items: [BaseItemDto] = []
     @State private var episodeCounts: [String: Int] = [:]  // seriesId -> count of new episodes
     @State private var isLoading = true
     @State private var loadError = false
 
     private var sectionTitle: String {
-        "Recently Added \(displayName ?? library.name)".cleanedYouTubeTitle
+        "Recently Added \(library.name)".cleanedYouTubeTitle
     }
 
     // Detect YouTube library by name
@@ -635,7 +621,7 @@ struct RecentlyAddedLibraryRow: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: isYouTubeLibrary ? 24 : 40) {
                         ForEach(items) { item in
-                            let key = item.seriesId ?? item.rawId
+                            let key = item.seriesId ?? item.id
                             // Use actual unplayed count from series (nil means no unwatched or not a series)
                             let unplayedCount = episodeCounts[key]
                             MediaPosterButton(
@@ -664,18 +650,22 @@ struct RecentlyAddedLibraryRow: View {
         loadError = false
 
         do {
-            guard let server = ServerManager.shared.server(forId: library.serverId) else { return }
-
-            // Use the MediaServer protocol for multi-server support
-            let latestItems = try await server.getLatestMedia(libraryId: library.rawId, limit: 30)
-
-            // Deduplicate by series for TV libraries
             let isTVLibrary = library.collectionType?.lowercased() == "tvshows"
-            items = deduplicateMediaItemsBySeries(latestItems)
+            let fetchLimit = 30
 
-            // Fetch actual unplayed counts from series (for Jellyfin TV shows)
-            if isTVLibrary && server.serverType == .jellyfin {
-                await loadUnplayedCounts(for: items)
+            let latestItems = try await JellyfinClient.shared.getLatestMedia(
+                parentId: library.id,
+                limit: fetchLimit,
+                includeWatched: true,
+                collectionType: library.collectionType,
+                isYouTubeLibrary: isYouTubeLibrary
+            )
+            let dedupedItems = deduplicateBySeries(latestItems)
+            items = dedupedItems
+
+            // Fetch actual unplayed counts from series (for TV shows)
+            if isTVLibrary {
+                await loadUnplayedCounts(for: dedupedItems)
             }
         } catch is CancellationError {
             // Ignore cancellation errors - expected during navigation
@@ -686,18 +676,18 @@ struct RecentlyAddedLibraryRow: View {
         isLoading = false
     }
 
-    private func loadUnplayedCounts(for mediaItems: [MediaItem]) async {
+    private func loadUnplayedCounts(for items: [BaseItemDto]) async {
         var counts: [String: Int] = [:]
 
-        // Collect unique series IDs
-        let seriesIds = Set(mediaItems.compactMap { item -> String? in
+        // Collect unique series IDs (handles both regular TV episodes and YouTube videos)
+        let seriesIds = Set(items.compactMap { item -> String? in
             if item.type == .episode { return item.seriesId }
             if item.type == .video { return item.seriesId }
-            if item.type == .series { return item.rawId }
+            if item.type == .series { return item.id }
             return nil
         })
 
-        // Fetch each series to get its unplayed count (Jellyfin-specific)
+        // Fetch each series to get its unplayed count
         for seriesId in seriesIds {
             do {
                 let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
@@ -712,16 +702,17 @@ struct RecentlyAddedLibraryRow: View {
         episodeCounts = counts
     }
 
-    private func deduplicateMediaItemsBySeries(_ items: [MediaItem]) -> [MediaItem] {
+    private func deduplicateBySeries(_ items: [BaseItemDto]) -> [BaseItemDto] {
         var seen = Set<String>()
-        var result: [MediaItem] = []
+        var result: [BaseItemDto] = []
 
         for item in items {
+            // Group episodes and videos by their series
             let key: String
             if item.type == .episode || item.type == .video {
-                key = item.seriesId ?? item.rawId
+                key = item.seriesId ?? item.id
             } else {
-                key = item.rawId
+                key = item.id
             }
             if !seen.contains(key) {
                 seen.insert(key)

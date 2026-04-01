@@ -3,9 +3,9 @@ import SwiftUI
 struct MediaRow: View {
     let title: String
     var subtitle: String?
-    let items: [MediaItem]
+    let items: [BaseItemDto]
     var isLandscape: Bool = false
-    let onSelect: (MediaItem) -> Void
+    let onSelect: (BaseItemDto) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -38,7 +38,7 @@ struct MediaRow: View {
 }
 
 struct MediaPosterButton: View {
-    let item: MediaItem
+    let item: BaseItemDto
     var libraryType: String?
     var libraryName: String?
     var isLandscape: Bool = false
@@ -56,17 +56,17 @@ struct MediaPosterButton: View {
     private var displayTitle: String {
         if isLandscape {
             // For landscape (YouTube), show video title
-            return item.title
+            return item.name
         }
         switch item.type {
         case .movie:
-            return item.title
+            return item.name
         case .series:
-            return item.title.cleanedYouTubeTitle
+            return item.name.cleanedYouTubeTitle
         case .episode:
-            return (item.seriesName ?? item.title).cleanedYouTubeTitle
+            return (item.seriesName ?? item.name).cleanedYouTubeTitle
         default:
-            return item.title
+            return item.name
         }
     }
 
@@ -100,7 +100,7 @@ struct MediaPosterButton: View {
         var ids: [String] = []
         if isLandscape {
             // Landscape mode (YouTube): try item's thumbnail first, then series as last resort
-            ids.append(item.rawId)
+            ids.append(item.id)
             if let seriesId = item.seriesId {
                 ids.append(seriesId)
             }
@@ -112,9 +112,9 @@ struct MediaPosterButton: View {
             if let seriesId = item.seriesId {
                 ids.append(seriesId)
             }
-            ids.append(item.rawId)
+            ids.append(item.id)
         } else {
-            ids.append(item.rawId)
+            ids.append(item.id)
         }
         return ids
     }
@@ -136,10 +136,12 @@ struct MediaPosterButton: View {
         parts.append(displayTitle)
 
         // Type
-        parts.append(item.type.rawValue)
+        if let type = item.type {
+            parts.append(type.rawValue)
+        }
 
         // Year
-        if let year = item.year {
+        if let year = item.productionYear {
             parts.append("from \(year)")
         }
 
@@ -150,12 +152,12 @@ struct MediaPosterButton: View {
         }
 
         // Watched status
-        if item.isPlayed {
+        if item.userData?.played == true {
             parts.append("watched")
         }
 
         // Favorite status
-        if item.isFavorite {
+        if item.userData?.isFavorite == true {
             parts.append("favorite")
         }
 
@@ -191,7 +193,7 @@ struct MediaPosterButton: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         // Watched indicator (small corner checkmark) - inside for non-circular
-                        if item.isPlayed {
+                        if item.userData?.played == true {
                             VStack {
                                 HStack {
                                     Spacer()
@@ -251,7 +253,7 @@ struct MediaPosterButton: View {
                                 .background(Color(red: 0.29, green: 0.55, blue: 0.73))
                                 .clipShape(Capsule())
                                 .offset(x: -4, y: 4)
-                        } else if item.isPlayed {
+                        } else if item.userData?.played == true {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 26))
                                 .symbolRenderingMode(.palette)
@@ -308,8 +310,8 @@ struct MediaPosterButton: View {
                 }
             } label: {
                 Label(
-                    item.isPlayed ? "Mark as Unwatched" : "Mark as Watched",
-                    systemImage: item.isPlayed ? "eye.slash" : "eye"
+                    item.userData?.played == true ? "Mark as Unwatched" : "Mark as Watched",
+                    systemImage: item.userData?.played == true ? "eye.slash" : "eye"
                 )
             }
 
@@ -331,11 +333,11 @@ struct MediaPosterButton: View {
 
     private func toggleWatched() async {
         do {
-            if item.isPlayed {
-                try await JellyfinClient.shared.markUnplayed(itemId: item.rawId)
+            if item.userData?.played == true {
+                try await JellyfinClient.shared.markUnplayed(itemId: item.id)
                 ToastManager.shared.show("Marked as unwatched", type: .success)
             } else {
-                try await JellyfinClient.shared.markPlayed(itemId: item.rawId)
+                try await JellyfinClient.shared.markPlayed(itemId: item.id)
                 ToastManager.shared.show("Marked as watched", type: .success)
             }
         } catch {
@@ -345,7 +347,7 @@ struct MediaPosterButton: View {
 
     private func refreshMetadata() async {
         do {
-            try await JellyfinClient.shared.refreshMetadata(itemId: item.rawId)
+            try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
             ToastManager.shared.show("Metadata refresh started", type: .info)
         } catch {
             ToastManager.shared.show("Failed to refresh metadata")
