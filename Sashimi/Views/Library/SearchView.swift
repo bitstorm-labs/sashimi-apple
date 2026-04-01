@@ -57,9 +57,9 @@ final class SearchHistoryManager: ObservableObject {
 struct SearchView: View {
     var onBackAtRoot: (() -> Void)?
     @State private var searchText = ""
-    @State private var results: [MediaItem] = []
+    @State private var results: [BaseItemDto] = []
     @State private var isSearching = false
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItem: BaseItemDto?
     @State private var selectedItemIsYouTube = false
     @State private var searchTask: Task<Void, Never>?
     @State private var youtubeLibraryIds: Set<String> = []
@@ -74,10 +74,10 @@ struct SearchView: View {
     }
 
     // Detect YouTube content by checking if we've identified it as YouTube
-    private func isYouTubeStyle(_ item: MediaItem) -> Bool {
+    private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
         if item.type == .video { return true }
         // Check if this specific item was identified as YouTube
-        if youtubeItemIds.contains(item.rawId) {
+        if youtubeItemIds.contains(item.id) {
             return true
         }
         // Check if the item belongs to a known YouTube library
@@ -95,20 +95,20 @@ struct SearchView: View {
         // Will be populated dynamically when we check item ancestors
     }
 
-    private func detectYouTubeItems(for items: [MediaItem]) async {
+    private func detectYouTubeItems(for items: [BaseItemDto]) async {
         // For each Series item, check if any ancestor has "youtube" in the name
         for item in items where item.type == .series {
             // Skip if we already know this item is YouTube
-            if youtubeItemIds.contains(item.rawId) {
+            if youtubeItemIds.contains(item.id) {
                 continue
             }
 
             do {
-                let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: item.rawId)
+                let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: item.id)
                 // Check if any ancestor has "youtube" in the name (the library folder)
                 for ancestor in ancestors where ancestor.name.lowercased().contains("youtube") {
                     // Mark this item as YouTube
-                    youtubeItemIds.insert(item.rawId)
+                    youtubeItemIds.insert(item.id)
                     // Store the ancestor's ID for future matches
                     youtubeLibraryIds.insert(ancestor.id)
                     if let parentId = item.parentId {
@@ -268,7 +268,7 @@ struct SearchView: View {
             }
         }
         .fullScreenCover(item: $selectedItem) { item in
-            MediaItemDetailBridge(mediaItem: item, forceYouTubeStyle: selectedItemIsYouTube)
+            MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
         }
         .onExitCommand {
             if !searchText.isEmpty {
@@ -294,12 +294,10 @@ struct SearchView: View {
         isSearching = true
 
         do {
-            let searchDtos = try await JellyfinClient.shared.search(query: searchText)
-            let serverId = ServerManager.shared.primaryServer?.id ?? ""
-            let mappedResults = searchDtos.map { mapDtoToMediaItem($0, serverId: serverId) }
+            let searchResults = try await JellyfinClient.shared.search(query: searchText)
             // Detect YouTube items by checking ancestors for "YouTube" library
-            await detectYouTubeItems(for: mappedResults)
-            results = mappedResults
+            await detectYouTubeItems(for: searchResults)
+            results = searchResults
             // Add to history on successful search
             if !results.isEmpty {
                 historyManager.addSearch(searchText)
@@ -310,10 +308,6 @@ struct SearchView: View {
         }
 
         isSearching = false
-    }
-
-    private func mapDtoToMediaItem(_ dto: BaseItemDto, serverId: String) -> MediaItem {
-        MediaItemMapper.map(dto, serverId: serverId)
     }
 }
 
