@@ -126,8 +126,15 @@ struct HomeView: View {
             }
         }
         .task {
+            // Wait for servers to be created before loading content
+            while !serverManager.serversReady {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
             await viewModel.loadContent()
             homeSettings.updateWithLibraries(viewModel.libraries)
+        }
+        .onChange(of: serverManager.activeServerId) { _, _ in
+            Task { await viewModel.loadContent() }
         }
         .onAppear {
             startAutoRefresh()

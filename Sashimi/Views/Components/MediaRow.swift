@@ -176,7 +176,8 @@ struct MediaPosterButton: View {
                                     itemIds: imageFallbackIds,
                                     maxWidth: 400,
                                     imageTypes: imageTypes,
-                                    contentMode: .fit
+                                    contentMode: .fit,
+                                    serverId: item.serverId
                                 )
                                 .clipShape(Circle())
                             )
@@ -185,7 +186,8 @@ struct MediaPosterButton: View {
                             itemIds: imageFallbackIds,
                             maxWidth: isLandscape ? 640 : 400,
                             imageTypes: imageTypes,
-                            contentMode: .fill
+                            contentMode: .fill,
+                            serverId: item.serverId
                         )
                         .frame(width: cardWidth, height: cardHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))

@@ -8,22 +8,39 @@ final class ServerManager: ObservableObject {
     @Published private(set) var accounts: [ServerAccount] = []
     @Published private(set) var servers: [any MediaServer] = []
     @Published private(set) var isAuthenticated = false
+    @Published private(set) var serversReady = false
     @Published var logoutReason: LogoutReason?
+    @Published var activeServerId: String? {
+        didSet { UserDefaults.standard.set(activeServerId, forKey: "activeServerId") }
+    }
 
     private let accountsKeychainKey = "serverAccounts"
 
     // MARK: - Convenience Accessors
 
-    var primaryServer: (any MediaServer)? {
-        servers.first
+    /// The currently active server (selected by user toggle)
+    var activeServer: (any MediaServer)? {
+        if let activeServerId {
+            return servers.first { $0.id == activeServerId }
+        }
+        return servers.first
     }
 
+    /// Alias for backward compat
+    var primaryServer: (any MediaServer)? { activeServer }
+
     var currentUserName: String? {
-        accounts.first?.userName
+        if let activeServerId {
+            return accounts.first { $0.id == activeServerId }?.userName
+        }
+        return accounts.first?.userName
     }
 
     var currentUserId: String? {
-        accounts.first?.userId
+        if let activeServerId {
+            return accounts.first { $0.id == activeServerId }?.userId
+        }
+        return accounts.first?.userId
     }
 
     // MARK: - Init
@@ -31,16 +48,20 @@ final class ServerManager: ObservableObject {
     private init() {
         let loaded = loadAccounts()
         accounts = loaded
-        Task {
-            for account in loaded {
-                await createServer(for: account)
-            }
-            isAuthenticated = !servers.isEmpty
-        }
+        activeServerId = UserDefaults.standard.string(forKey: "activeServerId")
+        // Set authenticated immediately so UI doesn't flash login screen
+        isAuthenticated = !loaded.isEmpty
 
-        // Migration: if no accounts in Keychain, check for old SessionManager credentials
         if loaded.isEmpty {
             migrateFromSessionManager()
+            serversReady = true
+        } else {
+            Task {
+                for account in loaded {
+                    await createServer(for: account)
+                }
+                serversReady = true
+            }
         }
     }
 
@@ -228,9 +249,15 @@ final class ServerManager: ObservableObject {
 
     // MARK: - Multi-Server Aggregation
 
+    /// Servers to use for content — just the active one if set
+    var activeServers: [any MediaServer] {
+        if let active = activeServer { return [active] }
+        return servers
+    }
+
     func getAllResumeItems(limit: Int = 20) async -> [MediaItem] {
         await withTaskGroup(of: [MediaItem].self) { group in
-            for server in servers {
+            for server in activeServers {
                 group.addTask {
                     (try? await server.getResumeItems(limit: limit)) ?? []
                 }
@@ -245,7 +272,7 @@ final class ServerManager: ObservableObject {
 
     func getAllNextUp(limit: Int = 50) async -> [MediaItem] {
         await withTaskGroup(of: [MediaItem].self) { group in
-            for server in servers {
+            for server in activeServers {
                 group.addTask {
                     (try? await server.getNextUp(limit: limit)) ?? []
                 }
