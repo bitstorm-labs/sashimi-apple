@@ -1,21 +1,14 @@
 import SwiftUI
 
 struct ContinueWatchingRow: View {
-    let items: [MediaItem]
-    var libraryNames: [String: String] = [:]  // rawId -> Library name mapping
-    var showServerBadges: Bool = false  // Whether to show server type badges on cards
-    let onSelect: (MediaItem) -> Void
-    var onPlay: ((MediaItem) -> Void)?  // Optional: immediate playback on Play button
+    let items: [BaseItemDto]
+    var libraryNames: [String: String] = [:]  // Item ID -> Library name mapping
+    let onSelect: (BaseItemDto) -> Void
+    var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
 
-    private func isYouTube(_ item: MediaItem) -> Bool {
-        guard let libraryName = libraryNames[item.rawId] else { return false }
+    private func isYouTube(_ item: BaseItemDto) -> Bool {
+        guard let libraryName = libraryNames[item.id] else { return false }
         return libraryName.lowercased().contains("youtube")
-    }
-
-    private func serverBadge(for item: MediaItem) -> String? {
-        guard showServerBadges,
-              let server = ServerManager.shared.server(forId: item.serverId) else { return nil }
-        return server.name
     }
 
     var body: some View {
@@ -31,7 +24,6 @@ struct ContinueWatchingRow: View {
                         ContinueWatchingCard(
                             item: item,
                             isYouTube: isYouTube(item),
-                            serverBadge: serverBadge(for: item),
                             onSelect: { onSelect(item) },
                             onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
                         )
@@ -45,9 +37,8 @@ struct ContinueWatchingRow: View {
 }
 
 struct ContinueWatchingCard: View {
-    let item: MediaItem
+    let item: BaseItemDto
     var isYouTube: Bool = false  // Whether this is YouTube content
-    var serverBadge: String?  // Short label when multiple servers connected (e.g. "J" or "P")
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
@@ -65,9 +56,9 @@ struct ContinueWatchingCard: View {
         // For episodes with backdrops (regular shows), use series backdrop
         // For episodes without backdrops (YouTube), use episode's own thumbnail
         if item.type == .episode {
-            return seriesHasBackdrop ? (item.seriesId ?? item.rawId) : item.rawId
+            return seriesHasBackdrop ? (item.seriesId ?? item.id) : item.id
         }
-        return item.rawId
+        return item.id
     }
 
     private var imageType: String {
@@ -92,24 +83,24 @@ struct ContinueWatchingCard: View {
     private var displayTitle: String {
         switch item.type {
         case .movie, .video:
-            return item.title
+            return item.name
         case .series:
-            return item.title.cleanedYouTubeTitle
+            return item.name.cleanedYouTubeTitle
         case .episode:
-            return (item.seriesName ?? item.title).cleanedYouTubeTitle
+            return (item.seriesName ?? item.name).cleanedYouTubeTitle
         default:
-            return item.title
+            return item.name
         }
     }
 
     private var episodeInfoString: String {
         // For YouTube, show date instead of S/E
         if isYouTube, let dateStr = item.premiereDate {
-            return "\(formatDate(dateStr)) - \(item.title)"
+            return "\(formatDate(dateStr)) - \(item.name)"
         }
-        let season = item.seasonNumber ?? 1
-        let episode = item.episodeNumber ?? 1
-        return "S\(season):E\(episode) - \(item.title)"
+        let season = item.parentIndexNumber ?? 1
+        let episode = item.indexNumber ?? 1
+        return "S\(season):E\(episode) - \(item.name)"
     }
 
     private func formatDate(_ isoDate: String) -> String {
@@ -169,17 +160,6 @@ struct ContinueWatchingCard: View {
                     .frame(width: 440, alignment: .leading)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(alignment: .topTrailing) {
-                    if let badge = serverBadge {
-                        Text(badge)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(SashimiTheme.accent.opacity(0.85)))
-                            .padding(8)
-                    }
-                }
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
@@ -203,7 +183,7 @@ struct ContinueWatchingCard: View {
                         )
                         .font(.system(size: 20))
                         .foregroundStyle(SashimiTheme.textSecondary)
-                    } else if let year = item.year {
+                    } else if let year = item.productionYear {
                         Text(String(year))
                             .font(.system(size: 20))
                             .foregroundStyle(SashimiTheme.textTertiary)
@@ -239,9 +219,9 @@ struct ContinueWatchingCard: View {
     }
 
     private func formatRemainingTime() -> String {
-        guard let durationTicks = item.durationTicks else { return "" }
-        let positionTicks = item.positionTicks ?? 0
-        let remaining = durationTicks - positionTicks
+        guard let total = item.runTimeTicks else { return "" }
+        let played = item.userData?.playbackPositionTicks ?? 0
+        let remaining = total - played
         let seconds = remaining / 10_000_000
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
@@ -256,8 +236,8 @@ struct ContinueWatchingCard: View {
 // MARK: - Continue Watching Detail View (See All)
 
 struct ContinueWatchingDetailView: View {
-    let items: [MediaItem]
-    let onSelect: (MediaItem) -> Void
+    let items: [BaseItemDto]
+    let onSelect: (BaseItemDto) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

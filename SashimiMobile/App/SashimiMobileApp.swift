@@ -14,7 +14,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct SashimiMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var serverManager = ServerManager.shared
+    @StateObject private var sessionManager = SessionManager.shared
 
     let modelContainer: ModelContainer
 
@@ -32,19 +32,19 @@ struct SashimiMobileApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(serverManager)
+                .environmentObject(sessionManager)
         }
         .modelContainer(modelContainer)
     }
 }
 
 struct ContentView: View {
-    @EnvironmentObject var serverManager: ServerManager
+    @EnvironmentObject var sessionManager: SessionManager
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         Group {
-            if serverManager.isAuthenticated {
+            if sessionManager.isAuthenticated {
                 Group {
                     if sizeClass == .compact {
                         PhoneTabView()
@@ -58,6 +58,9 @@ struct ContentView: View {
             } else {
                 MobileAuthView()
             }
+        }
+        .task {
+            await sessionManager.restoreSession()
         }
     }
 }

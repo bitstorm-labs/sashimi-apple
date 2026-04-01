@@ -6,7 +6,7 @@ private let logger = Logger(subsystem: "com.sashimi.app", category: "App")
 
 @main
 struct SashimiApp: App {
-    @StateObject private var serverManager = ServerManager.shared
+    @StateObject private var sessionManager = SessionManager.shared
 
     init() {
         configureAudioSession()
@@ -33,18 +33,18 @@ struct SashimiApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(serverManager)
+                .environmentObject(sessionManager)
                 .toastOverlay()
         }
     }
 }
 
 struct ContentView: View {
-    @EnvironmentObject private var serverManager: ServerManager
+    @EnvironmentObject private var sessionManager: SessionManager
 
     var body: some View {
         Group {
-            if serverManager.isAuthenticated {
+            if sessionManager.isAuthenticated {
                 MainTabView()
             } else {
                 ServerConnectionView()
@@ -54,7 +54,7 @@ struct ContentView: View {
 }
 
 struct MainTabView: View {
-    @EnvironmentObject private var serverManager: ServerManager
+    @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedTab = 0
     @State private var homeViewResetTrigger = false
     @State private var isAtDefaultState = true
@@ -149,7 +149,7 @@ enum ProfileDestination: Hashable {
 
 struct ProfileMenuView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var serverManager: ServerManager
+    @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
 
@@ -259,7 +259,7 @@ struct ProfileMenuView: View {
                 titleVisibility: .visible
             ) {
                 Button("Sign Out", role: .destructive) {
-                    serverManager.logout()
+                    sessionManager.logout()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -280,7 +280,7 @@ struct ProfileMenuView: View {
 // MARK: - Profile Header
 
 struct ProfileHeaderView: View {
-    @EnvironmentObject private var serverManager: ServerManager
+    @EnvironmentObject private var sessionManager: SessionManager
 
     var body: some View {
         VStack(spacing: 20) {
@@ -296,7 +296,8 @@ struct ProfileHeaderView: View {
                     )
                     .frame(width: 140, height: 140)
 
-                if let imageURL = serverManager.primaryServer?.userImageURL(maxWidth: 260) {
+                if let userId = sessionManager.currentUser?.id,
+                   let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
                     AsyncImage(url: imageURL) { image in
                         image
                             .resizable()
@@ -317,14 +318,14 @@ struct ProfileHeaderView: View {
             .shadow(color: SashimiTheme.accent.opacity(0.4), radius: 20)
 
             // User name
-            if let userName = serverManager.currentUserName {
+            if let userName = sessionManager.currentUser?.name {
                 Text(userName)
                     .font(.system(size: 38, weight: .bold))
                     .foregroundStyle(SashimiTheme.textPrimary)
             }
 
             // Server info
-            if let serverURL = serverManager.primaryServer?.serverURL {
+            if let serverURL = sessionManager.serverURL {
                 HStack(spacing: 8) {
                     Image(systemName: "server.rack")
                         .font(.system(size: 16))

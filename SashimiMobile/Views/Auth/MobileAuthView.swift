@@ -1,12 +1,7 @@
 import SwiftUI
 
 struct MobileAuthView: View {
-    @EnvironmentObject var serverManager: ServerManager
-
-    // Server type selection
-    @State private var selectedServerType: ServerType = .jellyfin
-
-    // Jellyfin state
+    @EnvironmentObject var sessionManager: SessionManager
     @State private var serverURL = ""
     @State private var username = ""
     @State private var password = ""
@@ -18,49 +13,17 @@ struct MobileAuthView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Server type picker
-                Section {
-                    Picker("Server Type", selection: $selectedServerType) {
-                        Text("Jellyfin").tag(ServerType.jellyfin)
-                        Text("Plex").tag(ServerType.plex)
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-                    .padding(.vertical, 4)
-                }
-
-                if selectedServerType == .jellyfin {
-                    jellyfinSections
+                if !showLogin {
+                    serverEntrySection
                 } else {
-                    MobilePlexAuthView(isConnecting: $isConnecting)
+                    loginSection
                 }
             }
-            .navigationTitle(navigationTitle)
+            .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
             .alert("Error", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
-            }
-        }
-    }
-
-    private var navigationTitle: String {
-        if selectedServerType == .jellyfin {
-            return showLogin ? "Sign In" : "Connect to Server"
-        } else {
-            return "Sign in with Plex"
-        }
-    }
-
-    // MARK: - Jellyfin Sections
-
-    private var jellyfinSections: some View {
-        Group {
-            if !showLogin {
-                serverEntrySection
-            } else {
-                loginSection
             }
         }
     }
@@ -133,8 +96,6 @@ struct MobileAuthView: View {
         }
     }
 
-    // MARK: - Jellyfin Logic
-
     private func connectToServer() {
         guard !serverURL.isEmpty else { return }
 
@@ -185,7 +146,7 @@ struct MobileAuthView: View {
 
         Task {
             do {
-                try await serverManager.addJellyfinServer(url: url, username: username, password: password)
+                try await sessionManager.login(serverURL: url, username: username, password: password)
                 await MainActor.run {
                     isConnecting = false
                 }

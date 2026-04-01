@@ -264,10 +264,10 @@ struct LibraryDetailView: View {
 
     let library: LibraryView_Model
 
-    @State private var items: [MediaItem] = []
+    @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
     @State private var isLoadingMore = false
-    @State private var selectedItem: MediaItem?
+    @State private var selectedItem: BaseItemDto?
     @State private var selectedItemIsYouTube = false
     @State private var totalCount = 0
     @State private var selectedLetter: String?
@@ -428,7 +428,7 @@ struct LibraryDetailView: View {
             await loadItems()
         }
         .fullScreenCover(item: $selectedItem) { item in
-            MediaItemDetailBridge(mediaItem: item, forceYouTubeStyle: selectedItemIsYouTube)
+            MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
         }
         .onChange(of: selectedItem) { oldValue, newValue in
             // Refresh item data when returning from detail view
@@ -459,14 +459,14 @@ struct LibraryDetailView: View {
         }
     }
 
-    private func findItem(for letter: String) -> MediaItem? {
+    private func findItem(for letter: String) -> BaseItemDto? {
         if letter == "#" {
             return items.first { item in
-                guard let firstChar = item.title.first else { return false }
+                guard let firstChar = item.name.first else { return false }
                 return !firstChar.isLetter
             }
         }
-        return items.first { $0.title.uppercased().hasPrefix(letter) }
+        return items.first { $0.name.uppercased().hasPrefix(letter) }
     }
 
     private func loadAllRemainingItems() async {
@@ -489,7 +489,7 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
-            items.append(contentsOf: response.items.map { mapDtoToMediaItem($0) })
+            items.append(contentsOf: response.items)
         } catch {
             // Silent fail — alphabet jump is best-effort
         }
@@ -533,7 +533,7 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
-            items = response.items.map { mapDtoToMediaItem($0) }
+            items = response.items
             totalCount = response.totalRecordCount
         } catch is CancellationError {
             // Ignore
@@ -571,7 +571,7 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
-            items.append(contentsOf: response.items.map { mapDtoToMediaItem($0) })
+            items.append(contentsOf: response.items)
         } catch is CancellationError {
             // Ignore
         } catch {
@@ -600,14 +600,10 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
-            items = response.items.map { mapDtoToMediaItem($0) }
+            items = response.items
         } catch {
             // Silent fail - non-critical refresh
         }
-    }
-
-    private func mapDtoToMediaItem(_ dto: BaseItemDto) -> MediaItem {
-        MediaItemMapper.map(dto)
     }
 }
 // swiftlint:enable type_body_length

@@ -78,12 +78,12 @@ struct PhoneHomeView: View {
                     libraryNames: libNames,
                     cardWidth: PhoneSizing.continueWatchingWidth
                 ) { item in
-                    PhoneMediaItemDetailBridge(mediaItem: item, libraryName: libNames[item.rawId])
+                    PhoneDetailView(item: item, libraryName: libNames[item.id])
                 }
             }
 
         case .library(let libraryId, let libraryName):
-            let library = viewModel.libraries.first(where: { $0.rawId == libraryId })
+            let library = viewModel.libraries.first(where: { $0.id == libraryId })
             MobileRecentlyAddedRow(
                 libraryId: libraryId,
                 libraryName: libraryName,

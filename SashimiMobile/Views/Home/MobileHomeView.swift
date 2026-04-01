@@ -66,12 +66,12 @@ struct MobileHomeView: View {
                     items: viewModel.continueWatchingItems,
                     libraryNames: libNames
                 ) { item in
-                    MobileMediaItemDetailBridge(mediaItem: item, libraryName: libNames[item.rawId])
+                    MobileDetailView(item: item, libraryName: libNames[item.id])
                 }
             }
 
         case .library(let libraryId, let libraryName):
-            let library = viewModel.libraries.first(where: { $0.rawId == libraryId })
+            let library = viewModel.libraries.first(where: { $0.id == libraryId })
             MobileRecentlyAddedRow(
                 libraryId: libraryId,
                 libraryName: libraryName,
