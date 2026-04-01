@@ -67,7 +67,7 @@ struct ContinueWatchingCard: View {
         if item.type == .episode {
             return seriesHasBackdrop ? (item.seriesId ?? item.rawId) : item.rawId
         }
-        return item.rawId
+        return item.imageItemId ?? item.rawId
     }
 
     private var imageType: String {
@@ -138,7 +138,8 @@ struct ContinueWatchingCard: View {
                         itemId: imageId,
                         imageType: imageType,
                         maxWidth: 600,
-                        fallbackImageTypes: fallbackImageTypes
+                        fallbackImageTypes: fallbackImageTypes,
+                        serverId: item.serverId
                     )
                     .frame(width: 440, height: 248)
                     .overlay(

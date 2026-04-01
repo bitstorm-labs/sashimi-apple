@@ -32,13 +32,13 @@ final class HomeViewModel: ObservableObject {
     }()
 
     func loadContent() async {
-        guard !serverManager.servers.isEmpty else { return }
+        guard !serverManager.activeServers.isEmpty else { return }
 
         isLoading = true
         error = nil
 
         do {
-            // Continue watching merged from all servers
+            // Continue watching from active server(s)
             async let resumeTask = serverManager.getAllResumeItems()
             async let nextUpTask = serverManager.getAllNextUp()
 
@@ -47,17 +47,17 @@ final class HomeViewModel: ObservableObject {
 
             continueWatchingItems = mergeAndSortContinueItems(resume: resumeItems, nextUp: nextUpItems)
 
-            // Libraries from ALL servers
+            // Libraries from active server(s)
             var allLibraries: [MediaLibrary] = []
-            for server in serverManager.servers {
+            for server in serverManager.activeServers {
                 let libs = (try? await server.getLibraries()) ?? []
                 allLibraries.append(contentsOf: libs)
             }
             libraries = allLibraries.filter { isMediaLibrary($0) }
 
-            // Recently added from all servers
+            // Recently added from active server(s)
             var allLatest: [MediaItem] = []
-            for server in serverManager.servers {
+            for server in serverManager.activeServers {
                 let items = (try? await server.getLatestMedia(libraryId: nil, limit: 30)) ?? []
                 allLatest.append(contentsOf: items)
             }

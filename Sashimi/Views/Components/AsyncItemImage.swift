@@ -7,17 +7,34 @@ struct SmartPosterImage: View {
     let maxWidth: Int
     var imageTypes: [String] = ["Primary", "Thumb"]
     var contentMode: ContentMode = .fill
+    var serverId: String?
 
     @State private var currentIndex: Int = 0
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
     @State private var attemptId = UUID()
 
+    private var resolvedServer: (any MediaServer)? {
+        if let serverId {
+            return ServerManager.shared.server(forId: serverId)
+        }
+        if ServerManager.shared.servers.count == 1 {
+            return ServerManager.shared.servers.first
+        }
+        return nil
+    }
+
     private var currentURL: URL? {
         guard currentIndex < itemIds.count, currentTypeIndex < imageTypes.count else { return nil }
+        let itemId = itemIds[currentIndex]
+        let type = imageTypes[currentTypeIndex]
+        if let server = resolvedServer {
+            let imageT: ImageType = type == "Backdrop" ? .backdrop : type == "Thumb" ? .thumb : .primary
+            return server.imageURL(itemId: itemId, type: imageT, maxWidth: maxWidth)
+        }
         return JellyfinClient.shared.syncImageURL(
-            itemId: itemIds[currentIndex],
-            imageType: imageTypes[currentTypeIndex],
+            itemId: itemId,
+            imageType: type,
             maxWidth: maxWidth
         )
     }
@@ -95,6 +112,7 @@ struct AsyncItemImage: View {
     var contentMode: ContentMode = .fill
     var fallbackImageTypes: [String] = []
     var server: (any MediaServer)?
+    var serverId: String?
 
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
@@ -106,12 +124,20 @@ struct AsyncItemImage: View {
 
     private var resolvedServer: (any MediaServer)? {
         if let server { return server }
+        // Check explicit serverId
+        if let serverId {
+            return ServerManager.shared.server(forId: serverId)
+        }
         // Auto-resolve: if itemId contains ":" it's a composite "{serverId}:{rawId}"
         if itemId.contains(":") {
             let parts = itemId.split(separator: ":", maxSplits: 1)
             if parts.count == 2 {
                 return ServerManager.shared.server(forId: String(parts[0]))
             }
+        }
+        // Fallback: if there's only one server, use it
+        if ServerManager.shared.servers.count == 1 {
+            return ServerManager.shared.servers.first
         }
         return nil
     }

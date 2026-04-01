@@ -560,6 +560,10 @@ struct ConnectedServersSection: View {
             ForEach(serverManager.accounts) { account in
                 ConnectedServerRow(
                     account: account,
+                    isActive: serverManager.activeServerId == account.id || (serverManager.activeServerId == nil && account.id == serverManager.accounts.first?.id),
+                    onSelect: {
+                        serverManager.activeServerId = account.id
+                    },
                     onRemove: { serverToRemove = account }
                 )
             }
@@ -594,6 +598,8 @@ struct ConnectedServersSection: View {
 
 struct ConnectedServerRow: View {
     let account: ServerAccount
+    var isActive: Bool = false
+    var onSelect: () -> Void = {}
     let onRemove: () -> Void
     @FocusState private var isFocused: Bool
     @FocusState private var removeIsFocused: Bool
@@ -613,51 +619,64 @@ struct ConnectedServerRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: serverTypeIcon)
-                .font(Typography.title)
-                .foregroundStyle(SashimiTheme.accent)
-                .frame(width: 50)
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Active indicator
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(Typography.title)
+                    .foregroundStyle(isActive ? SashimiTheme.accent : SashimiTheme.textTertiary)
+                    .frame(width: 36)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(account.serverName)
-                    .font(Typography.body)
-                    .foregroundStyle(SashimiTheme.textPrimary)
+                Image(systemName: serverTypeIcon)
+                    .font(Typography.title)
+                    .foregroundStyle(isActive ? SashimiTheme.accent : SashimiTheme.textSecondary)
+                    .frame(width: 50)
 
-                HStack(spacing: 8) {
-                    Text(serverTypeName)
-                        .font(Typography.captionSmall)
-                        .foregroundStyle(SashimiTheme.accent.opacity(0.8))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(SashimiTheme.accent.opacity(0.15)))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.serverName)
+                        .font(Typography.body)
+                        .foregroundStyle(isActive ? SashimiTheme.textPrimary : SashimiTheme.textSecondary)
 
-                    Text(account.userName)
-                        .font(Typography.caption)
-                        .foregroundStyle(SashimiTheme.textTertiary)
+                    HStack(spacing: 8) {
+                        Text(serverTypeName)
+                            .font(Typography.captionSmall)
+                            .foregroundStyle(SashimiTheme.accent.opacity(0.8))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(SashimiTheme.accent.opacity(0.15)))
+
+                        Text(account.userName)
+                            .font(Typography.caption)
+                            .foregroundStyle(SashimiTheme.textTertiary)
+                    }
                 }
-            }
 
-            Spacer()
+                Spacer()
 
-            Button(action: onRemove) {
-                Image(systemName: "trash")
-                    .font(Typography.bodySmall)
-                    .foregroundStyle(removeIsFocused ? .white : .red.opacity(0.7))
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(removeIsFocused ? Color.red : Color.red.opacity(0.1))
-                    )
+                Button(action: onRemove) {
+                    Image(systemName: "trash")
+                        .font(Typography.bodySmall)
+                        .foregroundStyle(removeIsFocused ? .white : .red.opacity(0.7))
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(removeIsFocused ? Color.red : Color.red.opacity(0.1))
+                        )
+                }
+                .buttonStyle(PlainNoHighlightButtonStyle())
+                .focused($removeIsFocused)
             }
-            .buttonStyle(PlainNoHighlightButtonStyle())
-            .focused($removeIsFocused)
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.08) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.accent.opacity(0.08) : (isActive ? SashimiTheme.accent.opacity(0.04) : SashimiTheme.cardBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(isActive ? SashimiTheme.accent.opacity(0.3) : .clear, lineWidth: 1)
         )
         .focused($isFocused)
     }
