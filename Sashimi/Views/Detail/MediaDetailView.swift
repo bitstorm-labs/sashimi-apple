@@ -796,8 +796,8 @@ struct MediaDetailView: View {
                 }
             }
 
-            // Trailer button for movies with trailers
-            if !isSeries && !isEpisode, let trailers = item.remoteTrailers, !trailers.isEmpty {
+            // Trailer button for movies and series with trailers
+            if !isEpisode, let trailers = item.remoteTrailers, !trailers.isEmpty {
                 ActionButton(
                     title: "Trailer",
                     icon: "film",

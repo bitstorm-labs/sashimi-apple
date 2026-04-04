@@ -61,11 +61,11 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 skipButton.setTitle(title, for: .normal)
                 if skipButton.isHidden {
                     skipButton.isHidden = false
-                    container.setNeedsFocusUpdate()
-                    container.updateFocusIfNeeded()
+                    container.updateSkipButtonFocus()
                 }
             } else if !skipButton.isHidden {
                 skipButton.isHidden = true
+                container.updateSkipButtonFocus()
             }
         }
     }
@@ -108,6 +108,19 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         container.skipButton = skipButton
         context.coordinator.skipButton = skipButton
+
+        // Focus guide: creates a path from the player controls back to the skip button.
+        // Without this, swiping down from the transport bar can't reach the button.
+        let focusGuide = UIFocusGuide()
+        container.view.addLayoutGuide(focusGuide)
+        NSLayoutConstraint.activate([
+            focusGuide.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            focusGuide.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            focusGuide.bottomAnchor.constraint(equalTo: skipButton.topAnchor),
+            focusGuide.heightAnchor.constraint(equalToConstant: 200)
+        ])
+        focusGuide.preferredFocusEnvironments = [skipButton]
+        container.skipFocusGuide = focusGuide
     }
 
     // MARK: - Transport Bar Menus
@@ -226,12 +239,19 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
 class PlayerContainerVC: UIViewController {
     weak var skipButton: UIButton?
+    var skipFocusGuide: UIFocusGuide?
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         if let skipButton, !skipButton.isHidden {
             return [skipButton]
         }
         return super.preferredFocusEnvironments
+    }
+
+    func updateSkipButtonFocus() {
+        skipFocusGuide?.isEnabled = !(skipButton?.isHidden ?? true)
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
     }
 }
 
