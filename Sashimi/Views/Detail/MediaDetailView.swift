@@ -695,9 +695,9 @@ struct MediaDetailView: View {
             if seasonCount > 0 {
                 parts.append(seasonCount == 1 ? "1 Season" : "\(seasonCount) Seasons")
             }
-        } else if let runtime = item.runTimeTicks {
+        } else if let runtime = DateFormatting.formatRuntime(item.runTimeTicks) {
             // Only show runtime for non-series content
-            parts.append(formatRuntime(runtime))
+            parts.append(runtime)
         }
 
         return parts.joined(separator: " • ")
@@ -1177,13 +1177,6 @@ struct MediaDetailView: View {
         } catch {
             // Silently ignore media info loading failures - not critical for playback
         }
-    }
-
-    private func formatRuntime(_ ticks: Int64) -> String {
-        let seconds = ticks / 10_000_000
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
     }
 
     /// Calculates and formats the finish time if playback started now
