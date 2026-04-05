@@ -74,7 +74,4 @@ final class SessionManager: ObservableObject {
         self.isAuthenticated = false
     }
 
-    func clearLogoutReason() {
-        logoutReason = nil
-    }
 }

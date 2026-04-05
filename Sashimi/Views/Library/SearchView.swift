@@ -91,10 +91,6 @@ struct SearchView: View {
         return false
     }
 
-    private func loadYouTubeLibraryIds() async {
-        // Will be populated dynamically when we check item ancestors
-    }
-
     private func detectYouTubeItems(for items: [BaseItemDto]) async {
         // For each Series item, check if any ancestor has "youtube" in the name
         for item in items where item.type == .series {
@@ -279,9 +275,6 @@ struct SearchView: View {
                 // At root with empty search
                 onBackAtRoot?()
             }
-        }
-        .task {
-            await loadYouTubeLibraryIds()
         }
     }
 

@@ -408,11 +408,6 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getVirtualFolders() async throws -> [VirtualFolderInfo] {
-        let data = try await request(path: "/Library/VirtualFolders")
-        return try JSONDecoder().decode([VirtualFolderInfo].self, from: data)
-    }
-
     func getItems(
         parentId: String? = nil,
         includeTypes: [ItemType]? = nil,

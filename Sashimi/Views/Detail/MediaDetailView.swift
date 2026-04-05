@@ -26,7 +26,6 @@ struct MediaDetailView: View {
     }
     @State private var seasons: [BaseItemDto] = []
     @State private var episodes: [BaseItemDto] = []
-    @State private var moreFromSeason: [BaseItemDto] = []
     @State private var selectedSeason: BaseItemDto?
     @State private var selectedEpisode: BaseItemDto?
     @State private var mediaInfo: MediaSourceInfo?
@@ -399,22 +398,6 @@ struct MediaDetailView: View {
     }
 
     // MARK: - Poster
-
-    private var posterId: String {
-        if isEpisode {
-            // Regular TV shows have parent backdrop images - use season poster
-            if seriesHasBackdrop, let seasonId = item.seasonId {
-                return seasonId
-            }
-            // YouTube/home videos - use episode's own thumbnail
-            return item.id
-        }
-        // Video type (YouTube) - always use own thumbnail
-        if isVideo {
-            return item.id
-        }
-        return item.id
-    }
 
     // All possible poster IDs to try in order
     private var posterFallbackIds: [String] {
@@ -904,45 +887,6 @@ struct MediaDetailView: View {
         }
     }
 
-    // MARK: - Media Info
-    private func mediaInfoSection(_ info: MediaSourceInfo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 24) {
-                if let container = info.container {
-                    mediaInfoPill(icon: "doc", text: container.uppercased())
-                }
-
-                if let videoCodec = info.videoCodec {
-                    mediaInfoPill(icon: "film", text: videoCodec.uppercased())
-                }
-
-                if let resolution = info.videoResolution {
-                    mediaInfoPill(icon: "rectangle.on.rectangle", text: resolution)
-                }
-
-                if let audioCodec = info.audioCodec {
-                    mediaInfoPill(icon: "speaker.wave.2", text: audioCodec.uppercased())
-                }
-
-                if let channels = info.audioChannels {
-                    mediaInfoPill(icon: "speaker.wave.3", text: "\(channels) CH")
-                }
-            }
-
-            // Audio track languages
-            if !info.audioLanguages.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "globe")
-                        .font(.caption)
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                    Text("Audio: " + info.audioLanguages.joined(separator: ", "))
-                        .font(.caption)
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                }
-            }
-        }
-    }
-
     private func mediaInfoPill(icon: String, text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
@@ -1207,7 +1151,6 @@ struct MediaDetailView: View {
                 selectedSeason = seasons.first { $0.id == seasonId }
                 let allEpisodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: seasonId)
                 episodes = allEpisodes
-                moreFromSeason = allEpisodes.filter { $0.id != item.id }
             } else if let firstSeason = seasons.first {
                 selectedSeason = firstSeason
                 await loadEpisodesForEpisodeView(seriesId: seriesId, seasonId: firstSeason.id)
@@ -1533,41 +1476,6 @@ struct EpisodeCard: View {
         }
 
         return parts.joined(separator: ", ")
-    }
-}
-
-struct TrailerListView: View {
-    let trailers: [MediaUrl]
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.95).ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                Text("Trailers")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .padding(.top, 50)
-
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(Array(trailers.enumerated()), id: \.offset) { index, trailer in
-                            TrailerRow(
-                                name: trailer.name ?? "Trailer \(index + 1)",
-                                url: trailer.url
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 100)
-                }
-
-                Button("Close") {
-                    dismiss()
-                }
-                .padding(.bottom, 50)
-            }
-        }
     }
 }
 
