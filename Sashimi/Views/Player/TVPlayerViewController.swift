@@ -55,19 +55,15 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.updateOverlay()
 
         // Update skip button visibility
-        if let skipButton = context.coordinator.skipButton {
+        if let skipVC = context.coordinator.skipVC {
             if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
                 let title = "Skip \(segment.type.displayName)"
-                skipButton.setTitle(title, for: .normal)
-                if skipButton.isHidden {
-                    skipButton.isHidden = false
-                    container.setNeedsFocusUpdate()
-                    container.updateFocusIfNeeded()
+                skipVC.updateTitle(title)
+                if skipVC.view.isHidden {
+                    skipVC.view.isHidden = false
                 }
-            } else if !skipButton.isHidden {
-                skipButton.isHidden = true
-                container.setNeedsFocusUpdate()
-                    container.updateFocusIfNeeded()
+            } else if !skipVC.view.isHidden {
+                skipVC.view.isHidden = true
             }
         }
     }
@@ -94,24 +90,17 @@ struct TVPlayerView: UIViewControllerRepresentable {
         hosting.didMove(toParent: playerVC)
         context.coordinator.hostingController = hosting
 
-        // Skip button on contentOverlayView so it participates in AVPVC's focus system
-        let skipButton = UIButton(type: .system)
-        skipButton.setTitle("Skip", for: .normal)
-        skipButton.titleLabel?.font = .systemFont(ofSize: 32, weight: .bold)
-        skipButton.isHidden = true
-        skipButton.translatesAutoresizingMaskIntoConstraints = false
-        skipButton.addTarget(context.coordinator, action: #selector(Coordinator.skipSegmentTapped), for: .primaryActionTriggered)
-
-        if let overlay = playerVC.contentOverlayView {
-            overlay.addSubview(skipButton)
-            NSLayoutConstraint.activate([
-                skipButton.trailingAnchor.constraint(equalTo: overlay.trailingAnchor, constant: -90),
-                skipButton.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -90)
-            ])
+        // Skip button in a custom overlay VC so it's focusable alongside the transport bar
+        let skipVC = SkipButtonViewController()
+        let coordinator = context.coordinator
+        skipVC.onSkip = {
+            coordinator.skipSegmentTapped()
         }
+        skipVC.view.isHidden = true
 
-        container.skipButton = skipButton
-        context.coordinator.skipButton = skipButton
+        playerVC.customOverlayViewController = skipVC
+        container.skipVC = skipVC
+        context.coordinator.skipVC = skipVC
     }
 
     // MARK: - Transport Bar Menus
@@ -183,7 +172,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         let onDismiss: () -> Void
         var playerVC: AVPlayerViewController?
         var hostingController: UIHostingController<PlayerContentOverlay>?
-        var skipButton: UIButton?
+        var skipVC: SkipButtonViewController?
         var controlsVisible = false
         weak var currentViewModel: PlayerViewModel?
         var currentItem: BaseItemDto?
@@ -192,7 +181,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
             self.onDismiss = onDismiss
         }
 
-        @objc func skipSegmentTapped() {
+        func skipSegmentTapped() {
             Task { @MainActor in
                 self.currentViewModel?.skipCurrentSegment()
             }
@@ -229,7 +218,38 @@ struct TVPlayerView: UIViewControllerRepresentable {
 // MARK: - Container VC (supports focus redirection to skip button)
 
 class PlayerContainerVC: UIViewController {
-    weak var skipButton: UIButton?
+    var skipVC: SkipButtonViewController?
+}
+
+// MARK: - Skip Button (custom overlay VC for AVPlayerViewController focus support)
+
+class SkipButtonViewController: UIViewController {
+    var onSkip: (() -> Void)?
+    private let button = UIButton(type: .system)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+
+        button.setTitle("Skip", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 32, weight: .bold)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(tapped), for: .primaryActionTriggered)
+        view.addSubview(button)
+
+        NSLayoutConstraint.activate([
+            button.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -90),
+            button.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -90)
+        ])
+    }
+
+    func updateTitle(_ title: String) {
+        button.setTitle(title, for: .normal)
+    }
+
+    @objc private func tapped() {
+        onSkip?()
+    }
 }
 
 // MARK: - Content Overlay (info bar, subtitles, clock)
