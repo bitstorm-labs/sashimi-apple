@@ -51,7 +51,7 @@ class SubtitleManager: ObservableObject {
                 cues = parseWebVTT(vttContent)
             }
         } catch {
-            print("SubtitleManager: Failed to load subtitles: \(error.localizedDescription)")
+            // Subtitle loading failed — no subtitles will be shown
         }
 
         isLoading = false

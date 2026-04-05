@@ -73,5 +73,4 @@ final class SessionManager: ObservableObject {
         self.logoutReason = reason
         self.isAuthenticated = false
     }
-
 }

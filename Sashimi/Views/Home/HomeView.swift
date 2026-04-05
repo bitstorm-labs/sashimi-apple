@@ -528,7 +528,6 @@ struct HeroSection: View {
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"
     }
-
 }
 
 // MARK: - Recently Added Library Row
