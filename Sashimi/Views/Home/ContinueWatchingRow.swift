@@ -95,30 +95,12 @@ struct ContinueWatchingCard: View {
 
     private var episodeInfoString: String {
         // For YouTube, show date instead of S/E
-        if isYouTube, let dateStr = item.premiereDate {
-            return "\(formatDate(dateStr)) - \(item.name)"
+        if isYouTube, let dateStr = DateFormatting.formatDate(item.premiereDate) {
+            return "\(dateStr) - \(item.name)"
         }
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season):E\(episode) - \(item.name)"
-    }
-
-    private func formatDate(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        return ""
     }
 
     var body: some View {
@@ -147,7 +129,7 @@ struct ContinueWatchingCard: View {
                                 .font(.caption)
                                 .foregroundStyle(SashimiTheme.accent)
 
-                            Text(formatRemainingTime())
+                            Text(remainingTimeString)
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundStyle(SashimiTheme.textSecondary)
@@ -206,6 +188,13 @@ struct ContinueWatchingCard: View {
         }
     }
 
+    private var remainingTimeString: String {
+        guard let total = item.runTimeTicks else { return "" }
+        let played = item.userData?.playbackPositionTicks ?? 0
+        let remaining = total - played
+        return DateFormatting.formatRemainingTime(remaining) ?? ""
+    }
+
     private var accessibilityDescription: String {
         var parts: [String] = [displayTitle]
 
@@ -213,23 +202,9 @@ struct ContinueWatchingCard: View {
             parts.append(episodeInfoString)
         }
 
-        parts.append(formatRemainingTime())
+        parts.append(remainingTimeString)
 
         return parts.joined(separator: ", ")
-    }
-
-    private func formatRemainingTime() -> String {
-        guard let total = item.runTimeTicks else { return "" }
-        let played = item.userData?.playbackPositionTicks ?? 0
-        let remaining = total - played
-        let seconds = remaining / 10_000_000
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m left"
-        }
-        return "\(minutes)m left"
     }
 }
 

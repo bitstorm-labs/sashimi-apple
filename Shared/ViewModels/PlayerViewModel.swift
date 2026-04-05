@@ -112,75 +112,30 @@ final class PlayerViewModel: ObservableObject {
 
         do {
             let freshItem: BaseItemDto
-            let url: URL
 
             if let localFileURL {
                 // Offline playback from local file
                 freshItem = item
                 currentItem = item
-                url = localFileURL
+
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback)
+                try audioSession.setActive(true)
+
+                let asset = AVURLAsset(url: localFileURL)
+                let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
+                player = AVPlayer(playerItem: playerItem)
             } else {
                 // Online playback - fetch fresh data from server
                 freshItem = try await client.getItem(itemId: item.id)
                 currentItem = freshItem
 
-                let playbackInfo = try await client.getPlaybackInfo(itemId: freshItem.id, maxBitrate: selectedQuality.maxBitrate)
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback)
+                try audioSession.setActive(true)
 
-                guard let mediaSource = playbackInfo.mediaSources?.first else {
-                    throw PlayerError.noMediaSource
-                }
-
-                // Store media source for subtitle/audio track info
-                currentMediaSource = mediaSource
-                videoResolution = mediaSource.videoResolution
-
-                let resolvedURL: URL?
-                if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
-                    resolvedURL = await client.buildURL(path: transcodingPath)
-                } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
-                    resolvedURL = await client.buildURL(path: directPath)
-                } else {
-                    resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
-                }
-
-                guard let resolvedURL else {
-                    throw PlayerError.noStreamURL
-                }
-                url = resolvedURL
+                try await setupPlayer(for: freshItem)
             }
-
-            attemptedURL = url.absoluteString
-
-            // Configure audio session for playback
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .moviePlayback)
-            try audioSession.setActive(true)
-
-            let asset = AVURLAsset(url: url)
-            // Only load playable + duration — exclude media selection groups
-            // so AVPlayerViewController won't show native subtitle/audio buttons
-            let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
-
-            // Set up chapter markers immediately (before playback starts)
-            if let chapters = freshItem.chapters, !chapters.isEmpty,
-               let runTimeTicks = freshItem.runTimeTicks {
-                let duration = Double(runTimeTicks) / 10_000_000.0
-                setupChapterMarkers(on: playerItem, chapters: chapters, duration: duration)
-            }
-
-            errorObserver = playerItem.observe(\.status) { [weak self] item, _ in
-                Task { @MainActor in
-                    if item.status == .failed {
-                        self?.errorMessage = item.error?.localizedDescription ?? "Unknown playback error"
-                        self?.error = item.error
-                    }
-                }
-            }
-
-            player = AVPlayer(playerItem: playerItem)
-            player?.appliesMediaSelectionCriteriaAutomatically = false
-            player?.volume = 1.0
-            player?.isMuted = false
 
             // Set up remote control commands for Bluetooth headsets/remotes
             // On tvOS, AVPlayerViewController handles MPRemoteCommandCenter automatically
@@ -188,33 +143,6 @@ final class PlayerViewModel: ObservableObject {
             setupRemoteCommands()
             #endif
             updateNowPlayingInfo(item: freshItem)
-
-            statusObserver = player?.observe(\.status) { [weak self] player, _ in
-                Task { @MainActor in
-                    if player.status == .failed {
-                        self?.errorMessage = player.error?.localizedDescription ?? "Player failed"
-                        self?.error = player.error
-                    }
-                }
-            }
-
-            // Observe play/pause to report progress immediately
-            rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
-                Task { @MainActor in
-                    await self?.reportProgress()
-                }
-            }
-
-            // Observe playback end
-            endObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: playerItem,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    await self?.handlePlaybackEnded()
-                }
-            }
 
             isLoading = false
 
@@ -385,79 +313,10 @@ final class PlayerViewModel: ObservableObject {
         player = nil
         isLoading = true
 
-        // Reload with new quality
         do {
-            let playbackInfo = try await client.getPlaybackInfo(itemId: item.id, maxBitrate: quality.maxBitrate)
-
-            guard let mediaSource = playbackInfo.mediaSources?.first else {
-                throw PlayerError.noMediaSource
-            }
-
-            currentMediaSource = mediaSource
-
-            let url: URL?
-            if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
-                url = await client.buildURL(path: transcodingPath)
-            } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
-                url = await client.buildURL(path: directPath)
-            } else {
-                url = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
-            }
-
-            guard let url else {
-                throw PlayerError.noStreamURL
-            }
-
-            let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
-
-            // Set up chapter markers
-            if let chapters = item.chapters, !chapters.isEmpty,
-               let runTimeTicks = item.runTimeTicks {
-                let duration = Double(runTimeTicks) / 10_000_000.0
-                setupChapterMarkers(on: playerItem, chapters: chapters, duration: duration)
-            }
-
-            errorObserver = playerItem.observe(\.status) { [weak self] item, _ in
-                Task { @MainActor in
-                    if item.status == .failed {
-                        self?.errorMessage = item.error?.localizedDescription ?? "Unknown playback error"
-                        self?.error = item.error
-                    }
-                }
-            }
-
-            player = AVPlayer(playerItem: playerItem)
-            player?.volume = 1.0
-            player?.isMuted = false
-            player?.appliesMediaSelectionCriteriaAutomatically = false
-
-            statusObserver = player?.observe(\.status) { [weak self] player, _ in
-                Task { @MainActor in
-                    if player.status == .failed {
-                        self?.errorMessage = player.error?.localizedDescription ?? "Player failed"
-                        self?.error = player.error
-                    }
-                }
-            }
-
-            rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
-                Task { @MainActor in
-                    await self?.reportProgress()
-                }
-            }
-
-            endObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: playerItem,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    await self?.handlePlaybackEnded()
-                }
-            }
-
+            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate)
             isLoading = false
+            updateNowPlayingInfo(item: item)
 
             // Seek to saved position
             if positionTicks > 0 {
@@ -473,6 +332,81 @@ final class PlayerViewModel: ObservableObject {
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
+    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil) async throws {
+        let playbackInfo = try await client.getPlaybackInfo(itemId: item.id, maxBitrate: maxBitrate ?? selectedQuality.maxBitrate)
+
+        guard let mediaSource = playbackInfo.mediaSources?.first else {
+            throw PlayerError.noMediaSource
+        }
+
+        currentMediaSource = mediaSource
+        videoResolution = mediaSource.videoResolution
+
+        let resolvedURL: URL?
+        if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
+            resolvedURL = await client.buildURL(path: transcodingPath)
+        } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
+            resolvedURL = await client.buildURL(path: directPath)
+        } else {
+            resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+        }
+
+        guard let resolvedURL else {
+            throw PlayerError.noStreamURL
+        }
+
+        attemptedURL = resolvedURL.absoluteString
+
+        let asset = AVURLAsset(url: resolvedURL)
+        let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
+
+        if let chapters = item.chapters, !chapters.isEmpty,
+           let runTimeTicks = item.runTimeTicks {
+            let duration = Double(runTimeTicks) / 10_000_000.0
+            setupChapterMarkers(on: playerItem, chapters: chapters, duration: duration)
+        }
+
+        errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
+            Task { @MainActor in
+                if observed.status == .failed {
+                    self?.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
+                    self?.error = observed.error
+                }
+            }
+        }
+
+        player = AVPlayer(playerItem: playerItem)
+        player?.appliesMediaSelectionCriteriaAutomatically = false
+        player?.volume = 1.0
+        player?.isMuted = false
+
+        statusObserver = player?.observe(\.status) { [weak self] observed, _ in
+            Task { @MainActor in
+                if observed.status == .failed {
+                    self?.errorMessage = observed.error?.localizedDescription ?? "Player failed"
+                    self?.error = observed.error
+                }
+            }
+        }
+
+        rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
+            Task { @MainActor in
+                await self?.reportProgress()
+            }
+        }
+
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.handlePlaybackEnded()
+            }
         }
     }
 
@@ -803,7 +737,7 @@ final class PlayerViewModel: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
 
-    private nonisolated func cleanupRemoteCommands() {
+    nonisolated private func cleanupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
         commandCenter.playCommand.removeTarget(nil)
         commandCenter.pauseCommand.removeTarget(nil)

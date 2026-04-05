@@ -55,19 +55,6 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertFalse(manager.isAuthenticated)
     }
 
-    @MainActor
-    func testClearLogoutReason() async {
-        let manager = SessionManager.shared
-
-        // Set a logout reason
-        manager.logout(reason: .userInitiated)
-        XCTAssertNotNil(manager.logoutReason)
-
-        // Clear it
-        manager.clearLogoutReason()
-        XCTAssertNil(manager.logoutReason)
-    }
-
     // MARK: - UserDto Tests
 
     func testUserDtoDecoding() throws {

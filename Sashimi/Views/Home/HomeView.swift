@@ -194,6 +194,7 @@ struct HomeView: View {
     }
 
     private func startAutoRefresh() {
+        refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
             Task {
                 await viewModel.refresh()
@@ -414,8 +415,8 @@ struct HeroSection: View {
 
                             if isYouTubeContent {
                                 // Show full date for YouTube
-                                if let dateStr = currentItem.premiereDate {
-                                    Text(formatDate(dateStr))
+                                if let dateStr = DateFormatting.formatDate(currentItem.premiereDate) {
+                                    Text(dateStr)
                                 }
                                 HStack(spacing: 6) {
                                     Image(systemName: "play.rectangle.fill")
@@ -427,8 +428,8 @@ struct HeroSection: View {
                                     Text(String(year))
                                 }
 
-                                if let runtime = currentItem.runTimeTicks {
-                                    Text(formatRuntime(runtime))
+                                if let runtime = DateFormatting.formatRuntime(currentItem.runTimeTicks) {
+                                    Text(runtime)
                                 }
                             }
                         }
@@ -522,37 +523,10 @@ struct HeroSection: View {
         autoAdvanceTimer = nil
     }
 
-    private func formatRuntime(_ ticks: Int64) -> String {
-        let seconds = ticks / 10_000_000
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        }
-        return "\(minutes)m"
-    }
-
     private func formatEpisodeInfo(_ item: BaseItemDto) -> String {
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"
-    }
-
-    private func formatDate(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "MMMM d, yyyy"
-            return displayFormatter.string(from: date)
-        }
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "MMMM d, yyyy"
-            return displayFormatter.string(from: date)
-        }
-        return ""
     }
 }
 

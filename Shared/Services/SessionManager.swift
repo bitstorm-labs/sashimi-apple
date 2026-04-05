@@ -66,13 +66,11 @@ final class SessionManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: userDefaultsUserIdKey)
         KeychainHelper.delete(forKey: keychainAccessTokenKey)
 
+        Task { await JellyfinClient.shared.clearCredentials() }
+
         self.serverURL = nil
         self.currentUser = nil
         self.logoutReason = reason
         self.isAuthenticated = false
-    }
-
-    func clearLogoutReason() {
-        logoutReason = nil
     }
 }
