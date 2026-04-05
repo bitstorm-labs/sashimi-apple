@@ -70,31 +70,6 @@ struct MediaPosterButton: View {
         }
     }
 
-    private var subtitleText: String? {
-        // No subtitle for landscape (YouTube) - title only
-        if isLandscape {
-            return nil
-        }
-        return nil
-    }
-
-    private func formatDate(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        return ""
-    }
-
     // Fallback image IDs
     private var imageFallbackIds: [String] {
         var ids: [String] = []
@@ -275,23 +250,14 @@ struct MediaPosterButton: View {
                 )
                 .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15, x: 0, y: 0)
 
-                VStack(alignment: .center, spacing: 2) {
-                    MarqueeText(
-                        text: displayTitle,
-                        isScrolling: isFocused,
-                        height: 24,
-                        alignment: .center
-                    )
-                    .font(.system(size: isCircular ? 20 : (isLandscape ? 20 : 22), weight: .medium))
-                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                    if let subtitle = subtitleText {
-                        Text(subtitle)
-                            .font(.system(size: 16))
-                            .foregroundStyle(SashimiTheme.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
+                MarqueeText(
+                    text: displayTitle,
+                    isScrolling: isFocused,
+                    height: 24,
+                    alignment: .center
+                )
+                .font(.system(size: isCircular ? 20 : (isLandscape ? 20 : 22), weight: .medium))
+                .foregroundStyle(SashimiTheme.textPrimary)
                 .frame(width: cardWidth, alignment: .center)
             }
             .scaleEffect(isFocused ? 1.05 : 1.0)
@@ -372,7 +338,6 @@ struct MarqueeText: View {
     @State private var offset: CGFloat = 0
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
-    @State private var scrollDirection: Bool = true // true = left, false = right
     @State private var animationTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -429,7 +394,6 @@ struct MarqueeText: View {
                         withAnimation(.easeOut(duration: 0.3)) {
                             offset = 0
                         }
-                        scrollDirection = true
                     }
                 }
         }

@@ -26,8 +26,7 @@ struct PlayerView: View {
                 .ignoresSafeArea()
                 .onAppear { viewModel.loadSubtitleTracks() }
             }
-
-}
+        }
         .task { await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning) }
         .onDisappear { Task { await viewModel.stop() } }
         .onChange(of: viewModel.playbackEnded) { _, ended in if ended { dismiss() } }
@@ -41,5 +40,4 @@ struct PlayerView: View {
             Button("Dismiss") { Task { await viewModel.stop(); dismiss() } }
         }
     }
-
 }

@@ -66,6 +66,8 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 }
             } else if !skipButton.isHidden {
                 skipButton.isHidden = true
+                container.setNeedsFocusUpdate()
+                    container.updateFocusIfNeeded()
             }
         }
     }
@@ -92,19 +94,21 @@ struct TVPlayerView: UIViewControllerRepresentable {
         hosting.didMove(toParent: playerVC)
         context.coordinator.hostingController = hosting
 
-        // Skip button as native UIButton on container view for reliable focus navigation
+        // Skip button on contentOverlayView so it participates in AVPVC's focus system
         let skipButton = UIButton(type: .system)
         skipButton.setTitle("Skip", for: .normal)
         skipButton.titleLabel?.font = .systemFont(ofSize: 32, weight: .bold)
         skipButton.isHidden = true
         skipButton.translatesAutoresizingMaskIntoConstraints = false
         skipButton.addTarget(context.coordinator, action: #selector(Coordinator.skipSegmentTapped), for: .primaryActionTriggered)
-        container.view.addSubview(skipButton)
 
-        NSLayoutConstraint.activate([
-            skipButton.trailingAnchor.constraint(equalTo: container.view.trailingAnchor, constant: -90),
-            skipButton.bottomAnchor.constraint(equalTo: container.view.bottomAnchor, constant: -90)
-        ])
+        if let overlay = playerVC.contentOverlayView {
+            overlay.addSubview(skipButton)
+            NSLayoutConstraint.activate([
+                skipButton.trailingAnchor.constraint(equalTo: overlay.trailingAnchor, constant: -90),
+                skipButton.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -90)
+            ])
+        }
 
         container.skipButton = skipButton
         context.coordinator.skipButton = skipButton
@@ -226,13 +230,6 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
 class PlayerContainerVC: UIViewController {
     weak var skipButton: UIButton?
-
-    override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        if let skipButton, !skipButton.isHidden {
-            return [skipButton]
-        }
-        return super.preferredFocusEnvironments
-    }
 }
 
 // MARK: - Content Overlay (info bar, subtitles, clock)

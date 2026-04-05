@@ -105,43 +105,6 @@ struct LibraryView_Model: Identifiable, Hashable {
     }
 }
 
-// MARK: - Library Card Button (with proper focus)
-struct LibraryCardButton: View {
-    let library: LibraryView_Model
-    let onSelect: () -> Void
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 12) {
-                AsyncItemImage(
-                    itemId: library.id,
-                    imageType: "Primary",
-                    maxWidth: 400
-                )
-                .frame(width: 300, height: 170)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
-                )
-                .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
-
-                Text(library.name)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .lineLimit(1)
-            }
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-        .focused($isFocused)
-        .accessibilityLabel("\(library.name) library")
-        .accessibilityHint("Double-tap to browse")
-    }
-}
-
 struct LibraryRowButton: View {
     let library: LibraryView_Model
     let onSelect: () -> Void

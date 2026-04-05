@@ -2,7 +2,7 @@
 # https://docs.fastlane.tools/advanced/Appfile/
 
 # App identifiers
-app_identifier "com.sashimi.app"
+app_identifier "com.mondominator.sashimi"
 
 # Apple ID (your Apple Developer account email)
 # apple_id "your-email@example.com"
@@ -15,9 +15,9 @@ team_id "S6WU9SVVDW"
 
 # For all lanes
 for_lane :beta do
-  app_identifier ["com.sashimi.app", "com.sashimi.app.topshelf"]
+  app_identifier ["com.mondominator.sashimi", "com.mondominator.sashimi.topshelf"]
 end
 
 for_lane :release do
-  app_identifier ["com.sashimi.app", "com.sashimi.app.topshelf"]
+  app_identifier ["com.mondominator.sashimi", "com.mondominator.sashimi.topshelf"]
 end

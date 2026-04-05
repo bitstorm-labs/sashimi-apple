@@ -2,6 +2,7 @@
 
 included:
   - Sashimi
+  - Shared
   - TopShelf
 
 excluded:

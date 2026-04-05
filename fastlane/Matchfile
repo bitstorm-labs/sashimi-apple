@@ -11,7 +11,7 @@ storage_mode "git"
 type "appstore"
 
 # App identifiers to manage
-app_identifier ["com.sashimi.app", "com.sashimi.app.topshelf"]
+app_identifier ["com.mondominator.sashimi", "com.mondominator.sashimi.topshelf"]
 
 # Team ID
 team_id "S6WU9SVVDW"

@@ -45,29 +45,13 @@ class SubtitleManager: ObservableObject {
         request.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
 
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let session = await JellyfinClient.shared.urlSession
+            let (data, _) = try await session.data(for: request)
             if let vttContent = String(data: data, encoding: .utf8) {
                 cues = parseWebVTT(vttContent)
             }
         } catch {
-            // Silently fail - no subtitles
-        }
-
-        isLoading = false
-    }
-
-    func loadLocalSubtitles(from fileURL: URL) async {
-        isLoading = true
-        currentCue = nil
-        cues = []
-
-        do {
-            let data = try Data(contentsOf: fileURL)
-            if let vttContent = String(data: data, encoding: .utf8) {
-                cues = parseWebVTT(vttContent)
-            }
-        } catch {
-            // Silently fail - no subtitles
+            // Subtitle loading failed — no subtitles will be shown
         }
 
         isLoading = false

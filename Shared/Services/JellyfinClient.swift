@@ -97,8 +97,15 @@ final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchec
         if let cfError = error {
             let errorCode = CFErrorGetCode(cfError)
 
-            // Self-signed certificate (error code 3 = kSecTrustResultRecoverableTrustFailure often)
-            if allowSelfSigned() {
+            // Self-signed certificate: only accept if the error is a trust failure
+            // (not revoked, not wrong host, etc.)
+            // Trust failure codes that indicate self-signed or untrusted root
+            let selfSignedCodes: Set<Int> = [
+                3,     // kSecTrustResultRecoverableTrustFailure
+                5,     // kSecTrustResultFatalTrustFailure (self-signed root)
+                -9807  // errSSLXCertChainInvalid (no root CA in chain)
+            ]
+            if allowSelfSigned() && selfSignedCodes.contains(errorCode) {
                 let credential = URLCredential(trust: serverTrust)
                 completionHandler(.useCredential, credential)
                 return
@@ -131,9 +138,10 @@ actor JellyfinClient {
     private let deviceName = "Sashimi iOS"
     #endif
     private let clientName = "Sashimi"
-    private let clientVersion = "1.0.0"
+    private let clientVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
 
-    private let urlSession: URLSession
+    // Internal so SubtitleManager can use the same certificate trust config
+    let urlSession: URLSession
     private let certificateDelegate: CertificateValidationDelegate
     private let maxRetries = 3
 
@@ -171,6 +179,12 @@ actor JellyfinClient {
             delegate: certificateDelegate,
             delegateQueue: nil
         )
+    }
+
+    func clearCredentials() {
+        self.serverURL = nil
+        self.accessToken = nil
+        self.userId = nil
     }
 
     func configure(serverURL: URL, accessToken: String? = nil, userId: String? = nil) {
@@ -399,11 +413,6 @@ actor JellyfinClient {
         let data = try await request(path: "/Users/\(userId)/Views")
         let response = try JSONDecoder().decode(LibraryViewsResponse.self, from: data)
         return response.items
-    }
-
-    func getVirtualFolders() async throws -> [VirtualFolderInfo] {
-        let data = try await request(path: "/Library/VirtualFolders")
-        return try JSONDecoder().decode([VirtualFolderInfo].self, from: data)
     }
 
     func getItems(

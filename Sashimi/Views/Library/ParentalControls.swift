@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 // MARK: - Parental Controls
 
@@ -6,28 +7,54 @@ import SwiftUI
 class ParentalControlsManager: ObservableObject {
     static let shared = ParentalControlsManager()
 
-    @AppStorage("parentalPIN") private var storedPIN: String = ""
+    private static let pinKeychainKey = "parentalPIN"
+    private static let lockoutKey = "pinLockoutUntil"
+
     @AppStorage("isPINEnabled") var isPINEnabled: Bool = false
     @AppStorage("maxContentRating") var maxContentRating: ContentRating = .any
     @AppStorage("kidsMode") var kidsMode: Bool = false
     @AppStorage("hideUnrated") var hideUnrated: Bool = false
+    @AppStorage("pinFailedAttempts") private var failedAttempts: Int = 0
 
     var hasSetPIN: Bool {
-        !storedPIN.isEmpty
+        KeychainHelper.get(forKey: Self.pinKeychainKey) != nil
+    }
+
+    var isLockedOut: Bool {
+        if let until = UserDefaults.standard.object(forKey: Self.lockoutKey) as? Date {
+            return Date() < until
+        }
+        return false
     }
 
     func setPIN(_ pin: String) {
-        storedPIN = pin
+        let hash = SHA256.hash(data: Data(pin.utf8))
+        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
+        KeychainHelper.save(hashString, forKey: Self.pinKeychainKey)
         isPINEnabled = true
+        failedAttempts = 0
     }
 
     func verifyPIN(_ pin: String) -> Bool {
-        pin == storedPIN
+        guard !isLockedOut else { return false }
+        guard let stored = KeychainHelper.get(forKey: Self.pinKeychainKey) else { return false }
+        let hash = SHA256.hash(data: Data(pin.utf8))
+        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
+        if hashString == stored {
+            failedAttempts = 0
+            return true
+        }
+        failedAttempts += 1
+        if failedAttempts >= 5 {
+            UserDefaults.standard.set(Date().addingTimeInterval(60), forKey: Self.lockoutKey)
+        }
+        return false
     }
 
     func disablePIN() {
-        storedPIN = ""
+        KeychainHelper.delete(forKey: Self.pinKeychainKey)
         isPINEnabled = false
+        failedAttempts = 0
     }
 
     func shouldHideItem(withRating rating: String?) -> Bool {
@@ -367,7 +394,6 @@ struct PINVerifyView: View {
     @StateObject private var controls = ParentalControlsManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var pin = ""
-    @State private var attempts = 0
     @State private var errorMessage: String?
     @FocusState private var isFocused: Bool
 
@@ -433,19 +459,18 @@ struct PINVerifyView: View {
         pin = filtered
 
         if pin.count == 4 {
-            if controls.verifyPIN(pin) {
+            if controls.isLockedOut {
+                errorMessage = "Too many attempts. Please try again later."
+                pin = ""
+            } else if controls.verifyPIN(pin) {
                 onComplete(true)
                 dismiss()
             } else {
-                attempts += 1
-                if attempts >= 3 {
-                    errorMessage = "Too many attempts. Please try again later."
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        onComplete(false)
-                        dismiss()
-                    }
+                if controls.isLockedOut {
+                    errorMessage = "Too many attempts. Locked for 60 seconds."
+                    pin = ""
                 } else {
-                    errorMessage = "Incorrect PIN. \(3 - attempts) attempts remaining."
+                    errorMessage = "Incorrect PIN. Try again."
                     pin = ""
                 }
             }
