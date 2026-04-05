@@ -45,12 +45,13 @@ class SubtitleManager: ObservableObject {
         request.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
 
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let session = await JellyfinClient.shared.urlSession
+            let (data, _) = try await session.data(for: request)
             if let vttContent = String(data: data, encoding: .utf8) {
                 cues = parseWebVTT(vttContent)
             }
         } catch {
-            // Silently fail - no subtitles
+            print("SubtitleManager: Failed to load subtitles: \(error.localizedDescription)")
         }
 
         isLoading = false

@@ -194,6 +194,7 @@ struct HomeView: View {
     }
 
     private func startAutoRefresh() {
+        refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
             Task {
                 await viewModel.refresh()

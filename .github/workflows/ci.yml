@@ -80,6 +80,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
+      - name: Run Tests
+        run: |
+          xcodebuild test \
+            -project Sashimi.xcodeproj \
+            -scheme Sashimi \
+            -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty --color
+
   swiftlint:
     name: SwiftLint
     runs-on: macos-15
@@ -91,4 +100,4 @@ jobs:
       - name: Run SwiftLint
         run: |
           brew install swiftlint
-          swiftlint lint --reporter github-actions-logging
+          swiftlint lint --strict --reporter github-actions-logging

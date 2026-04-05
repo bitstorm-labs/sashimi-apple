@@ -19,7 +19,7 @@ platform :tvos do
 
     match(
       type: "appstore",
-      app_identifier: ["com.sashimi.app", "com.sashimi.app.topshelf"],
+      app_identifier: ["com.mondominator.sashimi", "com.mondominator.sashimi.topshelf"],
       readonly: is_ci
     )
   end

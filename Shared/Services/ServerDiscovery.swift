@@ -79,7 +79,8 @@ final class ServerDiscovery: ObservableObject {
         let connection = NWConnection(to: result.endpoint, using: .tcp)
 
         connection.stateUpdateHandler = { [weak self] state in
-            if case .ready = state {
+            switch state {
+            case .ready:
                 if let endpoint = connection.currentPath?.remoteEndpoint,
                    case let .hostPort(host, port) = endpoint {
                     let address: String
@@ -107,6 +108,10 @@ final class ServerDiscovery: ObservableObject {
                     }
                 }
                 connection.cancel()
+            case .failed, .cancelled:
+                connection.cancel()
+            default:
+                break
             }
         }
 

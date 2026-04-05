@@ -131,9 +131,10 @@ actor JellyfinClient {
     private let deviceName = "Sashimi iOS"
     #endif
     private let clientName = "Sashimi"
-    private let clientVersion = "1.0.0"
+    private let clientVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
 
-    private let urlSession: URLSession
+    // Internal so SubtitleManager can use the same certificate trust config
+    let urlSession: URLSession
     private let certificateDelegate: CertificateValidationDelegate
     private let maxRetries = 3
 
@@ -171,6 +172,12 @@ actor JellyfinClient {
             delegate: certificateDelegate,
             delegateQueue: nil
         )
+    }
+
+    func clearCredentials() {
+        self.serverURL = nil
+        self.accessToken = nil
+        self.userId = nil
     }
 
     func configure(serverURL: URL, accessToken: String? = nil, userId: String? = nil) {

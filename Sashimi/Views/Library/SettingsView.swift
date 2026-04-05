@@ -61,8 +61,8 @@ struct SettingsView: View {
 
                             // About section
                             VStack(spacing: 12) {
-                                SettingsInfoRow(label: "Version", value: "1.0.0")
-                                SettingsInfoRow(label: "Build", value: "1")
+                                SettingsInfoRow(label: "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
+                                SettingsInfoRow(label: "Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown")
                             }
                             .padding(.top, 20)
 
