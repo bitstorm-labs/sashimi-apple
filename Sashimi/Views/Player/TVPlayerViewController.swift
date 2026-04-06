@@ -54,16 +54,25 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.currentItem = displayItem
         context.coordinator.updateOverlay()
 
-        // Update skip button visibility
+        // Update skip button visibility. Whenever the visibility changes we
+        // also kick the focus engine via setNeedsFocusUpdate so the container's
+        // preferredFocusEnvironments override is re-evaluated — without this
+        // the button can appear on screen but stay unfocused, which on tvOS
+        // looks like the button is missing entirely (no remote response).
         if let skipVC = context.coordinator.skipVC {
+            let wasHidden = skipVC.view.isHidden
             if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
                 let title = "Skip \(segment.type.displayName)"
                 skipVC.updateTitle(title)
-                if skipVC.view.isHidden {
+                if wasHidden {
                     skipVC.view.isHidden = false
+                    container.setNeedsFocusUpdate()
+                    container.updateFocusIfNeeded()
                 }
-            } else if !skipVC.view.isHidden {
+            } else if !wasHidden {
                 skipVC.view.isHidden = true
+                container.setNeedsFocusUpdate()
+                container.updateFocusIfNeeded()
             }
         }
     }
@@ -90,16 +99,44 @@ struct TVPlayerView: UIViewControllerRepresentable {
         hosting.didMove(toParent: playerVC)
         context.coordinator.hostingController = hosting
 
-        // Skip button in a custom overlay VC so it's focusable alongside the transport bar
+        // Skip button: install as a sibling of playerVC.view inside the container,
+        // NOT inside the AVPlayerViewController. This is the only way to get a
+        // skip button that is BOTH always visible AND focusable on tvOS:
+        //
+        //   - contentOverlayView is visible but isUserInteractionEnabled is false
+        //     (verified: previous fix d337c87 — button never received focus).
+        //   - customOverlayViewController is focusable but only displays alongside
+        //     the transport bar (verified: previous fix c564952 — button hidden
+        //     during normal playback).
+        //
+        // Putting it in the container with a custom focus environment gives us
+        // both: the view is part of the normal hierarchy so it always renders,
+        // and the container's preferredFocusEnvironments override forces the
+        // focus engine onto the button while a segment is active.
         let skipVC = SkipButtonViewController()
         let coordinator = context.coordinator
         skipVC.onSkip = {
             coordinator.skipSegmentTapped()
         }
+        skipVC.view.translatesAutoresizingMaskIntoConstraints = false
         skipVC.view.isHidden = true
 
-        playerVC.customOverlayViewController = skipVC
+        container.addChild(skipVC)
+        container.view.addSubview(skipVC.view)
+        skipVC.didMove(toParent: container)
+
+        // Pin the skip button overlay to the full container so its internal
+        // button constraints (bottom-right with insets) can position relative
+        // to the screen rather than a zero-size frame.
+        NSLayoutConstraint.activate([
+            skipVC.view.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            skipVC.view.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            skipVC.view.topAnchor.constraint(equalTo: container.view.topAnchor),
+            skipVC.view.bottomAnchor.constraint(equalTo: container.view.bottomAnchor),
+        ])
+
         container.skipVC = skipVC
+        container.playerVC = playerVC
         context.coordinator.skipVC = skipVC
     }
 
@@ -219,36 +256,96 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
 class PlayerContainerVC: UIViewController {
     var skipVC: SkipButtonViewController?
+    weak var playerVC: AVPlayerViewController?
+
+    /// When the skip button is visible, route the focus engine to it. Otherwise
+    /// give focus back to the AVPlayerViewController so the user retains
+    /// normal playback controls.
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        if let skipVC, !skipVC.view.isHidden {
+            return [skipVC.view]
+        }
+        if let playerVC {
+            return [playerVC]
+        }
+        return super.preferredFocusEnvironments
+    }
 }
 
-// MARK: - Skip Button (custom overlay VC for AVPlayerViewController focus support)
+// MARK: - Skip Button (sibling overlay inside the container, not a child of AVPVC)
 
 class SkipButtonViewController: UIViewController {
     var onSkip: (() -> Void)?
-    private let button = UIButton(type: .system)
+    private let button: UIButton = {
+        // Use modern UIButton.Configuration so contentInsets isn't ignored on
+        // tvOS 15+. The old setTitleColor / contentEdgeInsets API is deprecated
+        // when a configuration is set, and the build emits a warning.
+        var config = UIButton.Configuration.filled()
+        config.baseBackgroundColor = UIColor.black.withAlphaComponent(0.65)
+        config.baseForegroundColor = .white
+        config.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 36, bottom: 16, trailing: 36)
+        config.cornerStyle = .capsule
+        var titleAttr = AttributedString("Skip")
+        titleAttr.font = .systemFont(ofSize: 32, weight: .bold)
+        config.attributedTitle = titleAttr
+        let btn = UIButton(configuration: config)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        return btn
+    }()
+
+    override func loadView() {
+        // Use a passthrough container view so taps in empty space go through
+        // to the player below. Only the button itself is interactive.
+        let passthrough = PassthroughView()
+        passthrough.backgroundColor = .clear
+        view = passthrough
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .clear
 
-        button.setTitle("Skip", for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 32, weight: .bold)
-        button.translatesAutoresizingMaskIntoConstraints = false
         button.addTarget(self, action: #selector(tapped), for: .primaryActionTriggered)
         view.addSubview(button)
 
         NSLayoutConstraint.activate([
-            button.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -90),
-            button.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -90)
+            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
+            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
         ])
     }
 
     func updateTitle(_ title: String) {
-        button.setTitle(title, for: .normal)
+        var config = button.configuration
+        var titleAttr = AttributedString(title)
+        titleAttr.font = .systemFont(ofSize: 32, weight: .bold)
+        config?.attributedTitle = titleAttr
+        button.configuration = config
     }
 
     @objc private func tapped() {
         onSkip?()
+    }
+
+    // The button must be the preferred focus when this VC is asked, so the
+    // container's preferredFocusEnvironments → [skipVC.view] chain lands on
+    // the actual button rather than the empty passthrough wrapper.
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        [button]
+    }
+}
+
+/// UIView subclass that lets touches pass through to underlying views except
+/// where one of its visible subviews (e.g. the skip button) is hit. This
+/// keeps the AVPlayerViewController fully usable when the skip button is
+/// hidden — without this, the full-bounds wrapper would swallow remote input.
+private class PassthroughView: UIView {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        for subview in subviews where !subview.isHidden && subview.alpha > 0 {
+            let converted = convert(point, to: subview)
+            if subview.point(inside: converted, with: event) {
+                return true
+            }
+        }
+        return false
     }
 }
 
