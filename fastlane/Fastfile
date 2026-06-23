@@ -84,7 +84,7 @@ platform :tvos do
     # Build number from git commit count: always unique and monotonically
     # increasing. (latest_testflight_build_number queried the iOS platform and
     # returned 0 for this tvOS app, causing duplicate-build-number collisions.)
-    increment_build_number(build_number: number_of_commits)
+    increment_build_number(build_number: Time.now.to_i.to_s)
 
     # Sync certificates
     certificates
