@@ -20,7 +20,7 @@ on:
       - 'v*-rc*'
 
 env:
-  XCODE_VERSION: '16.0'
+  XCODE_VERSION: 'latest-stable'  # Apple requires tvOS 26 SDK (Xcode 26+) for uploads
 
 jobs:
   deploy:
