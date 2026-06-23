@@ -34,8 +34,10 @@ platform :tvos do
 
   desc "Build the app"
   lane :build do
-    # Generate Xcode project from XcodeGen
-    sh("cd .. && xcodegen generate")
+    # NOTE: do NOT run `xcodegen generate` here — the CI workflow already
+    # generates the project before fastlane runs, and regenerating here would
+    # reset CFBundleVersion to xcodegen's default (1), wiping the build number
+    # set by increment_build_number in the beta lane.
 
     # Force manual signing with the match app-store profiles for the Release archive.
     # The project uses automatic signing for local dev; CI must use the match profiles.
