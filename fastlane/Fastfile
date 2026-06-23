@@ -81,13 +81,10 @@ platform :tvos do
       is_key_content_base64: true
     )
 
-    # Increment build number (initial_build_number keeps the first-ever build at 1)
-    latest = latest_testflight_build_number(
-      api_key: api_key,
-      app_identifier: "com.mondominator.sashimi",
-      initial_build_number: 0
-    )
-    increment_build_number(build_number: latest + 1)
+    # Build number from git commit count: always unique and monotonically
+    # increasing. (latest_testflight_build_number queried the iOS platform and
+    # returned 0 for this tvOS app, causing duplicate-build-number collisions.)
+    increment_build_number(build_number: number_of_commits)
 
     # Sync certificates
     certificates
