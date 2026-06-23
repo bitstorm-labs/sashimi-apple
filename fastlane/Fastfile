@@ -33,6 +33,23 @@ platform :tvos do
     # Generate Xcode project from XcodeGen
     sh("cd .. && xcodegen generate")
 
+    # Force manual signing with the match app-store profiles for the Release archive.
+    # The project uses automatic signing for local dev; CI must use the match profiles.
+    {
+      "Sashimi" => "match AppStore com.mondominator.sashimi tvos",
+      "TopShelf" => "match AppStore com.mondominator.sashimi.topshelf tvos"
+    }.each do |target, profile|
+      update_code_signing_settings(
+        path: "Sashimi.xcodeproj",
+        use_automatic_signing: false,
+        team_id: "S6WU9SVVDW",
+        targets: [target],
+        code_sign_identity: "Apple Distribution",
+        profile_name: profile,
+        build_configurations: ["Release"]
+      )
+    end
+
     build_app(
       project: "Sashimi.xcodeproj",
       scheme: "Sashimi",
