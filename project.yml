@@ -55,6 +55,9 @@ targets:
           - CFBundleURLSchemes:
               - sashimi
             CFBundleURLName: com.mondominator.sashimi
+        # App uses only exempt encryption (standard HTTPS/TLS + Keychain) —
+        # declares export compliance so TestFlight never prompts per-build.
+        ITSAppUsesNonExemptEncryption: false
         # Alternate icons temporarily disabled for the first TestFlight beta
         # (each needs a 1280x768 App Store variant); re-add post-beta.
     settings:
