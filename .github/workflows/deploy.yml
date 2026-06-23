@@ -39,6 +39,20 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Install tvOS Platform
+        run: |
+          # tvOS platform isn't preinstalled for Xcode 16 on the runner; archive needs it
+          if xcodebuild -showsdks | grep -q tvos; then
+            echo "tvOS SDK already installed"
+          else
+            echo "Downloading tvOS platform..."
+            for i in 1 2 3; do
+              xcodebuild -downloadPlatform tvOS && break
+              echo "Retry $i failed, waiting 10s..."
+              sleep 10
+            done
+          fi
+
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
