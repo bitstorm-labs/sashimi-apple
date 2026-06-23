@@ -55,16 +55,8 @@ targets:
           - CFBundleURLSchemes:
               - sashimi
             CFBundleURLName: com.mondominator.sashimi
-        CFBundleIcons:
-          CFBundleAlternateIcons:
-            - CatIcon
-            - ChopsticksIcon
-            - WhitefishIcon
-            - FoxIcon
-            - PandaIcon
-            - RacoonIcon
-            - ShrimpIcon
-            - TunaIcon
+        # Alternate icons temporarily disabled for the first TestFlight beta
+        # (each needs a 1280x768 App Store variant); re-add post-beta.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi
@@ -82,7 +74,8 @@ targets:
         ENABLE_PREVIEWS: NO
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "CatIcon ChopsticksIcon WhitefishIcon FoxIcon PandaIcon RacoonIcon ShrimpIcon TunaIcon"
+        # Alternate icons temporarily disabled for the first TestFlight beta —
+        # each needs a 1280x768 App Store variant, deferred post-beta.
         ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME: ""
     entitlements:
       path: Sashimi/Sashimi.entitlements
@@ -156,6 +149,9 @@ targets:
     info:
       path: TopShelf/Info.plist
       properties:
+        CFBundleDisplayName: Sashimi TopShelf
+        UIRequiredDeviceCapabilities:
+          - arm64
         NSExtension:
           NSExtensionPointIdentifier: com.apple.tv-top-shelf
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
