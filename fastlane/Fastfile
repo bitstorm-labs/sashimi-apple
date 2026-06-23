@@ -52,10 +52,21 @@ platform :tvos do
   lane :beta do
     ensure_git_status_clean unless is_ci
 
-    # Increment build number
-    increment_build_number(
-      build_number: latest_testflight_build_number + 1
+    # Authenticate with the App Store Connect API key BEFORE any ASC query
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_KEY_CONTENT"],
+      is_key_content_base64: true
     )
+
+    # Increment build number (initial_build_number keeps the first-ever build at 1)
+    latest = latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: "com.mondominator.sashimi",
+      initial_build_number: 0
+    )
+    increment_build_number(build_number: latest + 1)
 
     # Sync certificates
     certificates
@@ -65,6 +76,8 @@ platform :tvos do
 
     # Upload to TestFlight
     upload_to_testflight(
+      api_key: api_key,
+      app_identifier: "com.mondominator.sashimi",
       skip_waiting_for_build_processing: true,
       changelog: changelog_from_git_commits(
         commits_count: 10,
