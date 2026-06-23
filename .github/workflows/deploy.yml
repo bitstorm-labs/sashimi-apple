@@ -27,6 +27,7 @@ jobs:
     name: Deploy to ${{ github.event.inputs.environment || 'testflight' }}
     runs-on: macos-15
     environment: ${{ github.event.inputs.environment || 'testflight' }}
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
