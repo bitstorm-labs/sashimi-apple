@@ -81,9 +81,9 @@ platform :tvos do
       is_key_content_base64: true
     )
 
-    # Build number from git commit count: always unique and monotonically
-    # increasing. (latest_testflight_build_number queried the iOS platform and
-    # returned 0 for this tvOS app, causing duplicate-build-number collisions.)
+    # Build number = Unix epoch seconds: always unique and monotonically
+    # increasing, with no dependency on ASC queries (wrong platform) or git
+    # history (shallow checkout). Under Apple's uint32 build-number limit until ~2106.
     increment_build_number(build_number: Time.now.to_i.to_s)
 
     # Sync certificates
