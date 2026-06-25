@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -40,16 +41,24 @@ struct SashimiMobileApp: App {
 
 struct ContentView: View {
     @EnvironmentObject var sessionManager: SessionManager
-    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    // Pick the layout by DEVICE TYPE (stable), not horizontalSizeClass (transient).
+    // The size class flips .compact -> .regular when an iPhone Plus/Pro Max rotates
+    // to landscape, which would swap the entire root view (PhoneTabView <-> the iPad
+    // layout) and tear down its subtree — dismissing an active fullScreenCover video
+    // player. A phone stays on the phone UI in landscape; iPad always uses the iPad UI.
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     var body: some View {
         Group {
             if sessionManager.isAuthenticated {
                 Group {
-                    if sizeClass == .compact {
-                        PhoneTabView()
-                    } else {
+                    if isPad {
                         MainNavigationView()
+                    } else {
+                        PhoneTabView()
                     }
                 }
                 .task {
