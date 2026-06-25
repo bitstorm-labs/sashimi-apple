@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A native tvOS client for Jellyfin media servers</strong>
+  <strong>A native Jellyfin client for Apple TV, iPhone, and iPad</strong>
 </p>
 
 <p align="center">
@@ -18,20 +18,36 @@
 
 ---
 
+Sashimi is a SwiftUI Jellyfin client that ships as a single universal app across
+Apple TV, iPhone, and iPad (Universal Purchase). The Apple TV and mobile apps
+share their networking, authentication, and playback logic.
+
 ## Features
 
-- Native SwiftUI interface designed for Apple TV
+**All platforms**
+- Native SwiftUI interface tailored per device (Apple TV, iPhone tabs, iPad sidebar)
 - Browse and stream your Jellyfin media library
 - Support for movies, TV shows, and YouTube-style content
 - Continue watching with playback progress sync
-- Top Shelf integration for quick access to recent content
+- Audio/subtitle track selection, quality switching, and skip intro/credits
 - Secure credential storage using Keychain
+
+**Apple TV**
+- Top Shelf integration for quick access to recent content
+
+**iPhone & iPad**
+- Offline mode: download media and watch without a connection
+- Picture-in-Picture playback
+- Adaptive layouts for phone (tabs) and tablet (sidebar)
 
 ## Requirements
 
-- tvOS 17.0+
+- tvOS 17.0+ / iOS 17.0+
 - Jellyfin server (local or remote)
-- Xcode 15.0+ (for development)
+- Xcode 16.0+ for development (Xcode 26+ required for TestFlight/App Store builds —
+  Apple mandates building with the current SDK)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (the Xcode project is generated
+  from `project.yml`)
 
 ## Installation
 
@@ -43,7 +59,7 @@
    cd sashimi
    ```
 
-2. Run the setup script:
+2. Run the setup script (installs hooks, generates the project):
    ```bash
    ./scripts/setup.sh
    ```
@@ -52,7 +68,9 @@
 
 4. Select your development team in Signing & Capabilities
 
-5. Build and run on Apple TV Simulator or device
+5. Choose a scheme and run:
+   - **Sashimi** → Apple TV (tvOS)
+   - **SashimiMobile** → iPhone / iPad (iOS)
 
 ### Dependencies
 
@@ -63,33 +81,43 @@
 ### Project Structure
 
 ```
-Sashimi/
-├── App/              # App entry point
-├── Services/         # API client, session management
-├── ViewModels/       # MVVM view models
-├── Views/            # SwiftUI views
-│   ├── Home/         # Home screen
-│   ├── Auth/         # Login/server connection
-│   ├── Library/      # Media library browsing
-│   ├── Detail/       # Media detail views
-│   ├── Player/       # Video player
-│   └── Components/   # Reusable UI components
-├── Models/           # Data models
-└── Resources/        # Assets
+sashimi/
+├── Sashimi/          # tvOS app (SwiftUI)
+├── SashimiMobile/    # iPhone + iPad app (SwiftUI)
+│   ├── Views/        # Phone/iPad layouts, player, downloads
+│   └── Downloads/    # Background downloads & offline storage
+├── TopShelf/         # tvOS Top Shelf extension
+├── Shared/           # Code shared by tvOS + iOS
+│   ├── Services/     # JellyfinClient, SessionManager, server discovery
+│   ├── ViewModels/   # Player and home view models
+│   └── Models/       # Jellyfin API data models
+└── SashimiTests/     # Unit tests
 ```
 
 ### Build Commands
 
 ```bash
-# Generate Xcode project (requires XcodeGen)
+# Generate the Xcode project (requires XcodeGen)
 xcodegen generate
 
-# Build with xcodebuild
-xcodebuild -project Sashimi.xcodeproj -scheme Sashimi -destination 'platform=tvOS Simulator,name=Apple TV'
+# Build the tvOS app
+xcodebuild -project Sashimi.xcodeproj -scheme Sashimi \
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)'
 
-# Build with Swift Package Manager
-swift build
+# Build the iOS app (iPhone/iPad)
+xcodebuild -project Sashimi.xcodeproj -scheme SashimiMobile \
+  -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
+
+### Distribution
+
+Both apps ship to TestFlight via fastlane + GitHub Actions:
+
+- tvOS: push a tag matching `v*-beta*` (e.g. `v1.0.0-beta.1`)
+- iOS: push a tag matching `ios-v*-beta*` (e.g. `ios-v1.0.1-beta.1`)
+
+Code signing uses fastlane `match`. The version comes from `MARKETING_VERSION` in
+`project.yml`; the build number is set automatically at build time.
 
 ### Git Hooks
 
