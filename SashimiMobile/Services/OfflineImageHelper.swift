@@ -3,7 +3,6 @@ import UIKit
 /// Helper to find locally cached images for offline mode.
 /// Downloads save poster.jpg, backdrop.jpg, and series_poster.jpg per item.
 enum OfflineImageHelper {
-
     /// Find a local poster image for an item (checks the item's download directory)
     static func posterURL(for itemId: String) -> URL? {
         let dir = DownloadFileManager.itemDirectory(for: itemId)

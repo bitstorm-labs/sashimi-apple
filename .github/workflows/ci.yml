@@ -61,6 +61,7 @@ jobs:
         run: xcodebuild -project Sashimi.xcodeproj -scheme Sashimi -showdestinations | head -30
 
       - name: Build for tvOS Simulator
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild build \
             -project Sashimi.xcodeproj \
@@ -71,6 +72,7 @@ jobs:
             | xcpretty --color
 
       - name: Build for tvOS Device (Release)
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild build \
             -project Sashimi.xcodeproj \
@@ -81,6 +83,7 @@ jobs:
             | xcpretty --color
 
       - name: Run Tests
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild test \
             -project Sashimi.xcodeproj \
@@ -108,10 +111,21 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
+      - name: Cache SPM Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
       - name: Resolve Dependencies
         run: xcodebuild -resolvePackageDependencies -project Sashimi.xcodeproj -scheme SashimiMobile
 
       - name: Build for iOS Simulator
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild build \
             -project Sashimi.xcodeproj \

@@ -49,7 +49,7 @@ struct MobileDetailView: View {
         if let year = item.productionYear {
             parts.append(String(year))
         }
-        if seasons.count > 0 {
+        if !seasons.isEmpty {
             parts.append(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
         }
         if let rating = item.officialRating {

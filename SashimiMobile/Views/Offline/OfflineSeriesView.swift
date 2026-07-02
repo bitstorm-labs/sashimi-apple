@@ -31,7 +31,7 @@ struct OfflineSeriesView: View {
 
                     // Info
                     HStack(spacing: MobileSpacing.sm) {
-                        if seasons.count > 0 {
+                        if !seasons.isEmpty {
                             Text(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
                         }
                         Text("\u{2022}")

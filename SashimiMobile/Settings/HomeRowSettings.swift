@@ -69,15 +69,13 @@ final class HomeRowSettings: ObservableObject {
 
     func updateLibraries(_ libraries: [JellyfinLibrary]) {
         // Add any new libraries that aren't in the list
-        for library in libraries {
-            if !rows.contains(where: {
-                if case .library(let id, _) = $0.type {
-                    return id == library.id
-                }
-                return false
-            }) {
-                rows.append(HomeRowConfig(type: .library(id: library.id, name: library.name), isEnabled: true))
+        for library in libraries where !rows.contains(where: {
+            if case .library(let id, _) = $0.type {
+                return id == library.id
             }
+            return false
+        }) {
+            rows.append(HomeRowConfig(type: .library(id: library.id, name: library.name), isEnabled: true))
         }
 
         // Remove libraries that no longer exist

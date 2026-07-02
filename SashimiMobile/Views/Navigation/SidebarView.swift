@@ -36,6 +36,9 @@ enum SidebarSelection: Hashable {
     }
 }
 
+// MainNavigationView hosts the sidebar + all tab destinations in one body; extracting subviews
+// would change view identity/state ownership, which is too risky for a lint-only pass.
+// swiftlint:disable:next type_body_length
 struct MainNavigationView: View {
     @State private var selection: SidebarSelection = .home
     @State private var sidebarVisible = false

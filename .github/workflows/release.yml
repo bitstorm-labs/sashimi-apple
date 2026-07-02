@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+      # Prerelease tags are handled by deploy.yml — exclude them here
+      - '!v*-beta*'
+      - '!v*-rc*'
 
 jobs:
   build-release:

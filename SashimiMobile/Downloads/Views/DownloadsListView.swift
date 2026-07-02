@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 import NukeUI
 
-// swiftlint:disable type_body_length
 struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
@@ -358,4 +357,3 @@ struct DownloadsListView: View {
         return status == .queued || status == .downloading || status == .preparing
     }
 }
-
