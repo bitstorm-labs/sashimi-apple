@@ -6,6 +6,25 @@ final class KeychainHelperTests: XCTestCase {
     // Use a unique test key prefix to avoid conflicts
     private let testKeyPrefix = "test_sashimi_"
 
+    // The keychain requires an entitled (signed) test host. On CI the test
+    // host is built with CODE_SIGNING_ALLOWED=NO, so every SecItemAdd fails
+    // with errSecMissingEntitlement. Probe once and skip the suite when the
+    // keychain is unavailable rather than failing 20+ tests spuriously.
+    private static let keychainAvailable: Bool = {
+        let probeKey = "test_sashimi_availability_probe"
+        let available = KeychainHelper.save("probe", forKey: probeKey)
+        KeychainHelper.delete(forKey: probeKey)
+        return available
+    }()
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipUnless(
+            Self.keychainAvailable,
+            "Keychain unavailable in this environment (unsigned test host lacks keychain entitlements)"
+        )
+    }
+
     override func tearDown() {
         super.tearDown()
         // Clean up test keys after each test
