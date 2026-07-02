@@ -2,8 +2,9 @@ import Foundation
 import SwiftData
 import UIKit
 
-// swiftlint:disable type_body_length
-// DownloadManager coordinates background downloads, URLSession delegate, and SwiftData persistence
+// swiftlint:disable type_body_length file_length
+// DownloadManager coordinates background downloads, URLSession delegate, and SwiftData persistence:
+// a large but cohesive type; splitting it would require a risky refactor of the URLSession delegate wiring.
 
 @MainActor
 final class DownloadManager: NSObject, ObservableObject {
