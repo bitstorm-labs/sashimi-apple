@@ -3,14 +3,6 @@ import SwiftUI
 // swiftlint:disable file_length
 // HomeView contains the main home screen with multiple tightly-coupled components
 
-// MARK: - Scroll Tracking
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
@@ -21,13 +13,6 @@ struct HomeView: View {
     @State private var heroIndex: Int = 0
     @State private var showContinueWatchingDetail = false
     @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
-    @Binding var resetTrigger: Bool
-    @Binding var isAtDefaultState: Bool
-
-    init(resetTrigger: Binding<Bool> = .constant(false), isAtDefaultState: Binding<Bool> = .constant(true)) {
-        _resetTrigger = resetTrigger
-        _isAtDefaultState = isAtDefaultState
-    }
 
     // Order libraries according to settings
     private var orderedLibraries: [JellyfinLibrary] {
@@ -52,37 +37,27 @@ struct HomeView: View {
                 )
                 .ignoresSafeArea()
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(alignment: .leading, spacing: 40) {
-                            // Header with logo and profile avatar
-                            AppHeader()
-                                .id("top")
-                                .padding(.bottom, -80)
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 40) {
+                        // Header with logo and profile avatar
+                        AppHeader()
+                            .padding(.bottom, -80)
 
-                            // Render rows based on settings order
-                            ForEach(homeSettings.rowConfigs) { config in
-                                if config.isVisible {
-                                    rowView(for: config)
-                                }
+                        // Render rows based on settings order
+                        ForEach(homeSettings.rowConfigs) { config in
+                            if config.isVisible {
+                                rowView(for: config)
                             }
+                        }
 
-                            // Bottom spacing
-                            Spacer()
-                                .frame(height: 100)
-                        }
+                        // Bottom spacing
+                        Spacer()
+                            .frame(height: 100)
                     }
-                    .coordinateSpace(name: "scroll")
-                    .ignoresSafeArea(edges: .top)
-                    .refreshable {
-                        await viewModel.refresh()
-                    }
-                    .onChange(of: resetTrigger) { _, _ in
-                        withAnimation {
-                            proxy.scrollTo("top", anchor: .top)
-                        }
-                        isAtDefaultState = true
-                    }
+                }
+                .ignoresSafeArea(edges: .top)
+                .refreshable {
+                    await viewModel.refresh()
                 }
             }
             .fullScreenCover(item: $selectedItem) { item in
