@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 import NukeUI
 
-// swiftlint:disable type_body_length
 struct OfflineHomeView: View {
     @Query(
         filter: #Predicate<DownloadedItem> { $0.statusRaw == "completed" },
@@ -20,7 +19,13 @@ struct OfflineHomeView: View {
         downloads.filter { $0.itemType == .movie }
     }
 
-    private var seriesGroups: [(name: String, representative: DownloadedItem, episodes: [DownloadedItem])] {
+    private struct SeriesGroup {
+        let name: String
+        let representative: DownloadedItem
+        let episodes: [DownloadedItem]
+    }
+
+    private var seriesGroups: [SeriesGroup] {
         let episodes = downloads.filter { $0.itemType == .episode }
         let grouped = Dictionary(grouping: episodes) { $0.seriesName ?? "Unknown" }
         return grouped.keys.sorted().compactMap { name in
@@ -29,7 +34,7 @@ struct OfflineHomeView: View {
                 ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
                     ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
             }
-            return (name: name, representative: first, episodes: sorted)
+            return SeriesGroup(name: name, representative: first, episodes: sorted)
         }
     }
 
@@ -207,7 +212,7 @@ struct OfflineHomeView: View {
         }
     }
 
-    private func offlineSeriesCard(group: (name: String, representative: DownloadedItem, episodes: [DownloadedItem])) -> some View {
+    private func offlineSeriesCard(group: SeriesGroup) -> some View {
         let height = posterWidth * (1 / PosterAspectRatio.portrait)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {

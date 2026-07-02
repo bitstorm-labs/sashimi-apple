@@ -2,6 +2,7 @@
 
 included:
   - Sashimi
+  - SashimiMobile
   - Shared
   - TopShelf
 
