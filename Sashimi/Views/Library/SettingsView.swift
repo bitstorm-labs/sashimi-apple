@@ -4,6 +4,17 @@ import SwiftUI
 // SettingsView contains multiple related settings views - splitting would fragment related UI code
 
 struct SettingsView: View {
+    // Parental Controls UI is hidden because nothing in the app enforces the
+    // PIN / rating filter / Kids Mode yet — showing it would be a placebo.
+    // Re-enable once enforcement lands (tracked in issue #173).
+    private static let parentalControlsEnabled = false
+
+    // App icon picker is hidden: alternate icons are temporarily disabled for
+    // the first TestFlight beta (see project.yml — each icon needs a 1280x768
+    // App Store variant) and SashimiApp resets to the default icon at every
+    // launch, so any selection would silently revert. Re-enable post-beta.
+    private static let appIconPickerEnabled = false
+
     var showSignOut: Bool = true
     var onBackAtRoot: (() -> Void)?
     @EnvironmentObject private var sessionManager: SessionManager
@@ -35,12 +46,14 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.playback)
                             }
 
-                            SettingsOptionRow(
-                                icon: "lock.shield",
-                                title: "Parental Controls",
-                                subtitle: "PIN and restrictions"
-                            ) {
-                                navigationPath.append(SettingsDestination.parentalControls)
+                            if Self.parentalControlsEnabled {
+                                SettingsOptionRow(
+                                    icon: "lock.shield",
+                                    title: "Parental Controls",
+                                    subtitle: "PIN and restrictions"
+                                ) {
+                                    navigationPath.append(SettingsDestination.parentalControls)
+                                }
                             }
 
                             SettingsOptionRow(
@@ -51,12 +64,14 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.certificates)
                             }
 
-                            SettingsOptionRow(
-                                icon: "app.badge",
-                                title: "App Icon",
-                                subtitle: "Change app icon"
-                            ) {
-                                navigationPath.append(SettingsDestination.appIcon)
+                            if Self.appIconPickerEnabled {
+                                SettingsOptionRow(
+                                    icon: "app.badge",
+                                    title: "App Icon",
+                                    subtitle: "Change app icon"
+                                ) {
+                                    navigationPath.append(SettingsDestination.appIcon)
+                                }
                             }
 
                             // About section
@@ -1003,34 +1018,13 @@ struct AppIconSettingsView: View {
     }
 
     private func changeIcon(to iconName: String?, name: String) {
-        // Use the private API to suppress the system alert (shows wrong icon preview)
-        // This is a known workaround used by many apps
+        // Public API only — the previous private-selector workaround
+        // (_setAlternateIconName:completionHandler:) is an App Review
+        // rejection risk. See issue #174.
         guard UIApplication.shared.supportsAlternateIcons else { return }
 
-        // Attempt to use the private method that doesn't show an alert
-        let selector = NSSelectorFromString("_setAlternateIconName:completionHandler:")
-        if UIApplication.shared.responds(to: selector) {
-            // swiftlint:disable:next line_length
-            typealias SetIconMethod = @convention(c) (NSObject, Selector, NSString?, @escaping (NSError?) -> Void) -> Void
-            let method = unsafeBitCast(
-                UIApplication.shared.method(for: selector),
-                to: SetIconMethod.self
-            )
-            method(UIApplication.shared, selector, iconName as NSString?, { error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        self.alertMessage = error.localizedDescription
-                        self.showingErrorAlert = true
-                    } else {
-                        self.currentIcon = iconName
-                        self.successIconName = name
-                        self.showingSuccessAlert = true
-                    }
-                }
-            })
-        } else {
-            // Fallback to standard method (will show system alert)
-            UIApplication.shared.setAlternateIconName(iconName) { error in
+        UIApplication.shared.setAlternateIconName(iconName) { error in
+            DispatchQueue.main.async {
                 if let error = error {
                     alertMessage = error.localizedDescription
                     showingErrorAlert = true
