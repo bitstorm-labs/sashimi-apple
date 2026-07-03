@@ -106,12 +106,17 @@ final class PlayerViewModel: ObservableObject {
     // is torn down or rebuilt.
     private var playSessionId: String?
 
+    /// Play method reported to the server — keeps the dashboard honest now
+    /// that explicit quality picks force transcodes.
+    private var currentPlayMethod: String {
+        currentMediaSource?.transcodingUrl != nil ? "Transcode" : "DirectStream"
+    }
+
     // Skip intro/credits
     @Published var segments: [MediaSegmentDto] = []
     @Published var currentSegment: MediaSegmentDto?
     @Published var showingSkipButton = false
 
-    private var timeObserver: Any?
     private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
     private var subtitleLoadTask: Task<Void, Never>?
@@ -137,6 +142,13 @@ final class PlayerViewModel: ObservableObject {
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
+        }
+
+        // Kill the previous episode's transcode session, same as
+        // changeQuality — auto-play-next otherwise leaves the old encode
+        // running until the server times it out.
+        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
         }
 
         isLoading = true
@@ -194,7 +206,7 @@ final class PlayerViewModel: ObservableObject {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -206,7 +218,7 @@ final class PlayerViewModel: ObservableObject {
                 let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
                 await player?.seek(to: startTime)
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -216,7 +228,7 @@ final class PlayerViewModel: ObservableObject {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -339,6 +351,11 @@ final class PlayerViewModel: ObservableObject {
         subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
+        // Reset the menu selection alongside the overlay — the re-apply
+        // below sets it back when it finds a match in the new source, and
+        // without this a failed match would leave the menu showing a track
+        // that isn't rendering.
+        selectedSubtitleTrackId = "off"
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -372,8 +389,12 @@ final class PlayerViewModel: ObservableObject {
             // Re-apply the session's subtitle selection on the rebuilt
             // player — the overlay was cleared along with the old player.
             // Match by content, not raw index: the new media source's stream
-            // indexes may differ from the old one's.
-            applySessionSubtitlePreference()
+            // indexes may differ from the old one's. When there was no manual
+            // pick this session, fall back to the Settings preference (which
+            // is what selected the subtitles that were just cleared).
+            if !applySessionSubtitlePreference() {
+                applyPreferredSubtitles()
+            }
 
             // Resume playback and tracking
             startProgressReporting()
@@ -710,15 +731,18 @@ final class PlayerViewModel: ObservableObject {
 
         selectedSubtitleTrackId = track.id
 
-        // Remember the session's subtitle intent by content so it survives
-        // quality changes and episode transitions (stream indexes don't).
-        sessionSubtitlePreference = SubtitlePreference(
-            language: track.languageCode,
-            displayTitle: track.displayName,
-            isExternal: track.isExternal
-        )
-
         if isUserSelection {
+            // Remember the session's subtitle intent by content so it
+            // survives quality changes and episode transitions (stream
+            // indexes don't). Only manual picks may write this — automatic
+            // re-applies can resolve via a weaker fallback tier (e.g.
+            // embedded "English" for an external "English (SDH)" pick), and
+            // storing that match would permanently degrade the intent.
+            sessionSubtitlePreference = SubtitlePreference(
+                language: track.languageCode,
+                displayTitle: track.displayName,
+                isExternal: track.isExternal
+            )
             // "On stays on until I turn it off" — persist the manual choice
             // across app launches too.
             playbackSettings.subtitlesEnabled = true

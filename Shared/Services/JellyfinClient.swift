@@ -808,12 +808,12 @@ actor JellyfinClient {
         return components.url
     }
 
-    func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0, playSessionId: String? = nil) async throws {
+    func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0, playSessionId: String? = nil, playMethod: String = "DirectStream") async throws {
         var body: [String: Any] = [
             "ItemId": itemId,
             "PositionTicks": positionTicks,
             "IsPaused": false,
-            "PlayMethod": "DirectStream"
+            "PlayMethod": playMethod
         ]
         if let playSessionId {
             body["PlaySessionId"] = playSessionId

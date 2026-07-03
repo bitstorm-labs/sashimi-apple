@@ -91,6 +91,16 @@ class SubtitleManager: ObservableObject {
         timeObservation = nil
     }
 
+    deinit {
+        // Safety net: the tuple holds the last strong reference to the
+        // player, so dropping it with a live observer would dealloc the
+        // player mid-observation and crash. Normal teardown goes through
+        // clear()/stopTracking() before this ever matters.
+        if let observation = timeObservation {
+            observation.player.removeTimeObserver(observation.token)
+        }
+    }
+
     private func updateCurrentCue(at time: Double) {
         let activeCue = cues.first { cue in
             time >= cue.startTime && time < cue.endTime
