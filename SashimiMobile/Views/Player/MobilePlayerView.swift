@@ -234,17 +234,20 @@ struct MobilePlayerView: View {
 
             Section("Subtitles") {
                 Button {
-                    viewModel.selectedSubtitleTrackId = nil
+                    // Route through the ViewModel so the subtitle overlay is
+                    // actually cleared, not just the selection state.
+                    viewModel.disableSubtitles()
                 } label: {
                     HStack {
                         Text("Off")
-                        if viewModel.selectedSubtitleTrackId == nil {
+                        if viewModel.selectedSubtitleTrackId == nil || viewModel.selectedSubtitleTrackId == "off" {
                             Image(systemName: "checkmark")
                         }
                     }
                 }
 
-                ForEach(Array(viewModel.subtitleTracks.enumerated()), id: \.element.id) { _, subtitle in
+                // Skip the ViewModel's built-in "Off" option — this menu renders its own above
+                ForEach(viewModel.subtitleTracks.filter { !$0.isOffOption }) { subtitle in
                     Button {
                         viewModel.selectSubtitleTrack(subtitle)
                     } label: {

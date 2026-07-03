@@ -223,6 +223,7 @@ actor JellyfinClient {
         method: String = "GET",
         queryItems: [URLQueryItem]? = nil,
         body: Data? = nil,
+        isAuthRequest: Bool = false,
         retryCount: Int = 0
     ) async throws -> Data {
         guard let serverURL else {
@@ -247,6 +248,12 @@ actor JellyfinClient {
             request.httpBody = body
         }
 
+        // Only idempotent requests are safe to retry: a timed-out-but-delivered
+        // POST (e.g. reportPlaybackStopped) would otherwise be applied twice.
+        // GET and DELETE are idempotent per HTTP semantics (repeating a
+        // DELETE, e.g. unmark-favorite, converges to the same state).
+        let isIdempotent = method == "GET" || method == "DELETE"
+
         do {
             let (data, response) = try await urlSession.data(for: request)
 
@@ -254,17 +261,23 @@ actor JellyfinClient {
                 throw JellyfinError.invalidResponse
             }
 
-            // Handle 401/403 as session expiry (don't retry)
+            // Handle 401/403 as session expiry (don't retry).
+            // Exception: /Users/AuthenticateByName returns 401 for wrong
+            // credentials — that's a login failure, not an expired session,
+            // so don't log out or report "session expired".
             if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                if isAuthRequest {
+                    throw JellyfinError.invalidCredentials
+                }
                 await SessionManager.shared.logout(reason: .sessionExpired)
                 throw JellyfinError.sessionExpired
             }
 
             // Retry on 5xx server errors
-            if (500...599).contains(httpResponse.statusCode) && retryCount < maxRetries {
+            if (500...599).contains(httpResponse.statusCode) && isIdempotent && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
-                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, retryCount: retryCount + 1)
+                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
@@ -278,10 +291,10 @@ actor JellyfinClient {
             throw CancellationError()
         } catch {
             // Retry on network errors (URLError)
-            if retryCount < maxRetries {
+            if isIdempotent && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
-                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, retryCount: retryCount + 1)
+                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
             }
             throw JellyfinError.networkError(error)
         }
@@ -294,7 +307,8 @@ actor JellyfinClient {
         let data = try await request(
             path: "/Users/AuthenticateByName",
             method: "POST",
-            body: bodyData
+            body: bodyData,
+            isAuthRequest: true
         )
 
         let result = try JSONDecoder().decode(AuthenticationResult.self, from: data)
@@ -832,6 +846,7 @@ enum JellyfinError: LocalizedError {
     case invalidURL
     case httpError(statusCode: Int)
     case decodingError
+    case invalidCredentials
     case sessionExpired
     case networkError(Error)
 
@@ -856,6 +871,8 @@ enum JellyfinError: LocalizedError {
             }
         case .decodingError:
             return "Could not load content. Try again."
+        case .invalidCredentials:
+            return "Incorrect username or password."
         case .sessionExpired:
             return "Session expired. Please sign in again."
         case .networkError:
