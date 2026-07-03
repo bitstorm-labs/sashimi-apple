@@ -98,6 +98,7 @@ final class PlayerViewModel: ObservableObject {
     private var timeObserver: Any?
     private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
+    private var subtitleLoadTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -106,6 +107,22 @@ final class PlayerViewModel: ObservableObject {
     private let playbackSettings = PlaybackSettings.shared
 
     func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false, localFileURL: URL? = nil) async {
+        // Tear down everything tied to the previous player first — auto-play
+        // next episode reuses this ViewModel, and observers left on the old
+        // player crash when it deallocates (same teardown as changeQuality).
+        // The session subtitle intent is deliberately preserved so subtitles
+        // stay on across episodes; only the overlay/tracking is cleared.
+        progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
+        cleanupSegmentTracking()
+        subtitleManager.clear()
+        selectedSubtitleTrackId = "off"
+        invalidatePlayerObservers()
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+
         isLoading = true
         error = nil
         errorMessage = nil
@@ -303,6 +320,7 @@ final class PlayerViewModel: ObservableObject {
         // Stop current playback
         player?.pause()
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
 
@@ -311,6 +329,7 @@ final class PlayerViewModel: ObservableObject {
             self.endObserver = nil
         }
 
+        invalidatePlayerObservers()
         player = nil
         isLoading = true
 
@@ -433,8 +452,21 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Invalidates the KVO observations tied to the current player/item.
+    /// Must run before the player is dropped or replaced so no observation
+    /// outlives the object it watches.
+    private func invalidatePlayerObservers() {
+        statusObserver?.invalidate()
+        statusObserver = nil
+        errorObserver?.invalidate()
+        errorObserver = nil
+        rateObserver?.invalidate()
+        rateObserver = nil
+    }
+
     func stop() async {
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
 
@@ -464,6 +496,7 @@ final class PlayerViewModel: ObservableObject {
         }
 
         player?.pause()
+        invalidatePlayerObservers()
         player = nil
         currentItem = nil
         playbackStartDate = nil
@@ -605,16 +638,25 @@ final class PlayerViewModel: ObservableObject {
         // Update selection state
         selectedSubtitleTrackId = track.isOffOption ? "off" : track.id
 
+        // A newer selection supersedes any in-flight subtitle load — racing
+        // loads used to call startTracking against a stale player.
+        subtitleLoadTask?.cancel()
+
         guard let item = currentItem, let player = player else { return }
 
         if track.isOffOption {
             // Turn off subtitles
             subtitleManager.clear()
         } else {
-            // Load and display subtitles via our custom overlay
-            Task {
+            // Load and display subtitles via our custom overlay. Capture the
+            // player at creation: by the time the load finishes the player
+            // may have been rebuilt (quality change / next episode), and
+            // tracking a stale player would leave a live observer on it.
+            let capturedPlayer = player
+            subtitleLoadTask = Task {
                 await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
-                subtitleManager.startTracking(player: player)
+                guard !Task.isCancelled, self.player === capturedPlayer else { return }
+                subtitleManager.startTracking(player: capturedPlayer)
             }
         }
     }
@@ -847,6 +889,7 @@ final class PlayerViewModel: ObservableObject {
 
     deinit {
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)

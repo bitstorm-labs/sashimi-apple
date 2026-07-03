@@ -21,8 +21,12 @@ class SubtitleManager: ObservableObject {
     @Published var isLoading = false
 
     private var cues: [SubtitleCue] = []
-    private var timeObserver: Any?
-    private weak var player: AVPlayer?
+    // The observer token is stored together with a strong reference to the
+    // player it was created on: removeTimeObserver must be called on that
+    // exact player (calling it on a different player throws
+    // NSInvalidArgumentException, and letting the player dealloc with a live
+    // observer throws NSInternalInconsistencyException).
+    private var timeObservation: (token: Any, player: AVPlayer)?
 
     func loadSubtitles(itemId: String, subtitleIndex: Int) async {
         isLoading = true
@@ -68,20 +72,23 @@ class SubtitleManager: ObservableObject {
     }
 
     func startTracking(player: AVPlayer) {
-        self.player = player
+        // Remove any observer from the previous player FIRST — tearing down
+        // after switching players would pair the old token with the new
+        // player and crash (see timeObservation).
         stopTracking()
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+        let token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             self?.updateCurrentCue(at: time.seconds)
         }
+        timeObservation = (token: token, player: player)
     }
 
     func stopTracking() {
-        if let observer = timeObserver, let player = player {
-            player.removeTimeObserver(observer)
+        if let observation = timeObservation {
+            observation.player.removeTimeObserver(observation.token)
         }
-        timeObserver = nil
+        timeObservation = nil
     }
 
     private func updateCurrentCue(at time: Double) {
