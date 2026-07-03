@@ -90,14 +90,36 @@ final class PlayerViewModel: ObservableObject {
     private var currentMediaSource: MediaSourceInfo?
     private var currentSubtitleStreamIndex: Int?
 
+    /// The subtitle track the session wants, described by content rather
+    /// than stream index (indexes are not stable across media sources).
+    /// Once set, subtitles stay on across quality changes and episode
+    /// transitions until explicitly turned off (disableSubtitles/stop).
+    private struct SubtitlePreference {
+        let language: String?
+        let displayTitle: String?
+        let isExternal: Bool
+    }
+    private var sessionSubtitlePreference: SubtitlePreference?
+
+    // Server-side play session: sent with playback reports so the server can
+    // correlate them, and used to stop the session's transcode when playback
+    // is torn down or rebuilt.
+    private var playSessionId: String?
+
+    /// Play method reported to the server — keeps the dashboard honest now
+    /// that explicit quality picks force transcodes.
+    private var currentPlayMethod: String {
+        currentMediaSource?.transcodingUrl != nil ? "Transcode" : "DirectStream"
+    }
+
     // Skip intro/credits
     @Published var segments: [MediaSegmentDto] = []
     @Published var currentSegment: MediaSegmentDto?
     @Published var showingSkipButton = false
 
-    private var timeObserver: Any?
     private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
+    private var subtitleLoadTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -106,6 +128,29 @@ final class PlayerViewModel: ObservableObject {
     private let playbackSettings = PlaybackSettings.shared
 
     func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false, localFileURL: URL? = nil) async {
+        // Tear down everything tied to the previous player first — auto-play
+        // next episode reuses this ViewModel, and observers left on the old
+        // player crash when it deallocates (same teardown as changeQuality).
+        // The session subtitle intent is deliberately preserved so subtitles
+        // stay on across episodes; only the overlay/tracking is cleared.
+        progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
+        cleanupSegmentTracking()
+        subtitleManager.clear()
+        selectedSubtitleTrackId = "off"
+        invalidatePlayerObservers()
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+
+        // Kill the previous episode's transcode session, same as
+        // changeQuality — auto-play-next otherwise leaves the old encode
+        // running until the server times it out.
+        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+        }
+
         isLoading = true
         error = nil
         errorMessage = nil
@@ -161,7 +206,7 @@ final class PlayerViewModel: ObservableObject {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -173,7 +218,7 @@ final class PlayerViewModel: ObservableObject {
                 let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
                 await player?.seek(to: startTime)
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -183,7 +228,7 @@ final class PlayerViewModel: ObservableObject {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -216,7 +261,7 @@ final class PlayerViewModel: ObservableObject {
         let positionTicks = Int64(currentTime.seconds * 10_000_000)
         let isPaused = player.timeControlStatus == .paused
 
-        try? await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused)
+        try? await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
     }
 
     private func handlePlaybackEnded() async {
@@ -226,7 +271,7 @@ final class PlayerViewModel: ObservableObject {
             // Mark as watched by reporting position at the end
             if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
                 let endTicks = Int64(duration * 10_000_000)
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks)
+                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
             }
             // Mark item as played
             try? await client.markPlayed(itemId: item.id)
@@ -303,19 +348,35 @@ final class PlayerViewModel: ObservableObject {
         // Stop current playback
         player?.pause()
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
+        // Reset the menu selection alongside the overlay — the re-apply
+        // below sets it back when it finds a match in the new source, and
+        // without this a failed match would leave the menu showing a track
+        // that isn't rendering.
+        selectedSubtitleTrackId = "off"
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
         }
 
+        invalidatePlayerObservers()
         player = nil
         isLoading = true
 
+        // Kill the old transcode session before requesting a new one, so the
+        // server isn't left encoding a stream nobody is watching.
+        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+        }
+
         do {
-            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate)
+            // An explicit non-Auto pick forces a transcode so the selection
+            // visibly takes effect: the tiers are caps, and a direct-played
+            // source under the cap would otherwise make the pick a no-op.
+            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, forceTranscode: quality != .auto)
             isLoading = false
             updateNowPlayingInfo(item: item)
 
@@ -327,13 +388,12 @@ final class PlayerViewModel: ObservableObject {
 
             // Re-apply the session's subtitle selection on the rebuilt
             // player — the overlay was cleared along with the old player.
-            // Rebuild the track from the media source rather than looking it
-            // up in subtitleTracks, which is only populated once the subtitle
-            // menu UI has appeared (never, on iOS).
-            if let selectedId = selectedSubtitleTrackId, selectedId != "off",
-               let stream = currentMediaSource?.subtitleStreams
-                   .first(where: { "\($0.index ?? 0)" == selectedId }) {
-                selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
+            // Match by content, not raw index: the new media source's stream
+            // indexes may differ from the old one's. When there was no manual
+            // pick this session, fall back to the Settings preference (which
+            // is what selected the subtitles that were just cleared).
+            if !applySessionSubtitlePreference() {
+                applyPreferredSubtitles()
             }
 
             // Resume playback and tracking
@@ -348,7 +408,7 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil) async throws {
+    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, forceTranscode: Bool = false) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -359,13 +419,15 @@ final class PlayerViewModel: ObservableObject {
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             maxBitrate: effectiveBitrate,
-            forceDirectPlay: playbackSettings.forceDirectPlay
+            forceDirectPlay: playbackSettings.forceDirectPlay,
+            forceTranscode: forceTranscode
         )
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             throw PlayerError.noMediaSource
         }
 
+        playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
         videoResolution = mediaSource.videoResolution
 
@@ -433,10 +495,26 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Invalidates the KVO observations tied to the current player/item.
+    /// Must run before the player is dropped or replaced so no observation
+    /// outlives the object it watches.
+    private func invalidatePlayerObservers() {
+        statusObserver?.invalidate()
+        statusObserver = nil
+        errorObserver?.invalidate()
+        errorObserver = nil
+        rateObserver?.invalidate()
+        rateObserver = nil
+    }
+
     func stop() async {
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
+        // The session is over — the persisted playbackSettings carry the
+        // subtitle preference into the next one.
+        sessionSubtitlePreference = nil
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -459,11 +537,18 @@ final class PlayerViewModel: ObservableObject {
             }
 
             if !isOfflinePlayback {
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
+                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
             }
         }
 
+        // Kill the session's server-side transcode, if one was active.
+        if !isOfflinePlayback, let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+        }
+        playSessionId = nil
+
         player?.pause()
+        invalidatePlayerObservers()
         player = nil
         currentItem = nil
         playbackStartDate = nil
@@ -520,7 +605,29 @@ final class PlayerViewModel: ObservableObject {
     /// these because they happen afterwards.
     private func applyPreferredTracks() async {
         await applyPreferredAudioLanguage()
-        applyPreferredSubtitles()
+        // The session's subtitle intent (a selection made in the player,
+        // e.g. during the previous episode) wins over the Settings-based
+        // preference — subtitles stay on until manually turned off.
+        if !applySessionSubtitlePreference() {
+            applyPreferredSubtitles()
+        }
+    }
+
+    /// Re-applies the session's subtitle intent against the current media
+    /// source. Returns false when there is no intent or no matching stream,
+    /// so callers can fall back to the Settings-based preference.
+    @discardableResult
+    private func applySessionSubtitlePreference() -> Bool {
+        guard let preference = sessionSubtitlePreference,
+              let stream = PlaybackSelection.matchingSubtitleStream(
+                in: currentMediaSource?.subtitleStreams ?? [],
+                language: preference.language,
+                displayTitle: preference.displayTitle,
+                isExternal: preference.isExternal
+              ) else { return false }
+
+        selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
+        return true
     }
 
     private func applyPreferredAudioLanguage() async {
@@ -546,7 +653,7 @@ final class PlayerViewModel: ObservableObject {
                 subtitlesEnabled: playbackSettings.subtitlesEnabled
               ) else { return }
 
-        selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
+        selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
     }
 
     /// Builds a menu option for a Jellyfin subtitle stream using the same
@@ -601,21 +708,60 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
-    func selectSubtitleTrack(_ track: SubtitleTrackOption) {
-        // Update selection state
-        selectedSubtitleTrackId = track.isOffOption ? "off" : track.id
+    /// Selects a subtitle track. `isUserSelection` distinguishes a manual
+    /// pick in the player UI (persisted as the user's preference) from the
+    /// automatic re-application paths (Settings preference, quality change,
+    /// next episode), which must not overwrite the stored preference.
+    func selectSubtitleTrack(_ track: SubtitleTrackOption, isUserSelection: Bool = true) {
+        // A newer selection supersedes any in-flight subtitle load — racing
+        // loads used to call startTracking against a stale player.
+        subtitleLoadTask?.cancel()
+
+        if track.isOffOption {
+            if isUserSelection {
+                // Manual "Off" — same persistence semantics as the views
+                // that call disableSubtitles() directly.
+                disableSubtitles()
+            } else {
+                selectedSubtitleTrackId = "off"
+                subtitleManager.clear()
+            }
+            return
+        }
+
+        selectedSubtitleTrackId = track.id
+
+        if isUserSelection {
+            // Remember the session's subtitle intent by content so it
+            // survives quality changes and episode transitions (stream
+            // indexes don't). Only manual picks may write this — automatic
+            // re-applies can resolve via a weaker fallback tier (e.g.
+            // embedded "English" for an external "English (SDH)" pick), and
+            // storing that match would permanently degrade the intent.
+            sessionSubtitlePreference = SubtitlePreference(
+                language: track.languageCode,
+                displayTitle: track.displayName,
+                isExternal: track.isExternal
+            )
+            // "On stays on until I turn it off" — persist the manual choice
+            // across app launches too.
+            playbackSettings.subtitlesEnabled = true
+            if let language = track.languageCode, !language.isEmpty {
+                playbackSettings.preferredSubtitleLanguage = language
+            }
+        }
 
         guard let item = currentItem, let player = player else { return }
 
-        if track.isOffOption {
-            // Turn off subtitles
-            subtitleManager.clear()
-        } else {
-            // Load and display subtitles via our custom overlay
-            Task {
-                await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
-                subtitleManager.startTracking(player: player)
-            }
+        // Load and display subtitles via our custom overlay. Capture the
+        // player at creation: by the time the load finishes the player
+        // may have been rebuilt (quality change / next episode), and
+        // tracking a stale player would leave a live observer on it.
+        let capturedPlayer = player
+        subtitleLoadTask = Task {
+            await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+            guard !Task.isCancelled, self.player === capturedPlayer else { return }
+            subtitleManager.startTracking(player: capturedPlayer)
         }
     }
 
@@ -623,9 +769,16 @@ final class PlayerViewModel: ObservableObject {
     /// option: sets the "off" sentinel AND clears the subtitle overlay. Views
     /// must use this instead of mutating `selectedSubtitleTrackId` directly,
     /// which would leave the current subtitles on screen.
+    ///
+    /// This is the ONLY place (besides stop()) that drops the session
+    /// subtitle intent, and it persists the "off" choice — subtitles stay
+    /// off across episodes and app launches until re-enabled.
     func disableSubtitles() {
+        subtitleLoadTask?.cancel()
         selectedSubtitleTrackId = "off"
         subtitleManager.clear()
+        sessionSubtitlePreference = nil
+        playbackSettings.subtitlesEnabled = false
     }
 
     func loadAllTracks() {
@@ -847,6 +1000,7 @@ final class PlayerViewModel: ObservableObject {
 
     deinit {
         progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
         cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)

@@ -18,6 +18,14 @@ struct TVPlayerView: UIViewControllerRepresentable {
         playerVC.showsPlaybackControls = true
         playerVC.delegate = context.coordinator
 
+        // Subtitles are rendered by our own overlay and selected through the
+        // custom captions.bubble menu below, but AVPlayerViewController also
+        // shows its native subtitle panel whenever the player item exposes
+        // legible options — a second, non-functional subtitle control. The
+        // no-match language sentinel empties the native subtitle tab while
+        // keeping the native AUDIO tab (the only audio control on tvOS).
+        playerVC.allowedSubtitleOptionLanguages = [""]
+
         playerVC.transportBarCustomMenuItems = buildMenus()
 
         // Embed AVPVC as child VC (not modal — avoids dismiss lifecycle issues)
