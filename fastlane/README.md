@@ -47,30 +47,6 @@ Push a new build to TestFlight
 
 Deploy a new version to the App Store
 
-### tvos bump_patch
-
-```sh
-[bundle exec] fastlane tvos bump_patch
-```
-
-Increment version number (patch)
-
-### tvos bump_minor
-
-```sh
-[bundle exec] fastlane tvos bump_minor
-```
-
-Increment version number (minor)
-
-### tvos bump_major
-
-```sh
-[bundle exec] fastlane tvos bump_major
-```
-
-Increment version number (major)
-
 ### tvos create_app_record
 
 ```sh

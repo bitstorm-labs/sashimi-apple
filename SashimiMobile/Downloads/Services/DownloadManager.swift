@@ -229,26 +229,6 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    func pauseDownload(itemId: String) {
-        backgroundSession.getAllTasks { [weak self] tasks in
-            guard let self else { return }
-            for task in tasks where self.taskIdMap[self.taskKey(task.taskIdentifier)] == itemId {
-                if let downloadTask = task as? URLSessionDownloadTask {
-                    downloadTask.cancel(byProducingResumeData: { _ in })
-                } else {
-                    task.cancel()
-                }
-                Task { @MainActor in
-                    self.persistence.updateStatus(itemId: itemId, status: .paused)
-                    self.pendingProgress.removeValue(forKey: itemId)
-                    self.activeDownloads.removeValue(forKey: itemId)
-                    self.preparingItems.remove(itemId)
-                }
-                break
-            }
-        }
-    }
-
     func cancelDownload(itemId: String) async {
         let tasks = await backgroundSession.allTasks
         for task in tasks where taskIdMap[taskKey(task.taskIdentifier)] == itemId {

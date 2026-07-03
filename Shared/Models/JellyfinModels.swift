@@ -15,13 +15,6 @@ extension String {
 // swiftlint:disable discouraged_optional_boolean
 // Jellyfin API models use optional booleans - this matches the server response structure
 
-struct ServerConfiguration: Codable {
-    var serverURL: URL
-    var accessToken: String?
-    var userId: String?
-    var serverName: String?
-}
-
 struct AuthenticationResult: Codable {
     let user: UserDto
     let accessToken: String
@@ -335,18 +328,6 @@ struct LibraryViewsResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case items = "Items"
-    }
-}
-
-struct VirtualFolderInfo: Codable {
-    let name: String
-    let itemId: String
-    let collectionType: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name = "Name"
-        case itemId = "ItemId"
-        case collectionType = "CollectionType"
     }
 }
 

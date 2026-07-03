@@ -45,21 +45,6 @@ final class JellyfinClientTests: XCTestCase {
         XCTAssertTrue(playbackURL?.absoluteString.contains("source-456") ?? false)
     }
 
-    func testHLSStreamURLConstruction() async {
-        let client = JellyfinClient.shared
-        await client.configure(serverURL: URL(string: "http://localhost:8096")!, accessToken: "test-token")
-
-        let hlsURL = await client.getHLSStreamURL(
-            itemId: "movie-789",
-            mediaSourceId: "source-123",
-            subtitleStreamIndex: 1
-        )
-
-        XCTAssertNotNil(hlsURL)
-        XCTAssertTrue(hlsURL?.absoluteString.contains("master.m3u8") ?? false)
-        XCTAssertTrue(hlsURL?.absoluteString.contains("movie-789") ?? false)
-    }
-
     // MARK: - Response Parsing Tests
 
     func testAuthenticationResultDecoding() throws {
@@ -236,32 +221,6 @@ final class JellyfinClientTests: XCTestCase {
 
         XCTAssertEqual(segment.start, 0.0, accuracy: 0.001)
         XCTAssertEqual(segment.end, 90.5, accuracy: 0.001)
-    }
-
-    // MARK: - Virtual Folder Tests
-
-    func testVirtualFolderDecoding() throws {
-        let json = """
-        [
-            {
-                "Name": "Movies",
-                "CollectionType": "movies",
-                "ItemId": "folder-1"
-            },
-            {
-                "Name": "TV Shows",
-                "CollectionType": "tvshows",
-                "ItemId": "folder-2"
-            }
-        ]
-        """.data(using: .utf8)!
-
-        let decoder = JSONDecoder()
-        let folders = try decoder.decode([VirtualFolderInfo].self, from: json)
-
-        XCTAssertEqual(folders.count, 2)
-        XCTAssertEqual(folders[0].name, "Movies")
-        XCTAssertEqual(folders[1].name, "TV Shows")
     }
 
     // MARK: - Chapter Tests

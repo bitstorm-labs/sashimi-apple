@@ -568,37 +568,6 @@ actor JellyfinClient {
         return components?.url
     }
 
-    /// Get HLS transcoding URL with optional subtitle track
-    func getHLSStreamURL(itemId: String, mediaSourceId: String, subtitleStreamIndex: Int? = nil) -> URL? {
-        guard let serverURL, let accessToken else {
-            return nil
-        }
-
-        var components = URLComponents(string: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
-        components?.path += "/Videos/\(itemId)/master.m3u8"
-
-        var queryItems = [
-            URLQueryItem(name: "MediaSourceId", value: mediaSourceId),
-            URLQueryItem(name: "api_key", value: accessToken),
-            URLQueryItem(name: "DeviceId", value: deviceId),
-            URLQueryItem(name: "VideoCodec", value: "h264"),
-            URLQueryItem(name: "AudioCodec", value: "aac"),
-            URLQueryItem(name: "TranscodingMaxAudioChannels", value: "6"),
-            URLQueryItem(name: "SegmentContainer", value: "ts"),
-            URLQueryItem(name: "MinSegments", value: "2"),
-            URLQueryItem(name: "BreakOnNonKeyFrames", value: "true"),
-            URLQueryItem(name: "TranscodeReasons", value: "SubtitleCodecNotSupported")
-        ]
-
-        if let subIndex = subtitleStreamIndex {
-            queryItems.append(URLQueryItem(name: "SubtitleStreamIndex", value: "\(subIndex)"))
-            queryItems.append(URLQueryItem(name: "SubtitleMethod", value: "Hls"))
-        }
-
-        components?.queryItems = queryItems
-        return components?.url
-    }
-
     func imageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
         guard let serverURL else { return nil }
 

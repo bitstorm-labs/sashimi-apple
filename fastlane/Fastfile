@@ -145,39 +145,6 @@ platform :tvos do
     push_git_tags unless is_ci
   end
 
-  # ============================================
-  # UTILITIES
-  # ============================================
-
-  desc "Increment version number (patch)"
-  lane :bump_patch do
-    increment_version_number(bump_type: "patch")
-    commit_version_bump(message: "chore: bump version to #{get_version_number}")
-  end
-
-  desc "Increment version number (minor)"
-  lane :bump_minor do
-    increment_version_number(bump_type: "minor")
-    commit_version_bump(message: "chore: bump version to #{get_version_number}")
-  end
-
-  desc "Increment version number (major)"
-  lane :bump_major do
-    increment_version_number(bump_type: "major")
-    commit_version_bump(message: "chore: bump version to #{get_version_number}")
-  end
-
-  # ============================================
-  # ERROR HANDLING
-  # ============================================
-
-  error do |lane, exception|
-    # Slack notification on failure (optional)
-    # slack(
-    #   message: "Fastlane failed: #{exception.message}",
-    #   success: false
-    # )
-  end
 end
 
 # ============================================================================
