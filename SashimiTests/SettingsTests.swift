@@ -93,7 +93,11 @@ final class SettingsTests: XCTestCase {
 
         // Restore original state
         certSettings.trustedHosts = originalHosts
-        defaults.set(originalPins ?? [:], forKey: CertificateTrustKeys.fingerprints)
+        if let originalPins {
+            defaults.set(originalPins, forKey: CertificateTrustKeys.fingerprints)
+        } else {
+            defaults.removeObject(forKey: CertificateTrustKeys.fingerprints)
+        }
     }
 
     func testLegacyGlobalAllowanceMigratesToChallengedHost() {

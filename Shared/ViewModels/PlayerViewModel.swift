@@ -327,9 +327,13 @@ final class PlayerViewModel: ObservableObject {
 
             // Re-apply the session's subtitle selection on the rebuilt
             // player — the overlay was cleared along with the old player.
+            // Rebuild the track from the media source rather than looking it
+            // up in subtitleTracks, which is only populated once the subtitle
+            // menu UI has appeared (never, on iOS).
             if let selectedId = selectedSubtitleTrackId, selectedId != "off",
-               let track = subtitleTracks.first(where: { $0.id == selectedId }) {
-                selectSubtitleTrack(track)
+               let stream = currentMediaSource?.subtitleStreams
+                   .first(where: { "\($0.index ?? 0)" == selectedId }) {
+                selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
             }
 
             // Resume playback and tracking
@@ -542,16 +546,21 @@ final class PlayerViewModel: ObservableObject {
                 subtitlesEnabled: playbackSettings.subtitlesEnabled
               ) else { return }
 
-        // Same id/display scheme as loadSubtitleTracks() so the subtitle menu
-        // shows this selection when it's opened later.
-        selectSubtitleTrack(SubtitleTrackOption(
+        selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
+    }
+
+    /// Builds a menu option for a Jellyfin subtitle stream using the same
+    /// id/display scheme as loadSubtitleTracks(), so selections made through
+    /// any path stay consistent with the subtitle menu.
+    private static func subtitleTrackOption(for stream: MediaStream) -> SubtitleTrackOption {
+        SubtitleTrackOption(
             id: "\(stream.index ?? 0)",
             displayName: stream.displayTitle ?? stream.language ?? "Unknown",
             languageCode: stream.language,
             index: stream.index ?? 0,
             isOffOption: false,
             isExternal: stream.isExternal ?? false
-        ))
+        )
     }
 
     func loadSubtitleTracks() {

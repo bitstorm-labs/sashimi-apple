@@ -7,18 +7,24 @@ enum KeychainHelper {
     static func save(_ value: String, forKey key: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
 
-        // Delete any existing item first
-        delete(forKey: key)
-
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccount as String: key
         ]
 
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var addAttributes = query
+        addAttributes[kSecValueData as String] = data
+        addAttributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+
+        let status = SecItemAdd(addAttributes as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            // Update in place rather than delete-then-add so a failed write
+            // can't destroy the existing value (e.g. the parental PIN, whose
+            // loss would lock the user out of parental settings).
+            let update: [String: Any] = [kSecValueData as String: data]
+            return SecItemUpdate(query as CFDictionary, update as CFDictionary) == errSecSuccess
+        }
         return status == errSecSuccess
     }
 

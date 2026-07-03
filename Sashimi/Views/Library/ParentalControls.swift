@@ -57,6 +57,12 @@ class ParentalControlsManager: ObservableObject {
     /// unsalted hash of a 4-digit PIN (10,000 possible values) is trivially
     /// brute-forced by anyone who could read the Keychain anyway.
     func setPIN(_ pin: String) -> Bool {
+        // verifyPIN distinguishes raw PINs from legacy SHA-256 hashes by
+        // length (4 vs 64), so only exactly-4-character PINs may be stored.
+        guard pin.count == 4 else {
+            logger.error("Rejected PIN of invalid length")
+            return false
+        }
         guard KeychainHelper.save(pin, forKey: Self.pinKeychainKey) else {
             logger.error("Failed to save parental PIN to Keychain")
             return false
