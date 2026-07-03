@@ -643,12 +643,18 @@ actor JellyfinClient {
     func getPlaybackInfo(
         itemId: String,
         maxBitrate: Int? = nil,
-        forceDirectPlay: Bool = false
+        forceDirectPlay: Bool = false,
+        forceTranscode: Bool = false
     ) async throws -> PlaybackInfoResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
         // Default to 120 Mbps (essentially unlimited), or use specified bitrate
         let streamingBitrate = maxBitrate ?? 120_000_000
+
+        // An explicit quality pick (forceTranscode) beats the global Force
+        // Direct Play setting for this request — otherwise the pick could
+        // never take effect.
+        let effectiveForceDirectPlay = forceDirectPlay && !forceTranscode
 
         let deviceProfile: [String: Any] = [
             "MaxStreamingBitrate": streamingBitrate,
@@ -683,12 +689,21 @@ actor JellyfinClient {
         // Disabling DirectStream and Transcoding leaves direct play as the
         // only option, so the server either returns the original file or
         // reports the item unplayable (rather than silently remuxing).
+        //
+        // Conversely, forceTranscode disables DirectPlay and DirectStream so
+        // the server MUST return a transcodingUrl that honors the bitrate
+        // cap — the quality tiers are caps, not targets, so a direct-played
+        // source under the cap would otherwise make the pick a no-op.
+        //
+        // MaxStreamingBitrate is sent both top-level and inside the device
+        // profile: which one the server honors is version-dependent.
         let body: [String: Any] = [
             "UserId": userId,
+            "MaxStreamingBitrate": streamingBitrate,
             "DeviceProfile": deviceProfile,
-            "EnableDirectPlay": true,
-            "EnableDirectStream": !forceDirectPlay,
-            "EnableTranscoding": !forceDirectPlay,
+            "EnableDirectPlay": !forceTranscode,
+            "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
+            "EnableTranscoding": !effectiveForceDirectPlay,
             "AllowVideoStreamCopy": true,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
@@ -793,13 +808,16 @@ actor JellyfinClient {
         return components.url
     }
 
-    func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0) async throws {
-        let body: [String: Any] = [
+    func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0, playSessionId: String? = nil) async throws {
+        var body: [String: Any] = [
             "ItemId": itemId,
             "PositionTicks": positionTicks,
             "IsPaused": false,
             "PlayMethod": "DirectStream"
         ]
+        if let playSessionId {
+            body["PlaySessionId"] = playSessionId
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
 
@@ -810,12 +828,15 @@ actor JellyfinClient {
         )
     }
 
-    func reportPlaybackProgress(itemId: String, positionTicks: Int64, isPaused: Bool) async throws {
-        let body: [String: Any] = [
+    func reportPlaybackProgress(itemId: String, positionTicks: Int64, isPaused: Bool, playSessionId: String? = nil) async throws {
+        var body: [String: Any] = [
             "ItemId": itemId,
             "PositionTicks": positionTicks,
             "IsPaused": isPaused
         ]
+        if let playSessionId {
+            body["PlaySessionId"] = playSessionId
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
 
@@ -826,11 +847,14 @@ actor JellyfinClient {
         )
     }
 
-    func reportPlaybackStopped(itemId: String, positionTicks: Int64) async throws {
-        let body: [String: Any] = [
+    func reportPlaybackStopped(itemId: String, positionTicks: Int64, playSessionId: String? = nil) async throws {
+        var body: [String: Any] = [
             "ItemId": itemId,
             "PositionTicks": positionTicks
         ]
+        if let playSessionId {
+            body["PlaySessionId"] = playSessionId
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
 
@@ -838,6 +862,20 @@ actor JellyfinClient {
             path: "/Sessions/Playing/Stopped",
             method: "POST",
             body: bodyData
+        )
+    }
+
+    /// Tells the server to kill the ffmpeg transcode belonging to a play
+    /// session. Without this, changing quality (or leaving the player) left
+    /// the old transcode running server-side.
+    func stopActiveEncoding(playSessionId: String) async throws {
+        _ = try await request(
+            path: "/Videos/ActiveEncodings",
+            method: "DELETE",
+            queryItems: [
+                URLQueryItem(name: "deviceId", value: deviceId),
+                URLQueryItem(name: "playSessionId", value: playSessionId)
+            ]
         )
     }
 

@@ -90,6 +90,11 @@ final class PlayerViewModel: ObservableObject {
     private var currentMediaSource: MediaSourceInfo?
     private var currentSubtitleStreamIndex: Int?
 
+    // Server-side play session: sent with playback reports so the server can
+    // correlate them, and used to stop the session's transcode when playback
+    // is torn down or rebuilt.
+    private var playSessionId: String?
+
     // Skip intro/credits
     @Published var segments: [MediaSegmentDto] = []
     @Published var currentSegment: MediaSegmentDto?
@@ -178,7 +183,7 @@ final class PlayerViewModel: ObservableObject {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -190,7 +195,7 @@ final class PlayerViewModel: ObservableObject {
                 let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
                 await player?.seek(to: startTime)
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -200,7 +205,7 @@ final class PlayerViewModel: ObservableObject {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0)
+                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -233,7 +238,7 @@ final class PlayerViewModel: ObservableObject {
         let positionTicks = Int64(currentTime.seconds * 10_000_000)
         let isPaused = player.timeControlStatus == .paused
 
-        try? await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused)
+        try? await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
     }
 
     private func handlePlaybackEnded() async {
@@ -243,7 +248,7 @@ final class PlayerViewModel: ObservableObject {
             // Mark as watched by reporting position at the end
             if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
                 let endTicks = Int64(duration * 10_000_000)
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks)
+                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
             }
             // Mark item as played
             try? await client.markPlayed(itemId: item.id)
@@ -333,8 +338,17 @@ final class PlayerViewModel: ObservableObject {
         player = nil
         isLoading = true
 
+        // Kill the old transcode session before requesting a new one, so the
+        // server isn't left encoding a stream nobody is watching.
+        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+        }
+
         do {
-            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate)
+            // An explicit non-Auto pick forces a transcode so the selection
+            // visibly takes effect: the tiers are caps, and a direct-played
+            // source under the cap would otherwise make the pick a no-op.
+            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, forceTranscode: quality != .auto)
             isLoading = false
             updateNowPlayingInfo(item: item)
 
@@ -367,7 +381,7 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil) async throws {
+    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, forceTranscode: Bool = false) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -378,13 +392,15 @@ final class PlayerViewModel: ObservableObject {
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             maxBitrate: effectiveBitrate,
-            forceDirectPlay: playbackSettings.forceDirectPlay
+            forceDirectPlay: playbackSettings.forceDirectPlay,
+            forceTranscode: forceTranscode
         )
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             throw PlayerError.noMediaSource
         }
 
+        playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
         videoResolution = mediaSource.videoResolution
 
@@ -491,9 +507,15 @@ final class PlayerViewModel: ObservableObject {
             }
 
             if !isOfflinePlayback {
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks)
+                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
             }
         }
+
+        // Kill the session's server-side transcode, if one was active.
+        if !isOfflinePlayback, let playSessionId, currentMediaSource?.transcodingUrl != nil {
+            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+        }
+        playSessionId = nil
 
         player?.pause()
         invalidatePlayerObservers()
