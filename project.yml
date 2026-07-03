@@ -48,6 +48,10 @@ targets:
       path: Sashimi/Info.plist
       properties:
         CFBundleDisplayName: Sashimi
+        # Marketing version flows from the MARKETING_VERSION build setting so it's
+        # a single source of truth (xcodegen otherwise hardcodes a default "1.0"),
+        # and the Settings About row shows the real version.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -63,7 +67,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi
-        MARKETING_VERSION: 1.0.0
+        MARKETING_VERSION: 1.0.1
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
@@ -164,6 +168,9 @@ targets:
       path: TopShelf/Info.plist
       properties:
         CFBundleDisplayName: Sashimi TopShelf
+        # Keep the extension's version in lockstep with the app — App Store
+        # validation expects them to match.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         UIRequiredDeviceCapabilities:
           - arm64
         NSExtension:
@@ -172,7 +179,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.topshelf
-        MARKETING_VERSION: 1.0.0
+        MARKETING_VERSION: 1.0.1
         CURRENT_PROJECT_VERSION: 2
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
