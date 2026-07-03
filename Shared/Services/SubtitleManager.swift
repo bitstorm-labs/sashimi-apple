@@ -1,5 +1,8 @@
 import SwiftUI
 import AVFoundation
+import os
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "SubtitleManager")
 
 // MARK: - Subtitle Cue
 
@@ -52,6 +55,7 @@ class SubtitleManager: ObservableObject {
             }
         } catch {
             // Subtitle loading failed — no subtitles will be shown
+            logger.error("Failed to load subtitles for item \(itemId, privacy: .public) index \(subtitleIndex): \(error.localizedDescription, privacy: .public)")
         }
 
         isLoading = false

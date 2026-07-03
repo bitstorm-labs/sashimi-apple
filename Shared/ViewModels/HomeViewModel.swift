@@ -1,8 +1,11 @@
 import Foundation
 import Combine
+import os
 #if os(tvOS)
 import TVServices
 #endif
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "HomeViewModel")
 
 @MainActor
 final class HomeViewModel: ObservableObject {
@@ -75,7 +78,10 @@ final class HomeViewModel: ObservableObject {
                         }
                     }
                 }
-            } catch { }
+            } catch {
+                // Non-fatal: the row just renders without a library name
+                logger.error("Failed to load ancestors for \(seriesId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         continueWatchingLibraryNames = libraryNames
@@ -144,7 +150,10 @@ final class HomeViewModel: ObservableObject {
                     libraryNames[item.id] = library.name
                 }
                 allHeroItems.append(contentsOf: items.prefix(5))
-            } catch { }
+            } catch {
+                // Non-fatal: this library is just missing from the hero rotation
+                logger.error("Failed to load latest media for library \(library.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         heroItems = allHeroItems.shuffled()

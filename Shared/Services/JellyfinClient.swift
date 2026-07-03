@@ -1,35 +1,113 @@
 import Foundation
 import Security
+import CryptoKit
+import os
 
 // swiftlint:disable type_body_length file_length
 // JellyfinClient handles all Jellyfin API endpoints - splitting would fragment the API layer
 
 // MARK: - Certificate Trust Settings
 
+/// UserDefaults keys shared between the main-actor settings object and the
+/// (background-queue) URLSession certificate delegate.
+enum CertificateTrustKeys {
+    static let selfSignedHosts = "selfSignedAllowedHosts"
+    static let expiredHosts = "expiredAllowedHosts"
+    static let trustedHosts = "trustedHosts"
+    static let fingerprints = "trustedHostCertFingerprints"
+    // Older builds stored the allowances as single global Bools that applied
+    // to every host. These keys only exist until migration runs.
+    static let legacySelfSigned = "allowSelfSignedCerts"
+    static let legacyExpired = "allowExpiredCerts"
+}
+
 @MainActor
 class CertificateTrustSettings: ObservableObject {
     static let shared = CertificateTrustSettings()
 
-    @Published var allowSelfSigned: Bool {
-        didSet { UserDefaults.standard.set(allowSelfSigned, forKey: "allowSelfSignedCerts") }
+    /// Hosts allowed to present certificates that fail system trust because
+    /// of an unknown (self-signed) root.
+    @Published var selfSignedAllowedHosts: Set<String> {
+        didSet { UserDefaults.standard.set(Array(selfSignedAllowedHosts), forKey: CertificateTrustKeys.selfSignedHosts) }
     }
-    @Published var allowExpiredCerts: Bool {
-        didSet { UserDefaults.standard.set(allowExpiredCerts, forKey: "allowExpiredCerts") }
+    /// Hosts allowed to present expired certificates.
+    @Published var expiredAllowedHosts: Set<String> {
+        didSet { UserDefaults.standard.set(Array(expiredAllowedHosts), forKey: CertificateTrustKeys.expiredHosts) }
     }
+    /// Manually trusted hosts. These are pinned to the SHA-256 fingerprint of
+    /// the leaf certificate they present on first acceptance.
     @Published var trustedHosts: Set<String> {
-        didSet {
-            UserDefaults.standard.set(Array(trustedHosts), forKey: "trustedHosts")
+        didSet { UserDefaults.standard.set(Array(trustedHosts), forKey: CertificateTrustKeys.trustedHosts) }
+    }
+
+    /// Host of the currently configured server; the per-host toggles in the
+    /// Settings UI apply to this host.
+    var currentHost: String? {
+        UserDefaults.standard.string(forKey: "serverURL")
+            .flatMap { URL(string: $0) }?
+            .host
+    }
+
+    /// Whether the current server's host may use a self-signed certificate.
+    /// (Settings-UI convenience over the per-host set.)
+    var allowSelfSigned: Bool {
+        get {
+            guard let host = currentHost else { return false }
+            return selfSignedAllowedHosts.contains(host)
+        }
+        set {
+            guard let host = currentHost else { return }
+            if newValue {
+                selfSignedAllowedHosts.insert(host)
+            } else {
+                selfSignedAllowedHosts.remove(host)
+            }
+        }
+    }
+
+    /// Whether the current server's host may use an expired certificate.
+    var allowExpiredCerts: Bool {
+        get {
+            guard let host = currentHost else { return false }
+            return expiredAllowedHosts.contains(host)
+        }
+        set {
+            guard let host = currentHost else { return }
+            if newValue {
+                expiredAllowedHosts.insert(host)
+            } else {
+                expiredAllowedHosts.remove(host)
+            }
         }
     }
 
     init() {
-        self.allowSelfSigned = UserDefaults.standard.bool(forKey: "allowSelfSignedCerts")
-        self.allowExpiredCerts = UserDefaults.standard.bool(forKey: "allowExpiredCerts")
-        if let hosts = UserDefaults.standard.array(forKey: "trustedHosts") as? [String] {
-            self.trustedHosts = Set(hosts)
-        } else {
-            self.trustedHosts = []
+        let defaults = UserDefaults.standard
+        self.selfSignedAllowedHosts = Set((defaults.array(forKey: CertificateTrustKeys.selfSignedHosts) as? [String]) ?? [])
+        self.expiredAllowedHosts = Set((defaults.array(forKey: CertificateTrustKeys.expiredHosts) as? [String]) ?? [])
+        self.trustedHosts = Set((defaults.array(forKey: CertificateTrustKeys.trustedHosts) as? [String]) ?? [])
+        migrateLegacyGlobalFlags()
+    }
+
+    /// Folds the old global allow-flags into the current server's host (the
+    /// only server the app can have been talking to) so existing connections
+    /// keep working, then clears them. If no server is configured yet the
+    /// flags stay put and CertificateValidationDelegate migrates them on the
+    /// first challenge instead.
+    private func migrateLegacyGlobalFlags() {
+        let defaults = UserDefaults.standard
+        let legacySelfSigned = defaults.bool(forKey: CertificateTrustKeys.legacySelfSigned)
+        let legacyExpired = defaults.bool(forKey: CertificateTrustKeys.legacyExpired)
+        guard legacySelfSigned || legacyExpired, let host = currentHost else { return }
+
+        if legacySelfSigned {
+            selfSignedAllowedHosts.insert(host)
         }
+        if legacyExpired {
+            expiredAllowedHosts.insert(host)
+        }
+        defaults.removeObject(forKey: CertificateTrustKeys.legacySelfSigned)
+        defaults.removeObject(forKey: CertificateTrustKeys.legacyExpired)
     }
 
     func trustHost(_ host: String) {
@@ -38,6 +116,11 @@ class CertificateTrustSettings: ObservableObject {
 
     func untrustHost(_ host: String) {
         trustedHosts.remove(host)
+        // Drop the pinned fingerprint so re-trusting the host later pins
+        // whatever certificate it presents then.
+        var pins = (UserDefaults.standard.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]) ?? [:]
+        pins.removeValue(forKey: host)
+        UserDefaults.standard.set(pins, forKey: CertificateTrustKeys.fingerprints)
     }
 
     func isHostTrusted(_ host: String) -> Bool {
@@ -48,18 +131,43 @@ class CertificateTrustSettings: ObservableObject {
 // MARK: - URLSession Delegate for Certificate Validation
 
 final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
-    private let allowSelfSigned: () -> Bool
-    private let allowExpired: () -> Bool
+    private let allowSelfSigned: (String) -> Bool
+    private let allowExpired: (String) -> Bool
     private let isHostTrusted: (String) -> Bool
+    private let pinnedFingerprint: (String) -> String?
+    private let storePinnedFingerprint: (String, String) -> Void
+    private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "CertificateValidation")
 
     init(
-        allowSelfSigned: @escaping () -> Bool,
-        allowExpired: @escaping () -> Bool,
-        isHostTrusted: @escaping (String) -> Bool
+        allowSelfSigned: @escaping (String) -> Bool,
+        allowExpired: @escaping (String) -> Bool,
+        isHostTrusted: @escaping (String) -> Bool,
+        pinnedFingerprint: @escaping (String) -> String?,
+        storePinnedFingerprint: @escaping (String, String) -> Void
     ) {
         self.allowSelfSigned = allowSelfSigned
         self.allowExpired = allowExpired
         self.isHostTrusted = isHostTrusted
+        self.pinnedFingerprint = pinnedFingerprint
+        self.storePinnedFingerprint = storePinnedFingerprint
+    }
+
+    /// Per-host allowance lookup with legacy fallback: if the old global Bool
+    /// is still set (settings object never initialized to migrate it), honor
+    /// it once and migrate it to this host so it becomes host-scoped.
+    static func hostAllowance(host: String, listKey: String, legacyKey: String) -> Bool {
+        let defaults = UserDefaults.standard
+        var hosts = (defaults.array(forKey: listKey) as? [String]) ?? []
+        if hosts.contains(host) {
+            return true
+        }
+        if defaults.bool(forKey: legacyKey) {
+            hosts.append(host)
+            defaults.set(hosts, forKey: listKey)
+            defaults.removeObject(forKey: legacyKey)
+            return true
+        }
+        return false
     }
 
     func urlSession(
@@ -75,52 +183,82 @@ final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchec
 
         let host = challenge.protectionSpace.host
 
-        // If host is explicitly trusted, accept the certificate
-        if isHostTrusted(host) {
-            let credential = URLCredential(trust: serverTrust)
-            completionHandler(.useCredential, credential)
-            return
-        }
-
-        // Evaluate the certificate chain
         var error: CFError?
         let isValid = SecTrustEvaluateWithError(serverTrust, &error)
 
-        if isValid {
-            // Certificate is valid through system trust
-            let credential = URLCredential(trust: serverTrust)
-            completionHandler(.useCredential, credential)
+        // Manually trusted hosts are accepted only while they present the
+        // leaf certificate pinned when the host was first accepted —
+        // trusting a host is not a blanket pass for whatever cert appears.
+        if isHostTrusted(host) {
+            if leafMatchesPin(serverTrust, host: host) {
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            } else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
             return
         }
 
-        // Check for recoverable errors
-        if let cfError = error {
-            let errorCode = CFErrorGetCode(cfError)
+        if isValid {
+            // Certificate chain is valid through system trust
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+            return
+        }
 
-            // Self-signed certificate: only accept if the error is a trust failure
-            // (not revoked, not wrong host, etc.)
-            // Trust failure codes that indicate self-signed or untrusted root
-            let selfSignedCodes: Set<Int> = [
-                3,     // kSecTrustResultRecoverableTrustFailure
-                5,     // kSecTrustResultFatalTrustFailure (self-signed root)
-                -9807  // errSSLXCertChainInvalid (no root CA in chain)
-            ]
-            if allowSelfSigned() && selfSignedCodes.contains(errorCode) {
-                let credential = URLCredential(trust: serverTrust)
-                completionHandler(.useCredential, credential)
-                return
-            }
-
-            // Expired certificate
-            if allowExpired() && errorCode == errSecCertificateExpired {
-                let credential = URLCredential(trust: serverTrust)
-                completionHandler(.useCredential, credential)
-                return
+        // Classify the failure by error domain + Security framework codes.
+        // (The old check compared SecTrustResultType constants (3, 5) against
+        // CFError codes, which are OSStatus values — they never matched.)
+        if let nsError = error.map({ $0 as Error as NSError }),
+           nsError.domain == NSOSStatusErrorDomain {
+            switch OSStatus(truncatingIfNeeded: nsError.code) {
+            case errSecNotTrusted, errSecCreateChainFailed, errSSLXCertChainInvalid:
+                // Untrusted or incomplete chain — the self-signed case.
+                if allowSelfSigned(host) {
+                    logger.warning("Accepting untrusted-root certificate for \(host, privacy: .public) (self-signed allowance)")
+                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                    return
+                }
+            case errSecCertificateExpired:
+                if allowExpired(host) {
+                    logger.warning("Accepting expired certificate for \(host, privacy: .public) (expired allowance)")
+                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                    return
+                }
+            default:
+                break
             }
         }
 
-        // Certificate validation failed
+        logger.error("Rejecting certificate for \(host, privacy: .public): \(error.map { String(describing: $0) } ?? "trust evaluation failed", privacy: .public)")
         completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+
+    /// True when the presented leaf certificate matches the fingerprint
+    /// pinned for this host. The first successful challenge after a host is
+    /// trusted records the pin.
+    private func leafMatchesPin(_ trust: SecTrust, host: String) -> Bool {
+        guard let fingerprint = Self.leafCertificateFingerprint(of: trust) else {
+            logger.error("Rejecting \(host, privacy: .public): could not read leaf certificate")
+            return false
+        }
+        if let pinned = pinnedFingerprint(host) {
+            if pinned == fingerprint {
+                return true
+            }
+            logger.error("Rejecting \(host, privacy: .public): certificate changed since the host was trusted (fingerprint mismatch)")
+            return false
+        }
+        storePinnedFingerprint(host, fingerprint)
+        return true
+    }
+
+    /// SHA-256 of the leaf certificate's DER encoding, as lowercase hex.
+    static func leafCertificateFingerprint(of trust: SecTrust) -> String? {
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first else {
+            return nil
+        }
+        let der = SecCertificateCopyData(leaf) as Data
+        return SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -156,15 +294,34 @@ actor JellyfinClient {
             self.deviceId = newId
         }
 
-        // Create certificate validation delegate
+        // Create certificate validation delegate. Closures read UserDefaults
+        // directly (thread-safe) because challenges arrive on the session's
+        // delegate queue, not the main actor.
         self.certificateDelegate = CertificateValidationDelegate(
-            allowSelfSigned: { UserDefaults.standard.bool(forKey: "allowSelfSignedCerts") },
-            allowExpired: { UserDefaults.standard.bool(forKey: "allowExpiredCerts") },
+            allowSelfSigned: { host in
+                CertificateValidationDelegate.hostAllowance(
+                    host: host,
+                    listKey: CertificateTrustKeys.selfSignedHosts,
+                    legacyKey: CertificateTrustKeys.legacySelfSigned
+                )
+            },
+            allowExpired: { host in
+                CertificateValidationDelegate.hostAllowance(
+                    host: host,
+                    listKey: CertificateTrustKeys.expiredHosts,
+                    legacyKey: CertificateTrustKeys.legacyExpired
+                )
+            },
             isHostTrusted: { host in
-                if let hosts = UserDefaults.standard.array(forKey: "trustedHosts") as? [String] {
-                    return hosts.contains(host)
-                }
-                return false
+                ((UserDefaults.standard.array(forKey: CertificateTrustKeys.trustedHosts) as? [String]) ?? []).contains(host)
+            },
+            pinnedFingerprint: { host in
+                (UserDefaults.standard.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String])?[host]
+            },
+            storePinnedFingerprint: { host, fingerprint in
+                var pins = (UserDefaults.standard.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]) ?? [:]
+                pins[host] = fingerprint
+                UserDefaults.standard.set(pins, forKey: CertificateTrustKeys.fingerprints)
             }
         )
 
@@ -483,7 +640,11 @@ actor JellyfinClient {
         return try JSONDecoder().decode(ItemsResponse.self, from: data)
     }
 
-    func getPlaybackInfo(itemId: String, maxBitrate: Int? = nil) async throws -> PlaybackInfoResponse {
+    func getPlaybackInfo(
+        itemId: String,
+        maxBitrate: Int? = nil,
+        forceDirectPlay: Bool = false
+    ) async throws -> PlaybackInfoResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
         // Default to 120 Mbps (essentially unlimited), or use specified bitrate
@@ -518,12 +679,16 @@ actor JellyfinClient {
             ]
         ]
 
+        // Jellyfin's PlaybackInfo API has no "force direct play" flag.
+        // Disabling DirectStream and Transcoding leaves direct play as the
+        // only option, so the server either returns the original file or
+        // reports the item unplayable (rather than silently remuxing).
         let body: [String: Any] = [
             "UserId": userId,
             "DeviceProfile": deviceProfile,
             "EnableDirectPlay": true,
-            "EnableDirectStream": true,
-            "EnableTranscoding": true,
+            "EnableDirectStream": !forceDirectPlay,
+            "EnableTranscoding": !forceDirectPlay,
             "AllowVideoStreamCopy": true,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
@@ -561,41 +726,14 @@ actor JellyfinClient {
             URLQueryItem(name: "Static", value: "true"),
             URLQueryItem(name: "MediaSourceId", value: mediaSourceId),
             URLQueryItem(name: "Container", value: ext),
+            // api_key stays in the URL here on purpose: this URL is handed to
+            // AVPlayer, which fetches the stream (and HLS sub-requests) itself
+            // and has no supported way to attach auth headers. Everywhere we
+            // control the fetch (URLSession), the token goes in X-Emby-Token.
             URLQueryItem(name: "api_key", value: accessToken),
             URLQueryItem(name: "DeviceId", value: deviceId)
         ]
 
-        return components?.url
-    }
-
-    /// Get HLS transcoding URL with optional subtitle track
-    func getHLSStreamURL(itemId: String, mediaSourceId: String, subtitleStreamIndex: Int? = nil) -> URL? {
-        guard let serverURL, let accessToken else {
-            return nil
-        }
-
-        var components = URLComponents(string: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
-        components?.path += "/Videos/\(itemId)/master.m3u8"
-
-        var queryItems = [
-            URLQueryItem(name: "MediaSourceId", value: mediaSourceId),
-            URLQueryItem(name: "api_key", value: accessToken),
-            URLQueryItem(name: "DeviceId", value: deviceId),
-            URLQueryItem(name: "VideoCodec", value: "h264"),
-            URLQueryItem(name: "AudioCodec", value: "aac"),
-            URLQueryItem(name: "TranscodingMaxAudioChannels", value: "6"),
-            URLQueryItem(name: "SegmentContainer", value: "ts"),
-            URLQueryItem(name: "MinSegments", value: "2"),
-            URLQueryItem(name: "BreakOnNonKeyFrames", value: "true"),
-            URLQueryItem(name: "TranscodeReasons", value: "SubtitleCodecNotSupported")
-        ]
-
-        if let subIndex = subtitleStreamIndex {
-            queryItems.append(URLQueryItem(name: "SubtitleStreamIndex", value: "\(subIndex)"))
-            queryItems.append(URLQueryItem(name: "SubtitleMethod", value: "Hls"))
-        }
-
-        components?.queryItems = queryItems
         return components?.url
     }
 

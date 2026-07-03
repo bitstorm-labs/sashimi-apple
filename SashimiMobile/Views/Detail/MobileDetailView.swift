@@ -1069,7 +1069,8 @@ struct MobileEpisodeCard: View {
                                         .fill(MobileColors.progressBackground)
                                     Rectangle()
                                         .fill(MobileColors.accent)
-                                        .frame(width: geo.size.width * CGFloat(episode.progressPercent / 100))
+                                        // progressPercent is a 0-1 fraction, not 0-100
+                                        .frame(width: geo.size.width * CGFloat(episode.progressPercent))
                                 }
                             }
                             .frame(height: 3)

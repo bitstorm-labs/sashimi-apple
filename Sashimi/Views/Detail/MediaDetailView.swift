@@ -9,7 +9,6 @@ private let trailerLogger = Logger(subsystem: "com.mondominator.sashimi", catego
 // with multiple states and sub-views - splitting would reduce cohesion
 
 struct MediaDetailView: View {
-    let initialItem: BaseItemDto
     var forceYouTubeStyle: Bool = false
     @Environment(\.dismiss) private var dismiss
     @State private var item: BaseItemDto
@@ -20,7 +19,6 @@ struct MediaDetailView: View {
     @State private var hasProgress: Bool = false
 
     init(item: BaseItemDto, forceYouTubeStyle: Bool = false) {
-        self.initialItem = item
         self.forceYouTubeStyle = forceYouTubeStyle
         self._item = State(initialValue: item)
     }
@@ -887,21 +885,6 @@ struct MediaDetailView: View {
         }
     }
 
-    private func mediaInfoPill(icon: String, text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.caption)
-            Text(text)
-                .font(.caption)
-                .fontWeight(.medium)
-        }
-        .foregroundStyle(SashimiTheme.textSecondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(SashimiTheme.cardBackground)
-        .clipShape(Capsule())
-    }
-
     // MARK: - Cast
     private func castSection(_ people: [PersonInfo]) -> some View {
         let cast = Array(people.filter { $0.type == "Actor" }.prefix(20))
@@ -1469,42 +1452,6 @@ struct EpisodeCard: View {
         }
 
         return parts.joined(separator: ", ")
-    }
-}
-
-struct TrailerRow: View {
-    let name: String
-    let url: String?
-    @FocusState private var isFocused: Bool
-    @State private var showingPlayer = false
-
-    var body: some View {
-        Button {
-            showingPlayer = true
-        } label: {
-            HStack(spacing: 16) {
-                Image(systemName: "play.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(isFocused ? .white : .gray)
-
-                Text(name)
-                    .font(.body)
-                    .foregroundStyle(.white)
-
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(isFocused ? SashimiTheme.accent : SashimiTheme.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-        .focused($isFocused)
-        .fullScreenCover(isPresented: $showingPlayer) {
-            if let urlString = url {
-                TrailerPlayerView(urlString: urlString, name: name)
-            }
-        }
     }
 }
 

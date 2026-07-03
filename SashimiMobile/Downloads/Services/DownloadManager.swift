@@ -181,7 +181,10 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
 
-        guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality) else {
+        // URLRequest (not bare URL) so the token travels in a header and the
+        // background task keeps it across app relaunches.
+        guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality),
+              let downloadRequest = DownloadURLBuilder.authorizedRequest(for: downloadURL) else {
             persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "Could not build download URL")
             stateVersion += 1
             startNextDownload()
@@ -197,7 +200,7 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
 
-        let task = backgroundSession.downloadTask(with: downloadURL)
+        let task = backgroundSession.downloadTask(with: downloadRequest)
         var map = taskIdMap
         map[taskKey(task.taskIdentifier)] = itemId
         taskIdMap = map
@@ -226,26 +229,6 @@ final class DownloadManager: NSObject, ObservableObject {
         if let record = try? context.fetch(descriptor).first {
             context.delete(record)
             try? context.save()
-        }
-    }
-
-    func pauseDownload(itemId: String) {
-        backgroundSession.getAllTasks { [weak self] tasks in
-            guard let self else { return }
-            for task in tasks where self.taskIdMap[self.taskKey(task.taskIdentifier)] == itemId {
-                if let downloadTask = task as? URLSessionDownloadTask {
-                    downloadTask.cancel(byProducingResumeData: { _ in })
-                } else {
-                    task.cancel()
-                }
-                Task { @MainActor in
-                    self.persistence.updateStatus(itemId: itemId, status: .paused)
-                    self.pendingProgress.removeValue(forKey: itemId)
-                    self.activeDownloads.removeValue(forKey: itemId)
-                    self.preparingItems.remove(itemId)
-                }
-                break
-            }
         }
     }
 
@@ -482,9 +465,9 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func downloadImage(url: URL?, destination: URL, itemId: String, keyPath: String, fileName: String) async {
-        guard let url else { return }
+        guard let url, let request = DownloadURLBuilder.authorizedRequest(for: url) else { return }
         do {
-            let (tempURL, _) = try await URLSession.shared.download(from: url)
+            let (tempURL, _) = try await URLSession.shared.download(for: request)
             try DownloadFileManager.moveFile(from: tempURL, to: destination)
             if keyPath == "posterFileName" {
                 persistence.updatePosterFileName(itemId: itemId, fileName: fileName)
@@ -513,7 +496,8 @@ final class DownloadManager: NSObject, ObservableObject {
                 continue
             }
 
-            guard let url = DownloadURLBuilder.subtitleURL(itemId: itemId, subtitleIndex: index) else {
+            guard let url = DownloadURLBuilder.subtitleURL(itemId: itemId, subtitleIndex: index),
+                  let request = DownloadURLBuilder.authorizedRequest(for: url) else {
                 continue
             }
 
@@ -521,7 +505,7 @@ final class DownloadManager: NSObject, ObservableObject {
             let destination = DownloadFileManager.subtitlePath(for: itemId, index: index, language: language)
 
             do {
-                let (tempURL, _) = try await URLSession.shared.download(from: url)
+                let (tempURL, _) = try await URLSession.shared.download(for: request)
                 try DownloadFileManager.moveFile(from: tempURL, to: destination)
                 persistence.addSubtitle(
                     itemId: itemId,

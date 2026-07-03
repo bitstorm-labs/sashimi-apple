@@ -57,7 +57,7 @@ struct CertificateSettingsView: View {
                     )
                 }
 
-                Text("Disabling certificate validation reduces security. Only enable if you trust your network.")
+                Text("These exceptions apply only to the current server. Enabling them reduces security — only do so if you trust your network.")
                     .font(Typography.captionSmall)
                     .foregroundStyle(SashimiTheme.textTertiary)
                     .padding(.horizontal, 8)
@@ -72,7 +72,7 @@ struct CertificateSettingsView: View {
                         }
                     }
 
-                    Text("These hosts have been manually trusted.")
+                    Text("These hosts are pinned to the certificate they presented when first trusted.")
                         .font(Typography.captionSmall)
                         .foregroundStyle(SashimiTheme.textTertiary)
                         .padding(.horizontal, 8)
