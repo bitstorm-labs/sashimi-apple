@@ -90,6 +90,17 @@ final class PlayerViewModel: ObservableObject {
     private var currentMediaSource: MediaSourceInfo?
     private var currentSubtitleStreamIndex: Int?
 
+    /// The subtitle track the session wants, described by content rather
+    /// than stream index (indexes are not stable across media sources).
+    /// Once set, subtitles stay on across quality changes and episode
+    /// transitions until explicitly turned off (disableSubtitles/stop).
+    private struct SubtitlePreference {
+        let language: String?
+        let displayTitle: String?
+        let isExternal: Bool
+    }
+    private var sessionSubtitlePreference: SubtitlePreference?
+
     // Server-side play session: sent with playback reports so the server can
     // correlate them, and used to stop the session's transcode when playback
     // is torn down or rebuilt.
@@ -360,14 +371,9 @@ final class PlayerViewModel: ObservableObject {
 
             // Re-apply the session's subtitle selection on the rebuilt
             // player — the overlay was cleared along with the old player.
-            // Rebuild the track from the media source rather than looking it
-            // up in subtitleTracks, which is only populated once the subtitle
-            // menu UI has appeared (never, on iOS).
-            if let selectedId = selectedSubtitleTrackId, selectedId != "off",
-               let stream = currentMediaSource?.subtitleStreams
-                   .first(where: { "\($0.index ?? 0)" == selectedId }) {
-                selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
-            }
+            // Match by content, not raw index: the new media source's stream
+            // indexes may differ from the old one's.
+            applySessionSubtitlePreference()
 
             // Resume playback and tracking
             startProgressReporting()
@@ -485,6 +491,9 @@ final class PlayerViewModel: ObservableObject {
         subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
         subtitleManager.clear()
+        // The session is over — the persisted playbackSettings carry the
+        // subtitle preference into the next one.
+        sessionSubtitlePreference = nil
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -575,7 +584,29 @@ final class PlayerViewModel: ObservableObject {
     /// these because they happen afterwards.
     private func applyPreferredTracks() async {
         await applyPreferredAudioLanguage()
-        applyPreferredSubtitles()
+        // The session's subtitle intent (a selection made in the player,
+        // e.g. during the previous episode) wins over the Settings-based
+        // preference — subtitles stay on until manually turned off.
+        if !applySessionSubtitlePreference() {
+            applyPreferredSubtitles()
+        }
+    }
+
+    /// Re-applies the session's subtitle intent against the current media
+    /// source. Returns false when there is no intent or no matching stream,
+    /// so callers can fall back to the Settings-based preference.
+    @discardableResult
+    private func applySessionSubtitlePreference() -> Bool {
+        guard let preference = sessionSubtitlePreference,
+              let stream = PlaybackSelection.matchingSubtitleStream(
+                in: currentMediaSource?.subtitleStreams ?? [],
+                language: preference.language,
+                displayTitle: preference.displayTitle,
+                isExternal: preference.isExternal
+              ) else { return false }
+
+        selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
+        return true
     }
 
     private func applyPreferredAudioLanguage() async {
@@ -601,7 +632,7 @@ final class PlayerViewModel: ObservableObject {
                 subtitlesEnabled: playbackSettings.subtitlesEnabled
               ) else { return }
 
-        selectSubtitleTrack(Self.subtitleTrackOption(for: stream))
+        selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
     }
 
     /// Builds a menu option for a Jellyfin subtitle stream using the same
@@ -656,30 +687,57 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
-    func selectSubtitleTrack(_ track: SubtitleTrackOption) {
-        // Update selection state
-        selectedSubtitleTrackId = track.isOffOption ? "off" : track.id
-
+    /// Selects a subtitle track. `isUserSelection` distinguishes a manual
+    /// pick in the player UI (persisted as the user's preference) from the
+    /// automatic re-application paths (Settings preference, quality change,
+    /// next episode), which must not overwrite the stored preference.
+    func selectSubtitleTrack(_ track: SubtitleTrackOption, isUserSelection: Bool = true) {
         // A newer selection supersedes any in-flight subtitle load — racing
         // loads used to call startTracking against a stale player.
         subtitleLoadTask?.cancel()
 
+        if track.isOffOption {
+            if isUserSelection {
+                // Manual "Off" — same persistence semantics as the views
+                // that call disableSubtitles() directly.
+                disableSubtitles()
+            } else {
+                selectedSubtitleTrackId = "off"
+                subtitleManager.clear()
+            }
+            return
+        }
+
+        selectedSubtitleTrackId = track.id
+
+        // Remember the session's subtitle intent by content so it survives
+        // quality changes and episode transitions (stream indexes don't).
+        sessionSubtitlePreference = SubtitlePreference(
+            language: track.languageCode,
+            displayTitle: track.displayName,
+            isExternal: track.isExternal
+        )
+
+        if isUserSelection {
+            // "On stays on until I turn it off" — persist the manual choice
+            // across app launches too.
+            playbackSettings.subtitlesEnabled = true
+            if let language = track.languageCode, !language.isEmpty {
+                playbackSettings.preferredSubtitleLanguage = language
+            }
+        }
+
         guard let item = currentItem, let player = player else { return }
 
-        if track.isOffOption {
-            // Turn off subtitles
-            subtitleManager.clear()
-        } else {
-            // Load and display subtitles via our custom overlay. Capture the
-            // player at creation: by the time the load finishes the player
-            // may have been rebuilt (quality change / next episode), and
-            // tracking a stale player would leave a live observer on it.
-            let capturedPlayer = player
-            subtitleLoadTask = Task {
-                await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
-                guard !Task.isCancelled, self.player === capturedPlayer else { return }
-                subtitleManager.startTracking(player: capturedPlayer)
-            }
+        // Load and display subtitles via our custom overlay. Capture the
+        // player at creation: by the time the load finishes the player
+        // may have been rebuilt (quality change / next episode), and
+        // tracking a stale player would leave a live observer on it.
+        let capturedPlayer = player
+        subtitleLoadTask = Task {
+            await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+            guard !Task.isCancelled, self.player === capturedPlayer else { return }
+            subtitleManager.startTracking(player: capturedPlayer)
         }
     }
 
@@ -687,9 +745,16 @@ final class PlayerViewModel: ObservableObject {
     /// option: sets the "off" sentinel AND clears the subtitle overlay. Views
     /// must use this instead of mutating `selectedSubtitleTrackId` directly,
     /// which would leave the current subtitles on screen.
+    ///
+    /// This is the ONLY place (besides stop()) that drops the session
+    /// subtitle intent, and it persists the "off" choice — subtitles stay
+    /// off across episodes and app launches until re-enabled.
     func disableSubtitles() {
+        subtitleLoadTask?.cancel()
         selectedSubtitleTrackId = "off"
         subtitleManager.clear()
+        sessionSubtitlePreference = nil
+        playbackSettings.subtitlesEnabled = false
     }
 
     func loadAllTracks() {

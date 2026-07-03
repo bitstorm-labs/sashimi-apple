@@ -6,15 +6,16 @@ final class PlaybackSelectionTests: XCTestCase {
 
     private func subtitleStream(
         language: String?,
-        index: Int,
+        index: Int?,
         isDefault: Bool? = nil,
-        isExternal: Bool? = nil
+        isExternal: Bool? = nil,
+        displayTitle: String? = nil
     ) -> MediaStream {
         MediaStream(
             type: "Subtitle",
             codec: "subrip",
             language: language,
-            displayTitle: language,
+            displayTitle: displayTitle ?? language,
             title: nil,
             height: nil,
             width: nil,
@@ -130,6 +131,115 @@ final class PlaybackSelectionTests: XCTestCase {
             subtitlesEnabled: true
         )
         XCTAssertEqual(selected?.index, 3)
+    }
+
+    // MARK: - matchingSubtitleStream
+
+    func testMatchesByLanguageWhenIndexesShift() {
+        // Same track, but the new media source numbers its streams differently
+        let streams = [
+            subtitleStream(language: "fre", index: 4),
+            subtitleStream(language: "eng", index: 7)
+        ]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "eng",
+            displayTitle: "eng",
+            isExternal: false
+        )
+        XCTAssertEqual(match?.index, 7)
+    }
+
+    func testMatchesToleratesTwoVsThreeLetterLanguageCodes() {
+        let streams = [subtitleStream(language: "eng", index: 3)]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "en",
+            displayTitle: nil,
+            isExternal: false
+        )
+        XCTAssertEqual(match?.index, 3)
+    }
+
+    func testPrefersDisplayTitleMatchAmongSameLanguageStreams() {
+        let streams = [
+            subtitleStream(language: "eng", index: 2, displayTitle: "English"),
+            subtitleStream(language: "eng", index: 3, displayTitle: "English (SDH)")
+        ]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "eng",
+            displayTitle: "English (SDH)",
+            isExternal: false
+        )
+        XCTAssertEqual(match?.index, 3)
+    }
+
+    func testPrefersMatchingExternalFlagWhenTitleDiffers() {
+        let streams = [
+            subtitleStream(language: "eng", index: 2, isExternal: false, displayTitle: "English (embedded)"),
+            subtitleStream(language: "eng", index: 5, isExternal: true, displayTitle: "English (SRT)")
+        ]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "eng",
+            displayTitle: "English",
+            isExternal: true
+        )
+        XCTAssertEqual(match?.index, 5)
+    }
+
+    func testFallsBackToLanguageOnlyWhenExternalFlagDiffers() {
+        let streams = [
+            subtitleStream(language: "eng", index: 2, isExternal: false, displayTitle: "English")
+        ]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "eng",
+            displayTitle: "English (SRT)",
+            isExternal: true
+        )
+        XCTAssertEqual(match?.index, 2)
+    }
+
+    func testSkipsStreamsWithoutAnIndex() {
+        // A stream with no index can't be addressed for playback — matching
+        // it would previously collapse to index 0 and silently fail.
+        let streams = [
+            subtitleStream(language: "eng", index: nil),
+            subtitleStream(language: "eng", index: 6)
+        ]
+        let match = PlaybackSelection.matchingSubtitleStream(
+            in: streams,
+            language: "eng",
+            displayTitle: "eng",
+            isExternal: false
+        )
+        XCTAssertEqual(match?.index, 6)
+    }
+
+    func testNoMatchWhenLanguageMissingFromNewSource() {
+        let streams = [subtitleStream(language: "fre", index: 1)]
+        XCTAssertNil(
+            PlaybackSelection.matchingSubtitleStream(
+                in: streams,
+                language: "eng",
+                displayTitle: "eng",
+                isExternal: false
+            )
+        )
+    }
+
+    func testNoMatchForNilLanguagePreference() {
+        let streams = [subtitleStream(language: "eng", index: 1)]
+        XCTAssertNil(
+            PlaybackSelection.matchingSubtitleStream(
+                in: streams,
+                language: nil,
+                displayTitle: "Unknown",
+                isExternal: false
+            )
+        )
     }
 
     // MARK: - preferredAudioOptionIndex
