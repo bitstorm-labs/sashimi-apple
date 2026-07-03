@@ -1,5 +1,8 @@
 import SwiftUI
 import CryptoKit
+import os
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "ParentalControls")
 
 // MARK: - Parental Controls
 
@@ -9,50 +12,96 @@ class ParentalControlsManager: ObservableObject {
 
     private static let pinKeychainKey = "parentalPIN"
     private static let lockoutKey = "pinLockoutUntil"
+    private static let failedAttemptsKey = "pinFailedAttempts"
 
     @AppStorage("isPINEnabled") var isPINEnabled: Bool = false
     @AppStorage("maxContentRating") var maxContentRating: ContentRating = .any
     @AppStorage("kidsMode") var kidsMode: Bool = false
     @AppStorage("hideUnrated") var hideUnrated: Bool = false
-    @AppStorage("pinFailedAttempts") private var failedAttempts: Int = 0
+
+    init() {
+        // Lockout state used to live in UserDefaults, where deleting the app
+        // container (or editing the plist) reset it. Clear any stragglers now
+        // that it lives in the Keychain alongside the PIN.
+        UserDefaults.standard.removeObject(forKey: Self.lockoutKey)
+        UserDefaults.standard.removeObject(forKey: Self.failedAttemptsKey)
+    }
+
+    /// Failed-attempt counter kept in the Keychain (not UserDefaults) so the
+    /// lockout can't be reset by wiping preferences.
+    private var failedAttempts: Int {
+        get { Int(KeychainHelper.get(forKey: Self.failedAttemptsKey) ?? "") ?? 0 }
+        set {
+            if !KeychainHelper.save(String(newValue), forKey: Self.failedAttemptsKey) {
+                logger.error("Failed to persist PIN attempt counter to Keychain")
+            }
+        }
+    }
 
     var hasSetPIN: Bool {
         KeychainHelper.get(forKey: Self.pinKeychainKey) != nil
     }
 
     var isLockedOut: Bool {
-        if let until = UserDefaults.standard.object(forKey: Self.lockoutKey) as? Date {
-            return Date() < until
+        if let stored = KeychainHelper.get(forKey: Self.lockoutKey),
+           let until = TimeInterval(stored) {
+            return Date().timeIntervalSince1970 < until
         }
         return false
     }
 
-    func setPIN(_ pin: String) {
-        let hash = SHA256.hash(data: Data(pin.utf8))
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        KeychainHelper.save(hashString, forKey: Self.pinKeychainKey)
+    /// Stores the PIN. Returns false (without enabling PIN lock) if the
+    /// Keychain write fails, so callers can surface the error.
+    ///
+    /// The PIN is stored raw: the Keychain itself is the secure store, and an
+    /// unsalted hash of a 4-digit PIN (10,000 possible values) is trivially
+    /// brute-forced by anyone who could read the Keychain anyway.
+    func setPIN(_ pin: String) -> Bool {
+        guard KeychainHelper.save(pin, forKey: Self.pinKeychainKey) else {
+            logger.error("Failed to save parental PIN to Keychain")
+            return false
+        }
         isPINEnabled = true
         failedAttempts = 0
+        KeychainHelper.delete(forKey: Self.lockoutKey)
+        return true
     }
 
     func verifyPIN(_ pin: String) -> Bool {
         guard !isLockedOut else { return false }
         guard let stored = KeychainHelper.get(forKey: Self.pinKeychainKey) else { return false }
-        let hash = SHA256.hash(data: Data(pin.utf8))
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        if hashString == stored {
+
+        let matches: Bool
+        if stored.count == 4 {
+            matches = pin == stored
+        } else {
+            // Legacy format: older builds stored an unsalted SHA-256 hex
+            // digest. Keep verifying it so existing PINs still work; the
+            // entry upgrades to the raw format when the PIN is next set.
+            let hash = SHA256.hash(data: Data(pin.utf8))
+            let hashString = hash.map { String(format: "%02x", $0) }.joined()
+            matches = hashString == stored
+        }
+
+        if matches {
             failedAttempts = 0
+            KeychainHelper.delete(forKey: Self.lockoutKey)
             return true
         }
+
         failedAttempts += 1
         if failedAttempts >= 5 {
-            UserDefaults.standard.set(Date().addingTimeInterval(60), forKey: Self.lockoutKey)
+            let until = Date().addingTimeInterval(60).timeIntervalSince1970
+            if !KeychainHelper.save(String(until), forKey: Self.lockoutKey) {
+                logger.error("Failed to persist PIN lockout to Keychain")
+            }
         }
         return false
     }
 
     func disablePIN() {
         KeychainHelper.delete(forKey: Self.pinKeychainKey)
+        KeychainHelper.delete(forKey: Self.lockoutKey)
         isPINEnabled = false
         failedAttempts = 0
     }
@@ -209,7 +258,9 @@ struct ParentalControlsView: View {
         }
         .sheet(isPresented: $showPINSetup) {
             PINSetupView { pin in
-                controls.setPIN(pin)
+                if !controls.setPIN(pin) {
+                    ToastManager.shared.show("Couldn't save PIN. Try again.")
+                }
                 showPINSetup = false
             }
         }

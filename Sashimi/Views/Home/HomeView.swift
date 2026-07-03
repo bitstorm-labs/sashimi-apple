@@ -95,9 +95,10 @@ struct HomeView: View {
             homeSettings.updateWithLibraries(viewModel.libraries)
         }
         .onAppear {
+            // Initial load happens in .task above (and .task re-runs when the
+            // view re-enters the hierarchy), so no extra refresh here — it
+            // used to double-fetch everything on first appearance.
             startAutoRefresh()
-            // Refresh immediately when view appears (e.g., switching tabs)
-            Task { await viewModel.refresh() }
         }
         .onDisappear {
             stopAutoRefresh()
@@ -193,6 +194,9 @@ struct HeroSection: View {
     @FocusState private var isFocused: Bool
     @State private var autoAdvanceTimer: Timer?
     @State private var progress: Double = 0
+
+    /// Seconds each hero item stays on screen before auto-advancing
+    private let slideDuration: Double = 6
 
     private var safeIndex: Int {
         guard !items.isEmpty else { return 0 }
@@ -473,23 +477,34 @@ struct HeroSection: View {
             stopAutoAdvance()
         }
         .onChange(of: currentIndex) { _, _ in
-            progress = 0
+            restartProgressAnimation()
         }
     }
 
     private func startAutoAdvance() {
         guard items.count > 1 else { return }
-        progress = 0
-        autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        restartProgressAnimation()
+        // One tick per slide; the progress bar fills via a single linear
+        // animation instead of a 10Hz timer mutating state.
+        autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: slideDuration, repeats: true) { _ in
             DispatchQueue.main.async {
-                progress += 0.1 / 6  // 6 seconds per item
-                if progress >= 1.0 {
-                    withAnimation(.easeInOut(duration: 0.6)) {
-                        currentIndex = (currentIndex + 1) % items.count
-                    }
-                    progress = 0
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    currentIndex = (currentIndex + 1) % items.count
                 }
             }
+        }
+    }
+
+    /// Snap the progress bar back to empty (no animation), then animate it
+    /// full over the slide duration.
+    private func restartProgressAnimation() {
+        var snapBack = Transaction()
+        snapBack.disablesAnimations = true
+        withTransaction(snapBack) {
+            progress = 0
+        }
+        withAnimation(.linear(duration: slideDuration)) {
+            progress = 1
         }
     }
 
