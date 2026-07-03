@@ -15,6 +15,10 @@ final class ServerDiscovery: ObservableObject {
         let address: String
         let port: Int
 
+        // Discovered servers are addressed over plain HTTP on purpose: mDNS
+        // discovery only finds servers on the local network, where Jellyfin's
+        // default setup is HTTP, and a self-signed HTTPS guess would fail
+        // validation anyway. Users can still type an https:// URL manually.
         var url: URL? {
             URL(string: "http://\(address):\(port)")
         }
@@ -53,10 +57,11 @@ final class ServerDiscovery: ObservableObject {
 
         browser?.start(queue: .main)
 
-        // Stop after 10 seconds
-        Task {
+        // Stop after 10 seconds (weak self so the timeout doesn't keep a
+        // dismissed discovery screen's object alive for the full window)
+        Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
-            stopDiscovery()
+            self?.stopDiscovery()
         }
     }
 

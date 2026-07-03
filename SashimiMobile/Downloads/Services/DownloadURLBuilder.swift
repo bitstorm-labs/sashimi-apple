@@ -1,6 +1,18 @@
 import Foundation
 
 enum DownloadURLBuilder {
+    /// Same persisted device id JellyfinClient uses (it writes this key on
+    /// first launch). Persist the fallback too so we never send a different
+    /// throwaway id per call, which would register phantom devices server-side.
+    private static var deviceId: String {
+        if let stored = UserDefaults.standard.string(forKey: "deviceId") {
+            return stored
+        }
+        let newId = UUID().uuidString
+        UserDefaults.standard.set(newId, forKey: "deviceId")
+        return newId
+    }
+
     // MARK: - Video Download URLs
 
     /// Build URL for downloading video at original quality (direct file download)
@@ -24,8 +36,6 @@ enum DownloadURLBuilder {
               let accessToken = KeychainHelper.get(forKey: "accessToken") else {
             return nil
         }
-
-        let deviceId = UserDefaults.standard.string(forKey: "deviceId") ?? UUID().uuidString
 
         var components = URLComponents(string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         components?.path += "/Videos/\(itemId)/stream.mp4"
