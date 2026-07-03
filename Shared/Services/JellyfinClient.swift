@@ -483,7 +483,11 @@ actor JellyfinClient {
         return try JSONDecoder().decode(ItemsResponse.self, from: data)
     }
 
-    func getPlaybackInfo(itemId: String, maxBitrate: Int? = nil) async throws -> PlaybackInfoResponse {
+    func getPlaybackInfo(
+        itemId: String,
+        maxBitrate: Int? = nil,
+        forceDirectPlay: Bool = false
+    ) async throws -> PlaybackInfoResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
         // Default to 120 Mbps (essentially unlimited), or use specified bitrate
@@ -518,12 +522,16 @@ actor JellyfinClient {
             ]
         ]
 
+        // Jellyfin's PlaybackInfo API has no "force direct play" flag.
+        // Disabling DirectStream and Transcoding leaves direct play as the
+        // only option, so the server either returns the original file or
+        // reports the item unplayable (rather than silently remuxing).
         let body: [String: Any] = [
             "UserId": userId,
             "DeviceProfile": deviceProfile,
             "EnableDirectPlay": true,
-            "EnableDirectStream": true,
-            "EnableTranscoding": true,
+            "EnableDirectStream": !forceDirectPlay,
+            "EnableTranscoding": !forceDirectPlay,
             "AllowVideoStreamCopy": true,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true

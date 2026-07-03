@@ -135,6 +135,7 @@ final class PlayerViewModel: ObservableObject {
                 try audioSession.setActive(true)
 
                 try await setupPlayer(for: freshItem)
+                await applyPreferredTracks()
             }
 
             // Set up remote control commands for Bluetooth headsets/remotes
@@ -324,6 +325,13 @@ final class PlayerViewModel: ObservableObject {
                 await player?.seek(to: seekTime)
             }
 
+            // Re-apply the session's subtitle selection on the rebuilt
+            // player — the overlay was cleared along with the old player.
+            if let selectedId = selectedSubtitleTrackId, selectedId != "off",
+               let track = subtitleTracks.first(where: { $0.id == selectedId }) {
+                selectSubtitleTrack(track)
+            }
+
             // Resume playback and tracking
             startProgressReporting()
             setupSegmentTracking()
@@ -337,7 +345,18 @@ final class PlayerViewModel: ObservableObject {
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
     private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil) async throws {
-        let playbackInfo = try await client.getPlaybackInfo(itemId: item.id, maxBitrate: maxBitrate ?? selectedQuality.maxBitrate)
+        // Bitrate precedence: explicit override (quality menu change) →
+        // session quality selection → global Settings cap. QualityOption.auto
+        // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
+        let effectiveBitrate = PlaybackSelection.effectiveMaxBitrate(
+            sessionOverride: maxBitrate ?? selectedQuality.maxBitrate,
+            settingsMaxBitrate: playbackSettings.maxBitrate
+        )
+        let playbackInfo = try await client.getPlaybackInfo(
+            itemId: item.id,
+            maxBitrate: effectiveBitrate,
+            forceDirectPlay: playbackSettings.forceDirectPlay
+        )
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             throw PlayerError.noMediaSource
@@ -490,6 +509,51 @@ final class PlayerViewModel: ObservableObject {
         selectedAudioTrackId = track.id
     }
 
+    // MARK: - Settings-based track preferences
+
+    /// Applies the Settings-preferred audio/subtitle languages when playback
+    /// starts. Selections made later in the player UI naturally override
+    /// these because they happen afterwards.
+    private func applyPreferredTracks() async {
+        await applyPreferredAudioLanguage()
+        applyPreferredSubtitles()
+    }
+
+    private func applyPreferredAudioLanguage() async {
+        let preferred = playbackSettings.preferredAudioLanguage
+        guard !preferred.isEmpty, let playerItem = player?.currentItem else { return }
+
+        // appliesMediaSelectionCriteriaAutomatically is false, so the default
+        // track plays unless we pick one explicitly.
+        guard let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible) else { return }
+
+        let codes = audioGroup.options.map { $0.locale?.language.languageCode?.identifier }
+        if let index = PlaybackSelection.preferredAudioOptionIndex(languageCodes: codes, preferredLanguage: preferred) {
+            playerItem.select(audioGroup.options[index], in: audioGroup)
+            selectedAudioTrackId = "\(index)"
+        }
+    }
+
+    private func applyPreferredSubtitles() {
+        guard let mediaSource = currentMediaSource,
+              let stream = PlaybackSelection.preferredSubtitleStream(
+                from: mediaSource.subtitleStreams,
+                preferredLanguage: playbackSettings.preferredSubtitleLanguage,
+                subtitlesEnabled: playbackSettings.subtitlesEnabled
+              ) else { return }
+
+        // Same id/display scheme as loadSubtitleTracks() so the subtitle menu
+        // shows this selection when it's opened later.
+        selectSubtitleTrack(SubtitleTrackOption(
+            id: "\(stream.index ?? 0)",
+            displayName: stream.displayTitle ?? stream.language ?? "Unknown",
+            languageCode: stream.language,
+            index: stream.index ?? 0,
+            isOffOption: false,
+            isExternal: stream.isExternal ?? false
+        ))
+    }
+
     func loadSubtitleTracks() {
         var tracks: [SubtitleTrackOption] = []
 
@@ -519,7 +583,13 @@ final class PlayerViewModel: ObservableObject {
         }
 
         subtitleTracks = tracks
-        selectedSubtitleTrackId = "off"
+        // Keep a still-valid selection (e.g. the Settings-based pre-selection
+        // applied when playback started) — this runs from the player UI's
+        // onAppear and used to unconditionally reset the menu to "Off" even
+        // while subtitles were showing.
+        if !tracks.contains(where: { $0.id == selectedSubtitleTrackId }) {
+            selectedSubtitleTrackId = "off"
+        }
     }
 
     func selectSubtitleTrack(_ track: SubtitleTrackOption) {
