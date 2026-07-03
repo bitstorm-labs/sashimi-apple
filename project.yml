@@ -191,11 +191,12 @@ targets:
   SashimiTests:
     type: bundle.unit-test
     platform: tvOS
+    # Shared/ is deliberately NOT compiled into the test bundle: the host app
+    # (TEST_HOST/BUNDLE_LOADER below) already provides those symbols via
+    # `@testable import Sashimi`. Compiling Shared/ twice created duplicate
+    # classes/singletons at runtime.
     sources:
       - path: SashimiTests
-        excludes:
-          - "**/.DS_Store"
-      - path: Shared
         excludes:
           - "**/.DS_Store"
     settings:
