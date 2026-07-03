@@ -569,6 +569,10 @@ actor JellyfinClient {
             URLQueryItem(name: "Static", value: "true"),
             URLQueryItem(name: "MediaSourceId", value: mediaSourceId),
             URLQueryItem(name: "Container", value: ext),
+            // api_key stays in the URL here on purpose: this URL is handed to
+            // AVPlayer, which fetches the stream (and HLS sub-requests) itself
+            // and has no supported way to attach auth headers. Everywhere we
+            // control the fetch (URLSession), the token goes in X-Emby-Token.
             URLQueryItem(name: "api_key", value: accessToken),
             URLQueryItem(name: "DeviceId", value: deviceId)
         ]
