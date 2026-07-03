@@ -540,6 +540,15 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Turns subtitles off through the same path as selecting the "Off" track
+    /// option: sets the "off" sentinel AND clears the subtitle overlay. Views
+    /// must use this instead of mutating `selectedSubtitleTrackId` directly,
+    /// which would leave the current subtitles on screen.
+    func disableSubtitles() {
+        selectedSubtitleTrackId = "off"
+        subtitleManager.clear()
+    }
+
     func loadAllTracks() {
         loadAudioTracks()
         loadSubtitleTracks()
@@ -666,6 +675,16 @@ final class PlayerViewModel: ObservableObject {
 
     private func setupRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
+
+        // Remove handlers registered by a previous loadMedia call first —
+        // auto-play-next reuses this ViewModel across episodes, and addTarget
+        // stacks a new handler each time (removal otherwise only happens in
+        // deinit). Mirrors the list in cleanupRemoteCommands().
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
 
         // Play command
         commandCenter.playCommand.isEnabled = true

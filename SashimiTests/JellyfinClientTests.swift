@@ -195,6 +195,15 @@ final class JellyfinClientTests: XCTestCase {
         XCTAssertEqual(response.items[0].collectionType, "movies")
     }
 
+    // MARK: - JellyfinError Tests
+
+    func testInvalidCredentialsErrorDescription() {
+        // Wrong password at login must read as a login failure,
+        // not "Session expired" (see H3 in #176)
+        XCTAssertEqual(JellyfinError.invalidCredentials.errorDescription, "Incorrect username or password.")
+        XCTAssertEqual(JellyfinError.sessionExpired.errorDescription, "Session expired. Please sign in again.")
+    }
+
     // MARK: - Media Segment Type Tests
 
     func testMediaSegmentTypeRawValues() {

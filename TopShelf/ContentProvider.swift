@@ -24,9 +24,11 @@ class ContentProvider: TVTopShelfContentProvider {
             sectionedItem.setImageURL(imageURL, for: .screenScale1x)
             sectionedItem.setImageURL(imageURL, for: .screenScale2x)
 
-            // Set progress bar (0.0 to 1.0)
+            // Set progress bar. HomeViewModel writes BaseItemDto.progressPercent,
+            // which is already a 0.0–1.0 fraction — the same range playbackProgress
+            // expects, so no conversion is needed.
             if let progress = item["progress"] as? Double, progress > 0 {
-                sectionedItem.playbackProgress = progress / 100.0  // Convert from percentage
+                sectionedItem.playbackProgress = progress
             }
 
             // Create play action URL

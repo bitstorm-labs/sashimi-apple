@@ -93,6 +93,13 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertNil(user.primaryImageTag)
     }
 
+    // MARK: - SessionError Tests
+
+    func testCredentialStorageFailedErrorDescription() {
+        let error: LocalizedError = SessionError.credentialStorageFailed
+        XCTAssertEqual(error.errorDescription, "Could not save credentials securely. Please try signing in again.")
+    }
+
     // MARK: - UserDefaults Key Tests
 
     func testUserDefaultsKeysAreConsistent() {

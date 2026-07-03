@@ -368,4 +368,35 @@ final class PlayerViewModelTests: XCTestCase {
         let error: LocalizedError = PlayerError.noMediaSource
         XCTAssertNotNil(error.errorDescription)
     }
+
+    // MARK: - Subtitle Selection Tests
+
+    @MainActor
+    func testDisableSubtitlesSetsOffSentinel() {
+        let viewModel = PlayerViewModel()
+        viewModel.selectedSubtitleTrackId = "42"
+
+        viewModel.disableSubtitles()
+
+        // "off" (not nil) is the sentinel for an explicit user choice. The
+        // overlay-clearing half (subtitleManager.clear()) isn't assertable
+        // here: currentCue is already nil on a fresh view model.
+        XCTAssertEqual(viewModel.selectedSubtitleTrackId, "off")
+    }
+
+    @MainActor
+    func testSelectOffTrackOptionSetsOffSentinel() {
+        let viewModel = PlayerViewModel()
+        let offOption = SubtitleTrackOption(
+            id: "off",
+            displayName: "Off",
+            languageCode: nil,
+            index: -1,
+            isOffOption: true
+        )
+
+        viewModel.selectSubtitleTrack(offOption)
+
+        XCTAssertEqual(viewModel.selectedSubtitleTrackId, "off")
+    }
 }
