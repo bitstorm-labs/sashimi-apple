@@ -96,6 +96,19 @@ jobs:
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
         run: bundle exec fastlane beta
 
+      # The iOS (SashimiMobile) beta lane fetches its own match certs and
+      # stamps its own epoch build number, so it runs standalone after tvOS.
+      - name: Deploy iOS to TestFlight
+        if: github.event.inputs.environment == 'testflight' || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+        run: bundle exec fastlane ios beta
+
       - name: Deploy to App Store
         if: github.event.inputs.environment == 'appstore'
         env:
