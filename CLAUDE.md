@@ -23,12 +23,12 @@ xcodegen generate
 
 ### MVVM Pattern
 - **Views** (`Sashimi/Views/`): SwiftUI views organized by feature (Home, Auth, Library, Detail, Player, Components)
-- **ViewModels** (`Sashimi/ViewModels/`): `@MainActor` `ObservableObject` classes managing view state
-- **Models** (`Sashimi/Models/`): Codable DTOs matching Jellyfin API responses
+- **ViewModels** (`Shared/ViewModels/`): `@MainActor` `ObservableObject` classes managing view state (shared between the tvOS and iOS targets)
+- **Models** (`Shared/Models/`): Codable DTOs matching Jellyfin API responses (shared between targets)
 
 ### Core Services
-- **JellyfinClient** (`Services/JellyfinClient.swift`): Swift `actor` handling all Jellyfin REST API communication. Singleton accessed via `JellyfinClient.shared`. Manages authentication headers, device identification, and playback URL generation.
-- **SessionManager** (`Services/SessionManager.swift`): `@MainActor` `ObservableObject` singleton managing auth state, token persistence via UserDefaults, and session restoration.
+- **JellyfinClient** (`Shared/Services/JellyfinClient.swift`): Swift `actor` handling all Jellyfin REST API communication. Singleton accessed via `JellyfinClient.shared`. Manages authentication headers, device identification, and playback URL generation.
+- **SessionManager** (`Shared/Services/SessionManager.swift`): `@MainActor` `ObservableObject` singleton managing auth state, token persistence via UserDefaults, and session restoration.
 
 ### Data Flow
 1. App entry (`SashimiApp.swift`) injects `SessionManager` as `@EnvironmentObject`
@@ -46,7 +46,7 @@ xcodegen generate
 `PlayerViewModel` handles playback via AVKit:
 - Fetches `PlaybackInfoResponse` to determine best stream URL (transcoding vs direct)
 - Reports playback progress to Jellyfin server every 5 seconds (and immediately on play/pause)
-- Shows resume dialog when video has saved progress (auto-resumes after 5 seconds)
+- Auto-resumes from saved progress when it exceeds the resume threshold setting (no dialog)
 - Supports Up Next feature for continuous episode playback
 
 ### Dependencies
@@ -180,7 +180,7 @@ magick source.png -trim +repage -resize 780x -background '#1a1a2e' \
 
 3. Uninstall and reinstall the app (install alone may use cached icon):
    ```bash
-   xcrun devicectl device uninstall app --device DEVICE_ID com.sashimi.app
+   xcrun devicectl device uninstall app --device DEVICE_ID com.mondominator.sashimi
    xcrun devicectl device install app --device DEVICE_ID \
      ~/Library/Developer/Xcode/DerivedData/Sashimi-*/Build/Products/Release-appletvos/Sashimi.app
    ```

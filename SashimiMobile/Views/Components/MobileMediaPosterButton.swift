@@ -170,7 +170,8 @@ struct MobilePosterCard: View {
                         .fill(MobileColors.progressBackground)
                     Rectangle()
                         .fill(MobileColors.accent)
-                        .frame(width: geometry.size.width * CGFloat(item.progressPercent / 100))
+                        // progressPercent is a 0-1 fraction, not 0-100
+                        .frame(width: geometry.size.width * CGFloat(item.progressPercent))
                 }
             }
             .frame(height: 4)

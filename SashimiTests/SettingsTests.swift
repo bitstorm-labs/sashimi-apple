@@ -73,6 +73,63 @@ final class SettingsTests: XCTestCase {
         certSettings.trustedHosts = originalHosts
     }
 
+    @MainActor
+    func testUntrustHostDropsPinnedFingerprint() {
+        let certSettings = CertificateTrustSettings.shared
+        let defaults = UserDefaults.standard
+        let testHost = "pinned.local.server"
+
+        let originalHosts = certSettings.trustedHosts
+        let originalPins = defaults.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]
+
+        certSettings.trustHost(testHost)
+        var pins = originalPins ?? [:]
+        pins[testHost] = "abc123"
+        defaults.set(pins, forKey: CertificateTrustKeys.fingerprints)
+
+        certSettings.untrustHost(testHost)
+        let remaining = defaults.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]
+        XCTAssertNil(remaining?[testHost])
+
+        // Restore original state
+        certSettings.trustedHosts = originalHosts
+        if let originalPins {
+            defaults.set(originalPins, forKey: CertificateTrustKeys.fingerprints)
+        } else {
+            defaults.removeObject(forKey: CertificateTrustKeys.fingerprints)
+        }
+    }
+
+    func testLegacyGlobalAllowanceMigratesToChallengedHost() {
+        let defaults = UserDefaults.standard
+        let listKey = "test_selfSignedAllowedHosts"
+        let legacyKey = "test_allowSelfSignedCerts"
+        defaults.removeObject(forKey: listKey)
+        defaults.set(true, forKey: legacyKey)
+
+        // Legacy global flag is honored once and migrated to the host
+        XCTAssertTrue(CertificateValidationDelegate.hostAllowance(host: "server.test", listKey: listKey, legacyKey: legacyKey))
+        XCTAssertFalse(defaults.bool(forKey: legacyKey), "legacy flag should be cleared after migration")
+        XCTAssertEqual(defaults.array(forKey: listKey) as? [String], ["server.test"])
+
+        // After migration the allowance is scoped: same host yes, others no
+        XCTAssertTrue(CertificateValidationDelegate.hostAllowance(host: "server.test", listKey: listKey, legacyKey: legacyKey))
+        XCTAssertFalse(CertificateValidationDelegate.hostAllowance(host: "other.test", listKey: listKey, legacyKey: legacyKey))
+
+        defaults.removeObject(forKey: listKey)
+        defaults.removeObject(forKey: legacyKey)
+    }
+
+    func testHostAllowanceFalseWithoutEntryOrLegacyFlag() {
+        let defaults = UserDefaults.standard
+        let listKey = "test_expiredAllowedHosts"
+        let legacyKey = "test_allowExpiredCerts"
+        defaults.removeObject(forKey: listKey)
+        defaults.removeObject(forKey: legacyKey)
+
+        XCTAssertFalse(CertificateValidationDelegate.hostAllowance(host: "server.test", listKey: listKey, legacyKey: legacyKey))
+    }
+
     // MARK: - LibrarySortOption Tests
 
     func testLibrarySortOptionRawValues() {

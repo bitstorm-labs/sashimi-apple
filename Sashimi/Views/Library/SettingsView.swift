@@ -774,7 +774,8 @@ struct SettingsNavigationRow<Destination: View>: View {
 }
 
 struct VideoQualitySettingsView: View {
-    @AppStorage("maxBitrate") private var maxBitrate = 20_000_000
+    // Default must match PlaybackSettings.maxBitrate (0 = Auto).
+    @AppStorage("maxBitrate") private var maxBitrate = 0
 
     let bitrateOptions = [
         (label: "Auto", value: 0),

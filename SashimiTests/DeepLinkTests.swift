@@ -60,11 +60,8 @@ final class DeepLinkTests: XCTestCase {
 
     // MARK: - DeepLinkDestination identity
 
-    // Explicitly the app module's type: SashimiTests also compiles the Shared
-    // sources, so an unqualified BaseItemDto resolves to the test target's
-    // copy, which DeepLinkDestination (app module) won't accept.
-    private func makeItem(id: String) -> Sashimi.BaseItemDto {
-        Sashimi.BaseItemDto(
+    private func makeItem(id: String) -> BaseItemDto {
+        BaseItemDto(
             id: id, name: "Test", type: .movie,
             seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
             indexNumber: nil, parentIndexNumber: nil, overview: nil,
