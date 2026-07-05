@@ -27,12 +27,19 @@ enum DeviceMediaCompatibility {
     }
 
     /// True only when the raw source file will direct-play on iOS/tvOS
-    /// AVPlayer: its container AND video codec AND audio codec must all be in
-    /// the allowlists. Fails closed — any nil/unknown field yields false.
+    /// AVPlayer: its container must be compatible AND at least one video stream
+    /// AND at least one audio stream must use an allowlisted codec. Fails closed
+    /// — any nil/unknown field, empty stream list, or unsupported token yields
+    /// false.
     ///
-    /// `container` may be a comma-separated list (e.g. "mp4,m4v" or
-    /// "mkv,webm"); it is considered compatible when at least one listed token
-    /// is in the container allowlist.
+    /// `container` may be a comma-separated list (e.g. "mp4,m4v"); EVERY listed
+    /// token must be in the container allowlist (so an anomalous "mkv,mp4" fails
+    /// closed rather than passing on the compatible token alone).
+    ///
+    /// Because a file can carry multiple audio (and, defensively, video)
+    /// streams — e.g. a TrueHD primary track plus an AC3 compatibility track on
+    /// a Blu-ray rip — we require only that AT LEAST ONE stream of each type is
+    /// playable; AVPlayer can select a compatible track at playback time.
     static func canDirectPlayOnDevice(_ source: MediaSourceInfo) -> Bool {
         guard let rawContainer = source.container, !rawContainer.isEmpty else { return false }
         let containers = rawContainer
@@ -40,13 +47,26 @@ enum DeviceMediaCompatibility {
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        guard containers.contains(where: { directPlayContainers.contains($0) }) else { return false }
+        guard !containers.isEmpty,
+              containers.allSatisfy({ directPlayContainers.contains($0) }) else { return false }
 
-        guard let rawVideo = source.videoCodec, !rawVideo.isEmpty,
-              directPlayVideoCodecs.contains(canonicalCodec(rawVideo)) else { return false }
+        guard let streams = source.mediaStreams, !streams.isEmpty else { return false }
 
-        guard let rawAudio = source.audioCodec, !rawAudio.isEmpty,
-              directPlayAudioCodecs.contains(canonicalCodec(rawAudio)) else { return false }
+        let hasCompatibleVideo = streams
+            .filter { $0.type == "Video" }
+            .contains { stream in
+                guard let codec = stream.codec, !codec.isEmpty else { return false }
+                return directPlayVideoCodecs.contains(canonicalCodec(codec))
+            }
+        guard hasCompatibleVideo else { return false }
+
+        let hasCompatibleAudio = streams
+            .filter { $0.type == "Audio" }
+            .contains { stream in
+                guard let codec = stream.codec, !codec.isEmpty else { return false }
+                return directPlayAudioCodecs.contains(canonicalCodec(codec))
+            }
+        guard hasCompatibleAudio else { return false }
 
         return true
     }
