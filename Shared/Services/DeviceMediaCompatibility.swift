@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Determines whether a raw media source will direct-play on this device's
@@ -26,6 +27,23 @@ enum DeviceMediaCompatibility {
         }
     }
 
+    /// Whether this device (and its currently attached display) can render
+    /// Dolby Vision. Reflects live device/display capability at call time.
+    static var deviceSupportsDolbyVision: Bool {
+        AVPlayer.availableHDRModes.contains(.dolbyVision)
+    }
+
+    /// True when the stream is single-layer Dolby Vision with NO cross-compatible
+    /// fallback — Jellyfin reports `VideoRangeType == "DOVI"` (Profile 5). Only
+    /// this bare "DOVI" value is gated: the cross-compatible variants
+    /// (`DOVIWithHDR10` / `DOVIWithHLG` / `DOVIWithSDR`) degrade gracefully to
+    /// HDR10/HLG/SDR on non-DV devices and therefore MUST NOT be gated. All
+    /// non-DV values (sdr/hdr10/hlg) and nil also pass.
+    private static func isDolbyVisionWithoutFallback(_ rangeType: String?) -> Bool {
+        guard let rangeType else { return false }
+        return rangeType.lowercased().trimmingCharacters(in: .whitespaces) == "dovi"
+    }
+
     /// True only when the raw source file will direct-play on iOS/tvOS
     /// AVPlayer: its container must be compatible AND at least one video stream
     /// AND at least one audio stream must use an allowlisted codec. Fails closed
@@ -40,7 +58,16 @@ enum DeviceMediaCompatibility {
     /// streams — e.g. a TrueHD primary track plus an AC3 compatibility track on
     /// a Blu-ray rip — we require only that AT LEAST ONE stream of each type is
     /// playable; AVPlayer can select a compatible track at playback time.
-    static func canDirectPlayOnDevice(_ source: MediaSourceInfo) -> Bool {
+    ///
+    /// A single-layer Dolby Vision Profile 5 video stream (VideoRangeType
+    /// "DOVI", no HDR10/HLG/SDR fallback) is treated as NOT compatible on a
+    /// device that lacks Dolby Vision, because AVPlayer renders it with wrong
+    /// colors. `deviceSupportsDolbyVision` defaults to the live device state so
+    /// production callers are unchanged; tests inject a deterministic value.
+    static func canDirectPlayOnDevice(
+        _ source: MediaSourceInfo,
+        deviceSupportsDolbyVision: Bool = DeviceMediaCompatibility.deviceSupportsDolbyVision
+    ) -> Bool {
         guard let rawContainer = source.container, !rawContainer.isEmpty else { return false }
         let containers = rawContainer
             .lowercased()
@@ -56,7 +83,12 @@ enum DeviceMediaCompatibility {
             .filter { $0.type == "Video" }
             .contains { stream in
                 guard let codec = stream.codec, !codec.isEmpty else { return false }
-                return directPlayVideoCodecs.contains(canonicalCodec(codec))
+                guard directPlayVideoCodecs.contains(canonicalCodec(codec)) else { return false }
+                // Gate single-layer DV (Profile 5) on non-DV devices only.
+                if isDolbyVisionWithoutFallback(stream.videoRangeType), !deviceSupportsDolbyVision {
+                    return false
+                }
+                return true
             }
         guard hasCompatibleVideo else { return false }
 
