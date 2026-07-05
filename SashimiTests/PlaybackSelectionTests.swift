@@ -22,7 +22,8 @@ final class PlaybackSelectionTests: XCTestCase {
             channels: nil,
             index: index,
             isDefault: isDefault,
-            isExternal: isExternal
+            isExternal: isExternal,
+            videoRangeType: nil
         )
     }
 
