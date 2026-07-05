@@ -44,6 +44,13 @@ struct DownloadButton: View {
         .tint(.white)
         .onAppear { refreshState() }
         .onChange(of: downloadManager.stateVersion) { _, _ in refreshState() }
+        // DownloadButton is recycled in ForEach/LazyVStack; `item` is a `let`,
+        // so SwiftUI won't reset @State when a reused view gets a new item.
+        // Clear cached Original availability so we don't show a stale result.
+        .onChange(of: item.id) { _, _ in
+            originalAllowed = .undetermined
+            determiningOptions = false
+        }
         .confirmationDialog("Download Quality", isPresented: $showingQualitySheet) {
             qualityOptions
         } message: {
@@ -169,6 +176,7 @@ struct DownloadButton: View {
     /// source isn't device-compatible, downgrade to .high rather than silently
     /// downloading an unplayable original.
     private func enqueueBoundQuality(_ requested: DownloadQuality) {
+        guard !determiningOptions else { return }
         guard requested == .original else {
             downloadManager.enqueueDownload(item: item, quality: requested)
             return
