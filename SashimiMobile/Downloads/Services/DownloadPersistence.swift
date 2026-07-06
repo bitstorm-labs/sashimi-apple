@@ -34,6 +34,17 @@ final class DownloadPersistence {
         }
     }
 
+    func updateQuality(itemId: String, quality: DownloadQuality) {
+        queue.async { [weak self] in
+            guard let context = self?.modelContext else { return }
+            let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
+            let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+            guard let record = try? context.fetch(descriptor).first else { return }
+            record.downloadQuality = quality
+            try? context.save()
+        }
+    }
+
     func updateProgress(itemId: String, progress: Double, downloadedBytes: Int64, totalBytes: Int64) {
         queue.async { [weak self] in
             guard let context = self?.modelContext else { return }

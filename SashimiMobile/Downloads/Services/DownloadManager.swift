@@ -181,6 +181,53 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
 
+        // Mark this item as the current download synchronously so re-entrant
+        // enqueues don't kick off a second concurrent download while we await
+        // the (only-for-.original) compatibility check below.
+        currentDownloadItemId = itemId
+
+        // Resolve the effective quality — for `.original`, verify the raw source
+        // will direct-play on this device; if not (or on any error) downgrade to
+        // `.high` and persist the downgrade — then start the actual download.
+        Task { [weak self] in
+            guard let self else { return }
+            let effectiveQuality = await self.resolveEffectiveQuality(itemId: itemId, requested: quality)
+            self.beginDownload(item: item, quality: effectiveQuality)
+        }
+    }
+
+    /// For `.original`, fetches playback info and downgrades to `.high` unless
+    /// the source can direct-play (fails closed on missing source / error).
+    /// Non-`.original` qualities skip the network call entirely. Persists the
+    /// downgrade so the DB/UI reflect what was actually downloaded.
+    private func resolveEffectiveQuality(itemId: String, requested: DownloadQuality) async -> DownloadQuality {
+        guard requested == .original else { return requested }
+
+        let compatible: Bool
+        do {
+            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: itemId)
+            compatible = info.mediaSources?.first
+                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
+        } catch {
+            compatible = false // fail closed
+        }
+
+        let effective = DownloadQuality.effectiveQuality(requested: requested, sourceIsCompatible: compatible)
+        if effective != requested {
+            persistence.updateQuality(itemId: itemId, quality: effective)
+        }
+        return effective
+    }
+
+    /// Builds the download URL with the (already-resolved) effective quality and
+    /// starts the background download task.
+    private func beginDownload(item: BaseItemDto, quality: DownloadQuality) {
+        let itemId = item.id
+
+        // The item may have been cancelled while the compatibility check was in
+        // flight; bail if it's no longer the current download.
+        guard currentDownloadItemId == itemId else { return }
+
         // URLRequest (not bare URL) so the token travels in a header and the
         // background task keeps it across app relaunches.
         guard let downloadURL = DownloadURLBuilder.downloadURL(itemId: itemId, quality: quality),
@@ -205,7 +252,8 @@ final class DownloadManager: NSObject, ObservableObject {
         map[taskKey(task.taskIdentifier)] = itemId
         taskIdMap = map
 
-        currentDownloadItemId = itemId
+        // currentDownloadItemId was already set synchronously in startNextDownload
+        // so re-entrant enqueues couldn't start a second concurrent download.
         task.resume()
         persistence.updateStatus(itemId: itemId, status: .downloading)
         preparingItems.insert(itemId)
