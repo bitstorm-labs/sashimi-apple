@@ -216,6 +216,7 @@ struct MobileDetailView: View {
             }
         }
         .onChange(of: episodes.first?.id) { _, _ in
+            seasonOriginalAllowed = false
             Task { await refreshSeasonOriginalAllowed() }
         }
     }

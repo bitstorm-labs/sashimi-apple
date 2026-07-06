@@ -215,6 +215,18 @@ final class DownloadManager: NSObject, ObservableObject {
         let effective = DownloadQuality.effectiveQuality(requested: requested, sourceIsCompatible: compatible)
         if effective != requested {
             persistence.updateQuality(itemId: itemId, quality: effective)
+            // Also reflect the downgrade in the UI's source of truth (mainContext).
+            // The persistence write above goes to a private queue context, which the
+            // @Query-backed UI doesn't observe — without this, a completed download
+            // can keep showing "Original" even though the file is actually High.
+            if let context = mainContext {
+                let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
+                let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
+                if let record = try? context.fetch(descriptor).first {
+                    record.downloadQuality = effective
+                    try? context.save()
+                }
+            }
         }
         return effective
     }
