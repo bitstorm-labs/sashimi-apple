@@ -37,6 +37,16 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
         case .low: return 4_000_000
         }
     }
+
+    /// Resolves the quality that should actually be downloaded given whether the
+    /// raw source can direct-play on this device. `.original` is only honored
+    /// when the source is device-compatible; otherwise it degrades to `.high` so
+    /// we never persist an unplayable Original file. All transcoded tiers pass
+    /// through unchanged (the `compatible` flag is irrelevant for them).
+    static func effectiveQuality(requested: DownloadQuality, sourceIsCompatible: Bool) -> DownloadQuality {
+        guard requested == .original else { return requested }
+        return sourceIsCompatible ? .original : .high
+    }
 }
 
 // MARK: - Download Status

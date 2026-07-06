@@ -26,6 +26,9 @@ struct MobileDetailView: View {
     @State private var showingNextNAlert = false
     @State private var showingNoUnwatchedAlert = false
     @State private var nextNInput = ""
+    // Fail-closed: hide Original in the season/bulk menu unless the representative
+    // first episode is confirmed device-compatible.
+    @State private var seasonOriginalAllowed = false
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var isSeries: Bool { item.type == .series }
@@ -78,6 +81,12 @@ struct MobileDetailView: View {
         case .nextN(let count):
             return Array(episodes.filter { !($0.userData?.played ?? false) }.prefix(count))
         }
+    }
+
+    // Drops .original from the season/bulk menu unless the representative episode
+    // is confirmed device-compatible (mirrors DownloadButton.availableQualities).
+    private var availableSeasonQualities: [DownloadQuality] {
+        DownloadQuality.allCases.filter { $0 != .original || seasonOriginalAllowed }
     }
 
     var body: some View {
@@ -205,6 +214,27 @@ struct MobileDetailView: View {
                     await refreshPlaybackState()
                 }
             }
+        }
+        .onChange(of: episodes.first?.id) { _, _ in
+            seasonOriginalAllowed = false
+            Task { await refreshSeasonOriginalAllowed() }
+        }
+    }
+
+    /// Determines whether the season/bulk menu should offer Original, using the
+    /// first (representative) episode as a proxy — series are uniformly encoded.
+    /// Fails closed: any missing episode / source / error leaves it false.
+    private func refreshSeasonOriginalAllowed() async {
+        guard NetworkMonitor.shared.isConnected, let first = episodes.first else {
+            seasonOriginalAllowed = false
+            return
+        }
+        do {
+            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: first.id)
+            seasonOriginalAllowed = info.mediaSources?.first
+                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
+        } catch {
+            seasonOriginalAllowed = false
         }
     }
 
@@ -562,7 +592,7 @@ struct MobileDetailView: View {
                 .buttonStyle(.bordered)
                 .tint(.white)
                 .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
-                    ForEach(DownloadQuality.allCases) { quality in
+                    ForEach(availableSeasonQualities) { quality in
                         Button("\(quality.displayName) — \(quality.subtitle)") {
                             DownloadManager.shared.downloadSeason(
                                 episodes: episodesForDownload, quality: quality
