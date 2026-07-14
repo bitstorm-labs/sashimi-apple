@@ -808,6 +808,18 @@ actor JellyfinClient {
         return components.url
     }
 
+    /// Fetches this device's own session from the server — the authoritative
+    /// view of how playback is actually being delivered (DirectPlay vs a
+    /// remux with video copied vs a full transcode, and why).
+    func getOwnSession() async throws -> SessionInfoDto? {
+        let data = try await request(
+            path: "/Sessions",
+            queryItems: [URLQueryItem(name: "DeviceId", value: deviceId)]
+        )
+        let sessions = try JSONDecoder().decode([SessionInfoDto].self, from: data)
+        return sessions.first(where: { $0.nowPlayingItemId?.id != nil }) ?? sessions.first
+    }
+
     func reportPlaybackStart(itemId: String, positionTicks: Int64 = 0, playSessionId: String? = nil, playMethod: String = "DirectStream") async throws {
         var body: [String: Any] = [
             "ItemId": itemId,

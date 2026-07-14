@@ -265,6 +265,66 @@ struct MediaSourceInfo: Codable {
     }
 }
 
+// MARK: - Session info (live playback truth from the server)
+
+/// Subset of /Sessions used by the player's stream-info chip. The server is
+/// the only source that can distinguish a full transcode from a remux with
+/// the video stream copied (IsVideoDirect).
+struct SessionInfoDto: Codable {
+    let deviceId: String?
+    let playState: SessionPlayState?
+    let transcodingInfo: SessionTranscodingInfo?
+    let nowPlayingItemId: NowPlayingItemRef?
+
+    enum CodingKeys: String, CodingKey {
+        case deviceId = "DeviceId"
+        case playState = "PlayState"
+        case transcodingInfo = "TranscodingInfo"
+        case nowPlayingItemId = "NowPlayingItem"
+    }
+}
+
+/// Minimal reference to the session's playing item (id only — avoids
+/// re-decoding a full BaseItemDto we don't need).
+struct NowPlayingItemRef: Codable {
+    let id: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "Id"
+    }
+}
+
+struct SessionPlayState: Codable {
+    /// "DirectPlay" | "DirectStream" | "Transcode"
+    let playMethod: String?
+
+    enum CodingKeys: String, CodingKey {
+        case playMethod = "PlayMethod"
+    }
+}
+
+struct SessionTranscodingInfo: Codable {
+    let videoCodec: String?
+    let audioCodec: String?
+    let bitrate: Int?
+    let width: Int?
+    let height: Int?
+    let isVideoDirect: Bool?
+    let isAudioDirect: Bool?
+    let transcodeReasons: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case videoCodec = "VideoCodec"
+        case audioCodec = "AudioCodec"
+        case bitrate = "Bitrate"
+        case width = "Width"
+        case height = "Height"
+        case isVideoDirect = "IsVideoDirect"
+        case isAudioDirect = "IsAudioDirect"
+        case transcodeReasons = "TranscodeReasons"
+    }
+}
+
 struct MediaStream: Codable {
     let type: String?
     let codec: String?
