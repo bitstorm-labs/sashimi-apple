@@ -212,12 +212,17 @@ struct MediaSourceInfo: Codable {
     }
 
     var videoResolution: String? {
-        guard let stream = mediaStreams?.first(where: { $0.type == "Video" }),
-              let height = stream.height else { return nil }
-        if height >= 2160 { return "4K" }
-        if height >= 1080 { return "1080p" }
-        if height >= 720 { return "720p" }
-        return "\(height)p"
+        guard let stream = mediaStreams?.first(where: { $0.type == "Video" }) else { return nil }
+        let width = stream.width ?? 0
+        let height = stream.height ?? 0
+        guard width > 0 || height > 0 else { return nil }
+        // Classify by width first: wide-aspect releases (3840x1920, 3840x1600
+        // scope) have sub-2160 heights and would otherwise mislabel as 1080p.
+        if width >= 3200 || height >= 2160 { return "4K" }
+        if width >= 1800 || height >= 1080 { return "1080p" }
+        if width >= 1200 || height >= 720 { return "720p" }
+        if height > 0 { return "\(height)p" }
+        return "SD"
     }
 
     var audioCodec: String? {
