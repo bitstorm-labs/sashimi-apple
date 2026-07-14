@@ -81,6 +81,31 @@ final class PlayerViewModel: ObservableObject {
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
     @Published var videoResolution: String?
+    @Published var streamInfo: StreamInfo?
+
+    /// How playback is actually being delivered, per the server's session —
+    /// shown as a chip in the player's top info bar when controls are visible.
+    struct StreamInfo: Equatable {
+        enum Method: Equatable {
+            case directPlay
+            case directStream   // container remux / audio conversion; video copied
+            case transcode
+        }
+
+        let method: Method
+        /// Transcode target, e.g. "1080p H264 8 Mbps" (nil unless transcoding)
+        let detail: String?
+        /// Human-readable primary transcode reason, e.g. "bitrate limit"
+        let reason: String?
+
+        var label: String {
+            switch method {
+            case .directPlay: return "Direct Play"
+            case .directStream: return "Direct Stream"
+            case .transcode: return "Transcode"
+            }
+        }
+    }
 
     // Track when playback actually started (for quick-exit protection)
     private var playbackStartDate: Date?
@@ -126,6 +151,67 @@ final class PlayerViewModel: ObservableObject {
     private var endObserver: NSObjectProtocol?
     private let client = JellyfinClient.shared
     private let playbackSettings = PlaybackSettings.shared
+
+    /// Refreshes the stream-info chip from the server's own session view.
+    /// Called when the player overlay becomes visible; cheap single GET.
+    func refreshStreamInfo() async {
+        guard !isOfflinePlayback else {
+            streamInfo = StreamInfo(method: .directPlay, detail: nil, reason: nil)
+            return
+        }
+        guard let session = try? await client.getOwnSession(),
+              session.nowPlayingItemId?.id != nil else { return }
+
+        let method = session.playState?.playMethod
+        let info = session.transcodingInfo
+
+        if method == "Transcode", let info {
+            if info.isVideoDirect == true {
+                // Container remux / audio conversion — video untouched
+                streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
+            } else {
+                var parts: [String] = []
+                if let width = info.width, let height = info.height {
+                    parts.append(Self.resolutionLabel(width: width, height: height))
+                }
+                if let codec = info.videoCodec { parts.append(codec.uppercased()) }
+                if let bitrate = info.bitrate, bitrate > 0 {
+                    parts.append("\(Int(round(Double(bitrate) / 1_000_000))) Mbps")
+                }
+                let reason = info.transcodeReasons?.first.map(Self.humanTranscodeReason)
+                streamInfo = StreamInfo(
+                    method: .transcode,
+                    detail: parts.isEmpty ? nil : parts.joined(separator: " "),
+                    reason: reason
+                )
+            }
+        } else if method == "DirectStream" {
+            streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
+        } else if method != nil {
+            streamInfo = StreamInfo(method: .directPlay, detail: nil, reason: nil)
+        }
+    }
+
+    private static func resolutionLabel(width: Int, height: Int) -> String {
+        if width >= 3200 || height >= 2160 { return "4K" }
+        if width >= 1800 || height >= 1080 { return "1080p" }
+        if width >= 1200 || height >= 720 { return "720p" }
+        return "\(height)p"
+    }
+
+    private static func humanTranscodeReason(_ reason: String) -> String {
+        switch reason {
+        case "ContainerNotSupported": return "container"
+        case "ContainerBitrateExceedsLimit": return "bitrate limit"
+        case "VideoCodecNotSupported": return "video codec"
+        case "AudioCodecNotSupported": return "audio codec"
+        case "SubtitleCodecNotSupported": return "subtitles"
+        case "VideoResolutionNotSupported": return "resolution"
+        case "AudioChannelsNotSupported": return "audio channels"
+        case "UnknownVideoStreamInfo", "UnknownAudioStreamInfo": return "stream info"
+        default: return reason
+        }
+    }
 
     func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false, localFileURL: URL? = nil) async {
         // Tear down everything tied to the previous player first — auto-play
@@ -430,6 +516,7 @@ final class PlayerViewModel: ObservableObject {
         playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
         videoResolution = mediaSource.videoResolution
+        streamInfo = nil   // stale for the new session; refreshed when the overlay opens
 
         let resolvedURL: URL?
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
