@@ -439,6 +439,42 @@ struct PlayerContentOverlay: View {
         .onReceive(clockTimer) { _ in
             clockTime = Date()
         }
+        // Refresh the delivery chip from the server whenever the overlay opens
+        .task(id: controlsVisible) {
+            if controlsVisible {
+                await viewModel.refreshStreamInfo()
+            }
+        }
+    }
+
+    // MARK: - Stream info chip
+
+    private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(chipColor(for: info.method))
+                .frame(width: 10, height: 10)
+            Text(chipText(for: info))
+        }
+    }
+
+    private func chipColor(for method: PlayerViewModel.StreamInfo.Method) -> Color {
+        switch method {
+        case .directPlay: return .green
+        case .directStream: return .yellow
+        case .transcode: return .orange
+        }
+    }
+
+    private func chipText(for info: PlayerViewModel.StreamInfo) -> String {
+        var text = info.label
+        if let detail = info.detail {
+            text += " → \(detail)"
+        }
+        if let reason = info.reason {
+            text += " (\(reason))"
+        }
+        return text
     }
 
     // MARK: - Top Info Bar
@@ -499,7 +535,7 @@ struct PlayerContentOverlay: View {
                         .lineLimit(1)
                 }
 
-                // Release date, quality, and finish time
+                // Release date, quality, finish time, and delivery method
                 HStack(spacing: 8) {
                     if let dateText = formattedReleaseDate {
                         Text(dateText)
@@ -517,6 +553,11 @@ struct PlayerContentOverlay: View {
                                 .foregroundStyle(.white.opacity(0.4))
                         }
                         Text(finishText)
+                    }
+                    if let info = viewModel.streamInfo {
+                        Text("·")
+                            .foregroundStyle(.white.opacity(0.4))
+                        streamInfoChip(info)
                     }
                 }
                 .font(.system(size: 24, weight: .medium))
