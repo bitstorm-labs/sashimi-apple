@@ -55,10 +55,10 @@ We may update this privacy policy from time to time. Any changes will be posted 
 
 If you have questions about this privacy policy, please open an issue on our GitHub repository:
 
-https://github.com/mondominator/sashimi/issues
+https://github.com/bitstorm-labs/sashimi-apple/issues
 
 ## Open Source
 
 Sashimi is open source software. You can review the complete source code to verify our privacy practices:
 
-https://github.com/mondominator/sashimi
+https://github.com/bitstorm-labs/sashimi-apple
