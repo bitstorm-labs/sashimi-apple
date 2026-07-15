@@ -593,7 +593,7 @@ struct RecentlyAddedLibraryRow: View {
                                 libraryType: library.collectionType,
                                 libraryName: library.name,
                                 isCircular: isYouTubeLibrary,
-                                badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
+                                badgeCount: (unplayedCount ?? 0) >= 1 ? unplayedCount : nil
                             ) {
                                 onSelect(item)
                             }
