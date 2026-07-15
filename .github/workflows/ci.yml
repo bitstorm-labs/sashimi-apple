@@ -66,7 +66,7 @@ jobs:
           xcodebuild build \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
-            -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' \
+            -destination 'generic/platform=tvOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
@@ -82,13 +82,22 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
+      - name: Create tvOS Simulator
+        # Runner images periodically drop preinstalled runtimes/devices; fetch
+        # the runtime and create a device explicitly (download alone creates none).
+        run: |
+          sudo xcodebuild -downloadPlatform tvOS || xcodebuild -downloadPlatform tvOS
+          RUNTIME=$(xcrun simctl list runtimes tvOS | grep -oE 'com.apple.CoreSimulator.SimRuntime.tvOS[-0-9]+' | tail -1)
+          echo "Using runtime: $RUNTIME"
+          xcrun simctl create "ci-atv" "Apple TV 4K (3rd generation)" "$RUNTIME"
+
       - name: Run Tests
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
-            -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' \
+            -destination 'platform=tvOS Simulator,name=ci-atv' \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
@@ -130,7 +139,7 @@ jobs:
           xcodebuild build \
             -project Sashimi.xcodeproj \
             -scheme SashimiMobile \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
