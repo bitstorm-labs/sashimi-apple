@@ -55,7 +55,7 @@ share their networking, authentication, and playback logic.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/mondominator/sashimi.git
+   git clone https://github.com/bitstorm-labs/sashimi-apple.git
    cd sashimi
    ```
 
