@@ -100,7 +100,7 @@ Navigate to **App Store** tab and fill in:
 1. Click **App Privacy** → **Get Started**
 2. For data collection, select: **Data Not Collected**
    - Sashimi only communicates with user's own server
-3. Link to privacy policy: `https://github.com/mondominator/sashimi/blob/main/PRIVACY.md`
+3. Link to privacy policy: `https://github.com/bitstorm-labs/sashimi-apple/blob/main/PRIVACY.md`
 
 #### Age Rating
 1. Click **Age Rating** → **Edit**
@@ -201,7 +201,7 @@ For automated deployment via GitHub Actions, you need to set up secrets.
 Match stores your certificates in a private Git repository. This is the recommended approach.
 
 1. Create a **private** GitHub repository for certificates:
-   - Example: `github.com/mondominator/certificates` (private!)
+   - Example: `github.com/bitstorm-labs/certificates` (private!)
 
 2. Initialize Match:
    ```bash
@@ -230,7 +230,7 @@ Add these secrets:
 | `APP_STORE_CONNECT_ISSUER_ID` | Your Issuer ID (from Step 5.1) |
 | `APP_STORE_CONNECT_KEY_CONTENT` | Base64-encoded .p8 file content* |
 | `MATCH_PASSWORD` | Password you set for Match |
-| `MATCH_GIT_URL` | `git@github.com:mondominator/certificates.git` |
+| `MATCH_GIT_URL` | `git@github.com:bitstorm-labs/certificates.git` |
 
 *To base64 encode the .p8 file:
 ```bash
