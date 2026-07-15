@@ -66,7 +66,7 @@ jobs:
           xcodebuild build \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
-            -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' \
+            -destination 'generic/platform=tvOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
@@ -82,13 +82,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
+      - name: Ensure tvOS Simulator Runtime
+        # Runner images periodically drop preinstalled runtimes; fetch on demand.
+        run: sudo xcodebuild -downloadPlatform tvOS -quiet || xcodebuild -downloadPlatform tvOS -quiet
+
       - name: Run Tests
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
-            -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' \
+            -destination 'platform=tvOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
@@ -130,7 +134,7 @@ jobs:
           xcodebuild build \
             -project Sashimi.xcodeproj \
             -scheme SashimiMobile \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
