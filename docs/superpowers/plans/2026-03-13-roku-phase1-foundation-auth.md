@@ -82,7 +82,7 @@ sashimi-roku/
 
 ```bash
 cd /Users/mondo/Documents/git
-gh repo create mondominator/sashimi-roku --private --description "Sashimi - Jellyfin client for Roku" --clone
+gh repo create bitstorm-labs/sashimi-roku --private --description "Sashimi - Jellyfin client for Roku" --clone
 cd sashimi-roku
 ```
 
@@ -1922,7 +1922,7 @@ Expected: CI passes — lint, build, package all succeed. Artifact `sashimi.zip`
 - [ ] **Step 3: Set up branch protection on main**
 
 ```bash
-gh api repos/mondominator/sashimi-roku/branches/main/protection \
+gh api repos/bitstorm-labs/sashimi-roku/branches/main/protection \
   --method PUT \
   --field required_status_checks='{"strict":true,"contexts":["build"]}' \
   --field enforce_admins=true \

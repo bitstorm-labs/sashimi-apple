@@ -72,7 +72,7 @@ docs: update installation instructions
 
 ### Testing
 
-While we don't have tests yet (see [issue #4](https://github.com/mondominator/sashimi/issues/4)), please:
+While we don't have tests yet (see [issue #4](https://github.com/bitstorm-labs/sashimi-apple/issues/4)), please:
 - Test your changes on tvOS Simulator
 - Test on a physical Apple TV if possible
 - Verify existing functionality still works
