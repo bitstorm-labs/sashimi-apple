@@ -61,6 +61,27 @@ struct MobileDetailView: View {
         return parts
     }
 
+    /// Premiere date as "November 8, 2024" (tvOS parity)
+    private var premiereDateLongText: String? {
+        guard let raw = item.premiereDate else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        guard let date else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMMM d, yyyy"
+        return fmt.string(from: date)
+    }
+
+    /// "Ends at 9:41 PM" from now + runtime (tvOS parity, accent-colored)
+    private var endsAtText: String? {
+        guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
+        let end = Date().addingTimeInterval(Double(ticks) / 10_000_000)
+        let fmt = DateFormatter()
+        fmt.timeStyle = .short
+        return "Ends at \(fmt.string(from: end))"
+    }
+
     private var isYouTubeChannelEpisode: Bool {
         isEpisode && isYouTubeStyle
     }
@@ -299,7 +320,7 @@ struct MobileDetailView: View {
 
             // Genres
             if let genres = item.genres, !genres.isEmpty {
-                Text(genres.prefix(3).joined(separator: " • "))
+                Text(([item.officialRating].compactMap { $0 } + genres.prefix(3)).joined(separator: " • "))
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
             }
@@ -375,6 +396,11 @@ struct MobileDetailView: View {
                     Text("•")
                     Text(formatRuntime(runtime))
                 }
+                if let ends = endsAtText {
+                    Text("•")
+                    Text(ends)
+                        .foregroundStyle(MobileColors.accent)
+                }
             }
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
@@ -412,7 +438,9 @@ struct MobileDetailView: View {
             }
 
             HStack(spacing: MobileSpacing.sm) {
-                if let year = item.productionYear {
+                if let dateText = premiereDateLongText {
+                    Text(dateText)
+                } else if let year = item.productionYear {
                     Text(String(year))
                 }
 
@@ -421,13 +449,10 @@ struct MobileDetailView: View {
                     Text(formatRuntime(runtime))
                 }
 
-                if let rating = item.officialRating {
+                if let ends = endsAtText {
                     Text("•")
-                    Text(rating)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(MobileColors.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Text(ends)
+                        .foregroundStyle(MobileColors.accent)
                 }
             }
             .font(MobileTypography.caption)
@@ -439,7 +464,7 @@ struct MobileDetailView: View {
             }
 
             if let genres = item.genres, !genres.isEmpty {
-                Text(genres.prefix(3).joined(separator: " • "))
+                Text(([item.officialRating].compactMap { $0 } + genres.prefix(3)).joined(separator: " • "))
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
             }
