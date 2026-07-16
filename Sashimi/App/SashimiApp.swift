@@ -53,7 +53,10 @@ struct ContentView: View {
     var body: some View {
         Group {
             if sessionManager.isAuthenticated {
+                // Rebuild the entire tab hierarchy when the active server
+                // changes — every view model reloads against the new server.
                 MainTabView()
+                    .id(sessionManager.activeServerId)
             } else {
                 ServerConnectionView()
             }
