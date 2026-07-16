@@ -333,7 +333,8 @@ struct PhoneDetailView: View {
         if let runtime = item.runTimeTicks {
             parts.append(formatRuntime(runtime))
         }
-        if let rating = item.officialRating {
+        // Series show rating as/near ratings row, not in the meta text line
+        if !isSeries, let rating = item.officialRating {
             parts.append(rating)
         }
         if let ends = endsAtText {

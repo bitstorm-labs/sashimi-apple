@@ -55,9 +55,7 @@ struct MobileDetailView: View {
         if !seasons.isEmpty {
             parts.append(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
         }
-        if let rating = item.officialRating {
-            parts.append(rating)
-        }
+        // Rating shown near the ratings row for series, not the meta text line
         return parts
     }
 
