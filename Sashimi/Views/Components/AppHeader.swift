@@ -72,5 +72,10 @@ struct AppHeader: View {
         }
         .frame(maxWidth: .infinity)
         .ignoresSafeArea(edges: .horizontal)
+        // The hero overlaps the header (negative padding below it in
+        // HomeView), which blocked focus from ever reaching the avatar
+        // button. Keep the header its own focus section, above the hero.
+        .focusSection()
+        .zIndex(1)
     }
 }
