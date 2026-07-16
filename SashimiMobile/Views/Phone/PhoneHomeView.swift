@@ -3,6 +3,8 @@ import SwiftUI
 struct PhoneHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var rowSettings = HomeRowSettings.shared
+    @ObservedObject private var sessionManager = SessionManager.shared
+    @State private var showAddServer = false
 
     var body: some View {
         ScrollView {
@@ -20,19 +22,46 @@ struct PhoneHomeView: View {
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 8) {
-                Image("SidebarLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                Text("Sashimi")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(MobileColors.textPrimary)
+                // Logo taps open the server quick-switcher (phone equivalent
+                // of the tvOS avatar menu).
+                Menu {
+                    ForEach(sessionManager.servers) { server in
+                        Button {
+                            Task { await sessionManager.switchServer(to: server.id) }
+                        } label: {
+                            if server.id == sessionManager.activeServerId {
+                                Label(server.name, systemImage: "checkmark")
+                            } else {
+                                Text(server.name)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button {
+                        showAddServer = true
+                    } label: {
+                        Label("Add Server…", systemImage: "plus")
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image("SidebarLogo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 32, height: 32)
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        Text("Sashimi")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(MobileColors.textPrimary)
+                    }
+                }
                 Spacer()
             }
             .padding(.horizontal, MobileSpacing.md)
             .padding(.vertical, MobileSpacing.xs)
             .background(MobileColors.background)
+        }
+        .sheet(isPresented: $showAddServer) {
+            MobileAddServerSheet()
         }
         .refreshable {
             await viewModel.loadContent()
