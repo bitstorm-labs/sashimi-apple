@@ -308,16 +308,24 @@ struct PhoneDetailView: View {
 
     @ViewBuilder
     private var metadataRow: some View {
-        // Metadata line
-        let parts = metadataParts
-        if !parts.isEmpty {
-            Text(parts.joined(separator: " \u{2022} "))
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textSecondary)
-                .lineLimit(1)
+        // Metadata line: date • runtime, then a blue "Ends at" (tvOS accent)
+        HStack(spacing: 6) {
+            let parts = metadataParts
+            if !parts.isEmpty {
+                Text(parts.joined(separator: " \u{2022} "))
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
+            if let ends = endsAtText {
+                if !parts.isEmpty {
+                    Text("\u{2022}").foregroundStyle(MobileColors.textSecondary)
+                }
+                Text(ends).foregroundStyle(MobileColors.accent)
+            }
         }
+        .font(MobileTypography.caption)
+        .lineLimit(1)
 
-        // Ratings + media chips on a single line
+        // Ratings + media (quality) chips on a single line
         HStack(spacing: MobileSpacing.sm) {
             ratingsRow
             if !isSeries {
@@ -341,18 +349,8 @@ struct PhoneDetailView: View {
         } else if let year = item.productionYear {
             parts.append(String(year))
         }
-        if isSeries, !seasons.isEmpty {
-            parts.append(seasons.count == 1 ? "1 Season" : "\(seasons.count) Seasons")
-        }
         if let runtime = item.runTimeTicks {
             parts.append(formatRuntime(runtime))
-        }
-        // Rating in the meta line for movies only (TV content omits it)
-        if isMovie, let rating = item.officialRating {
-            parts.append(rating)
-        }
-        if let ends = endsAtText {
-            parts.append(ends)
         }
         return parts
     }
