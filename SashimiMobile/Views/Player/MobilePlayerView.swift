@@ -30,6 +30,7 @@ private struct PlayerViewController: UIViewControllerRepresentable {
 
 struct MobilePlayerView: View {
     let item: BaseItemDto
+    var startFromBeginning: Bool = false
     @StateObject private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var showCustomOverlay = true
@@ -64,7 +65,7 @@ struct MobilePlayerView: View {
                         viewModel.errorMessage = "Can't connect to server. Download this item to watch offline."
                     }
                 }
-                await viewModel.loadMedia(item: item, localFileURL: nil)
+                await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning, localFileURL: nil)
                 timeoutTask.cancel()
             } else {
                 await viewModel.loadMedia(item: item, localFileURL: localFileURL)
@@ -373,17 +374,18 @@ struct MobilePlayerView: View {
 
 struct FullScreenPlayerModifier: ViewModifier {
     @Binding var item: BaseItemDto?
+    var startFromBeginning: Bool = false
 
     func body(content: Content) -> some View {
         content
             .fullScreenCover(item: $item) { mediaItem in
-                MobilePlayerView(item: mediaItem)
+                MobilePlayerView(item: mediaItem, startFromBeginning: startFromBeginning)
             }
     }
 }
 
 extension View {
-    func fullScreenPlayer(item: Binding<BaseItemDto?>) -> some View {
-        modifier(FullScreenPlayerModifier(item: item))
+    func fullScreenPlayer(item: Binding<BaseItemDto?>, startFromBeginning: Bool = false) -> some View {
+        modifier(FullScreenPlayerModifier(item: item, startFromBeginning: startFromBeginning))
     }
 }
