@@ -103,8 +103,8 @@ struct MobilePosterCard: View {
                     watchedCheckmark
                 }
 
-                // Unplayed badge (only show if > 1, shows "X new")
-                if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount > 1 {
+                // Unplayed badge (>= 1, shows "X new")
+                if let unplayedCount = item.userData?.unplayedItemCount, unplayedCount >= 1 {
                     unplayedBadge(count: unplayedCount)
                 }
             }
