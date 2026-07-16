@@ -54,6 +54,8 @@ struct ContentView: View {
     var body: some View {
         Group {
             if sessionManager.isAuthenticated {
+                // Rebuild the navigation hierarchy when the active server
+                // changes so every view reloads against the new server.
                 Group {
                     if isPad {
                         MainNavigationView()
@@ -61,6 +63,7 @@ struct ContentView: View {
                         PhoneTabView()
                     }
                 }
+                .id(sessionManager.activeServerId)
                 .task {
                     await DownloadManager.shared.syncPendingProgress()
                 }
