@@ -318,13 +318,6 @@ struct MobileDetailView: View {
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
 
-            // Genres
-            if let genres = item.genres, !genres.isEmpty {
-                Text(([item.officialRating].compactMap { $0 } + genres.prefix(3)).joined(separator: " • "))
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textSecondary)
-            }
-
             // Action buttons
             seriesActionButtons
         }
