@@ -668,8 +668,11 @@ actor JellyfinClient {
                 [
                     "Container": "ts",
                     "Type": "Video",
-                    "VideoCodec": "h264",
-                    "AudioCodec": "aac,ac3",
+                    // tvOS plays HEVC and EAC3 in HLS natively — declaring
+                    // them lets mkv remuxes stream-copy both tracks instead
+                    // of re-encoding video / downmixing EAC3 5.1 to AAC.
+                    "VideoCodec": "h264,hevc",
+                    "AudioCodec": "aac,ac3,eac3",
                     "Protocol": "hls",
                     "Context": "Streaming",
                     "MaxAudioChannels": "6",
