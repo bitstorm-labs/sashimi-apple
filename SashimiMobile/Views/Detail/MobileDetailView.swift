@@ -269,6 +269,11 @@ struct MobileDetailView: View {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fit)
+                    } else if state.error != nil {
+                        // No logo on the server: fall back to the title
+                        Text(item.name ?? "Unknown")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(MobileColors.textPrimary)
                     }
                 }
                 .frame(maxHeight: 100)
@@ -1020,9 +1025,10 @@ struct MobileDetailView: View {
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
-        guard NetworkMonitor.shared.isConnected else { return nil }
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(itemId)/Images/Logo?maxWidth=500")
+        // Built via the client (not raw UserDefaults) and NOT gated on
+        // NetworkMonitor: a false negative at view-build time permanently
+        // hid the logo even though every other image loaded fine.
+        JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
