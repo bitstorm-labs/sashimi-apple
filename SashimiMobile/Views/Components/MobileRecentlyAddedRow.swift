@@ -106,7 +106,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
             libraryName: libraryName,
             isCircular: isYouTubeLibrary,
             isLandscape: false,
-            badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
+            badgeCount: (unplayedCount ?? 0) >= 1 ? unplayedCount : nil
         )
     }
 
@@ -147,7 +147,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
         for seriesId in seriesIds {
             do {
                 let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
-                if let unplayedCount = series.userData?.unplayedItemCount, unplayedCount > 0 {
+                if let unplayedCount = series.userData?.unplayedItemCount, unplayedCount >= 1 {
                     counts[seriesId] = unplayedCount
                 }
             } catch {
@@ -264,7 +264,7 @@ struct MobileRecentlyAddedCard: View {
                 }
 
                 // "X new" badge
-                if let count = badgeCount, count > 1 {
+                if let count = badgeCount, count >= 1 {
                     Text("\(count) new")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
@@ -364,7 +364,7 @@ struct MobileRecentlyAddedGridView<Destination: View>: View {
             libraryName: libraryName,
             isCircular: isYouTubeLibrary,
             isLandscape: false,
-            badgeCount: (unplayedCount ?? 0) > 1 ? unplayedCount : nil
+            badgeCount: (unplayedCount ?? 0) >= 1 ? unplayedCount : nil
         )
     }
 }
