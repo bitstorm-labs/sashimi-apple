@@ -811,6 +811,17 @@ actor JellyfinClient {
     /// Fetches this device's own session from the server — the authoritative
     /// view of how playback is actually being delivered (DirectPlay vs a
     /// remux with video copied vs a full transcode, and why).
+    struct PublicSystemInfo: Codable {
+        let serverName: String?
+        enum CodingKeys: String, CodingKey { case serverName = "ServerName" }
+    }
+
+    /// Unauthenticated server info — used to label saved servers.
+    func getPublicSystemInfo() async throws -> PublicSystemInfo {
+        let data = try await request(path: "/System/Info/Public")
+        return try JSONDecoder().decode(PublicSystemInfo.self, from: data)
+    }
+
     func getOwnSession() async throws -> SessionInfoDto? {
         let data = try await request(
             path: "/Sessions",
