@@ -16,6 +16,7 @@ struct PhoneDetailView: View {
     @State private var episodes: [BaseItemDto] = []
     @State private var selectedSeason: BaseItemDto?
     @State private var nextEpisodeToPlay: BaseItemDto?
+    @State private var startOverItem: BaseItemDto?
     @State private var isLoadingEpisodes = false
     @State private var isWatched: Bool = false
     @State private var hasProgress: Bool = false
@@ -42,7 +43,6 @@ struct PhoneDetailView: View {
     /// The series whose seasons/episodes this page lists (self for a series,
     /// the parent for an episode) — drives the shared episode machinery.
     private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
-    private var isMovie: Bool { item.type == .movie }
     private var isMovie: Bool { item.type == .movie }
 
     private var isYouTubeStyle: Bool {
@@ -117,8 +117,12 @@ struct PhoneDetailView: View {
         .background(MobileColors.background)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenPlayer(item: $playingItem)
+        .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
-            PhoneEpisodeSheet(episode: episode, libraryName: libraryName)
+            // Full detail view — one consistent episode UI (matches iPad)
+            NavigationStack {
+                PhoneDetailView(item: episode, libraryName: libraryName)
+            }
         }
         .task {
             if NetworkMonitor.shared.isConnected,
@@ -281,6 +285,11 @@ struct PhoneDetailView: View {
             .clipped()
     }
 
+    private var trailerURL: URL? {
+        guard let raw = item.remoteTrailers?.first?.url else { return nil }
+        return URL(string: raw)
+    }
+
     private func logoImageURL(for itemId: String) -> URL? {
         JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
     }
@@ -333,12 +342,24 @@ struct PhoneDetailView: View {
             }
         }
 
-        // Genres line — movies only
-        if isMovie, let genres = item.genres, !genres.isEmpty {
-            Text(genres.prefix(3).joined(separator: " \u{2022} "))
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textSecondary)
-                .lineLimit(1)
+        // Cert chip + genres — movies only (tvOS-style stroked cert chip)
+        if isMovie {
+            HStack(spacing: MobileSpacing.sm) {
+                if let rating = item.officialRating {
+                    Text(rating)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(MobileColors.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.4), lineWidth: 1))
+                }
+                if let genres = item.genres, !genres.isEmpty {
+                    Text(genres.prefix(3).joined(separator: " \u{2022} "))
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.textSecondary)
+                        .lineLimit(1)
+                }
+            }
         }
     }
 
@@ -401,9 +422,41 @@ struct PhoneDetailView: View {
                     mediaInfoBadge(formatCodec(videoCodec))
                 }
                 if let audioCodec = info.audioCodec, let channels = info.audioChannels {
-                    mediaInfoBadge("\(formatCodec(audioCodec)) \(formatChannels(channels))")
+                    audioInfoBadge(codec: audioCodec, channels: channels)
                 }
             }
+        }
+    }
+
+    /// Audio badge with the real Dolby/DTS wordmark where available (tvOS parity)
+    @ViewBuilder
+    private func audioInfoBadge(codec: String, channels: Int) -> some View {
+        if let logoName = audioCodecLogoName(codec) {
+            HStack(spacing: 4) {
+                Image(logoName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 10)
+                Text(formatChannels(channels))
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 4).fill(MobileColors.cardBackground))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.3), lineWidth: 1))
+        } else {
+            mediaInfoBadge("\(formatCodec(codec)) \(formatChannels(channels))")
+        }
+    }
+
+    private func audioCodecLogoName(_ codec: String) -> String? {
+        switch codec.uppercased() {
+        case "AC3": return "DolbyDigital"
+        case "EAC3": return "DolbyDigitalPlus"
+        case "TRUEHD": return "DolbyTrueHD"
+        case "DTS", "DCA": return "DTS"
+        default: return nil
         }
     }
 
@@ -440,14 +493,42 @@ struct PhoneDetailView: View {
         HStack(spacing: MobileSpacing.sm) {
             if let nextEp = nextEpisodeToPlay {
                 let epHasProgress = (nextEp.userData?.playbackPositionTicks ?? 0) > 0
+                let epLabel: String = {
+                    if let sNum = nextEp.parentIndexNumber, let eNum = nextEp.indexNumber {
+                        return "\(epHasProgress ? "Resume" : "Play") S\(sNum):E\(eNum)"
+                    }
+                    return epHasProgress ? "Resume" : "Play"
+                }()
 
                 Button {
                     playingItem = nextEp
                 } label: {
-                    Label(epHasProgress ? "Resume" : "Play", systemImage: "play.fill")
+                    Label(epLabel, systemImage: "play.fill")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
+
+                if epHasProgress {
+                    Button {
+                        startOverItem = nextEp
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 16))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                }
+            }
+
+            if let trailerURL, NetworkMonitor.shared.isConnected {
+                Button {
+                    UIApplication.shared.open(trailerURL)
+                } label: {
+                    Image(systemName: "film")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
             }
 
             watchedButton
@@ -530,6 +611,17 @@ struct PhoneDetailView: View {
             }
             .buttonStyle(.borderedProminent)
 
+            if hasProgress {
+                Button {
+                    startOverItem = item
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
@@ -564,6 +656,28 @@ struct PhoneDetailView: View {
                     .font(.system(size: 14, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
+
+            if hasProgress {
+                Button {
+                    startOverItem = item
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
+            if let trailerURL, NetworkMonitor.shared.isConnected {
+                Button {
+                    UIApplication.shared.open(trailerURL)
+                } label: {
+                    Image(systemName: "film")
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
 
             watchedButton
 
@@ -665,6 +779,12 @@ struct PhoneDetailView: View {
 
     // MARK: - Episode List (Vertical)
 
+    /// The episode this page treats as "current": the open episode itself,
+    /// or the series page's next-up.
+    private var currentEpisodeId: String? {
+        isEpisode ? item.id : nextEpisodeToPlay?.id
+    }
+
     private var episodeList: some View {
         LazyVStack(spacing: MobileSpacing.sm) {
             ForEach(episodes) { episode in
@@ -672,17 +792,45 @@ struct PhoneDetailView: View {
                     showingEpisodeDetail = episode
                 } label: {
                     HStack(spacing: MobileSpacing.sm) {
-                        LazyImage(url: episodeThumbnailURL(episode)) { state in
-                            if let image = state.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else {
-                                Rectangle().fill(MobileColors.cardBackground)
+                        ZStack(alignment: .topTrailing) {
+                            LazyImage(url: episodeThumbnailURL(episode)) { state in
+                                if let image = state.image {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } else {
+                                    Rectangle().fill(MobileColors.cardBackground)
+                                }
+                            }
+                            .frame(width: 120, height: 68)
+
+                            // Watched checkmark (tvOS parity)
+                            if episode.userData?.played == true {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.white, Color(red: 0.29, green: 0.73, blue: 0.47))
+                                    .padding(3)
+                            }
+
+                            // Progress bar (tvOS parity)
+                            if episode.progressPercent > 0 {
+                                VStack {
+                                    Spacer()
+                                    GeometryReader { geo in
+                                        Rectangle()
+                                            .fill(MobileColors.accent)
+                                            .frame(width: geo.size.width * episode.progressPercent, height: 3)
+                                    }
+                                    .frame(height: 3)
+                                }
                             }
                         }
                         .frame(width: 120, height: 68)
                         .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MobileCornerRadius.small)
+                                .stroke(episode.id == currentEpisodeId ? Color.white : .clear, lineWidth: 2)
+                        )
 
                         VStack(alignment: .leading, spacing: 4) {
                             if !isYouTubeStyle, let epNum = episode.indexNumber {
@@ -973,9 +1121,9 @@ struct PhoneDetailView: View {
         case "H264", "AVC": return "H.264"
         case "AV1": return "AV1"
         case "AAC": return "AAC"
-        case "AC3": return "DD"
-        case "EAC3": return "DD+"
-        case "TRUEHD": return "TrueHD"
+        case "AC3": return "Dolby Digital"
+        case "EAC3": return "Dolby Digital+"
+        case "TRUEHD": return "Dolby TrueHD"
         case "DTS": return "DTS"
         case "FLAC": return "FLAC"
         default: return upper
