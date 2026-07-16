@@ -145,6 +145,12 @@ final class SessionManager: ObservableObject {
     }
 
     private func activate(_ server: ServerConfig, token: String) async {
+        // Mirror the active server into the legacy single-server keys:
+        // JellyfinClient's image-URL builders and several views still read
+        // them directly (scrubbing them in migration killed all artwork).
+        UserDefaults.standard.set(server.url.absoluteString, forKey: "serverURL")
+        UserDefaults.standard.set(server.userId, forKey: "userId")
+        UserDefaults.standard.set(server.username, forKey: "userName")
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
