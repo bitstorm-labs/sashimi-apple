@@ -238,15 +238,19 @@ final class SessionManager: ObservableObject {
     /// expiry keeps the entry so the user can re-authenticate; it just
     /// drops to signed-out state.
     func logout(reason: LogoutReason = .userInitiated) {
-        guard let active = activeServerId else { return }
-        if reason == .sessionExpired {
-            KeychainHelper.delete(forKey: tokenKey(active))
-            Task { await JellyfinClient.shared.clearCredentials() }
-            self.logoutReason = reason
-            self.isAuthenticated = false
-            return
+        if let active = activeServerId {
+            if reason == .sessionExpired {
+                // Keep the entry so the user can re-authenticate; just drop
+                // the dead token and session state.
+                KeychainHelper.delete(forKey: tokenKey(active))
+            } else {
+                Task { await removeServer(id: active) }
+            }
         }
-        Task { await removeServer(id: active) }
+        Task { await JellyfinClient.shared.clearCredentials() }
+        self.serverURL = nil
+        self.currentUser = nil
         self.logoutReason = reason
+        self.isAuthenticated = false
     }
 }
