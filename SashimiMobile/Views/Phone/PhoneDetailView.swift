@@ -244,15 +244,16 @@ struct PhoneDetailView: View {
         }
 
         if isSeries, !isYouTubeSeriesStyle, let logoURL = logoImageURL(for: item.id) {
-            LazyImage(url: logoURL) { state in
-                if let image = state.image {
-                    image.resizable().aspectRatio(contentMode: .fit)
-                } else if state.error != nil {
-                    seriesTitleText
+            HStack(spacing: 0) {
+                LazyImage(url: logoURL) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 70)
+                    } else if state.error != nil {
+                        seriesTitleText
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            .frame(maxHeight: 70)
-            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             seriesTitleText
         }
