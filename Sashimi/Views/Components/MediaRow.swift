@@ -43,7 +43,7 @@ struct MediaPosterButton: View {
     var libraryName: String?
     var isLandscape: Bool = false
     var isCircular: Bool = false  // For YouTube channel-style circular covers
-    var badgeCount: Int?  // Shows "X new" badge when > 1
+    var badgeCount: Int?  // Shows "X new" badge when >= 1
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
@@ -183,7 +183,7 @@ struct MediaPosterButton: View {
                         }
 
                         // "X new" badge for multiple episodes
-                        if let count = badgeCount, count > 1 {
+                        if let count = badgeCount, count >= 1 {
                             VStack {
                                 HStack {
                                     Spacer()
@@ -219,7 +219,7 @@ struct MediaPosterButton: View {
                 // Circular overlays (outside the clip shape)
                 .overlay(alignment: .topTrailing) {
                     if isCircular {
-                        if let count = badgeCount, count > 1 {
+                        if let count = badgeCount, count >= 1 {
                             Text("\(count) new")
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
