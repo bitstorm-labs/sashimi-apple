@@ -165,7 +165,15 @@ final class PlayerViewModel: ObservableObject {
         let method = session.playState?.playMethod
         let info = session.transcodingInfo
 
-        if method == "Transcode", let info {
+        if method == "Transcode", info == nil {
+            // Transcode session whose ffmpeg already finished (or hasn't
+            // registered yet): Jellyfin drops TranscodingInfo but PlayMethod
+            // stays "Transcode". Keep the last known chip if we have one —
+            // never fall through to "Direct Play" for a transcode session.
+            if streamInfo == nil {
+                streamInfo = StreamInfo(method: .transcode, detail: nil, reason: nil)
+            }
+        } else if method == "Transcode", let info {
             if info.isVideoDirect == true {
                 // Container remux / audio conversion — video untouched
                 streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
