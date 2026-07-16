@@ -87,10 +87,13 @@ struct MobileAuthView: View {
                 }
                 .disabled(username.isEmpty || isConnecting)
 
-                Button("Use Different Server") {
+                Button {
                     showLogin = false
                     serverURL = ""
                     normalizedServerURL = nil
+                } label: {
+                    Text("Use Different Server")
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
