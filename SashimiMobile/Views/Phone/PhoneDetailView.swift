@@ -39,6 +39,10 @@ struct PhoneDetailView: View {
 
     private var isSeries: Bool { item.type == .series }
     private var isEpisode: Bool { item.type == .episode }
+    /// The series whose seasons/episodes this page lists (self for a series,
+    /// the parent for an episode) — drives the shared episode machinery.
+    private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
+    private var isMovie: Bool { item.type == .movie }
     private var isMovie: Bool { item.type == .movie }
 
     private var isYouTubeStyle: Bool {
@@ -94,7 +98,7 @@ struct PhoneDetailView: View {
                     actionButtons
                     overviewSection
 
-                    if isSeries {
+                    if isSeries || isEpisode {
                         seasonsSection
                     }
 
@@ -230,7 +234,17 @@ struct PhoneDetailView: View {
     @ViewBuilder
     private var titleSection: some View {
         if isEpisode {
-            if let seriesName = item.seriesName {
+            if !isYouTubeChannelEpisode, let seriesId = item.seriesId, let logoURL = logoImageURL(for: seriesId) {
+                LazyImage(url: logoURL) { state in
+                    if let image = state.image {
+                        image.resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 56)
+                    } else if state.error != nil, let seriesName = item.seriesName {
+                        Text(seriesName)
+                            .font(MobileTypography.caption)
+                            .foregroundStyle(MobileColors.textSecondary)
+                    }
+                }
+            } else if let seriesName = item.seriesName {
                 Text(isYouTubeStyle ? seriesName.cleanedYouTubeTitle : seriesName)
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
@@ -311,8 +325,8 @@ struct PhoneDetailView: View {
             }
         }
 
-        // Genres line — movies only (series show rating in the meta line)
-        if !isSeries, let genres = item.genres, !genres.isEmpty {
+        // Genres line — movies only
+        if isMovie, let genres = item.genres, !genres.isEmpty {
             Text(genres.prefix(3).joined(separator: " \u{2022} "))
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textSecondary)
@@ -333,8 +347,8 @@ struct PhoneDetailView: View {
         if let runtime = item.runTimeTicks {
             parts.append(formatRuntime(runtime))
         }
-        // Series show rating as/near ratings row, not in the meta text line
-        if !isSeries, let rating = item.officialRating {
+        // Rating in the meta line for movies only (TV content omits it)
+        if isMovie, let rating = item.officialRating {
             parts.append(rating)
         }
         if let ends = endsAtText {
@@ -619,7 +633,7 @@ struct PhoneDetailView: View {
                             Button {
                                 selectedSeason = season
                                 Task {
-                                    await loadEpisodesForSeason(seriesId: item.id, season: season)
+                                    await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
                                 }
                             } label: {
                                 Text(season.name)
@@ -816,7 +830,9 @@ struct PhoneDetailView: View {
             seriesCommunityRating = series?.communityRating
             seriesCriticRating = series?.criticRating
 
+            seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesId)) ?? []
             if let seasonId = item.seasonId {
+                selectedSeason = seasons.first { $0.id == seasonId }
                 episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: seasonId)
             }
         } catch {
