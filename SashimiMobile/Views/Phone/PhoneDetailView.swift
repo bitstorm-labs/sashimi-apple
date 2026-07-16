@@ -243,12 +243,51 @@ struct PhoneDetailView: View {
             }
         }
 
+        if isSeries, !isYouTubeSeriesStyle, let logoURL = logoImageURL(for: item.id) {
+            LazyImage(url: logoURL) { state in
+                if let image = state.image {
+                    image.resizable().aspectRatio(contentMode: .fit)
+                } else if state.error != nil {
+                    seriesTitleText
+                }
+            }
+            .frame(maxHeight: 70)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            seriesTitleText
+        }
+    }
+
+    private var seriesTitleText: some View {
         Text(isYouTubeSeriesStyle ? item.name.cleanedYouTubeTitle : item.name)
             .font(.system(size: 22, weight: .bold))
             .foregroundStyle(MobileColors.textPrimary)
             .lineLimit(3)
             .frame(maxWidth: .infinity, alignment: isYouTubeSeriesStyle ? .center : .leading)
             .clipped()
+    }
+
+    private func logoImageURL(for itemId: String) -> URL? {
+        JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
+    }
+
+    /// Premiere date "November 8, 2024" (tvOS parity)
+    private var premiereDateLongText: String? {
+        guard let raw = item.premiereDate else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMMM d, yyyy"
+        return fmt.string(from: date)
+    }
+
+    /// "Ends at 9:41 PM"
+    private var endsAtText: String? {
+        guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
+        let end = Date().addingTimeInterval(Double(ticks) / 10_000_000)
+        let fmt = DateFormatter(); fmt.timeStyle = .short
+        return "Ends at \(fmt.string(from: end))"
     }
 
     // MARK: - Metadata Row
@@ -264,16 +303,16 @@ struct PhoneDetailView: View {
                 .lineLimit(1)
         }
 
-        // Ratings row
-        ratingsRow
-
-        // Media info badges (non-series)
-        if !isSeries {
-            mediaInfoBadges
+        // Ratings + media chips on a single line
+        HStack(spacing: MobileSpacing.sm) {
+            ratingsRow
+            if !isSeries {
+                mediaInfoBadges
+            }
         }
 
-        // Genres
-        if let genres = item.genres, !genres.isEmpty {
+        // Genres line — movies only (series show rating in the meta line)
+        if !isSeries, let genres = item.genres, !genres.isEmpty {
             Text(genres.prefix(3).joined(separator: " \u{2022} "))
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textSecondary)
@@ -283,7 +322,9 @@ struct PhoneDetailView: View {
 
     private var metadataParts: [String] {
         var parts: [String] = []
-        if let year = item.productionYear {
+        if let dateText = premiereDateLongText {
+            parts.append(dateText)
+        } else if let year = item.productionYear {
             parts.append(String(year))
         }
         if isSeries, !seasons.isEmpty {
@@ -294,6 +335,9 @@ struct PhoneDetailView: View {
         }
         if let rating = item.officialRating {
             parts.append(rating)
+        }
+        if let ends = endsAtText {
+            parts.append(ends)
         }
         return parts
     }
