@@ -4,17 +4,41 @@ struct MobileSettingsView: View {
     @ObservedObject private var sessionManager = SessionManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
     @State private var showingDeleteAllDownloads = false
+    @State private var showAddServer = false
 
     var body: some View {
         List {
-            // Server Section
-            Section("Server") {
-                if let serverURL = UserDefaults.standard.string(forKey: "serverURL") {
-                    LabeledContent("Server URL", value: serverURL)
+            // Servers (multi-server switcher; swipe to remove)
+            Section("Servers") {
+                ForEach(sessionManager.servers) { server in
+                    Button {
+                        Task { await sessionManager.switchServer(to: server.id) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name)
+                                    .foregroundStyle(.primary)
+                                Text("\(server.username) • \(server.url.absoluteString)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if server.id == sessionManager.activeServerId {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                }
+                .onDelete { offsets in
+                    let ids = offsets.map { sessionManager.servers[$0].id }
+                    Task { for id in ids { await sessionManager.removeServer(id: id) } }
                 }
 
-                if let username = sessionManager.currentUser?.name {
-                    LabeledContent("Logged in as", value: username)
+                Button {
+                    showAddServer = true
+                } label: {
+                    Label("Add Server", systemImage: "plus.circle.fill")
                 }
             }
 
@@ -69,6 +93,9 @@ struct MobileSettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showAddServer) {
+            MobileAddServerSheet()
+        }
         .navigationTitle("Settings")
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {
             Button("Delete All", role: .destructive) {
@@ -113,5 +140,30 @@ struct HomeRowOrderView: View {
         }
         .navigationTitle("Row Order")
         .environment(\.editMode, .constant(.active))
+    }
+}
+
+/// Auth flow presented for adding an additional server; dismisses once the
+/// server list grows.
+struct MobileAddServerSheet: View {
+    @ObservedObject private var sessionManager = SessionManager.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var initialCount = 0
+
+    var body: some View {
+        NavigationStack {
+            MobileAuthView()
+                .navigationTitle("Add Server")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+        }
+        .onAppear { initialCount = sessionManager.servers.count }
+        .onChange(of: sessionManager.servers.count) { _, newCount in
+            if newCount > initialCount { dismiss() }
+        }
     }
 }

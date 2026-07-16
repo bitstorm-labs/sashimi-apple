@@ -31,6 +31,14 @@ struct SettingsView: View {
                         // Settings content with constrained width
                         VStack(spacing: 24) {
                             SettingsOptionRow(
+                                icon: "server.rack",
+                                title: "Servers",
+                                subtitle: "Add or switch Jellyfin servers"
+                            ) {
+                                navigationPath.append(SettingsDestination.servers)
+                            }
+
+                            SettingsOptionRow(
                                 icon: "house",
                                 title: "Home Screen",
                                 subtitle: "Customize row order"
@@ -97,6 +105,8 @@ struct SettingsView: View {
             }
             .navigationDestination(for: SettingsDestination.self) { destination in
                 switch destination {
+                case .servers:
+                    ServersSettingsView()
                 case .homeScreen:
                     HomeScreenSettingsView()
                 case .playback:
@@ -133,6 +143,7 @@ struct SettingsView: View {
 }
 
 enum SettingsDestination: Hashable {
+    case servers
     case homeScreen
     case playback
     case parentalControls
@@ -1071,5 +1082,112 @@ struct AppIconButton: View {
             .animation(.spring(response: 0.3), value: isFocused)
         }
         .buttonStyle(.card)
+    }
+}
+
+// MARK: - Servers (multi-server management)
+
+struct ServersSettingsView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @State private var showAddServer = false
+    @State private var serverPendingRemoval: ServerConfig?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                Text("Servers")
+                    .font(.largeTitle.bold())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Select a server to switch. Hold to remove.")
+                    .font(.callout)
+                    .foregroundStyle(SashimiTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                ForEach(sessionManager.servers) { server in
+                    Button {
+                        Task { await sessionManager.switchServer(to: server.id) }
+                    } label: {
+                        HStack {
+                            Image(systemName: "server.rack")
+                                .foregroundStyle(SashimiTheme.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(server.name)
+                                    .foregroundStyle(SashimiTheme.textPrimary)
+                                Text("\(server.username) • \(server.url.absoluteString)")
+                                    .font(.caption)
+                                    .foregroundStyle(SashimiTheme.textTertiary)
+                            }
+                            Spacer()
+                            if server.id == sessionManager.activeServerId {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(SashimiTheme.accent)
+                            }
+                        }
+                        .padding()
+                        .background(SashimiTheme.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            serverPendingRemoval = server
+                        } label: {
+                            Label("Remove Server", systemImage: "trash")
+                        }
+                    }
+                }
+
+                Button {
+                    showAddServer = true
+                } label: {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Add Server")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                }
+            }
+            .frame(maxWidth: 900)
+            .padding(60)
+        }
+        .fullScreenCover(isPresented: $showAddServer) {
+            AddServerSheet()
+        }
+        .alert(
+            "Remove \(serverPendingRemoval?.name ?? "server")?",
+            isPresented: Binding(
+                get: { serverPendingRemoval != nil },
+                set: { if !$0 { serverPendingRemoval = nil } }
+            )
+        ) {
+            Button("Remove", role: .destructive) {
+                if let server = serverPendingRemoval {
+                    Task { await sessionManager.removeServer(id: server.id) }
+                }
+                serverPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { serverPendingRemoval = nil }
+        } message: {
+            Text("This signs out of the server on this device.")
+        }
+    }
+}
+
+/// ServerConnectionView presented modally for adding an additional server.
+/// Dismisses itself when the server list grows (login adds + activates).
+struct AddServerSheet: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var initialCount = 0
+
+    var body: some View {
+        ServerConnectionView()
+            .onAppear { initialCount = sessionManager.servers.count }
+            .onChange(of: sessionManager.servers.count) { _, newCount in
+                if newCount > initialCount { dismiss() }
+            }
+            .onExitCommand { dismiss() }
     }
 }
