@@ -35,6 +35,7 @@ struct MobilePlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
+    @State private var playbackSpeed: Float = 1.0
 
     private var localFileURL: URL? {
         DownloadManager.shared.localVideoURL(for: item.id)
@@ -47,6 +48,9 @@ struct MobilePlayerView: View {
             if let player = viewModel.player {
                 PlayerViewController(player: player)
                     .ignoresSafeArea()
+
+                // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
+                SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
                 customOverlay
             } else {
@@ -79,6 +83,9 @@ struct MobilePlayerView: View {
                     }
                 }
             }
+            // Populate the audio/subtitle menus (tvOS does this on player appear;
+            // without it both lists stay empty and subtitles can never be enabled)
+            viewModel.loadAllTracks()
             scheduleAutoHide()
         }
         .onDisappear {
@@ -227,6 +234,26 @@ struct MobilePlayerView: View {
                                 if viewModel.selectedAudioTrackId == track.id {
                                     Image(systemName: "checkmark")
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Speed") {
+                ForEach([Float(0.5), 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                    Button {
+                        playbackSpeed = speed
+                        // defaultRate keeps the speed across pause/play
+                        viewModel.player?.defaultRate = speed
+                        if viewModel.player?.rate != 0 {
+                            viewModel.player?.rate = speed
+                        }
+                    } label: {
+                        HStack {
+                            Text(speed == 1.0 ? "Normal" : String(format: "%g×", speed))
+                            if playbackSpeed == speed {
+                                Image(systemName: "checkmark")
                             }
                         }
                     }
