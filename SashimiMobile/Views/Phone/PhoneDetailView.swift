@@ -305,6 +305,17 @@ struct PhoneDetailView: View {
         return fmt.string(from: date)
     }
 
+    /// Episode air date "Nov 8, 2024" (short form for list rows)
+    private func shortAirDateText(_ episode: BaseItemDto) -> String? {
+        guard let raw = episode.premiereDate else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d, yyyy"
+        return fmt.string(from: date)
+    }
+
     /// "Ends at 9:41 PM"
     private var endsAtText: String? {
         guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
@@ -834,9 +845,15 @@ struct PhoneDetailView: View {
 
                         VStack(alignment: .leading, spacing: 4) {
                             if !isYouTubeStyle, let epNum = episode.indexNumber {
-                                Text("E\(epNum)")
-                                    .font(MobileTypography.captionSmall)
-                                    .foregroundStyle(MobileColors.accent)
+                                HStack(spacing: 4) {
+                                    Text("E\(epNum)")
+                                        .foregroundStyle(MobileColors.accent)
+                                    if let aired = shortAirDateText(episode) {
+                                        Text("• \(aired)")
+                                            .foregroundStyle(MobileColors.textTertiary)
+                                    }
+                                }
+                                .font(MobileTypography.captionSmall)
                             }
                             Text(episode.name)
                                 .font(MobileTypography.titleSmall)
