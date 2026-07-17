@@ -35,6 +35,7 @@ struct MobilePlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
+    @State private var playbackSpeed: Float = 1.0
 
     private var localFileURL: URL? {
         DownloadManager.shared.localVideoURL(for: item.id)
@@ -47,6 +48,9 @@ struct MobilePlayerView: View {
             if let player = viewModel.player {
                 PlayerViewController(player: player)
                     .ignoresSafeArea()
+
+                // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
+                SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
                 customOverlay
             } else {
@@ -79,6 +83,9 @@ struct MobilePlayerView: View {
                     }
                 }
             }
+            // Populate the audio/subtitle menus (tvOS does this on player appear;
+            // without it both lists stay empty and subtitles can never be enabled)
+            viewModel.loadAllTracks()
             scheduleAutoHide()
         }
         .onDisappear {
@@ -200,75 +207,7 @@ struct MobilePlayerView: View {
     // MARK: - Settings Menu
 
     private var settingsMenu: some View {
-        Menu {
-            Section("Quality") {
-                ForEach(QualityOption.allCases) { quality in
-                    Button {
-                        Task { await viewModel.changeQuality(quality) }
-                    } label: {
-                        HStack {
-                            Text(quality.displayName)
-                            if viewModel.selectedQuality == quality {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !viewModel.audioTracks.isEmpty {
-                Section("Audio") {
-                    ForEach(Array(viewModel.audioTracks.enumerated()), id: \.element.id) { _, track in
-                        Button {
-                            viewModel.selectAudioTrack(track)
-                        } label: {
-                            HStack {
-                                Text(track.displayName)
-                                if viewModel.selectedAudioTrackId == track.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Subtitles") {
-                Button {
-                    // Route through the ViewModel so the subtitle overlay is
-                    // actually cleared, not just the selection state.
-                    viewModel.disableSubtitles()
-                } label: {
-                    HStack {
-                        Text("Off")
-                        if viewModel.selectedSubtitleTrackId == nil || viewModel.selectedSubtitleTrackId == "off" {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-
-                // Skip the ViewModel's built-in "Off" option — this menu renders its own above
-                ForEach(viewModel.subtitleTracks.filter { !$0.isOffOption }) { subtitle in
-                    Button {
-                        viewModel.selectSubtitleTrack(subtitle)
-                    } label: {
-                        HStack {
-                            Text(subtitle.displayName)
-                            if viewModel.selectedSubtitleTrackId == subtitle.id {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.15))
-                .clipShape(Circle())
-        }
+        PlayerSettingsMenu(viewModel: viewModel, playbackSpeed: $playbackSpeed)
     }
 
     // MARK: - Skip Button
@@ -367,6 +306,105 @@ struct MobilePlayerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - Settings Menu (quality / audio / speed / subtitles)
+
+private struct PlayerSettingsMenu: View {
+    @ObservedObject var viewModel: PlayerViewModel
+    @Binding var playbackSpeed: Float
+
+    var body: some View {
+        Menu {
+            Section("Quality") {
+                ForEach(QualityOption.allCases) { quality in
+                    Button {
+                        Task { await viewModel.changeQuality(quality) }
+                    } label: {
+                        HStack {
+                            Text(quality.displayName)
+                            if viewModel.selectedQuality == quality {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !viewModel.audioTracks.isEmpty {
+                Section("Audio") {
+                    ForEach(Array(viewModel.audioTracks.enumerated()), id: \.element.id) { _, track in
+                        Button {
+                            viewModel.selectAudioTrack(track)
+                        } label: {
+                            HStack {
+                                Text(track.displayName)
+                                if viewModel.selectedAudioTrackId == track.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Speed") {
+                ForEach([Float(0.5), 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                    Button {
+                        playbackSpeed = speed
+                        // defaultRate keeps the speed across pause/play
+                        viewModel.player?.defaultRate = speed
+                        if viewModel.player?.rate != 0 {
+                            viewModel.player?.rate = speed
+                        }
+                    } label: {
+                        HStack {
+                            Text(speed == 1.0 ? "Normal" : String(format: "%g×", speed))
+                            if playbackSpeed == speed {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Subtitles") {
+                Button {
+                    // Route through the ViewModel so the subtitle overlay is
+                    // actually cleared, not just the selection state.
+                    viewModel.disableSubtitles()
+                } label: {
+                    HStack {
+                        Text("Off")
+                        if viewModel.selectedSubtitleTrackId == nil || viewModel.selectedSubtitleTrackId == "off" {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+
+                // Skip the ViewModel's built-in "Off" option — this menu renders its own above
+                ForEach(viewModel.subtitleTracks.filter { !$0.isOffOption }) { subtitle in
+                    Button {
+                        viewModel.selectSubtitleTrack(subtitle)
+                    } label: {
+                        HStack {
+                            Text(subtitle.displayName)
+                            if viewModel.selectedSubtitleTrackId == subtitle.id {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.15))
+                .clipShape(Circle())
+        }
     }
 }
 
