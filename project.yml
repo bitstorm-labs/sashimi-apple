@@ -2,7 +2,7 @@ name: Sashimi
 options:
   bundleIdPrefix: com.sashimi
   deploymentTarget:
-    tvOS: "17.0"
+    tvOS: "18.0"
     iOS: "17.0"
   xcodeVersion: "15.0"
   defaultConfig: Release
@@ -187,7 +187,7 @@ targets:
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
-        TVOS_DEPLOYMENT_TARGET: "17.0"
+        TVOS_DEPLOYMENT_TARGET: "18.0"
     entitlements:
       path: TopShelf/TopShelf.entitlements
       properties:

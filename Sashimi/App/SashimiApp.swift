@@ -133,31 +133,26 @@ struct MainTabView: View {
     @State private var selectedTab = 0
 
     var body: some View {
+        // Modern collapsible left-sidebar navigation (Apple TV app idiom).
+        // Icon rail at the left edge expands with labels on focus.
         TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-                .tag(0)
+            Tab("Home", systemImage: "house", value: 0) {
+                HomeView()
+            }
 
-            LibraryView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Library", systemImage: "square.grid.2x2")
-                }
-                .tag(1)
+            Tab("Library", systemImage: "square.grid.2x2", value: 1) {
+                LibraryView(onBackAtRoot: { selectedTab = 0 })
+            }
 
-            SearchView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(2)
+            Tab("Search", systemImage: "magnifyingglass", value: 2) {
+                SearchView(onBackAtRoot: { selectedTab = 0 })
+            }
 
-            SettingsView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(3)
+            Tab("Settings", systemImage: "gearshape", value: 3) {
+                SettingsView(onBackAtRoot: { selectedTab = 0 })
+            }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .onExitCommand(perform: exitCommandAction)
     }
 
