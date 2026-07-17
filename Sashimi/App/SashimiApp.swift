@@ -128,6 +128,17 @@ struct ContentView: View {
     }
 }
 
+/// Nav-item style with no default tvOS focus platter — focus is shown by the
+/// soft highlight we draw ourselves. Only a subtle press-scale remains.
+private struct SidebarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedTab = 0
@@ -183,20 +194,20 @@ struct MainTabView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 36) {
-            // Logo (mark only when collapsed, mark + wordmark when expanded)
-            HStack(spacing: 16) {
-                Image(systemName: "fish.fill")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(SashimiTheme.accent)
-                    .frame(width: 44)
+            // Wordmark appears only when the rail is pulled out; collapsed
+            // rail is just the nav icons (keeps a fixed top inset either way).
+            Group {
                 if expanded {
                     Image("Logo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 60)
                         .fixedSize()
+                } else {
+                    Color.clear.frame(height: 60)
                 }
             }
+            .frame(height: 60, alignment: .leading)
             .padding(.bottom, 12)
 
             ForEach(Self.navItems, id: \.index) { item in
@@ -212,17 +223,19 @@ struct MainTabView: View {
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .environment(\.colorScheme, .dark)
-                .opacity(expanded ? 1 : 0.9)
-                .ignoresSafeArea()
-        }
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 1)
-                .ignoresSafeArea()
+            // Match the Home screen's vertical gradient so the rail reads as
+            // part of the same surface, then fade the right edge into content.
+            LinearGradient(
+                colors: [SashimiTheme.background, Color.black],
+                startPoint: .top, endPoint: .bottom
+            )
+            .overlay(
+                LinearGradient(
+                    colors: [Color.black.opacity(expanded ? 0.35 : 0.0), Color.clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            )
+            .ignoresSafeArea()
         }
         .animation(.easeInOut(duration: 0.28), value: expanded)
         .focusSection()
@@ -243,10 +256,19 @@ struct MainTabView: View {
                 }
             }
             .foregroundStyle(navTint(index))
-            .padding(.vertical, 6)
+            .padding(.vertical, 12)
+            .padding(.horizontal, expanded ? 16 : 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(focusHighlight(focusedNav == index))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SidebarButtonStyle())
         .focused($focusedNav, equals: index)
+    }
+
+    /// Soft accent highlight in place of the tvOS default white focus platter.
+    private func focusHighlight(_ isFocused: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(isFocused ? 0.14 : 0))
     }
 
     private func navTint(_ index: Int) -> Color {
@@ -295,8 +317,12 @@ struct MainTabView: View {
                     .fixedSize()
                 }
             }
+            .padding(.vertical, 10)
+            .padding(.horizontal, expanded ? 12 : 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(focusHighlight(focusedNav == 99))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SidebarButtonStyle())
         .focused($focusedNav, equals: 99)
         .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
             ForEach(sessionManager.servers) { server in
