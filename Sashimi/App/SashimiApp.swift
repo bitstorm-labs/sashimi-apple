@@ -166,21 +166,13 @@ struct MainTabView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             // Content sits to the right of the slim rail and never moves —
-            // the expanded panel overlays it (blurred), Plex-style.
+            // the expanded panel overlays it. Kept bright/unblurred so the
+            // previewed section reads clearly as you roam the rail.
             content
                 .padding(.leading, railWidth)
-                .blur(radius: expanded ? 8 : 0)
-                .animation(.easeInOut(duration: 0.28), value: expanded)
                 // Content wins initial focus so the app opens with the rail
                 // resting (collapsed), not auto-expanded onto Home.
                 .prefersDefaultFocus(true, in: mainScope)
-
-            // Dim scrim over content while the panel is open
-            Color.black
-                .opacity(expanded ? 0.45 : 0)
-                .allowsHitTesting(false)
-                .ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.28), value: expanded)
 
             sidebar
         }
@@ -287,6 +279,9 @@ struct MainTabView: View {
         .padding(.trailing, expanded ? 28 : 38)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
+        // Dim the rail's contents when resting (not engaged); full on focus.
+        // Applied before .background so only the foreground fades, not the rail.
+        .opacity(expanded ? 1.0 : 0.68)
         .background {
             // Match the Home screen's vertical gradient so the rail reads as
             // part of the same surface, then fade the right edge into content.
@@ -345,9 +340,12 @@ struct MainTabView: View {
             .fill(Color.white.opacity(isFocused ? 0.14 : 0))
     }
 
+    /// Jellyfin purple, sampled from the logo — the selected-item highlight.
+    private static let jellyfinPurple = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
+
     private func navTint(_ id: NavID) -> Color {
         if focusedNav == id { return .white }
-        if selection == id { return SashimiTheme.accent }
+        if selection == id { return Self.jellyfinPurple }
         return .white.opacity(0.55)
     }
 
