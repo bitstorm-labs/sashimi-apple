@@ -200,7 +200,7 @@ struct MainTabView: View {
                 Image("SidebarLogoMark")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 44, height: 44)
+                    .frame(width: expanded ? 60 : 46, height: expanded ? 60 : 46)
                 if expanded {
                     Text("Sashimi")
                         .font(.system(size: 32, weight: .heavy, design: .rounded))
@@ -208,7 +208,8 @@ struct MainTabView: View {
                         .fixedSize()
                 }
             }
-            .frame(height: 52, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+            .frame(height: 60)
             .padding(.bottom, 16)
 
             ForEach(Self.navItems, id: \.index) { item in
@@ -259,7 +260,7 @@ struct MainTabView: View {
             .foregroundStyle(navTint(index))
             .padding(.vertical, 12)
             .padding(.horizontal, expanded ? 16 : 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
             .background(focusHighlight(focusedNav == index))
         }
         .buttonStyle(SidebarButtonStyle())
@@ -320,7 +321,7 @@ struct MainTabView: View {
             }
             .padding(.vertical, 10)
             .padding(.horizontal, expanded ? 12 : 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
             .background(focusHighlight(focusedNav == 99))
         }
         .buttonStyle(SidebarButtonStyle())
