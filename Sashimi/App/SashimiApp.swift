@@ -148,7 +148,7 @@ struct MainTabView: View {
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
 
-    private let railWidth: CGFloat = 100
+    private let railWidth: CGFloat = 72
     private let panelWidth: CGFloat = 360
 
     private var expanded: Bool { focusedNav != nil }
@@ -201,14 +201,14 @@ struct MainTabView: View {
                     Image("Logo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 60)
+                        .frame(height: 120)
                         .fixedSize()
                 } else {
-                    Color.clear.frame(height: 60)
+                    Color.clear.frame(height: 120)
                 }
             }
-            .frame(height: 60, alignment: .leading)
-            .padding(.bottom, 12)
+            .frame(height: 120, alignment: .leading)
+            .padding(.bottom, 4)
 
             ForEach(Self.navItems, id: \.index) { item in
                 navButton(item.index, item.title, item.icon)
@@ -218,8 +218,8 @@ struct MainTabView: View {
 
             avatarButton
         }
-        .padding(.vertical, 70)
-        .padding(.horizontal, 28)
+        .padding(.vertical, 60)
+        .padding(.horizontal, 14)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background {
@@ -257,7 +257,7 @@ struct MainTabView: View {
             }
             .foregroundStyle(navTint(index))
             .padding(.vertical, 12)
-            .padding(.horizontal, expanded ? 16 : 8)
+            .padding(.horizontal, expanded ? 16 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(focusHighlight(focusedNav == index))
         }
@@ -318,7 +318,7 @@ struct MainTabView: View {
                 }
             }
             .padding(.vertical, 10)
-            .padding(.horizontal, expanded ? 12 : 4)
+            .padding(.horizontal, expanded ? 12 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(focusHighlight(focusedNav == 99))
         }
