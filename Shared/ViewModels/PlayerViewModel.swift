@@ -78,6 +78,8 @@ final class PlayerViewModel: ObservableObject {
     @Published var subtitleManager = SubtitleManager()
     @Published var playbackEnded = false
     @Published var nextEpisode: BaseItemDto?
+    /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
+    private var isHandlingEnd = false
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
     @Published var videoResolution: String?
@@ -233,6 +235,7 @@ final class PlayerViewModel: ObservableObject {
         subtitleManager.clear()
         selectedSubtitleTrackId = "off"
         invalidatePlayerObservers()
+        isHandlingEnd = false
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
@@ -359,6 +362,11 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func handlePlaybackEnded() async {
+        // Guard against firing twice (e.g. a skip-to-end and the natural end
+        // notification for the same item). Reset when the next item loads.
+        if isHandlingEnd { return }
+        isHandlingEnd = true
+
         progressReportTask?.cancel()
 
         if let item = currentItem, !isOfflinePlayback {
@@ -389,7 +397,11 @@ final class PlayerViewModel: ObservableObject {
                 return next
             }
             // Fall back to next higher index for YouTube (date-based indexes like 20241108)
-            return await fetchNextByIndex(parentId: seasonId, currentIndex: currentIndex, type: .episode, exactMatch: false)
+            if let next = await fetchNextByIndex(parentId: seasonId, currentIndex: currentIndex, type: .episode, exactMatch: false) {
+                return next
+            }
+            // Season finale: roll over to the first episode of the next season.
+            return await fetchFirstEpisodeOfNextSeason(for: item)
         }
 
         // Handle videos (explicit Video type)
@@ -400,6 +412,34 @@ final class PlayerViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    /// After a season finale, find the first episode of the next season so
+    /// auto-play rolls over across seasons (matches other Jellyfin clients).
+    private func fetchFirstEpisodeOfNextSeason(for item: BaseItemDto) async -> BaseItemDto? {
+        guard let seriesId = item.seriesId,
+              let currentSeason = item.parentIndexNumber else { return nil }
+        do {
+            let seasons = try await client.getItems(
+                parentId: seriesId,
+                includeTypes: [.season],
+                sortBy: "IndexNumber",
+                limit: 100
+            )
+            guard let nextSeason = seasons.items.first(where: { ($0.indexNumber ?? 0) == currentSeason + 1 }) else {
+                return nil
+            }
+            let episodes = try await client.getItems(
+                parentId: nextSeason.id,
+                includeTypes: [.episode],
+                sortBy: "IndexNumber",
+                limit: 100
+            )
+            // First real episode (index >= 1 skips "specials"/index 0)
+            return episodes.items.first { ($0.indexNumber ?? 0) >= 1 } ?? episodes.items.first
+        } catch {
+            return nil
+        }
     }
 
     private func fetchNextByIndex(parentId: String, currentIndex: Int, type: ItemType, exactMatch: Bool = true) async -> BaseItemDto? {
@@ -944,10 +984,21 @@ final class PlayerViewModel: ObservableObject {
 
     func skipCurrentSegment() {
         guard let segment = currentSegment, let player else { return }
-        let targetTime = CMTime(seconds: segment.endSeconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        player.seek(to: targetTime)
         showingSkipButton = false
         currentSegment = nil
+
+        // If this skip lands at (or within ~2s of) the end — typical for a
+        // credits/outro segment — run the end-of-playback flow directly.
+        // Seeking to the exact end does NOT post AVPlayerItemDidPlayToEndTime,
+        // so auto-play-next would otherwise never fire (issue #241).
+        let duration = player.currentItem?.duration.seconds ?? 0
+        if duration.isFinite, duration > 0, segment.endSeconds >= duration - 2.0 {
+            Task { await handlePlaybackEnded() }
+            return
+        }
+
+        let targetTime = CMTime(seconds: segment.endSeconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        player.seek(to: targetTime)
     }
 
     private func cleanupSegmentTracking() {
