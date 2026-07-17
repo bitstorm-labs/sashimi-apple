@@ -149,8 +149,10 @@ struct MainTabView: View {
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
 
-    private let railWidth: CGFloat = 56
-    private let panelWidth: CGFloat = 300
+    // Rail is inset from the screen edge so the icons aren't jammed against
+    // the bezel (they read as centered in a strip, Plex-style).
+    private let railWidth: CGFloat = 120
+    private let panelWidth: CGFloat = 320
 
     private var expanded: Bool { focusedNav != nil }
 
@@ -215,10 +217,15 @@ struct MainTabView: View {
             }
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
             .frame(height: 60)
-            .padding(.bottom, 16)
 
-            ForEach(Self.navItems, id: \.index) { item in
-                navButton(item.index, item.title, item.icon)
+            // Balanced spacers put the logo at the top, avatar at the foot,
+            // and the nav group vertically centered between them.
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 36) {
+                ForEach(Self.navItems, id: \.index) { item in
+                    navButton(item.index, item.title, item.icon)
+                }
             }
 
             Spacer()
@@ -226,7 +233,10 @@ struct MainTabView: View {
             avatarButton
         }
         .padding(.vertical, 60)
-        .padding(.horizontal, expanded ? 28 : 6)
+        // Collapsed: icon (44) centered in the 120-wide rail -> 38pt margin
+        // each side, so icons sit inset from the edge, not glued to it.
+        .padding(.leading, expanded ? 36 : 38)
+        .padding(.trailing, expanded ? 28 : 38)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background {
