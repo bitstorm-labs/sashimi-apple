@@ -39,9 +39,9 @@ struct HomeView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 40) {
-                        // Header with logo and profile avatar
-                        AppHeader()
-                            .padding(.bottom, -80)
+                        // Clear the tab bar row (logo/avatar live there now)
+                        Spacer()
+                            .frame(height: 90)
 
                         // Render rows based on settings order
                         ForEach(homeSettings.rowConfigs) { config in

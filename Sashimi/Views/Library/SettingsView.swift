@@ -559,7 +559,7 @@ struct HomeRowToggleButton: View {
     }
 }
 
-// MARK: - Settings Container (styled background with AppHeader and width constraint)
+// MARK: - Settings Container (styled background and width constraint)
 
 struct SettingsContainer<Content: View>: View {
     let content: Content

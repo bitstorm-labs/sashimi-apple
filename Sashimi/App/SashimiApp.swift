@@ -133,6 +133,16 @@ struct MainTabView: View {
     @State private var selectedTab = 0
 
     var body: some View {
+        ZStack(alignment: .top) {
+            mainTabs
+            // Logo + avatar share the tab bar row (issue #235): one focus
+            // strip instead of the old header-above-the-bar hop.
+            TabBarAccessories()
+        }
+        .onExitCommand(perform: exitCommandAction)
+    }
+
+    private var mainTabs: some View {
         TabView(selection: $selectedTab) {
             HomeView()
                 .tabItem {
@@ -158,7 +168,6 @@ struct MainTabView: View {
                 }
                 .tag(3)
         }
-        .onExitCommand(perform: exitCommandAction)
     }
 
     /// Menu/back button handling. Returns nil on the Home tab so the press
