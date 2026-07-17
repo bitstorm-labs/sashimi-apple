@@ -99,9 +99,12 @@ platform :tvos do
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
       skip_waiting_for_build_processing: true,
+      # Only this build's changes (commits since the previous beta tag),
+      # merge commits excluded — keeps TestFlight notes short.
       changelog: changelog_from_git_commits(
-        commits_count: 10,
-        pretty: "- %s"
+        tag_match_pattern: "v*-beta.*",
+        pretty: "- %s",
+        merge_commit_filtering: "exclude_merges"
       )
     )
 
@@ -220,7 +223,11 @@ platform :ios do
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
       skip_waiting_for_build_processing: true,
-      changelog: changelog_from_git_commits(commits_count: 10, pretty: "- %s")
+      changelog: changelog_from_git_commits(
+        tag_match_pattern: "v*-beta.*",
+        pretty: "- %s",
+        merge_commit_filtering: "exclude_merges"
+      )
     )
   end
 end
