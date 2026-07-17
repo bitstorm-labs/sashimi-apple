@@ -128,50 +128,312 @@ struct ContentView: View {
     }
 }
 
+/// Nav-item style with no default tvOS focus platter — focus is shown by the
+/// soft highlight we draw ourselves. Only a subtle press-scale remains.
+private struct SidebarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
-    @State private var selectedTab = 0
 
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-                .tag(0)
-
-            LibraryView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Library", systemImage: "square.grid.2x2")
-                }
-                .tag(1)
-
-            SearchView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(2)
-
-            SettingsView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(3)
-        }
-        .onExitCommand(perform: exitCommandAction)
+    /// A destination in the rail. Libraries are dynamic, so this is an enum
+    /// rather than a tab index.
+    enum NavID: Hashable {
+        case home, search, settings, avatar
+        case library(String)
     }
 
-    /// Menu/back button handling. Returns nil on the Home tab so the press
-    /// is left unhandled and propagates to the system, which suspends the
-    /// app and returns to the tvOS home screen. The previous two-press flow
-    /// called exit(0), which Apple prohibits (programmatic termination) —
-    /// see issue #174.
-    private var exitCommandAction: (() -> Void)? {
-        if selectedTab != 0 {
-            // Other tabs: go to Home
-            return { selectedTab = 0 }
+    // Which nav item currently holds focus; nil means focus is in content
+    // (so the rail rests collapsed). Drives the pullout expansion.
+    @FocusState private var focusedNav: NavID?
+    @Namespace private var mainScope
+    @State private var selection: NavID = .home
+    @State private var libraries: [JellyfinLibrary] = []
+    @State private var showServerSwitcher = false
+    @State private var showAddServer = false
+
+    private let railWidth: CGFloat = 120
+    private let panelWidth: CGFloat = 340
+
+    private var expanded: Bool { focusedNav != nil }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Content sits to the right of the slim rail and never moves —
+            // the expanded panel overlays it. Kept bright/unblurred so the
+            // previewed section reads clearly as you roam the rail.
+            content
+                .padding(.leading, railWidth)
+                // Content wins initial focus so the app opens with the rail
+                // resting (collapsed), not auto-expanded onto Home.
+                .prefersDefaultFocus(true, in: mainScope)
+
+            sidebar
         }
-        // Home tab: let the system handle Menu (leave the app)
+        .ignoresSafeArea()
+        .focusScope(mainScope)
+        .onExitCommand(perform: exitCommandAction)
+        .task { await loadLibraries() }
+        // Focus-driven: moving focus onto a nav item switches the content
+        // behind the blur immediately — no click needed (Plex behavior).
+        .onChange(of: focusedNav) { _, newValue in
+            if let newValue, newValue != .avatar {
+                selection = newValue
+            }
+        }
+    }
+
+    private func loadLibraries() async {
+        if let libs = try? await JellyfinClient.shared.getLibraryViews() {
+            libraries = libs
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selection {
+        case .home, .avatar:
+            HomeView()
+        case .search:
+            SearchView(onBackAtRoot: { selection = .home })
+        case .settings:
+            SettingsView(onBackAtRoot: { selection = .home })
+        case .library(let id):
+            if let lib = libraries.first(where: { $0.id == id }) {
+                LibraryDetailView(library: LibraryView_Model(from: lib))
+                    .id(id)  // rebuild the grid when switching libraries
+            } else {
+                HomeView()
+            }
+        }
+    }
+
+    private struct NavRow: Identifiable {
+        let id: NavID
+        let title: String
+        let icon: String
+    }
+
+    /// Nav rows in order: Home, each library, Search, Settings.
+    private var navRows: [NavRow] {
+        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
+        for lib in libraries {
+            rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
+        }
+        rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
+        rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
+        return rows
+    }
+
+    private func libraryIcon(_ lib: JellyfinLibrary) -> String {
+        if lib.name.lowercased().contains("youtube") { return "play.rectangle.fill" }
+        switch lib.collectionType {
+        case "movies": return "film.stack"
+        case "tvshows": return "tv"
+        case "music": return "music.note"
+        case "musicvideos": return "music.note.tv"
+        case "books": return "books.vertical"
+        case "photos", "homevideos": return "photo.stack"
+        case "playlists": return "list.and.film"
+        case "boxsets": return "square.stack.3d.up.fill"
+        case "livetv": return "dot.radiowaves.left.and.right"
+        default: return "rectangle.stack"
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            // Sushi mark is always visible; the "Sashimi" wordmark unfolds
+            // beside it only when the rail is pulled out.
+            HStack(spacing: 14) {
+                Image("SidebarLogoMark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: expanded ? 60 : 46, height: expanded ? 60 : 46)
+                if expanded {
+                    Text("Sashimi")
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .fixedSize()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+            .frame(height: 60)
+
+            // Balanced spacers put the logo at the top, avatar at the foot,
+            // and the nav group vertically centered between them.
+            Spacer(minLength: 16)
+
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(navRows, id: \.id) { row in
+                    navButton(row.id, row.title, row.icon)
+                }
+            }
+
+            Spacer(minLength: 16)
+
+            avatarButton
+
+            // App version under the avatar (centered when collapsed)
+            Text(appVersion)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+                .padding(.top, 4)
+        }
+        .padding(.vertical, 50)
+        .padding(.leading, expanded ? 36 : 38)
+        .padding(.trailing, expanded ? 28 : 38)
+        .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        // Dim the rail's contents when resting (not engaged); full on focus.
+        // Applied before .background so only the foreground fades, not the rail.
+        .opacity(expanded ? 1.0 : 0.68)
+        .background {
+            // Match the Home screen's vertical gradient so the rail reads as
+            // part of the same surface, then fade the right edge into content.
+            LinearGradient(
+                colors: [SashimiTheme.background, Color.black],
+                startPoint: .top, endPoint: .bottom
+            )
+            .overlay(
+                LinearGradient(
+                    colors: [Color.black.opacity(expanded ? 0.35 : 0.0), Color.clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            )
+            .ignoresSafeArea()
+        }
+        // Hairline right edge so the rail reads as a defined strip (makes the
+        // icon centering legible even when the content behind is dark).
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 1)
+                .ignoresSafeArea()
+        }
+        .animation(.easeInOut(duration: 0.28), value: expanded)
+        .focusSection()
+    }
+
+    private func navButton(_ id: NavID, _ title: String, _ icon: String) -> some View {
+        Button {
+            selection = id
+        } label: {
+            HStack(spacing: 20) {
+                Image(systemName: icon)
+                    .font(.system(size: 28, weight: .semibold))
+                    .frame(width: 44)
+                if expanded {
+                    Text(title)
+                        .font(.system(size: 25, weight: .semibold))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .foregroundStyle(navTint(id))
+            .padding(.vertical, 11)
+            .padding(.horizontal, expanded ? 16 : 0)
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+            .background(focusHighlight(focusedNav == id))
+        }
+        .buttonStyle(SidebarButtonStyle())
+        .focused($focusedNav, equals: id)
+    }
+
+    /// Soft accent highlight in place of the tvOS default white focus platter.
+    private func focusHighlight(_ isFocused: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(isFocused ? 0.14 : 0))
+    }
+
+    /// Jellyfin purple, sampled from the logo — the selected-item highlight.
+    private static let jellyfinPurple = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
+
+    private var appVersion: String {
+        "v" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "")
+    }
+
+    private func navTint(_ id: NavID) -> Color {
+        if focusedNav == id { return .white }
+        if selection == id { return Self.jellyfinPurple }
+        return .white.opacity(0.55)
+    }
+
+    private var avatarButton: some View {
+        Button {
+            showServerSwitcher = true
+        } label: {
+            HStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.6)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 52, height: 52)
+                    if let userId = sessionManager.currentUser?.id,
+                       let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
+                        AsyncImage(url: imageURL) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "person.fill").foregroundStyle(.white)
+                        }
+                        .frame(width: 52, height: 52)
+                        .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.fill").foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 44)
+                if expanded {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(sessionManager.currentUser?.name ?? "Account")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("Switch server")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .fixedSize()
+                }
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, expanded ? 12 : 0)
+            .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+            .background(focusHighlight(focusedNav == .avatar))
+        }
+        .buttonStyle(SidebarButtonStyle())
+        .focused($focusedNav, equals: .avatar)
+        .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
+            ForEach(sessionManager.servers) { server in
+                Button(server.id == sessionManager.activeServerId ? "✓ \(server.name)" : server.name) {
+                    Task { await sessionManager.switchServer(to: server.id) }
+                }
+            }
+            Button("Add Server…") { showAddServer = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showAddServer) {
+            AddServerSheet()
+        }
+    }
+
+    /// Menu/back button handling. Returns nil on Home so the press propagates
+    /// to the system (suspends the app). The previous exit(0) flow is Apple-
+    /// prohibited — see issue #174.
+    private var exitCommandAction: (() -> Void)? {
+        if selection != .home {
+            return { selection = .home }
+        }
         return nil
     }
 }
