@@ -148,7 +148,7 @@ struct MainTabView: View {
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
 
-    private let railWidth: CGFloat = 72
+    private let railWidth: CGFloat = 56
     private let panelWidth: CGFloat = 360
 
     private var expanded: Bool { focusedNav != nil }
@@ -194,21 +194,22 @@ struct MainTabView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 36) {
-            // Wordmark appears only when the rail is pulled out; collapsed
-            // rail is just the nav icons (keeps a fixed top inset either way).
-            Group {
+            // Sushi mark is always visible; the "Sashimi" wordmark unfolds
+            // beside it only when the rail is pulled out.
+            HStack(spacing: 14) {
+                Image("SidebarLogoMark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 44, height: 44)
                 if expanded {
-                    Image("Logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 120)
+                    Text("Sashimi")
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
                         .fixedSize()
-                } else {
-                    Color.clear.frame(height: 120)
                 }
             }
-            .frame(height: 120, alignment: .leading)
-            .padding(.bottom, 4)
+            .frame(height: 52, alignment: .leading)
+            .padding(.bottom, 16)
 
             ForEach(Self.navItems, id: \.index) { item in
                 navButton(item.index, item.title, item.icon)
@@ -219,7 +220,7 @@ struct MainTabView: View {
             avatarButton
         }
         .padding(.vertical, 60)
-        .padding(.horizontal, 14)
+        .padding(.horizontal, expanded ? 28 : 6)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background {
