@@ -141,27 +141,27 @@ private struct SidebarButtonStyle: ButtonStyle {
 
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
-    @State private var selectedTab = 0
+
+    /// A destination in the rail. Libraries are dynamic, so this is an enum
+    /// rather than a tab index.
+    enum NavID: Hashable {
+        case home, search, settings, avatar
+        case library(String)
+    }
+
     // Which nav item currently holds focus; nil means focus is in content
     // (so the rail rests collapsed). Drives the pullout expansion.
-    @FocusState private var focusedNav: Int?
+    @FocusState private var focusedNav: NavID?
     @Namespace private var mainScope
+    @State private var selection: NavID = .home
+    @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
 
-    // Rail is inset from the screen edge so the icons aren't jammed against
-    // the bezel (they read as centered in a strip, Plex-style).
     private let railWidth: CGFloat = 120
-    private let panelWidth: CGFloat = 320
+    private let panelWidth: CGFloat = 340
 
     private var expanded: Bool { focusedNav != nil }
-
-    private static let navItems: [(index: Int, title: String, icon: String)] = [
-        (0, "Home", "house"),
-        (1, "Library", "square.grid.2x2"),
-        (2, "Search", "magnifyingglass"),
-        (3, "Settings", "gearshape")
-    ]
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -187,20 +187,70 @@ struct MainTabView: View {
         .ignoresSafeArea()
         .focusScope(mainScope)
         .onExitCommand(perform: exitCommandAction)
+        .task { await loadLibraries() }
+        // Focus-driven: moving focus onto a nav item switches the content
+        // behind the blur immediately — no click needed (Plex behavior).
+        .onChange(of: focusedNav) { _, newValue in
+            if let newValue, newValue != .avatar {
+                selection = newValue
+            }
+        }
+    }
+
+    private func loadLibraries() async {
+        if let libs = try? await JellyfinClient.shared.getLibraryViews() {
+            libraries = libs
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch selectedTab {
-        case 1: LibraryView(onBackAtRoot: { selectedTab = 0 })
-        case 2: SearchView(onBackAtRoot: { selectedTab = 0 })
-        case 3: SettingsView(onBackAtRoot: { selectedTab = 0 })
-        default: HomeView()
+        switch selection {
+        case .home, .avatar:
+            HomeView()
+        case .search:
+            SearchView(onBackAtRoot: { selection = .home })
+        case .settings:
+            SettingsView(onBackAtRoot: { selection = .home })
+        case .library(let id):
+            if let lib = libraries.first(where: { $0.id == id }) {
+                LibraryDetailView(library: LibraryView_Model(from: lib))
+                    .id(id)  // rebuild the grid when switching libraries
+            } else {
+                HomeView()
+            }
+        }
+    }
+
+    /// Nav rows in order: Home, each library, Search, Settings.
+    private var navRows: [(id: NavID, title: String, icon: String)] {
+        var rows: [(NavID, String, String)] = [(.home, "Home", "house")]
+        for lib in libraries {
+            rows.append((.library(lib.id), lib.name, libraryIcon(lib)))
+        }
+        rows.append((.search, "Search", "magnifyingglass"))
+        rows.append((.settings, "Settings", "gearshape"))
+        return rows.map { (id: $0.0, title: $0.1, icon: $0.2) }
+    }
+
+    private func libraryIcon(_ lib: JellyfinLibrary) -> String {
+        if lib.name.lowercased().contains("youtube") { return "play.rectangle.fill" }
+        switch lib.collectionType {
+        case "movies": return "film.stack"
+        case "tvshows": return "tv"
+        case "music": return "music.note"
+        case "musicvideos": return "music.note.tv"
+        case "books": return "books.vertical"
+        case "photos", "homevideos": return "photo.stack"
+        case "playlists": return "list.and.film"
+        case "boxsets": return "square.stack.3d.up.fill"
+        case "livetv": return "dot.radiowaves.left.and.right"
+        default: return "rectangle.stack"
         }
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 36) {
+        VStack(alignment: .leading, spacing: 30) {
             // Sushi mark is always visible; the "Sashimi" wordmark unfolds
             // beside it only when the rail is pulled out.
             HStack(spacing: 14) {
@@ -220,21 +270,19 @@ struct MainTabView: View {
 
             // Balanced spacers put the logo at the top, avatar at the foot,
             // and the nav group vertically centered between them.
-            Spacer()
+            Spacer(minLength: 16)
 
-            VStack(alignment: .leading, spacing: 36) {
-                ForEach(Self.navItems, id: \.index) { item in
-                    navButton(item.index, item.title, item.icon)
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(navRows, id: \.id) { row in
+                    navButton(row.id, row.title, row.icon)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 16)
 
             avatarButton
         }
-        .padding(.vertical, 60)
-        // Collapsed: icon (44) centered in the 120-wide rail -> 38pt margin
-        // each side, so icons sit inset from the edge, not glued to it.
+        .padding(.vertical, 50)
         .padding(.leading, expanded ? 36 : 38)
         .padding(.trailing, expanded ? 28 : 38)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
@@ -254,32 +302,41 @@ struct MainTabView: View {
             )
             .ignoresSafeArea()
         }
+        // Hairline right edge so the rail reads as a defined strip (makes the
+        // icon centering legible even when the content behind is dark).
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 1)
+                .ignoresSafeArea()
+        }
         .animation(.easeInOut(duration: 0.28), value: expanded)
         .focusSection()
     }
 
-    private func navButton(_ index: Int, _ title: String, _ icon: String) -> some View {
+    private func navButton(_ id: NavID, _ title: String, _ icon: String) -> some View {
         Button {
-            selectedTab = index
+            selection = id
         } label: {
             HStack(spacing: 20) {
                 Image(systemName: icon)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 28, weight: .semibold))
                     .frame(width: 44)
                 if expanded {
                     Text(title)
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(.system(size: 25, weight: .semibold))
+                        .lineLimit(1)
                         .fixedSize()
                 }
             }
-            .foregroundStyle(navTint(index))
-            .padding(.vertical, 12)
+            .foregroundStyle(navTint(id))
+            .padding(.vertical, 11)
             .padding(.horizontal, expanded ? 16 : 0)
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .background(focusHighlight(focusedNav == index))
+            .background(focusHighlight(focusedNav == id))
         }
         .buttonStyle(SidebarButtonStyle())
-        .focused($focusedNav, equals: index)
+        .focused($focusedNav, equals: id)
     }
 
     /// Soft accent highlight in place of the tvOS default white focus platter.
@@ -288,9 +345,9 @@ struct MainTabView: View {
             .fill(Color.white.opacity(isFocused ? 0.14 : 0))
     }
 
-    private func navTint(_ index: Int) -> Color {
-        if focusedNav == index { return .white }
-        if selectedTab == index { return SashimiTheme.accent }
+    private func navTint(_ id: NavID) -> Color {
+        if focusedNav == id { return .white }
+        if selection == id { return SashimiTheme.accent }
         return .white.opacity(0.55)
     }
 
@@ -337,10 +394,10 @@ struct MainTabView: View {
             .padding(.vertical, 10)
             .padding(.horizontal, expanded ? 12 : 0)
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .background(focusHighlight(focusedNav == 99))
+            .background(focusHighlight(focusedNav == .avatar))
         }
         .buttonStyle(SidebarButtonStyle())
-        .focused($focusedNav, equals: 99)
+        .focused($focusedNav, equals: .avatar)
         .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
             ForEach(sessionManager.servers) { server in
                 Button(server.id == sessionManager.activeServerId ? "✓ \(server.name)" : server.name) {
@@ -355,17 +412,13 @@ struct MainTabView: View {
         }
     }
 
-    /// Menu/back button handling. Returns nil on the Home tab so the press
-    /// is left unhandled and propagates to the system, which suspends the
-    /// app and returns to the tvOS home screen. The previous two-press flow
-    /// called exit(0), which Apple prohibits (programmatic termination) —
-    /// see issue #174.
+    /// Menu/back button handling. Returns nil on Home so the press propagates
+    /// to the system (suspends the app). The previous exit(0) flow is Apple-
+    /// prohibited — see issue #174.
     private var exitCommandAction: (() -> Void)? {
-        if selectedTab != 0 {
-            // Other tabs: go to Home
-            return { selectedTab = 0 }
+        if selection != .home {
+            return { selection = .home }
         }
-        // Home tab: let the system handle Menu (leave the app)
         return nil
     }
 }
