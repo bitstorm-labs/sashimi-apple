@@ -925,7 +925,7 @@ actor JellyfinClient {
 
         var queryItems = [
             URLQueryItem(name: "UserId", value: userId),
-            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,ImageTags"),
+            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,ImageTags,PremiereDate"),
             URLQueryItem(name: "EnableImageTypes", value: "Primary,Thumb")
         ]
 
