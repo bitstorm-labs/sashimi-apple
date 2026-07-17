@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Shared header component with logo and avatar display
-/// Used across all main tabs (Home, Library, Search, Settings)
+/// Shared header with the logo and avatar. Purely decorative: the avatar is
+/// an identity anchor, not a button — server switching lives in
+/// Settings > Servers. Keeping the header out of the focus chain means
+/// swiping up from content lands directly on the tab bar (issue #235).
 struct AppHeader: View {
     @EnvironmentObject private var sessionManager: SessionManager
-    @State private var showServerSwitcher = false
-    @State private var showAddServer = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -18,10 +18,7 @@ struct AppHeader: View {
 
             Spacer()
 
-            // User avatar — click for the server quick-switcher
-            Button {
-                showServerSwitcher = true
-            } label: {
+            // User avatar (display only)
             ZStack {
                 Circle()
                     .fill(
@@ -53,29 +50,11 @@ struct AppHeader: View {
                 }
             }
             .shadow(color: SashimiTheme.accent.opacity(0.3), radius: 8)
-            }
-            .buttonStyle(.plain)
             .padding(.trailing, 30)
             .padding(.top, 22)
-            .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
-                ForEach(sessionManager.servers) { server in
-                    Button(server.id == sessionManager.activeServerId ? "✓ \(server.name)" : server.name) {
-                        Task { await sessionManager.switchServer(to: server.id) }
-                    }
-                }
-                Button("Add Server…") { showAddServer = true }
-                Button("Cancel", role: .cancel) {}
-            }
-            .fullScreenCover(isPresented: $showAddServer) {
-                AddServerSheet()
-            }
         }
         .frame(maxWidth: .infinity)
         .ignoresSafeArea(edges: .horizontal)
-        // The hero overlaps the header (negative padding below it in
-        // HomeView), which blocked focus from ever reaching the avatar
-        // button. Keep the header its own focus section, above the hero.
-        .focusSection()
         .zIndex(1)
     }
 }
