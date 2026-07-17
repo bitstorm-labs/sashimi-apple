@@ -253,15 +253,11 @@ struct PhoneDetailView: View {
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
             }
-
-            if !isYouTubeChannelEpisode, let season = item.parentIndexNumber, let episode = item.indexNumber {
-                Text("S\(season):E\(episode)")
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.accent)
-            }
         }
 
-        if isSeries, !isYouTubeSeriesStyle, let logoURL = logoImageURL(for: item.id) {
+        if isEpisode {
+            episodeTitleText
+        } else if isSeries, !isYouTubeSeriesStyle, let logoURL = logoImageURL(for: item.id) {
             LazyImage(url: logoURL) { state in
                 if let image = state.image {
                     image.resizable().aspectRatio(contentMode: .fit)
@@ -274,6 +270,23 @@ struct PhoneDetailView: View {
         } else {
             seriesTitleText
         }
+    }
+
+    /// tvOS parity: "S1:E2 • Episode Name" inline at title size.
+    private var episodeTitleText: some View {
+        HStack(spacing: 8) {
+            if !isYouTubeChannelEpisode, let season = item.parentIndexNumber, let episode = item.indexNumber {
+                Text("S\(season):E\(episode)")
+                    .foregroundStyle(MobileColors.textPrimary)
+                Text("•")
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+            Text(item.name)
+                .foregroundStyle(MobileColors.textPrimary)
+                .lineLimit(3)
+        }
+        .font(.system(size: 22, weight: .bold))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var seriesTitleText: some View {
