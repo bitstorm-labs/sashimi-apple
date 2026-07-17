@@ -131,34 +131,185 @@ struct ContentView: View {
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedTab = 0
+    // Which nav item currently holds focus; nil means focus is in content
+    // (so the rail rests collapsed). Drives the pullout expansion.
+    @FocusState private var focusedNav: Int?
+    @State private var showServerSwitcher = false
+    @State private var showAddServer = false
+
+    private let railWidth: CGFloat = 100
+    private let panelWidth: CGFloat = 360
+
+    private var expanded: Bool { focusedNav != nil }
+
+    private static let navItems: [(index: Int, title: String, icon: String)] = [
+        (0, "Home", "house"),
+        (1, "Library", "square.grid.2x2"),
+        (2, "Search", "magnifyingglass"),
+        (3, "Settings", "gearshape")
+    ]
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView()
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-                .tag(0)
+        ZStack(alignment: .topLeading) {
+            // Content sits to the right of the slim rail and never moves —
+            // the expanded panel overlays it (blurred), Plex-style.
+            content
+                .padding(.leading, railWidth)
+                .blur(radius: expanded ? 8 : 0)
+                .animation(.easeInOut(duration: 0.28), value: expanded)
 
-            LibraryView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Library", systemImage: "square.grid.2x2")
-                }
-                .tag(1)
+            // Dim scrim over content while the panel is open
+            Color.black
+                .opacity(expanded ? 0.45 : 0)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.28), value: expanded)
 
-            SearchView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(2)
-
-            SettingsView(onBackAtRoot: { selectedTab = 0 })
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(3)
+            sidebar
         }
+        .ignoresSafeArea()
         .onExitCommand(perform: exitCommandAction)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case 1: LibraryView(onBackAtRoot: { selectedTab = 0 })
+        case 2: SearchView(onBackAtRoot: { selectedTab = 0 })
+        case 3: SettingsView(onBackAtRoot: { selectedTab = 0 })
+        default: HomeView()
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 36) {
+            // Logo (mark only when collapsed, mark + wordmark when expanded)
+            HStack(spacing: 16) {
+                Image(systemName: "fish.fill")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(SashimiTheme.accent)
+                    .frame(width: 44)
+                if expanded {
+                    Image("Logo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 60)
+                        .fixedSize()
+                }
+            }
+            .padding(.bottom, 12)
+
+            ForEach(Self.navItems, id: \.index) { item in
+                navButton(item.index, item.title, item.icon)
+            }
+
+            Spacer()
+
+            avatarButton
+        }
+        .padding(.vertical, 70)
+        .padding(.horizontal, 28)
+        .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
+                .opacity(expanded ? 1 : 0.9)
+                .ignoresSafeArea()
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 1)
+                .ignoresSafeArea()
+        }
+        .animation(.easeInOut(duration: 0.28), value: expanded)
+        .focusSection()
+    }
+
+    private func navButton(_ index: Int, _ title: String, _ icon: String) -> some View {
+        Button {
+            selectedTab = index
+        } label: {
+            HStack(spacing: 20) {
+                Image(systemName: icon)
+                    .font(.system(size: 30, weight: .semibold))
+                    .frame(width: 44)
+                if expanded {
+                    Text(title)
+                        .font(.system(size: 26, weight: .semibold))
+                        .fixedSize()
+                }
+            }
+            .foregroundStyle(navTint(index))
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .focused($focusedNav, equals: index)
+    }
+
+    private func navTint(_ index: Int) -> Color {
+        if focusedNav == index { return .white }
+        if selectedTab == index { return SashimiTheme.accent }
+        return .white.opacity(0.55)
+    }
+
+    private var avatarButton: some View {
+        Button {
+            showServerSwitcher = true
+        } label: {
+            HStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [SashimiTheme.accent, SashimiTheme.accent.opacity(0.6)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 52, height: 52)
+                    if let userId = sessionManager.currentUser?.id,
+                       let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
+                        AsyncImage(url: imageURL) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "person.fill").foregroundStyle(.white)
+                        }
+                        .frame(width: 52, height: 52)
+                        .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.fill").foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 44)
+                if expanded {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(sessionManager.currentUser?.name ?? "Account")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("Switch server")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .fixedSize()
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .focused($focusedNav, equals: 99)
+        .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
+            ForEach(sessionManager.servers) { server in
+                Button(server.id == sessionManager.activeServerId ? "✓ \(server.name)" : server.name) {
+                    Task { await sessionManager.switchServer(to: server.id) }
+                }
+            }
+            Button("Add Server…") { showAddServer = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showAddServer) {
+            AddServerSheet()
+        }
     }
 
     /// Menu/back button handling. Returns nil on the Home tab so the press
