@@ -273,6 +273,13 @@ struct MainTabView: View {
             Spacer(minLength: 16)
 
             avatarButton
+
+            // App version under the avatar (centered when collapsed)
+            Text(appVersion)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
+                .padding(.top, 4)
         }
         .padding(.vertical, 50)
         .padding(.leading, expanded ? 36 : 38)
@@ -342,6 +349,10 @@ struct MainTabView: View {
 
     /// Jellyfin purple, sampled from the logo — the selected-item highlight.
     private static let jellyfinPurple = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
+
+    private var appVersion: String {
+        "v" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "")
+    }
 
     private func navTint(_ id: NavID) -> Color {
         if focusedNav == id { return .white }
