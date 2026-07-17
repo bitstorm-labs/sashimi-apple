@@ -145,11 +145,12 @@ struct MainTabView: View {
     // Which nav item currently holds focus; nil means focus is in content
     // (so the rail rests collapsed). Drives the pullout expansion.
     @FocusState private var focusedNav: Int?
+    @Namespace private var mainScope
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
 
     private let railWidth: CGFloat = 56
-    private let panelWidth: CGFloat = 360
+    private let panelWidth: CGFloat = 300
 
     private var expanded: Bool { focusedNav != nil }
 
@@ -168,6 +169,9 @@ struct MainTabView: View {
                 .padding(.leading, railWidth)
                 .blur(radius: expanded ? 8 : 0)
                 .animation(.easeInOut(duration: 0.28), value: expanded)
+                // Content wins initial focus so the app opens with the rail
+                // resting (collapsed), not auto-expanded onto Home.
+                .prefersDefaultFocus(true, in: mainScope)
 
             // Dim scrim over content while the panel is open
             Color.black
@@ -179,6 +183,7 @@ struct MainTabView: View {
             sidebar
         }
         .ignoresSafeArea()
+        .focusScope(mainScope)
         .onExitCommand(perform: exitCommandAction)
     }
 
