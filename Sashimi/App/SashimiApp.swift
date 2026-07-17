@@ -214,15 +214,21 @@ struct MainTabView: View {
         }
     }
 
+    private struct NavRow: Identifiable {
+        let id: NavID
+        let title: String
+        let icon: String
+    }
+
     /// Nav rows in order: Home, each library, Search, Settings.
-    private var navRows: [(id: NavID, title: String, icon: String)] {
-        var rows: [(NavID, String, String)] = [(.home, "Home", "house")]
+    private var navRows: [NavRow] {
+        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
         for lib in libraries {
-            rows.append((.library(lib.id), lib.name, libraryIcon(lib)))
+            rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
         }
-        rows.append((.search, "Search", "magnifyingglass"))
-        rows.append((.settings, "Settings", "gearshape"))
-        return rows.map { (id: $0.0, title: $0.1, icon: $0.2) }
+        rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
+        rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
+        return rows
     }
 
     private func libraryIcon(_ lib: JellyfinLibrary) -> String {
