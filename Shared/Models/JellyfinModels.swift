@@ -206,6 +206,7 @@ struct MediaSourceInfo: Codable {
     let transcodingUrl: String?
     let directStreamUrl: String?
     let mediaStreams: [MediaStream]?
+    let bitrate: Int?
 
     var videoCodec: String? {
         mediaStreams?.first(where: { $0.type == "Video" })?.codec
@@ -267,6 +268,7 @@ struct MediaSourceInfo: Codable {
         case transcodingUrl = "TranscodingUrl"
         case directStreamUrl = "DirectStreamUrl"
         case mediaStreams = "MediaStreams"
+        case bitrate = "Bitrate"
     }
 }
 

@@ -196,10 +196,17 @@ final class PlayerViewModel: ObservableObject {
                 )
             }
         } else if method == "DirectStream" {
-            streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
+            streamInfo = StreamInfo(method: .directStream, detail: sourceBitrateDetail, reason: nil)
         } else if method != nil {
-            streamInfo = StreamInfo(method: .directPlay, detail: nil, reason: nil)
+            streamInfo = StreamInfo(method: .directPlay, detail: sourceBitrateDetail, reason: nil)
         }
+    }
+
+    /// Source file's overall bitrate ("4 Mbps") for direct play/stream chips —
+    /// transcode sessions report the target bitrate via TranscodingInfo instead.
+    private var sourceBitrateDetail: String? {
+        guard let bps = currentMediaSource?.bitrate, bps > 0 else { return nil }
+        return "\(Int(round(Double(bps) / 1_000_000))) Mbps"
     }
 
     private static func resolutionLabel(width: Int, height: Int) -> String {

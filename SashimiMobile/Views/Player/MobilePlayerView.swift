@@ -86,6 +86,7 @@ struct MobilePlayerView: View {
             // Populate the audio/subtitle menus (tvOS does this on player appear;
             // without it both lists stay empty and subtitles can never be enabled)
             viewModel.loadAllTracks()
+            await viewModel.refreshStreamInfo()
             scheduleAutoHide()
         }
         .onDisappear {
@@ -182,12 +183,38 @@ struct MobilePlayerView: View {
 
             Spacer()
 
+            // Stream-info chip (Direct Play / Transcode + bitrate)
+            if let info = viewModel.streamInfo {
+                streamInfoChip(info)
+            }
+
             // Settings menu
             settingsMenu
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
+        var text = info.label
+        if let detail = info.detail { text += " · \(detail)" }
+        let color: Color
+        switch info.method {
+        case .directPlay: color = .green
+        case .directStream: color = .yellow
+        case .transcode: color = .orange
+        }
+        return HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.white.opacity(0.15))
+        .clipShape(Capsule())
     }
 
     private var controlBarSubtitle: String? {
@@ -238,6 +265,11 @@ struct MobilePlayerView: View {
 
     private func toggleOverlay() {
         showCustomOverlay.toggle()
+        // Refresh the stream-info chip each time the overlay is brought up
+        // (the transcode session may register/change after playback starts).
+        if showCustomOverlay {
+            Task { await viewModel.refreshStreamInfo() }
+        }
         scheduleAutoHide()
     }
 
