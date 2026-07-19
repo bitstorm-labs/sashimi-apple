@@ -80,9 +80,25 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let chapters: [ChapterInfo]?
     let path: String?
     let remoteTrailers: [MediaUrl]?
+    /// Present only when the item query requests Fields=MediaStreams. Used for
+    /// the resolution badge on cover art; nil for series/seasons (no stream).
+    let mediaStreams: [MediaStream]?
+
+    /// Resolution chip for cover art: "4K", "HD", or "SD". Nil when the item
+    /// has no video stream (series/season) or dimensions are unknown.
+    var qualityBadge: String? {
+        guard let stream = mediaStreams?.first(where: { $0.type == "Video" }) else { return nil }
+        let width = stream.width ?? 0
+        let height = stream.height ?? 0
+        guard width > 0 || height > 0 else { return nil }
+        if width >= 3200 || height >= 2160 { return "4K" }
+        if width >= 1280 || height >= 720 { return "HD" }
+        return "SD"
+    }
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
+        case mediaStreams = "MediaStreams"
         case name = "Name"
         case type = "Type"
         case seriesName = "SeriesName"

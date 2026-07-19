@@ -973,7 +973,7 @@ struct PhoneDetailView: View {
                 primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
-                path: nil, remoteTrailers: nil
+                path: nil, remoteTrailers: nil, mediaStreams: nil
             )
         }
 
