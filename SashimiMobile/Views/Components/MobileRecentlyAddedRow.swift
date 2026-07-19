@@ -189,6 +189,8 @@ struct MobileRecentlyAddedCard: View {
     let isLandscape: Bool
     let badgeCount: Int?
 
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
+
     private var isYouTube: Bool {
         if let name = libraryName, name.lowercased().contains("youtube") {
             return true
@@ -273,6 +275,14 @@ struct MobileRecentlyAddedCard: View {
                         .background(Color(red: 0.29, green: 0.55, blue: 0.73))
                         .clipShape(Capsule())
                         .padding(4)
+                }
+
+                // Quality badge (bottom-right; top-right holds watched/new)
+                if showQualityBadges, !isCircular, !isLandscape, let quality = item.qualityBadge {
+                    QualityBadge(label: quality, fontSize: 11,
+                                 horizontalPadding: 6, verticalPadding: 3, cornerRadius: 5)
+                        .padding(4)
+                        .frame(width: width, height: height, alignment: .bottomTrailing)
                 }
             }
 
