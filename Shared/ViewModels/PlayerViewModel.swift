@@ -205,7 +205,12 @@ final class PlayerViewModel: ObservableObject {
     /// Source file's overall bitrate ("4 Mbps") for direct play/stream chips —
     /// transcode sessions report the target bitrate via TranscodingInfo instead.
     private var sourceBitrateDetail: String? {
-        guard let bps = currentMediaSource?.bitrate, bps > 0 else { return nil }
+        // Prefer the container bitrate; fall back to the video stream's own
+        // bitrate when the MediaSource omits it (some remuxed/direct files),
+        // so the OSD speed chip is never blank.
+        let bps = (currentMediaSource?.bitrate).flatMap { $0 > 0 ? $0 : nil }
+            ?? currentMediaSource?.mediaStreams?.first(where: { $0.type == "Video" })?.bitRate
+        guard let bps, bps > 0 else { return nil }
         return "\(Int(round(Double(bps) / 1_000_000))) Mbps"
     }
 

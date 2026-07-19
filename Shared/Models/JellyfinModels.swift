@@ -361,6 +361,7 @@ struct MediaStream: Codable {
     let isDefault: Bool?
     let isExternal: Bool?
     let videoRangeType: String?
+    let bitRate: Int?
 
     enum CodingKeys: String, CodingKey {
         case type = "Type"
@@ -375,6 +376,7 @@ struct MediaStream: Codable {
         case isDefault = "IsDefault"
         case isExternal = "IsExternal"
         case videoRangeType = "VideoRangeType"
+        case bitRate = "BitRate"
     }
 }
 
