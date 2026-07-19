@@ -155,6 +155,9 @@ final class SessionManager: ObservableObject {
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
         self.isAuthenticated = true
+        // Measure the connection in the background so the first play uses a
+        // bandwidth-appropriate Auto bitrate (no stall on remote links).
+        Task { await JellyfinClient.shared.measureBandwidth() }
     }
 
     // MARK: - Add / switch / remove

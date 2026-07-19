@@ -348,6 +348,47 @@ actor JellyfinClient {
         self.serverURL = serverURL
         self.accessToken = accessToken
         self.userId = userId
+        // A new server means a new link — force a fresh measurement.
+        measuredBitrate = nil
+    }
+
+    /// Measured downstream bandwidth (bits/sec) from the last BitrateTest.
+    private var measuredBitrate: Int?
+
+    /// The bitrate to request on "Auto": the measured bandwidth with headroom,
+    /// clamped to a sane range. Falls back to a conservative default until a
+    /// measurement lands (measureBandwidth runs on connect).
+    private func autoBitrateCap() -> Int {
+        guard let measured = measuredBitrate else { return 20_000_000 }
+        let withHeadroom = Int(Double(measured) * 0.85)
+        return min(max(withHeadroom, 3_000_000), 100_000_000)
+    }
+
+    /// Time a fixed-size download from the server's BitrateTest endpoint to
+    /// estimate the connection bandwidth, then cache it for Auto bitrate.
+    /// Best-effort: on any failure the previous/​default cap stands.
+    func measureBandwidth() async {
+        guard let serverURL else { return }
+        let sizeBytes = 8_000_000
+        guard var components = URLComponents(
+            url: serverURL.appendingPathComponent("Playback/BitrateTest"),
+            resolvingAgainstBaseURL: false
+        ) else { return }
+        components.queryItems = [URLQueryItem(name: "Size", value: String(sizeBytes))]
+        guard let url = components.url else { return }
+
+        var req = URLRequest(url: url)
+        req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 20
+
+        let start = Date()
+        guard let (data, response) = try? await urlSession.data(for: req),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+        let elapsed = Date().timeIntervalSince(start)
+        guard elapsed > 0.01, !data.isEmpty else { return }
+
+        let bitsPerSecond = Int((Double(data.count) * 8.0) / elapsed)
+        measuredBitrate = bitsPerSecond
     }
 
     var isConfigured: Bool {
@@ -648,8 +689,10 @@ actor JellyfinClient {
     ) async throws -> PlaybackInfoResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
-        // Default to 120 Mbps (essentially unlimited), or use specified bitrate
-        let streamingBitrate = maxBitrate ?? 120_000_000
+        // Auto (no explicit cap) uses the measured connection bandwidth so we
+        // don't request more than the link can carry (the cause of remote
+        // stalls); explicit picks are honored as-is.
+        let streamingBitrate = maxBitrate ?? autoBitrateCap()
 
         // An explicit quality pick (forceTranscode) beats the global Force
         // Direct Play setting for this request — otherwise the pick could
