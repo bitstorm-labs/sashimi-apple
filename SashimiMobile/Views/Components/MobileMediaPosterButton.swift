@@ -13,6 +13,8 @@ struct MobilePosterCard: View {
     let isLandscape: Bool
     let forceYouTube: Bool
 
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
+
     init(
         item: BaseItemDto,
         width: CGFloat = MobileSizing.posterWidth,
@@ -96,6 +98,21 @@ struct MobilePosterCard: View {
                 // Progress bar overlay
                 if showProgress, item.progressPercent > 0 {
                     progressBar
+                }
+
+                // Quality badge (bottom-right; top-right is reserved for the
+                // watched/new indicators, so the two never overlap). Sits above
+                // the progress bar since only in-progress items show that.
+                if showQualityBadges, !effectiveIsLandscape, let quality = item.qualityBadge {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            QualityBadge(label: quality, fontSize: 11,
+                                         horizontalPadding: 6, verticalPadding: 3, cornerRadius: 5)
+                                .padding(4)
+                        }
+                    }
                 }
 
                 // Watched checkmark (top-right, green)

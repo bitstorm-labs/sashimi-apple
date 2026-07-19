@@ -48,6 +48,7 @@ struct MediaPosterButton: View {
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
     @FocusState private var isFocused: Bool
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
 
     // Card dimensions
     private var cardWidth: CGFloat { isCircular ? 200 : (isLandscape ? 320 : 220) }
@@ -166,6 +167,20 @@ struct MediaPosterButton: View {
                         )
                         .frame(width: cardWidth, height: cardHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        // Quality badge (bottom-right; top-right is reserved for
+                        // the watched/new indicators, so the two never overlap)
+                        if showQualityBadges, !isLandscape, let quality = item.qualityBadge {
+                            VStack {
+                                Spacer()
+                                HStack {
+                                    Spacer()
+                                    QualityBadge(label: quality, fontSize: 19,
+                                                 horizontalPadding: 10, verticalPadding: 5, cornerRadius: 8)
+                                        .padding(9)
+                                }
+                            }
+                        }
 
                         // Watched indicator (small corner checkmark) - inside for non-circular
                         if item.userData?.played == true {
