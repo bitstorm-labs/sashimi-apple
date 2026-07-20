@@ -5,7 +5,9 @@ import SwiftUI
 enum MobileColors {
     static let background = Color(red: 0.07, green: 0.07, blue: 0.09)
     static let cardBackground = Color(white: 0.12)
-    static let accent = Color(red: 0.36, green: 0.68, blue: 0.90)
+    // Jellyfin purple (#BD3EED) — the app's brand accent, matching the logo,
+    // sidebar highlight, and quality badges.
+    static let accent = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
     static let textPrimary = Color.white
     static let textSecondary = Color(white: 0.75)
