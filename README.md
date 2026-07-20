@@ -30,6 +30,11 @@ share their networking, authentication, and playback logic.
 - Support for movies, TV shows, and YouTube-style content
 - Continue watching with playback progress sync
 - Audio/subtitle track selection, quality switching, and skip intro/credits
+- **Shuffle** — play one random item from a library or a single show
+- **Trailers** — plays a local trailer inline when one exists
+  (`LocalTrailerCount > 0`, e.g. downloaded by [Trailarr](https://github.com/nandyalu/trailarr))
+- **Quality badges** (4K / HD / SD) on cover art, with a toggle
+- **Stream bitrate** shown on the playback overlay
 - Secure credential storage using Keychain
 
 **Apple TV**
