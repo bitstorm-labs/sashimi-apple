@@ -1058,12 +1058,20 @@ actor JellyfinClient {
         let data = try await request(
             path: "/Users/\(userId)/Items/\(itemId)",
             queryItems: [
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags,RemoteTrailers,LocalTrailerCount"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
             ]
         )
 
         return try JSONDecoder().decode(BaseItemDto.self, from: data)
+    }
+
+    /// Local trailer items (from Trailarr etc.) that Jellyfin exposes as
+    /// playable Trailer items. The endpoint returns a JSON array directly.
+    func getLocalTrailers(itemId: String) async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+        let data = try await request(path: "/Users/\(userId)/Items/\(itemId)/LocalTrailers", queryItems: [])
+        return (try? JSONDecoder().decode([BaseItemDto].self, from: data)) ?? []
     }
 
     func getItemAncestors(itemId: String) async throws -> [BaseItemDto] {

@@ -735,6 +735,17 @@ struct MediaDetailView: View {
         }
     }
 
+    /// Play the item's local trailer inline; fall back to remote if none.
+    private func playLocalTrailer() async {
+        if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
+            selectedEpisode = trailer
+            startFromBeginning = true
+            showingPlayer = true
+        } else {
+            showingTrailers = true
+        }
+    }
+
     /// Shuffle: play a random episode of this series.
     private func shuffleEpisode() async {
         let seriesId = isSeries ? item.id : (item.seriesId ?? item.id)
@@ -798,14 +809,19 @@ struct MediaDetailView: View {
                 }
             }
 
-            // Trailer button for movies and series with trailers
-            if !isEpisode, let trailers = item.remoteTrailers, !trailers.isEmpty {
+            // Trailer button — plays a local trailer inline (Trailarr) when one
+            // exists, else falls back to the remote (YouTube) hand-off.
+            if !isEpisode, (item.localTrailerCount ?? 0) > 0 || (item.remoteTrailers?.isEmpty == false) {
                 ActionButton(
                     title: "Trailer",
                     icon: "film",
                     isPrimary: false
                 ) {
-                    showingTrailers = true
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Task { await playLocalTrailer() }
+                    } else {
+                        showingTrailers = true
+                    }
                 }
             }
 
