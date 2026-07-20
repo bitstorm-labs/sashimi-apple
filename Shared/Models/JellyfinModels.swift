@@ -80,6 +80,10 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let chapters: [ChapterInfo]?
     let path: String?
     let remoteTrailers: [MediaUrl]?
+    /// Count of local trailer files (from Trailarr etc.) — present when the
+    /// query requests Fields=LocalTrailerCount. Drives the local-first Trailer
+    /// button (plays inline vs the remote YouTube hand-off).
+    let localTrailerCount: Int?
     /// Present only when the item query requests Fields=MediaStreams. Used for
     /// the resolution badge on cover art; nil for series/seasons (no stream).
     let mediaStreams: [MediaStream]?
@@ -126,6 +130,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case chapters = "Chapters"
         case path = "Path"
         case remoteTrailers = "RemoteTrailers"
+        case localTrailerCount = "LocalTrailerCount"
     }
 
     func hash(into hasher: inout Hasher) {

@@ -94,7 +94,7 @@ final class HomeViewModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
         )
 
         let episode2 = BaseItemDto(
@@ -113,7 +113,7 @@ final class HomeViewModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
         )
 
         // Test that series deduplication works
@@ -144,7 +144,7 @@ final class HomeViewModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
         )
 
         let movie2 = BaseItemDto(
@@ -156,7 +156,7 @@ final class HomeViewModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
         )
 
         var seenIds = Set<String>()
