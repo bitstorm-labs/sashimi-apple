@@ -70,7 +70,7 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
         )
         XCTAssertEqual(movie.displayTitle, "Test Movie")
 
@@ -84,7 +84,7 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
         )
         XCTAssertEqual(episode.displayTitle, "Series Name S1E1")
     }
@@ -109,7 +109,7 @@ final class ModelTests: XCTestCase {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
-            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil
+            premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, mediaStreams: nil
         )
 
         XCTAssertEqual(item.progressPercent, 0.5, accuracy: 0.01)

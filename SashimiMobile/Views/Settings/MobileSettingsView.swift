@@ -49,6 +49,11 @@ struct MobileSettingsView: View {
                 }
             }
 
+            // Display Section
+            Section("Display") {
+                Toggle("Show Quality Badges", isOn: $playbackSettings.showQualityBadges)
+            }
+
             // Playback Section
             Section("Playback") {
                 Toggle("Auto-Play Next Episode", isOn: $playbackSettings.autoPlayNextEpisode)

@@ -340,7 +340,7 @@ extension DownloadedItem {
             primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
             people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
-            path: nil, remoteTrailers: nil
+            path: nil, remoteTrailers: nil, mediaStreams: nil
         )
     }
 
@@ -382,7 +382,8 @@ extension DownloadedItem {
             premiereDate: nil,
             chapters: nil,
             path: nil,
-            remoteTrailers: nil
+            remoteTrailers: nil,
+            mediaStreams: nil
         )
     }
 }
