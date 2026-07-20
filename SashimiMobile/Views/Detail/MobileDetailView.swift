@@ -713,11 +713,42 @@ struct MobileDetailView: View {
 
             watchedButton
 
+            if (item.localTrailerCount ?? 0) > 0 || (trailerURL != nil && NetworkMonitor.shared.isConnected) {
+                Button {
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Task { await playLocalTrailer() }
+                    } else if let trailerURL {
+                        Task { await UIApplication.shared.open(trailerURL) }
+                    }
+                } label: {
+                    Image(systemName: "film")
+                        .font(.system(size: 20))
+                        .foregroundStyle(MobileColors.textSecondary)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
             if NetworkMonitor.shared.isConnected {
                 DownloadButton(item: item, quality: nil)
             }
 
             Spacer()
+        }
+    }
+
+    private var trailerURL: URL? {
+        guard let raw = item.remoteTrailers?.first?.url else { return nil }
+        return URL(string: raw)
+    }
+
+    /// Play the item's local trailer inline (Trailarr); falls back to the
+    /// remote URL if none is present.
+    private func playLocalTrailer() async {
+        if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
+            playingItem = trailer
+        } else if let trailerURL {
+            await UIApplication.shared.open(trailerURL)
         }
     }
 
@@ -911,7 +942,7 @@ struct MobileDetailView: View {
                 primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
-                path: nil, remoteTrailers: nil, mediaStreams: nil
+                path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
             )
         }
 

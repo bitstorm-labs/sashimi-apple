@@ -500,6 +500,16 @@ struct PhoneDetailView: View {
             )
     }
 
+    /// Play the item's local trailer inline (Trailarr); falls back to the
+    /// remote URL if none is present.
+    private func playLocalTrailer() async {
+        if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
+            playingItem = trailer
+        } else if let trailerURL {
+            await UIApplication.shared.open(trailerURL)
+        }
+    }
+
     /// Shuffle: play a random episode of this series.
     private func shuffleEpisode() async {
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: contentSeriesId, itemTypes: [.episode]) {
@@ -560,9 +570,13 @@ struct PhoneDetailView: View {
             .buttonStyle(.bordered)
             .tint(.white)
 
-            if let trailerURL, NetworkMonitor.shared.isConnected {
+            if (item.localTrailerCount ?? 0) > 0 || (trailerURL != nil && NetworkMonitor.shared.isConnected) {
                 Button {
-                    UIApplication.shared.open(trailerURL)
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Task { await playLocalTrailer() }
+                    } else if let trailerURL {
+                        UIApplication.shared.open(trailerURL)
+                    }
                 } label: {
                     Image(systemName: "film")
                         .font(.system(size: 16))
@@ -708,9 +722,13 @@ struct PhoneDetailView: View {
                 .tint(.white)
             }
 
-            if let trailerURL, NetworkMonitor.shared.isConnected {
+            if (item.localTrailerCount ?? 0) > 0 || (trailerURL != nil && NetworkMonitor.shared.isConnected) {
                 Button {
-                    UIApplication.shared.open(trailerURL)
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Task { await playLocalTrailer() }
+                    } else if let trailerURL {
+                        UIApplication.shared.open(trailerURL)
+                    }
                 } label: {
                     Image(systemName: "film")
                         .font(.system(size: 16))
@@ -989,7 +1007,7 @@ struct PhoneDetailView: View {
                 primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
-                path: nil, remoteTrailers: nil, mediaStreams: nil
+                path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
             )
         }
 
