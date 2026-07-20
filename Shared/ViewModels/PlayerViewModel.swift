@@ -177,8 +177,9 @@ final class PlayerViewModel: ObservableObject {
             }
         } else if method == "Transcode", let info {
             if info.isVideoDirect == true {
-                // Container remux / audio conversion — video untouched
-                streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
+                // Container remux / audio conversion — video untouched, so the
+                // source video bitrate IS the delivered speed. Show it.
+                streamInfo = StreamInfo(method: .directStream, detail: sourceBitrateDetail, reason: nil)
             } else {
                 var parts: [String] = []
                 if let width = info.width, let height = info.height {
@@ -187,6 +188,9 @@ final class PlayerViewModel: ObservableObject {
                 if let codec = info.videoCodec { parts.append(codec.uppercased()) }
                 if let bitrate = info.bitrate, bitrate > 0 {
                     parts.append("\(Int(round(Double(bitrate) / 1_000_000))) Mbps")
+                } else if let source = sourceBitrateDetail {
+                    // TranscodingInfo omitted the target bitrate — show source
+                    parts.append(source)
                 }
                 let reason = info.transcodeReasons?.first.map(Self.humanTranscodeReason)
                 streamInfo = StreamInfo(
