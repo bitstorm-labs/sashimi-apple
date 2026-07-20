@@ -8,10 +8,14 @@ enum SashimiTheme {
     static let accent = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
     static let highlight = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
+    // Neutral focus/selection color — kept separate from the purple accent so
+    // the ever-present focus ring stays quiet (native-tvOS feel) while purple
+    // is reserved for deliberate accents (scrubber, progress, selected state).
+    static let focus = Color.white
     static let textPrimary = Color.white
     static let textSecondary = Color(white: 0.75)
     static let textTertiary = Color(white: 0.55)
-    static let focusGlow = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255).opacity(0.5)
+    static let focusGlow = Color.white.opacity(0.45)
     static let progressBackground = Color(white: 0.25)
     static let success = Color.green
     static let warning = Color.orange

@@ -256,10 +256,10 @@ struct MediaPosterButton: View {
                     Group {
                         if isCircular {
                             Circle()
-                                .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
                         } else {
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
                         }
                     }
                 )
