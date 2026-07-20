@@ -458,7 +458,7 @@ struct HeroSection: View {
             .clipShape(RoundedRectangle(cornerRadius: 24))
             .overlay(
                 RoundedRectangle(cornerRadius: 24)
-                    .stroke(SashimiTheme.accent.opacity(isFocused ? 0.6 : 0), lineWidth: 4)
+                    .stroke(SashimiTheme.focus.opacity(isFocused ? 0.6 : 0), lineWidth: 4)
             )
             .padding(.horizontal, 50)
             .scaleEffect(isFocused ? 1.01 : 1.0)
