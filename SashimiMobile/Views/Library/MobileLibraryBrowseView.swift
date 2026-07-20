@@ -70,6 +70,8 @@ struct MobileLibraryBrowseView: View {
     @State private var searchText = ""
     /// Invalidates the in-flight load loop when sort/filter changes mid-fetch.
     @State private var loadGeneration = 0
+    /// Set by the Shuffle button to present the player on a random item.
+    @State private var shuffleItem: BaseItemDto?
 
     private var isYouTubeLibrary: Bool {
         libraryName.lowercased().contains("youtube")
@@ -80,6 +82,15 @@ struct MobileLibraryBrowseView: View {
         case "movies": return [.movie]
         case "tvshows": return [.series]
         default: return nil
+        }
+    }
+
+    /// Shuffle: play one random item — a random movie for a movie library, a
+    /// random episode for a TV library.
+    private func shufflePlay() async {
+        let types: [ItemType] = collectionType == "tvshows" ? [.episode] : [.movie]
+        if let item = try? await JellyfinClient.shared.getRandomItem(parentId: libraryId, itemTypes: types) {
+            shuffleItem = item
         }
     }
 
@@ -148,10 +159,18 @@ struct MobileLibraryBrowseView: View {
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic))
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if !isYouTubeLibrary {
+                    Button {
+                        Task { await shufflePlay() }
+                    } label: {
+                        Image(systemName: "shuffle")
+                    }
+                }
                 sortMenu
                 filterMenu
             }
         }
+        .fullScreenPlayer(item: $shuffleItem)
         .task {
             await loadItems()
         }

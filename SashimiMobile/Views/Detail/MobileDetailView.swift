@@ -558,6 +558,14 @@ struct MobileDetailView: View {
         }
     }
 
+    /// Shuffle: play a random episode of this series.
+    private func shuffleEpisode() async {
+        let seriesId = isSeries ? item.id : (item.seriesId ?? item.id)
+        if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: seriesId, itemTypes: [.episode]) {
+            playingItem = ep
+        }
+    }
+
     // MARK: - Action Buttons
 
     private var seriesActionButtons: some View {
@@ -578,6 +586,14 @@ struct MobileDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+
+            Button {
+                Task { await shuffleEpisode() }
+            } label: {
+                Label("Shuffle", systemImage: "shuffle")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
 
             watchedButton
 

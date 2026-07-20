@@ -298,6 +298,12 @@ struct LibraryDetailView: View {
                                 }
                             )
 
+                            if !isYouTubeLibrary {
+                                ShuffleButton {
+                                    Task { await shufflePlay() }
+                                }
+                            }
+
                             Spacer()
 
                             if totalCount > 0 {
@@ -430,6 +436,20 @@ struct LibraryDetailView: View {
             }
         }
         return items.first { $0.name.uppercased().hasPrefix(letter) }
+    }
+
+    /// Shuffle: play one random item from this library — a random movie for a
+    /// movie library, a random episode for a TV library.
+    private func shufflePlay() async {
+        let types: [ItemType] = switch library.collectionType {
+        case "tvshows": [.episode]
+        case "movies": [.movie]
+        default: [.movie, .episode]
+        }
+        if let item = try? await JellyfinClient.shared.getRandomItem(parentId: library.id, itemTypes: types) {
+            selectedItemIsYouTube = false
+            selectedItem = item
+        }
     }
 
     private func loadAllRemainingItems() async {
@@ -649,6 +669,35 @@ struct SortMenuButton: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Shuffle Button
+struct ShuffleButton: View {
+    let onShuffle: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: onShuffle) {
+            HStack(spacing: 8) {
+                Image(systemName: "shuffle")
+                Text("Shuffle")
+            }
+            .font(.system(size: 20))
+            .foregroundStyle(SashimiTheme.textPrimary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
     }
 }
 

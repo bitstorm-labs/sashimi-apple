@@ -735,6 +735,16 @@ struct MediaDetailView: View {
         }
     }
 
+    /// Shuffle: play a random episode of this series.
+    private func shuffleEpisode() async {
+        let seriesId = isSeries ? item.id : (item.seriesId ?? item.id)
+        if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: seriesId, itemTypes: [.episode]) {
+            selectedEpisode = ep
+            startFromBeginning = false
+            showingPlayer = true
+        }
+    }
+
     // MARK: - Action Buttons
     private var actionButtonsRow: some View {
         HStack(spacing: 30) {
@@ -751,6 +761,17 @@ struct MediaDetailView: View {
                     selectedEpisode = nextEp
                     startFromBeginning = false
                     showingPlayer = true
+                }
+            }
+
+            // Series: shuffle a random episode
+            if isSeries {
+                ActionButton(
+                    title: "Shuffle",
+                    icon: "shuffle",
+                    isPrimary: false
+                ) {
+                    Task { await shuffleEpisode() }
                 }
             }
 
