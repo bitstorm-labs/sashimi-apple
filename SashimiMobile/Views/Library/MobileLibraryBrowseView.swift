@@ -89,12 +89,22 @@ struct MobileLibraryBrowseView: View {
         return items.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    private var columns: [GridItem] {
-        let minWidth = sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
-        return [GridItem(.adaptive(minimum: minWidth), spacing: MobileSpacing.md)]
+    // Covers fill their column: derive the column count from the available
+    // width, then hand each card the exact column width. The old fixed-width
+    // cards left big vertical gaps on smaller iPhones (2 columns ~163pt wide
+    // but covers only 110pt).
+    private func gridMetrics(availableWidth: CGFloat) -> (columns: [GridItem], cardWidth: CGFloat) {
+        let spacing = MobileSpacing.md
+        let avail = availableWidth - spacing * 2   // matches the grid's horizontal padding
+        let target: CGFloat = sizeClass == .compact ? 118 : 165
+        let count = max(2, Int((avail + spacing) / (target + spacing)))
+        let cardWidth = floor((avail - spacing * CGFloat(count - 1)) / CGFloat(count))
+        let cols = Array(repeating: GridItem(.fixed(cardWidth), spacing: spacing), count: count)
+        return (cols, cardWidth)
     }
 
     var body: some View {
+        GeometryReader { geo in
         ScrollView {
             if isLoading && items.isEmpty {
                 ProgressView()
@@ -102,20 +112,21 @@ struct MobileLibraryBrowseView: View {
             } else if displayedItems.isEmpty {
                 emptyState
             } else {
+                let metrics = gridMetrics(availableWidth: geo.size.width)
                 VStack(alignment: .leading, spacing: MobileSpacing.sm) {
                     Text(countText)
                         .font(MobileTypography.captionSmall)
                         .foregroundStyle(MobileColors.textTertiary)
                         .padding(.horizontal, MobileSpacing.md)
 
-                    LazyVGrid(columns: columns, spacing: MobileSpacing.md) {
+                    LazyVGrid(columns: metrics.columns, spacing: MobileSpacing.md) {
                         ForEach(displayedItems, id: \.id) { item in
                             NavigationLink {
                                 AdaptiveDetailView(item: item, libraryName: libraryName)
                             } label: {
                                 MobileRecentlyAddedCard(
                                     item: item,
-                                    width: sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth,
+                                    width: metrics.cardWidth,
                                     libraryName: libraryName,
                                     isCircular: isYouTubeLibrary && item.type == .series,
                                     isLandscape: false,
@@ -147,6 +158,7 @@ struct MobileLibraryBrowseView: View {
         .onChange(of: sort) { _, _ in reload() }
         .onChange(of: sortAscending) { _, _ in reload() }
         .onChange(of: filter) { _, _ in reload() }
+        }
     }
 
     private var countText: String {

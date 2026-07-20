@@ -189,6 +189,8 @@ struct MobileRecentlyAddedCard: View {
     let isLandscape: Bool
     let badgeCount: Int?
 
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
+
     private var isYouTube: Bool {
         if let name = libraryName, name.lowercased().contains("youtube") {
             return true
@@ -205,6 +207,10 @@ struct MobileRecentlyAddedCard: View {
             return width * (1 / PosterAspectRatio.portrait)
         }
     }
+
+    // Title font grows with the cover so bigger grids (small iPhones now fill
+    // 2 wide columns) get more readable labels; small covers stay at 13.
+    private var titleFontSize: CGFloat { min(16, max(13, width * 0.095)) }
 
     private var imageURL: URL? {
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
@@ -274,14 +280,22 @@ struct MobileRecentlyAddedCard: View {
                         .clipShape(Capsule())
                         .padding(4)
                 }
+
+                // Quality badge (bottom-right; top-right holds watched/new)
+                if showQualityBadges, !isCircular, !isLandscape, let quality = item.qualityBadge {
+                    QualityBadge(label: quality, fontSize: 11,
+                                 horizontalPadding: 6, verticalPadding: 3, cornerRadius: 5)
+                        .padding(4)
+                        .frame(width: width, height: height, alignment: .bottomTrailing)
+                }
             }
 
-            // Title
+            // Title (scales with cover size so larger grids read better)
             Text(displayTitle)
-                .font(MobileTypography.caption)
+                .font(.system(size: titleFontSize, weight: .medium))
                 .foregroundStyle(MobileColors.textPrimary)
                 .lineLimit(1)
-                .frame(width: width, height: 16, alignment: isCircular ? .center : .leading)
+                .frame(width: width, height: titleFontSize + 5, alignment: isCircular ? .center : .leading)
         }
     }
 

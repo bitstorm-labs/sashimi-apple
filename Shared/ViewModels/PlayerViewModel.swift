@@ -80,6 +80,10 @@ final class PlayerViewModel: ObservableObject {
     @Published var nextEpisode: BaseItemDto?
     /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
     private var isHandlingEnd = false
+    /// Resume position still waiting to be applied once the item is ready to
+    /// play. A pre-ready seek is silently dropped for HLS/transcode streams
+    /// (no seekable range yet), so we re-seek from the status observer.
+    private var pendingResumeTicks: Int64 = 0
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
     @Published var videoResolution: String?
@@ -177,8 +181,9 @@ final class PlayerViewModel: ObservableObject {
             }
         } else if method == "Transcode", let info {
             if info.isVideoDirect == true {
-                // Container remux / audio conversion — video untouched
-                streamInfo = StreamInfo(method: .directStream, detail: nil, reason: nil)
+                // Container remux / audio conversion — video untouched, so the
+                // source video bitrate IS the delivered speed. Show it.
+                streamInfo = StreamInfo(method: .directStream, detail: sourceBitrateDetail, reason: nil)
             } else {
                 var parts: [String] = []
                 if let width = info.width, let height = info.height {
@@ -187,6 +192,9 @@ final class PlayerViewModel: ObservableObject {
                 if let codec = info.videoCodec { parts.append(codec.uppercased()) }
                 if let bitrate = info.bitrate, bitrate > 0 {
                     parts.append("\(Int(round(Double(bitrate) / 1_000_000))) Mbps")
+                } else if let source = sourceBitrateDetail {
+                    // TranscodingInfo omitted the target bitrate — show source
+                    parts.append(source)
                 }
                 let reason = info.transcodeReasons?.first.map(Self.humanTranscodeReason)
                 streamInfo = StreamInfo(
@@ -205,7 +213,12 @@ final class PlayerViewModel: ObservableObject {
     /// Source file's overall bitrate ("4 Mbps") for direct play/stream chips —
     /// transcode sessions report the target bitrate via TranscodingInfo instead.
     private var sourceBitrateDetail: String? {
-        guard let bps = currentMediaSource?.bitrate, bps > 0 else { return nil }
+        // Prefer the container bitrate; fall back to the video stream's own
+        // bitrate when the MediaSource omits it (some remuxed/direct files),
+        // so the OSD speed chip is never blank.
+        let bps = (currentMediaSource?.bitrate).flatMap { $0 > 0 ? $0 : nil }
+            ?? currentMediaSource?.mediaStreams?.first(where: { $0.type == "Video" })?.bitRate
+        guard let bps, bps > 0 else { return nil }
         return "\(Int(round(Double(bps) / 1_000_000))) Mbps"
     }
 
@@ -309,6 +322,7 @@ final class PlayerViewModel: ObservableObject {
             if startFromBeginning {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
+                pendingResumeTicks = 0
                 if !isOffline {
                     try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
@@ -319,7 +333,10 @@ final class PlayerViewModel: ObservableObject {
             } else if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
                 // Auto-resume from saved position (no dialog)
                 resumePositionTicks = startTicks
+                pendingResumeTicks = startTicks
                 let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
+                // Best-effort immediate seek (lands for direct play); the
+                // status observer re-applies it once HLS/transcode is ready.
                 await player?.seek(to: startTime)
                 if !isOffline {
                     try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
@@ -331,6 +348,7 @@ final class PlayerViewModel: ObservableObject {
             } else {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
+                pendingResumeTicks = 0
                 if !isOffline {
                     try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
                     startProgressReporting()
@@ -548,6 +566,19 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Applies the saved resume position once the item can actually seek. A
+    /// pre-ready seek is silently dropped for HLS/transcode (no seekable range
+    /// yet) — direct play lands immediately, but transcode needs this retry.
+    /// Runs once, and skips if the immediate seek already landed near target.
+    private func applyPendingResumeSeekIfNeeded() {
+        guard pendingResumeTicks > 0, let player else { return }
+        let target = CMTime(value: pendingResumeTicks / 10000, timescale: 1000)
+        pendingResumeTicks = 0
+        if abs(player.currentTime().seconds - target.seconds) > 3 {
+            player.seek(to: target)
+        }
+    }
+
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
     private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, forceTranscode: Bool = false) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
@@ -602,6 +633,8 @@ final class PlayerViewModel: ObservableObject {
                 if observed.status == .failed {
                     self?.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
                     self?.error = observed.error
+                } else if observed.status == .readyToPlay {
+                    self?.applyPendingResumeSeekIfNeeded()
                 }
             }
         }
