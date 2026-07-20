@@ -16,6 +16,8 @@ private struct PlayerViewController: UIViewControllerRepresentable {
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
         controller.entersFullScreenWhenPlaybackBegins = false
+        // Tint the native transport controls with the brand accent (purple)
+        controller.view.tintColor = UIColor(MobileColors.accent)
         return controller
     }
 
