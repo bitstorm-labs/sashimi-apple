@@ -298,11 +298,6 @@ struct PhoneDetailView: View {
             .clipped()
     }
 
-    private var trailerURL: URL? {
-        guard let raw = item.remoteTrailers?.first?.url else { return nil }
-        return URL(string: raw)
-    }
-
     private func logoImageURL(for itemId: String) -> URL? {
         JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
     }
@@ -500,13 +495,11 @@ struct PhoneDetailView: View {
             )
     }
 
-    /// Play the item's local trailer inline (Trailarr); falls back to the
-    /// remote URL if none is present.
+    /// Play the item's local trailer inline (Trailarr). The button only appears
+    /// when a local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             playingItem = trailer
-        } else if let trailerURL {
-            await UIApplication.shared.open(trailerURL)
         }
     }
 
@@ -570,13 +563,9 @@ struct PhoneDetailView: View {
             .buttonStyle(.bordered)
             .tint(.white)
 
-            if (item.localTrailerCount ?? 0) > 0 || (trailerURL != nil && NetworkMonitor.shared.isConnected) {
+            if (item.localTrailerCount ?? 0) > 0 {
                 Button {
-                    if (item.localTrailerCount ?? 0) > 0 {
-                        Task { await playLocalTrailer() }
-                    } else if let trailerURL {
-                        UIApplication.shared.open(trailerURL)
-                    }
+                    Task { await playLocalTrailer() }
                 } label: {
                     Image(systemName: "film")
                         .font(.system(size: 16))
@@ -722,13 +711,9 @@ struct PhoneDetailView: View {
                 .tint(.white)
             }
 
-            if (item.localTrailerCount ?? 0) > 0 || (trailerURL != nil && NetworkMonitor.shared.isConnected) {
+            if (item.localTrailerCount ?? 0) > 0 {
                 Button {
-                    if (item.localTrailerCount ?? 0) > 0 {
-                        Task { await playLocalTrailer() }
-                    } else if let trailerURL {
-                        UIApplication.shared.open(trailerURL)
-                    }
+                    Task { await playLocalTrailer() }
                 } label: {
                     Image(systemName: "film")
                         .font(.system(size: 16))
