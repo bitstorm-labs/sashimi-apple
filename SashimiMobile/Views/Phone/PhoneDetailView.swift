@@ -500,6 +500,13 @@ struct PhoneDetailView: View {
             )
     }
 
+    /// Shuffle: play a random episode of this series.
+    private func shuffleEpisode() async {
+        if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: contentSeriesId, itemTypes: [.episode]) {
+            playingItem = ep
+        }
+    }
+
     // MARK: - Action Buttons
 
     @ViewBuilder
@@ -543,6 +550,15 @@ struct PhoneDetailView: View {
                     .tint(.white)
                 }
             }
+
+            Button {
+                Task { await shuffleEpisode() }
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 16))
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
 
             if let trailerURL, NetworkMonitor.shared.isConnected {
                 Button {
