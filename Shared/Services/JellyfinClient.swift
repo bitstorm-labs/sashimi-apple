@@ -681,6 +681,18 @@ actor JellyfinClient {
         return try JSONDecoder().decode(ItemsResponse.self, from: data)
     }
 
+    /// Fetches one random item for the Shuffle button. `parentId` is the
+    /// library or series id; `itemTypes` scopes to movies or episodes.
+    func getRandomItem(parentId: String, itemTypes: [ItemType]) async throws -> BaseItemDto? {
+        let response = try await getItems(
+            parentId: parentId,
+            includeTypes: itemTypes,
+            sortBy: "Random",
+            limit: 1
+        )
+        return response.items.first
+    }
+
     func getPlaybackInfo(
         itemId: String,
         maxBitrate: Int? = nil,
