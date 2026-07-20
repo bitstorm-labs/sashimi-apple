@@ -157,11 +157,11 @@ struct TrustedHostRow: View {
         .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
+                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)

@@ -186,7 +186,7 @@ struct SettingsOptionRow: View {
             .padding(.vertical, 24)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(isFocused ? SashimiTheme.accent : SashimiTheme.cardBackground)
+                    .fill(isFocused ? SashimiTheme.focus : SashimiTheme.cardBackground)
             )
             .scaleEffect(isFocused ? 1.02 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -505,7 +505,7 @@ struct HomeRowMoveButton: View {
                 .frame(width: 50, height: 50)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(isFocused ? SashimiTheme.accent : SashimiTheme.cardBackground)
+                        .fill(isFocused ? SashimiTheme.focus : SashimiTheme.cardBackground)
                 )
         }
         .buttonStyle(.card)
@@ -547,11 +547,11 @@ struct HomeRowToggleButton: View {
         .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
+                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -608,11 +608,11 @@ struct SettingsToggleRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
+                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -773,11 +773,11 @@ struct SettingsNavigationRow<Destination: View>: View {
         .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
+                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -860,11 +860,11 @@ struct SettingsPickerOptionRow: View {
         .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.accent.opacity(0.15) : SashimiTheme.cardBackground)
+                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.accent.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
+                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
         )
         .scaleEffect(isFocused ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -1068,9 +1068,9 @@ struct AppIconButton: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
-                            .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                            .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
                     )
-                    .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.5) : .clear, radius: 8)
+                    .shadow(color: isFocused ? SashimiTheme.focus.opacity(0.5) : .clear, radius: 8)
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")

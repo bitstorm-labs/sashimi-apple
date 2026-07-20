@@ -861,7 +861,7 @@ struct MediaDetailView: View {
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(isMoreButtonFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                        .stroke(isMoreButtonFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
                 )
                 .shadow(color: isMoreButtonFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
                 .scaleEffect(isMoreButtonFocused ? 1.05 : 1.0)
@@ -1231,7 +1231,7 @@ struct ActionButton: View {
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
             )
             .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
             .scaleEffect(isFocused ? 1.05 : 1.0)
@@ -1301,7 +1301,7 @@ struct CastCard: View {
                     .clipShape(Circle())
                     .overlay(
                         Circle()
-                            .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                            .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
                     )
                 } else {
                     Circle()
@@ -1314,7 +1314,7 @@ struct CastCard: View {
                         }
                         .overlay(
                             Circle()
-                                .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 3)
+                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
                         )
                 }
 
@@ -1407,7 +1407,7 @@ struct EpisodeCard: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(
-                            isCurrentEpisode && !isFocused ? .white : (isFocused ? SashimiTheme.accent : .clear),
+                            isCurrentEpisode && !isFocused ? .white : (isFocused ? SashimiTheme.focus : .clear),
                             lineWidth: isCurrentEpisode && !isFocused ? 4 : 3
                         )
                         .opacity(isCurrentEpisode && !isFocused ? (pulseAnimation ? 1.0 : 0.4) : 1.0)

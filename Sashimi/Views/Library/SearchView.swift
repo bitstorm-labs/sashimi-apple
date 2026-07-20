@@ -315,14 +315,14 @@ struct RecentSearchButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .foregroundStyle(isFocused ? SashimiTheme.accent : SashimiTheme.textTertiary)
+                    .foregroundStyle(isFocused ? SashimiTheme.focus : SashimiTheme.textTertiary)
                 Text(query)
                     .foregroundStyle(isFocused ? .white : SashimiTheme.textPrimary)
             }
             .font(Typography.body)
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(isFocused ? SashimiTheme.accent.opacity(0.3) : SashimiTheme.cardBackground)
+            .background(isFocused ? SashimiTheme.focus.opacity(0.3) : SashimiTheme.cardBackground)
             .clipShape(Capsule())
             .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
             .scaleEffect(isFocused ? 1.05 : 1.0)

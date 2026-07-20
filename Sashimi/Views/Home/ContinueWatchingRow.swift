@@ -144,7 +144,7 @@ struct ContinueWatchingCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                        .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
                 )
                 .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
 
