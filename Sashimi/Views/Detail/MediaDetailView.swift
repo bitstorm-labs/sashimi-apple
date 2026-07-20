@@ -1,8 +1,4 @@
 import SwiftUI
-import AVKit
-import os
-
-private let trailerLogger = Logger(subsystem: "com.mondominator.sashimi", category: "Trailer")
 
 // swiftlint:disable type_body_length file_length
 // MediaDetailView is a complex view handling movies, series, seasons, and episodes
@@ -36,7 +32,6 @@ struct MediaDetailView: View {
     @State private var showingSeriesDetail: BaseItemDto?
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingFileInfo = false
-    @State private var showingTrailers = false
     @State private var showingDeleteConfirm = false
     @State private var isRefreshing = false
     @State private var refreshID = UUID()
@@ -201,11 +196,6 @@ struct MediaDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Are you sure you want to delete this item? This cannot be undone.")
-        }
-        .fullScreenCover(isPresented: $showingTrailers) {
-            if let trailer = item.remoteTrailers?.first, let url = trailer.url {
-                TrailerPlayerView(urlString: url, name: trailer.name ?? "Trailer")
-            }
         }
         .task {
             await loadContent()
@@ -735,14 +725,13 @@ struct MediaDetailView: View {
         }
     }
 
-    /// Play the item's local trailer inline; fall back to remote if none.
+    /// Play the item's local trailer inline. The button only appears when a
+    /// local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             selectedEpisode = trailer
             startFromBeginning = true
             showingPlayer = true
-        } else {
-            showingTrailers = true
         }
     }
 
@@ -809,19 +798,15 @@ struct MediaDetailView: View {
                 }
             }
 
-            // Trailer button — plays a local trailer inline (Trailarr) when one
-            // exists, else falls back to the remote (YouTube) hand-off.
-            if !isEpisode, (item.localTrailerCount ?? 0) > 0 || (item.remoteTrailers?.isEmpty == false) {
+            // Trailer button — only when a local trailer exists (Trailarr),
+            // played inline. No remote (YouTube) hand-off, matching Roku.
+            if !isEpisode, (item.localTrailerCount ?? 0) > 0 {
                 ActionButton(
                     title: "Trailer",
                     icon: "film",
                     isPrimary: false
                 ) {
-                    if (item.localTrailerCount ?? 0) > 0 {
-                        Task { await playLocalTrailer() }
-                    } else {
-                        showingTrailers = true
-                    }
+                    Task { await playLocalTrailer() }
                 }
             }
 
@@ -1489,140 +1474,5 @@ struct EpisodeCard: View {
         }
 
         return parts.joined(separator: ", ")
-    }
-}
-
-struct TrailerPlayerView: View {
-    let urlString: String
-    let name: String
-    @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer?
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var showYouTubePrompt = false
-
-    private var youtubeVideoId: String? {
-        if urlString.contains("youtube.com/watch") {
-            return URLComponents(string: urlString)?.queryItems?.first(where: { $0.name == "v" })?.value
-        } else if urlString.contains("youtu.be/") {
-            return urlString.components(separatedBy: "youtu.be/").last?.components(separatedBy: "?").first
-        }
-        return nil
-    }
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            if showYouTubePrompt, let videoId = youtubeVideoId {
-                // YouTube video - prompt to open in YouTube app
-                VStack(spacing: 30) {
-                    Image(systemName: "play.rectangle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(.red)
-
-                    Text("YouTube Trailer")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-
-                    Text("Open this trailer in the YouTube app?")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    HStack(spacing: 40) {
-                        Button("Open YouTube") {
-                            openInYouTubeApp(videoId: videoId)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-
-                        Button("Cancel") {
-                            dismiss()
-                        }
-                    }
-                    .padding(.top, 20)
-                }
-                .padding(60)
-            } else if isLoading {
-                VStack(spacing: 20) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text("Loading trailer...")
-                        .foregroundStyle(.secondary)
-                }
-            } else if let error = errorMessage {
-                VStack(spacing: 20) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 50))
-                        .foregroundStyle(.yellow)
-                    Text(error)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                    Button("Close") { dismiss() }
-                        .padding(.top, 20)
-                }
-                .padding()
-            } else if player != nil {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-                    .overlay(alignment: .topLeading) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title)
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(40)
-                    }
-            }
-        }
-        .onAppear {
-            if youtubeVideoId != nil {
-                // YouTube video - show prompt to open in YouTube app
-                showYouTubePrompt = true
-            } else {
-                loadDirectTrailer()
-            }
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
-        }
-    }
-
-    private func loadDirectTrailer() {
-        trailerLogger.info("Loading direct trailer: \(urlString)")
-        if let url = URL(string: urlString) {
-            isLoading = false
-            player = AVPlayer(url: url)
-            player?.play()
-        } else {
-            trailerLogger.error("Invalid trailer URL: \(urlString)")
-            isLoading = false
-            errorMessage = "Invalid trailer URL"
-        }
-    }
-
-    private func openInYouTubeApp(videoId: String) {
-        // Try YouTube app URL scheme for tvOS
-        let youtubeAppURL = URL(string: "youtube://watch/\(videoId)")
-        let youtubeWebURL = URL(string: "https://www.youtube.com/watch?v=\(videoId)")
-
-        if let appURL = youtubeAppURL {
-            UIApplication.shared.open(appURL) { success in
-                if !success {
-                    trailerLogger.info("YouTube app not available, trying web URL")
-                    if let webURL = youtubeWebURL {
-                        UIApplication.shared.open(webURL) { webSuccess in
-                            if !webSuccess {
-                                trailerLogger.error("Could not open YouTube")
-                            }
-                        }
-                    }
-                }
-                dismiss()
-            }
-        }
     }
 }
