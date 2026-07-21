@@ -1189,6 +1189,11 @@ struct AddServerSheet: View {
             .onChange(of: sessionManager.servers.count) { _, newCount in
                 if newCount > initialCount { dismiss() }
             }
+            .onDisappear {
+                // Re-point the shared client at the active server after the
+                // probe, so the live session keeps working.
+                Task { await sessionManager.restoreActiveClient() }
+            }
             .onExitCommand { dismiss() }
     }
 }

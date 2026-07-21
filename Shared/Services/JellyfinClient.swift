@@ -467,7 +467,15 @@ actor JellyfinClient {
                 if isAuthRequest {
                     throw JellyfinError.invalidCredentials
                 }
-                await SessionManager.shared.logout(reason: .sessionExpired)
+                // Only treat as session expiry when the request was against the
+                // ACTIVE server. During an Add Server probe the shared client is
+                // briefly pointed at a different server; a 401 there must not
+                // nuke the live session (that stranded users with a saved-but-
+                // tokenless server they couldn't re-add).
+                let activeURL = await SessionManager.shared.serverURL
+                if let activeURL, self.serverURL == activeURL {
+                    await SessionManager.shared.logout(reason: .sessionExpired)
+                }
                 throw JellyfinError.sessionExpired
             }
 

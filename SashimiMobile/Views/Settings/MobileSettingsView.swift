@@ -170,5 +170,10 @@ struct MobileAddServerSheet: View {
         .onChange(of: sessionManager.servers.count) { _, newCount in
             if newCount > initialCount { dismiss() }
         }
+        .onDisappear {
+            // The probe repointed the shared client at the candidate server;
+            // re-point it at whatever server is active now so the session works.
+            Task { await sessionManager.restoreActiveClient() }
+        }
     }
 }
