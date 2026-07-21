@@ -33,6 +33,8 @@ struct MediaDetailView: View {
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingFileInfo = false
     @State private var showingDeleteConfirm = false
+    @State private var showingFullOverview = false
+    @State private var isFavorite: Bool = false
     @State private var isRefreshing = false
     @State private var refreshID = UUID()
     @FocusState private var isMoreButtonFocused: Bool
@@ -184,6 +186,21 @@ struct MediaDetailView: View {
         .fullScreenCover(item: $showingEpisodeDetail) { episode in
             MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle)
         }
+        .sheet(isPresented: $showingFullOverview) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text(item.name ?? "Overview")
+                        .font(Typography.headlineSmall)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                    Text(item.overview ?? "")
+                        .font(Typography.body)
+                        .foregroundStyle(SashimiTheme.textSecondary)
+                }
+                .padding(Spacing.xl)
+                .frame(maxWidth: 1100, alignment: .leading)
+            }
+            .background(SashimiTheme.background)
+        }
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -203,6 +220,7 @@ struct MediaDetailView: View {
         .onAppear {
             isWatched = item.userData?.played ?? false
             hasProgress = item.progressPercent > 0
+            isFavorite = item.userData?.isFavorite ?? false
         }
         .onChange(of: showingPlayer) { _, isShowing in
             if !isShowing {
@@ -233,8 +251,28 @@ struct MediaDetailView: View {
 
             isWatched = refreshedItem.userData?.played ?? false
             hasProgress = refreshedItem.progressPercent > 0 && !(refreshedItem.userData?.played ?? false)
+            isFavorite = refreshedItem.userData?.isFavorite ?? false
         } catch {
             // Silently ignore - non-critical refresh
+        }
+    }
+
+    /// Optimistic favorite toggle (reverts on failure), matching toggleWatched.
+    private func toggleFavorite() async {
+        let newState = !isFavorite
+        isFavorite = newState
+        do {
+            if newState {
+                try await JellyfinClient.shared.markFavorite(itemId: item.id)
+            } else {
+                try await JellyfinClient.shared.removeFavorite(itemId: item.id)
+            }
+            ToastManager.shared.show(
+                newState ? "Added to Favorites" : "Removed from Favorites", type: .success
+            )
+        } catch {
+            isFavorite = !newState
+            ToastManager.shared.show("Failed to update favorite")
         }
     }
 
@@ -830,6 +868,23 @@ struct MediaDetailView: View {
             }
 
             Menu {
+                Button {
+                    Task { await toggleFavorite() }
+                } label: {
+                    Label(
+                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                        systemImage: isFavorite ? "heart.fill" : "heart"
+                    )
+                }
+
+                if item.overview?.isEmpty == false {
+                    Button {
+                        showingFullOverview = true
+                    } label: {
+                        Label("Full Overview", systemImage: "text.alignleft")
+                    }
+                }
+
                 Button {
                     showingFileInfo = true
                 } label: {

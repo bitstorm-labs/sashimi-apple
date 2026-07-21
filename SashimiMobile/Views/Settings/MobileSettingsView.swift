@@ -60,6 +60,15 @@ struct MobileSettingsView: View {
                 Toggle("Auto-Skip Intro", isOn: $playbackSettings.autoSkipIntro)
                 Toggle("Auto-Skip Credits", isOn: $playbackSettings.autoSkipCredits)
                 Toggle("Force Direct Play", isOn: $playbackSettings.forceDirectPlay)
+                // tvOS parity — same values as the tvOS Resume Threshold screen
+                Picker("Resume Threshold", selection: $playbackSettings.resumeThresholdSeconds) {
+                    Text("Always resume").tag(0)
+                    Text("30 seconds").tag(30)
+                    Text("1 minute").tag(60)
+                    Text("2 minutes").tag(120)
+                    Text("5 minutes").tag(300)
+                    Text("10 minutes").tag(600)
+                }
             }
 
             // Video Quality Section
