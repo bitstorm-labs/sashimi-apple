@@ -6,7 +6,11 @@ import NukeUI
 // PhoneDetailView handles movies, series, and episodes in one stacked layout - splitting would fragment related display logic
 
 struct PhoneDetailView: View {
-    let item: BaseItemDto
+    // @State (tvOS parity): list/search endpoints omit heavy fields like
+    // People, so the .task refresh swaps in the full item — with a plain
+    // `let`, cast (and other detail-only fields) silently never showed for
+    // items opened from search.
+    @State var item: BaseItemDto
     var libraryName: String?
 
     // MARK: - State (mirrored from MobileDetailView)
@@ -127,6 +131,7 @@ struct PhoneDetailView: View {
         .task {
             if NetworkMonitor.shared.isConnected,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+                item = freshItem
                 isWatched = freshItem.userData?.played ?? false
                 hasProgress = freshItem.progressPercent > 0
             } else {

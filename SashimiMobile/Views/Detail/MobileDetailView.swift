@@ -6,7 +6,11 @@ import NukeUI
 // MobileDetailView handles movies, series, and episodes in one view - splitting would fragment related display logic
 
 struct MobileDetailView: View {
-    let item: BaseItemDto
+    // @State (tvOS parity): list/search endpoints omit heavy fields like
+    // People, so the .task refresh swaps in the full item — with a plain
+    // `let`, cast (and other detail-only fields) silently never showed for
+    // items opened from search.
+    @State var item: BaseItemDto
     var libraryName: String?
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
@@ -219,6 +223,7 @@ struct MobileDetailView: View {
         .task {
             if NetworkMonitor.shared.isConnected,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+                item = freshItem
                 isWatched = freshItem.userData?.played ?? false
                 hasProgress = freshItem.progressPercent > 0
             } else {
