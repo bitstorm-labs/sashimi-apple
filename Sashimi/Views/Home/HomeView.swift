@@ -4,6 +4,12 @@ import SwiftUI
 // HomeView contains the main home screen with multiple tightly-coupled components
 
 struct HomeView: View {
+    /// The parent focus scope (from MainTabView) so the hero can claim default
+    /// focus on Home — otherwise focus lands on the nav rail instead.
+    var focusNamespace: Namespace.ID?
+    /// Fired when the hero first has content — lets the parent pull focus off
+    /// the rail (which grabbed it while the hero was still loading).
+    var onHeroReady: (() -> Void)?
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
     @EnvironmentObject private var sessionManager: SessionManager
@@ -93,6 +99,10 @@ struct HomeView: View {
         .task {
             await viewModel.loadContent()
             homeSettings.updateWithLibraries(viewModel.libraries)
+            if !viewModel.heroItems.isEmpty { onHeroReady?() }
+        }
+        .onChange(of: viewModel.heroItems.count) { _, count in
+            if count > 0 { onHeroReady?() }
         }
         .onAppear {
             // Initial load happens in .task above (and .task re-runs when the
@@ -130,6 +140,7 @@ struct HomeView: View {
                         items: viewModel.heroItems,
                         libraryNames: viewModel.heroItemLibraryNames,
                         currentIndex: $heroIndex,
+                        focusNamespace: focusNamespace,
                         onSelect: { item in
                             // Check if item comes from a library named YouTube
                             let libraryName = viewModel.heroItemLibraryNames[item.id] ?? ""
@@ -189,6 +200,7 @@ struct HeroSection: View {
     let items: [BaseItemDto]
     let libraryNames: [String: String]
     @Binding var currentIndex: Int
+    var focusNamespace: Namespace.ID?
     let onSelect: (BaseItemDto) -> Void
 
     @FocusState private var isFocused: Bool
@@ -466,6 +478,7 @@ struct HeroSection: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .defaultFocus(in: focusNamespace)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Double-tap to view details")
@@ -719,6 +732,20 @@ struct LoadingOverlay: View {
                     .font(.headline)
                     .foregroundStyle(SashimiTheme.textSecondary)
             }
+        }
+    }
+}
+
+private extension View {
+    /// Applies `prefersDefaultFocus` only when a namespace is supplied, so the
+    /// hero claims default focus on Home while leaving previews/other callers
+    /// (no namespace) untouched.
+    @ViewBuilder
+    func defaultFocus(in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            prefersDefaultFocus(true, in: namespace)
+        } else {
+            self
         }
     }
 }

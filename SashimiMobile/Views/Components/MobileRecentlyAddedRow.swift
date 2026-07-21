@@ -56,7 +56,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
                     } label: {
                         Text("See All")
                             .font(MobileTypography.body)
-                            .foregroundStyle(MobileColors.accent)
+                            .foregroundStyle(MobileColors.link)
                     }
                 }
             }

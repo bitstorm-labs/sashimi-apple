@@ -771,7 +771,7 @@ struct PhoneDetailView: View {
                 } label: {
                     Text(overviewExpanded ? "Show Less" : "Show More")
                         .font(MobileTypography.caption)
-                        .foregroundStyle(MobileColors.accent)
+                        .foregroundStyle(MobileColors.link)
                 }
             }
         }

@@ -8,6 +8,10 @@ enum SashimiTheme {
     static let accent = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
     static let highlight = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
+    // Interactive links / action glyphs (See All, Show More, the Continue
+    // Watching play symbol) — the original sky-blue accent, kept distinct from
+    // the purple brand accent so tappable affordances read as links.
+    static let link = Color(red: 0.36, green: 0.68, blue: 0.90)
     // Neutral focus/selection color — kept separate from the purple accent so
     // the ever-present focus ring stays quiet (native-tvOS feel) while purple
     // is reserved for deliberate accents (scrubber, progress, selected state).
