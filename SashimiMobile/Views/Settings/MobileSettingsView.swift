@@ -157,14 +157,8 @@ struct MobileAddServerSheet: View {
 
     var body: some View {
         NavigationStack {
-            MobileAuthView()
-                .navigationTitle("Add Server")
+            MobileAuthView(onCancel: { dismiss() })
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                }
         }
         .onAppear { initialCount = sessionManager.servers.count }
         .onChange(of: sessionManager.servers.count) { _, newCount in
