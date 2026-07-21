@@ -20,16 +20,6 @@ struct MobileAuthView: View {
         // one (the root login wraps it; the Add Server sheet wraps it with a
         // Cancel toolbar). A nested stack here would shadow that Cancel button.
         Form {
-            if let onCancel {
-                Section {
-                    Button(role: .cancel) {
-                        onCancel()
-                    } label: {
-                        Label("Cancel", systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
             if !showLogin {
                 serverEntrySection
             } else {
