@@ -5,6 +5,7 @@ struct ContinueWatchingRow: View {
     var libraryNames: [String: String] = [:]  // Item ID -> Library name mapping
     let onSelect: (BaseItemDto) -> Void
     var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
+    var onSeeAll: (() -> Void)?  // Optional: opens the full Continue Watching grid
 
     private func isYouTube(_ item: BaseItemDto) -> Bool {
         guard let libraryName = libraryNames[item.id] else { return false }
@@ -28,11 +29,49 @@ struct ContinueWatchingRow: View {
                             onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
                         )
                     }
+
+                    // Trailing "See All" card opens the full grid (only when
+                    // the row is at its cap, so it isn't noise on short rows)
+                    if let onSeeAll, items.count >= 10 {
+                        SeeAllCard(action: onSeeAll)
+                    }
                 }
                 .padding(.horizontal, 80)
                 .padding(.vertical, 20)
             }
         }
+    }
+}
+
+/// Trailing card at the end of the Continue Watching row that opens the full
+/// grid (ContinueWatchingDetailView) — same footprint as a CW card.
+private struct SeeAllCard: View {
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 12) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 44))
+                Text("See All")
+                    .font(.system(size: 24, weight: .semibold))
+            }
+            .foregroundStyle(isFocused ? SashimiTheme.textPrimary : SashimiTheme.textSecondary)
+            .frame(width: 440, height: 248)
+            .background(SashimiTheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
+            )
+            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .accessibilityLabel("See all Continue Watching")
     }
 }
 

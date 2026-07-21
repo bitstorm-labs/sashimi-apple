@@ -1,19 +1,69 @@
 import NukeUI
 import SwiftUI
 
+/// Last-10 search queries, persisted to UserDefaults (tvOS/Roku parity).
+private enum RecentSearches {
+    private static let key = "recentSearches"
+    private static let maxCount = 10
+
+    static func load() -> [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    static func add(_ query: String) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return load() }
+        var list = load().filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+        list.insert(trimmed, at: 0)
+        list = Array(list.prefix(maxCount))
+        UserDefaults.standard.set(list, forKey: key)
+        return list
+    }
+
+    static func clear() -> [String] {
+        UserDefaults.standard.removeObject(forKey: key)
+        return []
+    }
+}
+
 struct MobileSearchView: View {
     @State private var searchText = ""
     @State private var searchResults: [BaseItemDto] = []
     @State private var isSearching = false
+    @State private var recentSearches: [String] = RecentSearches.load()
+    // Only commit a query to history after the user pauses typing on a query
+    // that returned results (avoids logging every keystroke prefix).
+    @State private var historyTask: Task<Void, Never>?
 
     var body: some View {
         List {
             if searchText.isEmpty {
-                ContentUnavailableView(
-                    "Search",
-                    systemImage: "magnifyingglass",
-                    description: Text("Search for movies, shows, and more.")
-                )
+                if recentSearches.isEmpty {
+                    ContentUnavailableView(
+                        "Search",
+                        systemImage: "magnifyingglass",
+                        description: Text("Search for movies, shows, and more.")
+                    )
+                } else {
+                    Section {
+                        ForEach(recentSearches, id: \.self) { query in
+                            Button {
+                                searchText = query
+                            } label: {
+                                Label(query, systemImage: "clock.arrow.circlepath")
+                                    .foregroundStyle(MobileColors.textPrimary)
+                            }
+                        }
+                        Button {
+                            recentSearches = RecentSearches.clear()
+                        } label: {
+                            Text("Clear Recent Searches")
+                                .foregroundStyle(MobileColors.link)
+                        }
+                    } header: {
+                        Text("Recent Searches")
+                    }
+                }
             } else if isSearching {
                 HStack {
                     Spacer()
@@ -42,6 +92,15 @@ struct MobileSearchView: View {
         .onChange(of: searchText) { _, newValue in
             Task {
                 await performSearch(query: newValue)
+            }
+            // Debounced history commit: only record queries the user settled
+            // on (1.5s pause) that produced results.
+            historyTask?.cancel()
+            let query = newValue
+            historyTask = Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled, !query.isEmpty, !searchResults.isEmpty else { return }
+                recentSearches = RecentSearches.add(query)
             }
         }
     }

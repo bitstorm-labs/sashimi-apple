@@ -9,6 +9,8 @@ struct MobileDetailView: View {
     let item: BaseItemDto
     var libraryName: String?
     @State private var playingItem: BaseItemDto?
+    @State private var startOverItem: BaseItemDto?
+    @State private var overviewExpanded = false
     @State private var seasons: [BaseItemDto] = []
     @State private var episodes: [BaseItemDto] = []
     @State private var selectedSeason: BaseItemDto?
@@ -34,6 +36,14 @@ struct MobileDetailView: View {
     private var isSeries: Bool { item.type == .series }
     private var isEpisode: Bool { item.type == .episode }
     private var isMovie: Bool { item.type == .movie }
+    /// The series whose seasons/episodes this page lists (self for a series,
+    /// the parent for an episode) — drives the shared episode machinery.
+    private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
+    /// The episode this page treats as "current": the open episode itself,
+    /// or the series page's next-up.
+    private var currentEpisodeId: String? {
+        isEpisode ? item.id : nextEpisodeToPlay?.id
+    }
 
     // YouTube detection via libraryName or path
     private var isYouTubeStyle: Bool {
@@ -121,26 +131,17 @@ struct MobileDetailView: View {
                         movieHeaderSection
                     }
 
-                    // Overview
-                    if let overview = item.overview, !overview.isEmpty {
-                        Text(overview)
-                            .font(MobileTypography.body)
-                            .foregroundStyle(MobileColors.textSecondary)
-                            .lineLimit(4)
-                            .frame(maxWidth: UIScreen.main.bounds.width * 0.5, alignment: .leading)
-                    }
+                    // Overview — expandable, URL-stripped (phone parity)
+                    overviewSection
                 }
                 .padding(.horizontal, MobileSpacing.md)
                 .padding(.top, MobileSpacing.sm)
 
-                // Seasons & Episodes for series
-                if isSeries {
+                // Seasons & Episodes — series AND episode detail both get the
+                // season-tab selector (phone parity); episodes title the list
+                // "More Episodes".
+                if isSeries || isEpisode {
                     seasonsSection
-                }
-
-                // More Episodes for episode detail
-                if isEpisode {
-                    moreEpisodesSection
                 }
 
                 // Cast section
@@ -209,6 +210,7 @@ struct MobileDetailView: View {
             .ignoresSafeArea()
         }
         .fullScreenPlayer(item: $playingItem)
+        .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
                 MobileDetailView(item: episode, libraryName: libraryName)
@@ -464,6 +466,42 @@ struct MobileDetailView: View {
         }
     }
 
+    // MARK: - Overview Section
+
+    private func stripURLs(_ text: String) -> String {
+        // swiftlint:disable:next force_try
+        let regex = try! NSRegularExpression(pattern: "https?://\\S+", options: [])
+        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @ViewBuilder
+    private var overviewSection: some View {
+        let cleanOverview = stripURLs(item.overview ?? "")
+        if !cleanOverview.isEmpty {
+            VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+                Text(cleanOverview)
+                    .font(MobileTypography.body)
+                    .foregroundStyle(MobileColors.textSecondary)
+                    .lineLimit(overviewExpanded ? 50 : 4)
+
+                Button {
+                    withAnimation(.easeInOut(duration: MobileAnimation.normal)) {
+                        overviewExpanded.toggle()
+                    }
+                } label: {
+                    Text(overviewExpanded ? "Show Less" : "Show More")
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.link)
+                }
+            }
+            // Keep the text in the left column so it doesn't run under the
+            // right-side backdrop (expanded text just grows downward).
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.5, alignment: .leading)
+        }
+    }
+
     // MARK: - Ratings Row
 
     @ViewBuilder
@@ -510,9 +548,41 @@ struct MobileDetailView: View {
                     mediaInfoBadge(formatCodec(videoCodec))
                 }
                 if let audioCodec = info.audioCodec, let channels = info.audioChannels {
-                    mediaInfoBadge("\(formatCodec(audioCodec)) \(formatChannels(channels))")
+                    audioInfoBadge(codec: audioCodec, channels: channels)
                 }
             }
+        }
+    }
+
+    /// Audio badge with the real Dolby/DTS wordmark where available (tvOS/phone parity)
+    @ViewBuilder
+    private func audioInfoBadge(codec: String, channels: Int) -> some View {
+        if let logoName = audioCodecLogoName(codec) {
+            HStack(spacing: 4) {
+                Image(logoName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 10)
+                Text(formatChannels(channels))
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 4).fill(MobileColors.cardBackground))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.3), lineWidth: 1))
+        } else {
+            mediaInfoBadge("\(formatCodec(codec)) \(formatChannels(channels))")
+        }
+    }
+
+    private func audioCodecLogoName(_ codec: String) -> String? {
+        switch codec.uppercased() {
+        case "AC3": return "DolbyDigital"
+        case "EAC3": return "DolbyDigitalPlus"
+        case "TRUEHD": return "DolbyTrueHD"
+        case "DTS", "DCA": return "DTS"
+        default: return nil
         }
     }
 
@@ -585,6 +655,18 @@ struct MobileDetailView: View {
                     .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
+
+                if epHasProgress {
+                    Button {
+                        startOverItem = nextEp
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 20))
+                            .foregroundStyle(MobileColors.textSecondary)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                }
             }
 
             Button {
@@ -594,6 +676,18 @@ struct MobileDetailView: View {
                     .font(.system(size: 14, weight: .semibold))
             }
             .buttonStyle(.bordered)
+
+            if (item.localTrailerCount ?? 0) > 0 {
+                Button {
+                    Task { await playLocalTrailer() }
+                } label: {
+                    Image(systemName: "film")
+                        .font(.system(size: 20))
+                        .foregroundStyle(MobileColors.textSecondary)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
 
             watchedButton
 
@@ -676,6 +770,18 @@ struct MobileDetailView: View {
             }
             .buttonStyle(.borderedProminent)
 
+            if hasProgress {
+                Button {
+                    startOverItem = item
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 20))
+                        .foregroundStyle(MobileColors.textSecondary)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
@@ -710,6 +816,18 @@ struct MobileDetailView: View {
                     .font(.system(size: 14, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
+
+            if hasProgress {
+                Button {
+                    startOverItem = item
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 20))
+                        .foregroundStyle(MobileColors.textSecondary)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
 
             watchedButton
 
@@ -765,7 +883,7 @@ struct MobileDetailView: View {
                             Button {
                                 selectedSeason = season
                                 Task {
-                                    await loadEpisodesForSeason(seriesId: item.id, season: season)
+                                    await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
                                 }
                             } label: {
                                 Text(season.name ?? "Season")
@@ -789,7 +907,7 @@ struct MobileDetailView: View {
                     .frame(height: 150)
             } else if !episodes.isEmpty {
                 VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                    Text("Episodes")
+                    Text(isEpisode ? "More Episodes" : "Episodes")
                         .font(MobileTypography.headline)
                         .foregroundStyle(MobileColors.textPrimary)
                         .padding(.horizontal, MobileSpacing.md)
@@ -799,7 +917,7 @@ struct MobileDetailView: View {
                             ForEach(episodes) { episode in
                                 MobileEpisodeCard(
                                     episode: episode,
-                                    isCurrentEpisode: episode.id == nextEpisodeToPlay?.id,
+                                    isCurrentEpisode: episode.id == currentEpisodeId,
                                     isYouTube: isYouTubeStyle
                                 ) {
                                     showingEpisodeDetail = episode
@@ -808,33 +926,6 @@ struct MobileDetailView: View {
                         }
                         .padding(.horizontal, MobileSpacing.md)
                     }
-                }
-            }
-        }
-    }
-
-    // MARK: - More Episodes Section
-
-    private var moreEpisodesSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            if !episodes.isEmpty {
-                Text("More Episodes")
-                    .font(MobileTypography.headline)
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .padding(.horizontal, MobileSpacing.md)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: MobileSpacing.md) {
-                        ForEach(episodes) { episode in
-                            MobileEpisodeCard(
-                                episode: episode,
-                                isCurrentEpisode: episode.id == item.id
-                            ) {
-                                showingEpisodeDetail = episode
-                            }
-                        }
-                    }
-                    .padding(.horizontal, MobileSpacing.md)
                 }
             }
         }
@@ -965,7 +1056,11 @@ struct MobileDetailView: View {
             seriesCommunityRating = series?.communityRating
             seriesCriticRating = series?.criticRating
 
+            // Full season list so episode detail gets the season selector
+            // (phone parity), defaulting to this episode's own season.
+            seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesId)) ?? []
             if let seasonId = item.seasonId {
+                selectedSeason = seasons.first { $0.id == seasonId }
                 episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: seasonId)
             }
         } catch {
@@ -1193,8 +1288,12 @@ struct MobileEpisodeCard: View {
                         if !isYouTube, let ep = episode.indexNumber {
                             Text("E\(ep)")
                         }
+                        if let aired = shortAirDateText {
+                            let prefix = (!isYouTube && episode.indexNumber != nil) ? "• " : ""
+                            Text("\(prefix)\(aired)")
+                        }
                         if let runtime = episode.runTimeTicks {
-                            let prefix = isYouTube ? "" : "• "
+                            let prefix = (isYouTube && shortAirDateText == nil) ? "" : "• "
                             Text("\(prefix)\(runtime / 10_000_000 / 60) min")
                         }
                     }
@@ -1205,6 +1304,17 @@ struct MobileEpisodeCard: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Air date as "Nov 8, 2024" (phone parity)
+    private var shortAirDateText: String? {
+        guard let raw = episode.premiereDate else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d, yyyy"
+        return fmt.string(from: date)
     }
 }
 

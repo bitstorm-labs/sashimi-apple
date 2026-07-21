@@ -42,6 +42,13 @@ struct SashimiMobileApp: App {
 struct ContentView: View {
     @EnvironmentObject var sessionManager: SessionManager
 
+    // sashimi:// deep links (play/{id}, item/{id}) — mirrors the tvOS handler.
+    // Links arriving before session restore completes are stashed and replayed
+    // once authentication flips; latest link wins.
+    @State private var deepLinkDestination: DeepLinkDestination?
+    @State private var pendingDeepLink: DeepLink?
+    @State private var deepLinkTask: Task<Void, Never>?
+
     // Pick the layout by DEVICE TYPE (stable), not horizontalSizeClass (transient).
     // The size class flips .compact -> .regular when an iPhone Plus/Pro Max rotates
     // to landscape, which would swap the entire root view (PhoneTabView <-> the iPad
@@ -90,6 +97,64 @@ struct ContentView: View {
         }
         .task {
             await sessionManager.restoreSession()
+        }
+        .onOpenURL { url in
+            handleDeepLink(url)
+        }
+        .onChange(of: sessionManager.isAuthenticated) { _, isAuthenticated in
+            if isAuthenticated {
+                if let link = pendingDeepLink {
+                    pendingDeepLink = nil
+                    resolveDeepLink(link)
+                }
+            } else {
+                pendingDeepLink = nil
+                deepLinkTask?.cancel()
+                deepLinkDestination = nil
+            }
+        }
+        .fullScreenCover(item: $deepLinkDestination) { destination in
+            switch destination {
+            case .play(let item):
+                MobilePlayerView(item: item)
+            case .detail(let item):
+                NavigationStack {
+                    AdaptiveDetailView(item: item)
+                        // Modal root has no back button and fullScreenCover has
+                        // no swipe-to-dismiss — without this the user is stuck.
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { deepLinkDestination = nil }
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func handleDeepLink(_ url: URL) {
+        guard let link = DeepLink(url: url) else { return }
+        guard sessionManager.isAuthenticated else {
+            pendingDeepLink = link
+            return
+        }
+        resolveDeepLink(link)
+    }
+
+    @MainActor
+    private func resolveDeepLink(_ link: DeepLink) {
+        // Last link wins: cancel any in-flight resolution.
+        deepLinkTask?.cancel()
+        deepLinkTask = Task {
+            guard let item = try? await JellyfinClient.shared.getItem(itemId: link.itemId),
+                  !Task.isCancelled else { return }
+            switch link.action {
+            case .play:
+                deepLinkDestination = .play(item)
+            case .item:
+                deepLinkDestination = .detail(item)
+            }
         }
     }
 }

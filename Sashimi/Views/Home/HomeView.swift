@@ -165,6 +165,9 @@ struct HomeView: View {
                         },
                         onPlay: { item in
                             playingItem = item
+                        },
+                        onSeeAll: {
+                            showContinueWatchingDetail = true
                         }
                     )
                     .focusSection()
