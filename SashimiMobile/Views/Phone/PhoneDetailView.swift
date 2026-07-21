@@ -38,6 +38,12 @@ struct PhoneDetailView: View {
     // Fail-closed: hide Original in the season/bulk menu unless the representative
     // first episode is confirmed device-compatible.
     @State private var seasonOriginalAllowed = false
+    // Admin menu (tvOS parity): File Info / Refresh Metadata / Delete
+    @State private var showingFileInfo = false
+    @State private var showingDeleteConfirm = false
+    @State private var isRefreshing = false
+    @State private var adminError: String?
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     // MARK: - Computed Properties
@@ -151,6 +157,77 @@ struct PhoneDetailView: View {
         .onChange(of: episodes.first?.id) { _, _ in
             seasonOriginalAllowed = false
             Task { await refreshSeasonOriginalAllowed() }
+        }
+        .alert("File Info", isPresented: $showingFileInfo) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(mediaInfo?.path ?? item.path ?? "Path not available")
+        }
+        .confirmationDialog("Delete Item", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                Task { await deleteItem() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to delete this item? This cannot be undone.")
+        }
+        .alert("Error", isPresented: .constant(adminError != nil)) {
+            Button("OK") { adminError = nil }
+        } message: {
+            Text(adminError ?? "")
+        }
+    }
+
+    // MARK: - Admin Menu (tvOS parity)
+
+    /// File Info / Refresh Metadata / Delete — online only.
+    private var adminMenu: some View {
+        Menu {
+            Button {
+                showingFileInfo = true
+            } label: {
+                Label("File Info", systemImage: "info.circle")
+            }
+            Button {
+                Task { await refreshMetadata() }
+            } label: {
+                Label(isRefreshing ? "Refreshing..." : "Refresh Metadata", systemImage: "arrow.clockwise")
+            }
+            .disabled(isRefreshing)
+            Button(role: .destructive) {
+                showingDeleteConfirm = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 16))
+        }
+        .buttonStyle(.bordered)
+        .tint(.white)
+    }
+
+    private func refreshMetadata() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            try await JellyfinClient.shared.refreshMetadata(itemId: item.id)
+            // Give the server a beat, then pull the refreshed item.
+            try? await Task.sleep(for: .seconds(2))
+            if let fresh = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+                item = fresh
+            }
+        } catch {
+            adminError = "Failed to refresh metadata: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteItem() async {
+        do {
+            try await JellyfinClient.shared.deleteItem(itemId: item.id)
+            dismiss()
+        } catch {
+            adminError = "Failed to delete: \(error.localizedDescription)"
         }
     }
 
@@ -625,6 +702,10 @@ struct PhoneDetailView: View {
                 }
             }
 
+            if NetworkMonitor.shared.isConnected {
+                adminMenu
+            }
+
             Spacer()
         }
         .alert("Download Unwatched Episodes", isPresented: $showingNextNAlert) {
@@ -691,6 +772,10 @@ struct PhoneDetailView: View {
                 .tint(.white)
             }
 
+            if NetworkMonitor.shared.isConnected {
+                adminMenu
+            }
+
             Spacer()
         }
     }
@@ -731,6 +816,7 @@ struct PhoneDetailView: View {
 
             if NetworkMonitor.shared.isConnected {
                 DownloadButton(item: item, quality: nil)
+                adminMenu
             }
 
             Spacer()
