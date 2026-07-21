@@ -153,6 +153,7 @@ struct MainTabView: View {
     // (so the rail rests collapsed). Drives the pullout expansion.
     @FocusState private var focusedNav: NavID?
     @Namespace private var mainScope
+    @Namespace private var railScope
     @State private var selection: NavID = .home
     @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
@@ -190,6 +191,9 @@ struct MainTabView: View {
                 .focusable(didInitialHomeFocus && focusedNav == nil)
                 .focusEffectDisabled()
                 .padding(.leading, railWidth)
+                // Its own focus section so it competes on equal footing with
+                // the rail's section for the leftward beam.
+                .focusSection()
 
             sidebar
         }
@@ -199,8 +203,16 @@ struct MainTabView: View {
         .task { await loadLibraries() }
         // Focus-driven: moving focus onto a nav item switches the content
         // behind the blur immediately — no click needed (Plex behavior).
-        .onChange(of: focusedNav) { _, newValue in
+        .onChange(of: focusedNav) { old, newValue in
             if let newValue, newValue != .avatar {
+                // Entering the rail from content: land on the CURRENT
+                // section's row, not whatever geometry picked — otherwise
+                // focus-follows-selection immediately switches the content
+                // underneath the user.
+                if old == nil, newValue != selection {
+                    focusedNav = selection
+                    return
+                }
                 selection = newValue
             }
         }
@@ -361,6 +373,9 @@ struct MainTabView: View {
                 .ignoresSafeArea()
         }
         .animation(.easeInOut(duration: 0.28), value: expanded)
+        // Scope so prefersDefaultFocus can steer entry to the current
+        // section's row (the onChange snap is the deterministic fallback).
+        .focusScope(railScope)
         .focusSection()
     }
 
@@ -387,6 +402,7 @@ struct MainTabView: View {
         }
         .buttonStyle(SidebarButtonStyle())
         .focused($focusedNav, equals: id)
+        .prefersDefaultFocus(id == selection, in: railScope)
     }
 
     /// Soft accent highlight in place of the tvOS default white focus platter.
