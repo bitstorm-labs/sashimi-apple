@@ -59,6 +59,14 @@ struct MobileHomeView: View {
     @ViewBuilder
     private func rowView(for row: HomeRowConfig) -> some View {
         switch row.type {
+        case .builtIn(.hero):
+            if !viewModel.heroItems.isEmpty {
+                MobileHeroBanner(
+                    items: viewModel.heroItems,
+                    libraryNames: viewModel.heroItemLibraryNames
+                )
+            }
+
         case .builtIn(.continueWatching):
             if !viewModel.continueWatchingItems.isEmpty {
                 let libNames = viewModel.continueWatchingLibraryNames
