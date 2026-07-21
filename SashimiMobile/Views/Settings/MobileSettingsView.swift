@@ -3,6 +3,17 @@ import SwiftUI
 struct MobileSettingsView: View {
     @ObservedObject private var sessionManager = SessionManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
+
+    /// Same list as the tvOS LanguagePickerView.
+    private static let languages: [(code: String, name: String)] = [
+        ("", "System Default"), ("en", "English"), ("es", "Spanish"),
+        ("fr", "French"), ("de", "German"), ("it", "Italian"),
+        ("pt", "Portuguese"), ("ja", "Japanese"), ("ko", "Korean"),
+        ("zh", "Chinese"), ("ru", "Russian"), ("ar", "Arabic"),
+        ("hi", "Hindi"), ("nl", "Dutch"), ("pl", "Polish"),
+        ("sv", "Swedish"), ("da", "Danish"), ("no", "Norwegian"),
+        ("fi", "Finnish")
+    ]
     @State private var showingDeleteAllDownloads = false
     @State private var showAddServer = false
 
@@ -68,6 +79,24 @@ struct MobileSettingsView: View {
                     Text("2 minutes").tag(120)
                     Text("5 minutes").tag(300)
                     Text("10 minutes").tag(600)
+                }
+            }
+
+            // Language Section (tvOS parity — same AppStorage keys, so the
+            // shared PlayerViewModel track selection honors these)
+            Section("Language") {
+                Picker("Audio Language", selection: $playbackSettings.preferredAudioLanguage) {
+                    ForEach(Self.languages, id: \.code) { language in
+                        Text(language.name).tag(language.code)
+                    }
+                }
+                Toggle("Enable Subtitles", isOn: $playbackSettings.subtitlesEnabled)
+                if playbackSettings.subtitlesEnabled {
+                    Picker("Subtitle Language", selection: $playbackSettings.preferredSubtitleLanguage) {
+                        ForEach(Self.languages, id: \.code) { language in
+                            Text(language.name).tag(language.code)
+                        }
+                    }
                 }
             }
 
