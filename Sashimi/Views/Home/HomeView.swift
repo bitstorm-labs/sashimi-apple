@@ -475,11 +475,15 @@ struct HeroSection: View {
                 RoundedRectangle(cornerRadius: 24)
                     .stroke(SashimiTheme.focus.opacity(isFocused ? 0.6 : 0), lineWidth: 4)
             )
-            .padding(.horizontal, 50)
             .scaleEffect(isFocused ? 1.01 : 1.0)
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
+        // Padding OUTSIDE the button: with it inside, the hero's focus frame
+        // stretched to the rail seam and covered the invisible double-press
+        // buffer — the focus engine saw the buffer as inside the hero and
+        // skipped straight to the rail on a single left press.
+        .padding(.horizontal, 50)
         .focused($isFocused)
         .defaultFocus(in: focusNamespace)
         .accessibilityElement(children: .combine)
