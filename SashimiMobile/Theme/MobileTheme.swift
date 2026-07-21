@@ -9,6 +9,10 @@ enum MobileColors {
     // scrubber. On-brand with the logo/badges but calmer than the full-
     // saturation #BD3EED, which stays reserved for the quality badges.
     static let accent = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
+    // Interactive links / action glyphs (See All, Show More, the Continue
+    // Watching play symbol) — the original sky-blue accent, distinct from the
+    // purple brand accent so tappable affordances read as links.
+    static let link = Color(red: 0.36, green: 0.68, blue: 0.90)
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
     static let textPrimary = Color.white
     static let textSecondary = Color(white: 0.75)

@@ -1184,7 +1184,7 @@ struct AddServerSheet: View {
     @State private var initialCount = 0
 
     var body: some View {
-        ServerConnectionView()
+        ServerConnectionView(onCancel: { dismiss() })
             .onAppear { initialCount = sessionManager.servers.count }
             .onChange(of: sessionManager.servers.count) { _, newCount in
                 if newCount > initialCount { dismiss() }
