@@ -2,12 +2,14 @@ import Foundation
 import SwiftUI
 
 enum HomeRowType: String, Codable, Identifiable, CaseIterable {
+    case hero = "hero"
     case continueWatching = "continue_watching"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
+        case .hero: return "Featured (iPad)"
         case .continueWatching: return "Continue Watching"
         }
     }
@@ -53,9 +55,16 @@ final class HomeRowSettings: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
            let savedRows = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
             rows = savedRows
+            // Migration: configs saved before the hero row existed get it
+            // injected up top (enabled — it's the new default look on iPad).
+            if !rows.contains(where: { $0.type == .builtIn(.hero) }) {
+                rows.insert(HomeRowConfig(type: .builtIn(.hero), isEnabled: true), at: 0)
+                saveRows()
+            }
         } else {
-            // Default order - just Continue Watching, libraries added dynamically
+            // Default order - hero, Continue Watching; libraries added dynamically
             rows = [
+                HomeRowConfig(type: .builtIn(.hero), isEnabled: true),
                 HomeRowConfig(type: .builtIn(.continueWatching), isEnabled: true)
             ]
         }
