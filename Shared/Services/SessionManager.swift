@@ -168,12 +168,30 @@ final class SessionManager: ObservableObject {
 
         let result = try await JellyfinClient.shared.authenticate(username: username, password: password)
 
-        if servers.contains(where: { $0.url == serverURL && $0.userId == result.user.id }) {
-            // Restore the previously active server's client config.
-            if let current = activeServer, let token = KeychainHelper.get(forKey: tokenKey(current.id)) {
-                await activate(current, token: token)
+        if let existing = servers.first(where: { $0.url == serverURL && $0.userId == result.user.id }) {
+            // Server is already saved. If there's a live session for it, this is
+            // a genuine duplicate add — restore the active client and report it.
+            // Otherwise the entry survived a session-expiry/sign-out (token was
+            // dropped but the entry kept), so the user is re-authenticating:
+            // recover by re-saving the fresh token and reactivating, instead of
+            // stranding them on "already connected to that one".
+            let hasLiveSession = isAuthenticated
+                && activeServerId == existing.id
+                && KeychainHelper.get(forKey: tokenKey(existing.id)) != nil
+            if hasLiveSession {
+                if let current = activeServer, let token = KeychainHelper.get(forKey: tokenKey(current.id)) {
+                    await activate(current, token: token)
+                }
+                throw SessionError.duplicateServer
             }
-            throw SessionError.duplicateServer
+            guard KeychainHelper.save(result.accessToken, forKey: tokenKey(existing.id)) else {
+                await JellyfinClient.shared.clearCredentials()
+                throw SessionError.credentialStorageFailed
+            }
+            activeServerId = existing.id
+            saveServers()
+            await activate(existing, token: result.accessToken)
+            return
         }
 
         var serverName = serverURL.host ?? "Jellyfin"
@@ -208,6 +226,15 @@ final class SessionManager: ObservableObject {
     }
 
     /// Switch the active server (no-op if already active or unknown).
+    /// Re-point the shared client at the active server + token. Call after an
+    /// Add Server probe (which repoints the shared client at the candidate
+    /// server) so the live session keeps working when the sheet closes.
+    func restoreActiveClient() async {
+        guard let server = activeServer,
+              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else { return }
+        await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+    }
+
     func switchServer(to id: String) async {
         guard id != activeServerId,
               let server = servers.first(where: { $0.id == id }),
