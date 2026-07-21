@@ -204,6 +204,19 @@ struct MainTabView: View {
                 selection = newValue
             }
         }
+        // Re-auth a saved server whose session expired: picking it in the
+        // switcher raises reauthServer; present a prefilled login for it.
+        .fullScreenCover(item: $sessionManager.reauthServer) { server in
+            ServerConnectionView(
+                onCancel: { sessionManager.reauthServer = nil },
+                onComplete: { sessionManager.reauthServer = nil },
+                prefillServerURL: server.url,
+                prefillUsername: server.username
+            )
+            .onDisappear {
+                Task { await sessionManager.restoreActiveClient() }
+            }
+        }
     }
 
     private func loadLibraries() async {

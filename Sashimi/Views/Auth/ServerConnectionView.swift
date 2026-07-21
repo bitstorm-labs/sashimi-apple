@@ -27,10 +27,20 @@ enum ServerValidationState: Equatable {
 
 // MARK: - Server Connection View
 
+// Single-screen connection form: server entry, discovery, and login steps all
+// live here, so the body runs a little long.
+// swiftlint:disable:next type_body_length
 struct ServerConnectionView: View {
     /// When presented as a sheet (Add Server), this provides an explicit,
     /// always-focusable way out — the initial login screen leaves it nil.
     var onCancel: (() -> Void)?
+    /// Called after a successful sign-in — lets a presenting cover dismiss even
+    /// when no new server was added (re-authenticating an existing one).
+    var onComplete: (() -> Void)?
+    /// Pre-fill for re-authenticating a saved server whose session expired:
+    /// the server + username are filled and focus jumps to the password.
+    var prefillServerURL: URL?
+    var prefillUsername: String?
 
     @EnvironmentObject private var sessionManager: SessionManager
     @StateObject private var serverDiscovery = ServerDiscovery()
@@ -267,7 +277,17 @@ struct ServerConnectionView: View {
             }
         }
         .onAppear {
-            focusedField = .serverAddress
+            if let prefillServerURL {
+                serverAddress = prefillServerURL.absoluteString
+                validateServerAddress(serverAddress)
+                if let prefillUsername {
+                    username = prefillUsername
+                    validateUsername(prefillUsername)
+                }
+                focusedField = .password
+            } else {
+                focusedField = .serverAddress
+            }
         }
     }
 
@@ -376,6 +396,7 @@ struct ServerConnectionView: View {
         Task {
             do {
                 try await sessionManager.login(serverURL: url, username: username, password: password)
+                onComplete?()
             } catch {
                 errorMessage = error.localizedDescription
             }
