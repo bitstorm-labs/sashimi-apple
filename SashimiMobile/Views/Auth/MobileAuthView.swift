@@ -11,20 +11,21 @@ struct MobileAuthView: View {
     @State private var normalizedServerURL: URL?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                if !showLogin {
-                    serverEntrySection
-                } else {
-                    loginSection
-                }
+        // No NavigationStack here on purpose: this view is always hosted inside
+        // one (the root login wraps it; the Add Server sheet wraps it with a
+        // Cancel toolbar). A nested stack here would shadow that Cancel button.
+        Form {
+            if !showLogin {
+                serverEntrySection
+            } else {
+                loginSection
             }
-            .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
-            }
+        }
+        .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
+        .alert("Error", isPresented: .constant(errorMessage != nil)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 
