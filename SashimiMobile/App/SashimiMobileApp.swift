@@ -120,6 +120,13 @@ struct ContentView: View {
             case .detail(let item):
                 NavigationStack {
                     AdaptiveDetailView(item: item)
+                        // Modal root has no back button and fullScreenCover has
+                        // no swipe-to-dismiss — without this the user is stuck.
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { deepLinkDestination = nil }
+                            }
+                        }
                 }
             }
         }
