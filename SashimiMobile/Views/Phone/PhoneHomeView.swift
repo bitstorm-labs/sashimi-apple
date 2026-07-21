@@ -99,10 +99,6 @@ struct PhoneHomeView: View {
     @ViewBuilder
     private func rowView(for row: HomeRowConfig) -> some View {
         switch row.type {
-        case .builtIn(.hero):
-            // Hero is iPad-only (no room on phone); config row hidden there too.
-            EmptyView()
-
         case .builtIn(.continueWatching):
             if !viewModel.continueWatchingItems.isEmpty {
                 let libNames = viewModel.continueWatchingLibraryNames
