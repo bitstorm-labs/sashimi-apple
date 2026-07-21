@@ -127,7 +127,7 @@ struct ContinueWatchingCard: View {
                         HStack(spacing: 10) {
                             Image(systemName: "play.fill")
                                 .font(.caption)
-                                .foregroundStyle(SashimiTheme.accent)
+                                .foregroundStyle(SashimiTheme.link)
 
                             Text(remainingTimeString)
                                 .font(.caption)

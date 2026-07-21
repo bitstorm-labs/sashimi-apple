@@ -127,7 +127,7 @@ struct MobileContinueWatchingCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 10))
-                            .foregroundStyle(MobileColors.accent)
+                            .foregroundStyle(MobileColors.link)
 
                         Text(remainingTimeText)
                             .font(.system(size: 11, weight: .medium))

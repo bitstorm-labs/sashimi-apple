@@ -157,6 +157,10 @@ struct MainTabView: View {
     @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
+    // One-shot: the hero grabs focus once on cold launch (the rail otherwise
+    // steals it while content is still loading). Also gates the edge guard so
+    // it doesn't interfere with that initial focus resolution.
+    @State private var didInitialHomeFocus = false
 
     private let railWidth: CGFloat = 120
     private let panelWidth: CGFloat = 340
@@ -173,6 +177,19 @@ struct MainTabView: View {
                 // Content wins initial focus so the app opens with the rail
                 // resting (collapsed), not auto-expanded onto Home.
                 .prefersDefaultFocus(true, in: mainScope)
+
+            // Invisible focus buffer at the rail/content seam. From content,
+            // one left press lands here (nothing visible happens); a second
+            // left press crosses into the rail — so the nav takes a deliberate
+            // double-press, not a single accidental swipe. Inert until the
+            // initial Home focus resolves, and only live while focus is in
+            // content, so exiting the rail stays a single right press.
+            Color.clear
+                .frame(width: 6)
+                .frame(maxHeight: .infinity)
+                .focusable(didInitialHomeFocus && focusedNav == nil)
+                .focusEffectDisabled()
+                .padding(.leading, railWidth)
 
             sidebar
         }
@@ -199,7 +216,7 @@ struct MainTabView: View {
     private var content: some View {
         switch selection {
         case .home, .avatar:
-            HomeView()
+            HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
         case .search:
             SearchView(onBackAtRoot: { selection = .home })
         case .settings:
@@ -209,8 +226,20 @@ struct MainTabView: View {
                 LibraryDetailView(library: LibraryView_Model(from: lib))
                     .id(id)  // rebuild the grid when switching libraries
             } else {
-                HomeView()
+                HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
             }
+        }
+    }
+
+    /// Cold-launch focus fix: the rail grabs focus while the hero is still
+    /// loading, so once the hero has content, drop rail focus and let the
+    /// hero (the mainScope default-focus target) take it. Runs once; the edge
+    /// guard is armed a beat later so it can't interfere with this handoff.
+    private func handleHeroReady() {
+        guard !didInitialHomeFocus, selection == .home || selection == .avatar else { return }
+        focusedNav = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            didInitialHomeFocus = true
         }
     }
 

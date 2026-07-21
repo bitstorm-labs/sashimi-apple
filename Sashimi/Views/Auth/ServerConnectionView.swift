@@ -28,6 +28,10 @@ enum ServerValidationState: Equatable {
 // MARK: - Server Connection View
 
 struct ServerConnectionView: View {
+    /// When presented as a sheet (Add Server), this provides an explicit,
+    /// always-focusable way out — the initial login screen leaves it nil.
+    var onCancel: (() -> Void)?
+
     @EnvironmentObject private var sessionManager: SessionManager
     @StateObject private var serverDiscovery = ServerDiscovery()
 
@@ -248,6 +252,20 @@ struct ServerConnectionView: View {
             .frame(maxWidth: 600)
         }
         .padding(80)
+        .overlay(alignment: .topLeading) {
+            if let onCancel {
+                Button {
+                    onCancel()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                        Text("Cancel")
+                    }
+                    .font(.callout)
+                }
+                .padding(40)
+            }
+        }
         .onAppear {
             focusedField = .serverAddress
         }
