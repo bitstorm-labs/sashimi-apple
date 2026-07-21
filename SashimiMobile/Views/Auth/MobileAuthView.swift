@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct MobileAuthView: View {
+    /// Provided when shown as the Add Server sheet — renders a Cancel button so
+    /// there's always an obvious way back. nil for the root login (nothing to
+    /// cancel to).
+    var onCancel: (() -> Void)?
+
     @EnvironmentObject var sessionManager: SessionManager
     @State private var serverURL = ""
     @State private var username = ""
@@ -15,6 +20,16 @@ struct MobileAuthView: View {
         // one (the root login wraps it; the Add Server sheet wraps it with a
         // Cancel toolbar). A nested stack here would shadow that Cancel button.
         Form {
+            if let onCancel {
+                Section {
+                    Button(role: .cancel) {
+                        onCancel()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
             if !showLogin {
                 serverEntrySection
             } else {
@@ -22,6 +37,13 @@ struct MobileAuthView: View {
             }
         }
         .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
+        .toolbar {
+            if let onCancel {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+        }
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: {
