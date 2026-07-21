@@ -46,6 +46,7 @@ struct MainNavigationView: View {
     @State private var sidebarWidth: CGFloat = 200
     @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
+    @State private var showAddServer = false
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
@@ -247,11 +248,36 @@ struct MainNavigationView: View {
                 downloadIndicator
             }
 
-            userAvatarView
+            // Quick server switcher (iPad equivalent of the phone's logo-tap
+            // menu) — the avatar was previously display-only.
+            Menu {
+                ForEach(sessionManager.servers) { server in
+                    Button {
+                        Task { await sessionManager.switchServer(to: server.id) }
+                    } label: {
+                        if server.id == sessionManager.activeServerId {
+                            Label(server.name, systemImage: "checkmark")
+                        } else {
+                            Text(server.name)
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    showAddServer = true
+                } label: {
+                    Label("Add Server…", systemImage: "plus")
+                }
+            } label: {
+                userAvatarView
+            }
         }
         .padding(.horizontal, MobileSpacing.md)
         .padding(.vertical, MobileSpacing.sm)
         .background(MobileColors.background)
+        .sheet(isPresented: $showAddServer) {
+            MobileAddServerSheet()
+        }
     }
 
     @ViewBuilder
