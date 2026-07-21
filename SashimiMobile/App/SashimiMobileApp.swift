@@ -67,6 +67,21 @@ struct ContentView: View {
                 .task {
                     await DownloadManager.shared.syncPendingProgress()
                 }
+                // Re-auth a saved server whose session expired: tapping it in
+                // the switcher raises reauthServer; present a prefilled login.
+                .sheet(item: $sessionManager.reauthServer) { server in
+                    NavigationStack {
+                        MobileAuthView(
+                            onCancel: { sessionManager.reauthServer = nil },
+                            onComplete: { sessionManager.reauthServer = nil },
+                            prefillServerURL: server.url
+                        )
+                        .navigationBarTitleDisplayMode(.inline)
+                    }
+                    .onDisappear {
+                        Task { await sessionManager.restoreActiveClient() }
+                    }
+                }
             } else {
                 NavigationStack {
                     MobileAuthView()

@@ -47,6 +47,10 @@ final class SessionManager: ObservableObject {
     @Published private(set) var servers: [ServerConfig] = []
     @Published private(set) var activeServerId: String?
     @Published var logoutReason: LogoutReason?
+    /// Set when the user picks a saved server whose token was dropped by a past
+    /// session expiry — the UI presents a prefilled re-auth for it. Cleared on
+    /// success or cancel.
+    @Published var reauthServer: ServerConfig?
 
     private let serversKey = "servers"
     private let activeServerIdKey = "activeServerId"
@@ -236,9 +240,14 @@ final class SessionManager: ObservableObject {
     }
 
     func switchServer(to id: String) async {
-        guard id != activeServerId,
-              let server = servers.first(where: { $0.id == id }),
-              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else { return }
+        guard id != activeServerId, let server = servers.first(where: { $0.id == id }) else { return }
+        guard let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+            // Token was dropped by a past session expiry (the entry was kept so
+            // the user could re-authenticate). Prompt a prefilled re-auth
+            // instead of silently doing nothing when they tap this server.
+            reauthServer = server
+            return
+        }
         activeServerId = id
         saveServers()
         await activate(server, token: token)

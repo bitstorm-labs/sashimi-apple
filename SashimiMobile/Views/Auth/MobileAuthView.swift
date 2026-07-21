@@ -5,6 +5,12 @@ struct MobileAuthView: View {
     /// there's always an obvious way back. nil for the root login (nothing to
     /// cancel to).
     var onCancel: (() -> Void)?
+    /// Called after a successful sign-in — lets a presenting sheet dismiss even
+    /// when no new server was added (e.g. re-authenticating an existing one).
+    var onComplete: (() -> Void)?
+    /// Pre-fills and jumps straight to the password step for this server (used
+    /// to re-authenticate a saved server whose session expired).
+    var prefillServerURL: URL?
 
     @EnvironmentObject var sessionManager: SessionManager
     @State private var serverURL = ""
@@ -38,6 +44,13 @@ struct MobileAuthView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+        .task {
+            guard let prefillServerURL, !showLogin else { return }
+            await JellyfinClient.shared.configure(serverURL: prefillServerURL)
+            serverURL = prefillServerURL.absoluteString
+            normalizedServerURL = prefillServerURL
+            showLogin = true
         }
     }
 
@@ -165,6 +178,7 @@ struct MobileAuthView: View {
                 try await sessionManager.login(serverURL: url, username: username, password: password)
                 await MainActor.run {
                     isConnecting = false
+                    onComplete?()
                 }
             } catch {
                 await MainActor.run {
