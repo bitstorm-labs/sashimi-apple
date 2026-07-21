@@ -68,7 +68,9 @@ struct ContentView: View {
                     await DownloadManager.shared.syncPendingProgress()
                 }
             } else {
-                MobileAuthView()
+                NavigationStack {
+                    MobileAuthView()
+                }
             }
         }
         .task {
