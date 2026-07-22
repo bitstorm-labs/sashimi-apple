@@ -168,9 +168,6 @@ struct HomeView: View {
                         },
                         onSeeAll: {
                             showContinueWatchingDetail = true
-                        },
-                        onChange: {
-                            Task { await viewModel.refresh() }
                         }
                     )
                     .focusSection()
