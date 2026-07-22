@@ -596,6 +596,25 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let itemId: String? = UserDefaults.standard.dictionary(forKey: Self.taskMapKey)?[String(taskId)] as? String
         guard let itemId else { return }
 
+        // A background download task reports HTTP 4xx/5xx here (not as a
+        // transport error), with the error page as the "downloaded" body.
+        // Without this guard we'd move that page to video.mp4 and mark the
+        // item COMPLETED — a broken file masquerading as a finished download.
+        if let http = downloadTask.response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            Task { @MainActor in
+                self.persistence.updateStatus(itemId: itemId, status: .failed, errorMessage: "Server returned HTTP \(http.statusCode)")
+                self.pendingProgress.removeValue(forKey: itemId)
+                self.activeDownloads.removeValue(forKey: itemId)
+                self.preparingItems.remove(itemId)
+                var map = self.taskIdMap
+                map.removeValue(forKey: self.taskKey(taskId))
+                self.taskIdMap = map
+                self.stateVersion += 1
+                self.dequeueNext()
+            }
+            return
+        }
+
         let destination = DownloadFileManager.videoPath(for: itemId, container: ext)
         let moveError: Error?
         do {
