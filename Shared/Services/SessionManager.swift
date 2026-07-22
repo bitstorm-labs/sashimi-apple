@@ -155,6 +155,14 @@ final class SessionManager: ObservableObject {
         UserDefaults.standard.set(server.url.absoluteString, forKey: "serverURL")
         UserDefaults.standard.set(server.userId, forKey: "userId")
         UserDefaults.standard.set(server.username, forKey: "userName")
+        // The token, too: DownloadURLBuilder and SubtitleManager authorize their
+        // background requests off the global "accessToken" keychain key. Without
+        // this mirror a fresh multi-server install (no legacy token to inherit)
+        // has an empty global key, so every download and external-subtitle fetch
+        // fails instantly with "Could not build download URL". Per-server tokens
+        // live under "accessToken.<id>"; this keeps the active one in the global
+        // slot those two consumers read.
+        _ = KeychainHelper.save(token, forKey: keychainAccessTokenKey)
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
@@ -292,6 +300,9 @@ final class SessionManager: ObservableObject {
                 Task { await removeServer(id: active) }
             }
         }
+        // Clear the mirrored global token so a signed-out app can't authorize a
+        // download/subtitle fetch with the last session's token.
+        KeychainHelper.delete(forKey: keychainAccessTokenKey)
         Task { await JellyfinClient.shared.clearCredentials() }
         self.serverURL = nil
         self.currentUser = nil
