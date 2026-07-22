@@ -6,6 +6,7 @@ struct ContinueWatchingRow: View {
     let onSelect: (BaseItemDto) -> Void
     var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
     var onSeeAll: (() -> Void)?  // Optional: opens the full Continue Watching grid
+    var onChange: (() -> Void)?  // Fired after a card context-menu mutation
 
     private func isYouTube(_ item: BaseItemDto) -> Bool {
         guard let libraryName = libraryNames[item.id] else { return false }
@@ -26,7 +27,8 @@ struct ContinueWatchingRow: View {
                             item: item,
                             isYouTube: isYouTube(item),
                             onSelect: { onSelect(item) },
-                            onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
+                            onPlayPause: onPlay != nil ? { onPlay?(item) } : nil,
+                            onChange: onChange
                         )
                     }
 
@@ -80,6 +82,7 @@ struct ContinueWatchingCard: View {
     var isYouTube: Bool = false  // Whether this is YouTube content
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
+    var onChange: (() -> Void)?  // Fired after a context-menu mutation (row refresh)
 
     @FocusState private var isFocused: Bool
 
@@ -220,6 +223,30 @@ struct ContinueWatchingCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Double-tap to resume playback, or press Play to start immediately")
+        .contextMenu {
+            // Marking a CW EPISODE watched only advances Next Up to the next
+            // episode — the show never leaves the row. Marking the SERIES
+            // watched is the only Jellyfin mechanism that removes it
+            // (verified vs 10.11; there is no hide-from-next-up endpoint).
+            if item.type == .episode, let seriesId = item.seriesId {
+                Button {
+                    Task {
+                        try? await JellyfinClient.shared.markPlayed(itemId: seriesId)
+                        onChange?()
+                    }
+                } label: {
+                    Label("Mark Series as Watched", systemImage: "eye.circle")
+                }
+            }
+            Button {
+                Task {
+                    try? await JellyfinClient.shared.markPlayed(itemId: item.id)
+                    onChange?()
+                }
+            } label: {
+                Label(item.type == .episode ? "Mark Episode as Watched" : "Mark as Watched", systemImage: "eye")
+            }
+        }
         .onPlayPauseCommand {
             if let playPause = onPlayPause {
                 playPause()
