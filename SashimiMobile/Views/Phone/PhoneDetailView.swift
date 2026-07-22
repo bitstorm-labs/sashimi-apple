@@ -29,6 +29,7 @@ struct PhoneDetailView: View {
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
+    @State private var showSeriesDetail = false
     @State private var downloadScope: DownloadScope?
     @State private var showingDownloadQuality = false
     @State private var showingNextNAlert = false
@@ -128,6 +129,11 @@ struct PhoneDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenPlayer(item: $playingItem)
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
+        .navigationDestination(isPresented: $showSeriesDetail) {
+            if let seriesItem = navigateToSeriesItem {
+                PhoneDetailView(item: seriesItem, libraryName: libraryName)
+            }
+        }
         .sheet(item: $showingEpisodeDetail) { episode in
             // Full detail view — one consistent episode UI (matches iPad)
             NavigationStack {
@@ -181,24 +187,35 @@ struct PhoneDetailView: View {
     // MARK: - Admin Menu (tvOS parity)
 
     /// File Info / Refresh Metadata / Delete — online only.
-    private var adminMenu: some View {
+    @ViewBuilder
+    private var adminMenuItems: some View {
+        Button {
+            showingFileInfo = true
+        } label: {
+            Label("File Info", systemImage: "info.circle")
+        }
+        Button {
+            Task { await refreshMetadata() }
+        } label: {
+            Label(isRefreshing ? "Refreshing..." : "Refresh Metadata", systemImage: "arrow.clockwise")
+        }
+        .disabled(isRefreshing)
+        Button(role: .destructive) {
+            showingDeleteConfirm = true
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    /// Single overflow menu per action row: contextual actions (labeled) first,
+    /// then the admin items. Phones don't have the width for a pile of
+    /// unlabeled icon buttons — six in a row compressed the Resume label into
+    /// a vertical letter-stack and left users guessing at cryptic glyphs.
+    private func overflowMenu(@ViewBuilder extras: () -> some View) -> some View {
         Menu {
-            Button {
-                showingFileInfo = true
-            } label: {
-                Label("File Info", systemImage: "info.circle")
-            }
-            Button {
-                Task { await refreshMetadata() }
-            } label: {
-                Label(isRefreshing ? "Refreshing..." : "Refresh Metadata", systemImage: "arrow.clockwise")
-            }
-            .disabled(isRefreshing)
-            Button(role: .destructive) {
-                showingDeleteConfirm = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+            extras()
+            Divider()
+            adminMenuItems
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 16))
@@ -621,19 +638,10 @@ struct PhoneDetailView: View {
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
                         .font(.system(size: 14, weight: .semibold))
+                        .fixedSize()
                 }
                 .buttonStyle(.borderedProminent)
-
-                if epHasProgress {
-                    Button {
-                        startOverItem = nextEp
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 16))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
-                }
+                .layoutPriority(1)
             }
 
             Button {
@@ -644,17 +652,6 @@ struct PhoneDetailView: View {
             }
             .buttonStyle(.bordered)
             .tint(.white)
-
-            if (item.localTrailerCount ?? 0) > 0 {
-                Button {
-                    Task { await playLocalTrailer() }
-                } label: {
-                    Image(systemName: "film")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
 
             watchedButton
 
@@ -703,7 +700,23 @@ struct PhoneDetailView: View {
             }
 
             if NetworkMonitor.shared.isConnected {
-                adminMenu
+                overflowMenu {
+                    if let nextEp = nextEpisodeToPlay,
+                       (nextEp.userData?.playbackPositionTicks ?? 0) > 0 {
+                        Button {
+                            startOverItem = nextEp
+                        } label: {
+                            Label("Start Over", systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Button {
+                            Task { await playLocalTrailer() }
+                        } label: {
+                            Label("Play Trailer", systemImage: "film")
+                        }
+                    }
+                }
             }
 
             Spacer()
@@ -737,43 +750,33 @@ struct PhoneDetailView: View {
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
+                    .fixedSize()
             }
             .buttonStyle(.borderedProminent)
-
-            if hasProgress {
-                Button {
-                    startOverItem = item
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
+            .layoutPriority(1)
 
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
                 DownloadButton(item: item, quality: nil)
-            }
 
-            if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
-                NavigationLink {
-                    if let seriesItem = navigateToSeriesItem {
-                        PhoneDetailView(item: seriesItem, libraryName: libraryName)
-                    } else {
-                        ProgressView()
+                overflowMenu {
+                    if hasProgress {
+                        Button {
+                            startOverItem = item
+                        } label: {
+                            Label("Start Over", systemImage: "arrow.counterclockwise")
+                        }
                     }
-                } label: {
-                    Image(systemName: "tv")
-                        .font(.system(size: 16))
+                    if item.seriesId != nil {
+                        Button {
+                            showSeriesDetail = true
+                        } label: {
+                            Label("Go to Series", systemImage: "tv")
+                        }
+                        .disabled(navigateToSeriesItem == nil)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
-
-            if NetworkMonitor.shared.isConnected {
-                adminMenu
             }
 
             Spacer()
@@ -787,36 +790,32 @@ struct PhoneDetailView: View {
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
+                    .fixedSize()
             }
             .buttonStyle(.borderedProminent)
-
-            if hasProgress {
-                Button {
-                    startOverItem = item
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
-
-            if (item.localTrailerCount ?? 0) > 0 {
-                Button {
-                    Task { await playLocalTrailer() }
-                } label: {
-                    Image(systemName: "film")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
+            .layoutPriority(1)
 
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
                 DownloadButton(item: item, quality: nil)
-                adminMenu
+
+                overflowMenu {
+                    if hasProgress {
+                        Button {
+                            startOverItem = item
+                        } label: {
+                            Label("Start Over", systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                    if (item.localTrailerCount ?? 0) > 0 {
+                        Button {
+                            Task { await playLocalTrailer() }
+                        } label: {
+                            Label("Play Trailer", systemImage: "film")
+                        }
+                    }
+                }
             }
 
             Spacer()
