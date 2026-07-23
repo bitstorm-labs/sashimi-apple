@@ -19,4 +19,9 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("use24HourTime") var use24HourTime = false
     @AppStorage("showQualityBadges") var showQualityBadges = true
     @AppStorage("showReviewRatings") var showReviewRatings = true
+    // When false (default) the cover review-rating badge shows a TV show's
+    // overall rating rather than an individual episode's. Since episode DTOs
+    // don't carry the series' overall rating, episode cards suppress the badge
+    // unless the user opts into per-episode ratings here.
+    @AppStorage("useEpisodeRatings") var useEpisodeRatings = false
 }
