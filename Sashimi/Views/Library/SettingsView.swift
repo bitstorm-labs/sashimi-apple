@@ -189,9 +189,17 @@ struct SettingsOptionRow: View {
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 24)
+            // Neutral focus: subtle white fill + white stroke (matches every
+            // other row — LibraryView, HomeRowToggleButton, etc.). A solid
+            // SashimiTheme.focus (Color.white) fill made the focused row a
+            // white box with the white-on-focus text vanishing into it.
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(isFocused ? SashimiTheme.focus : SashimiTheme.cardBackground)
+                    .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
             )
             .scaleEffect(isFocused ? 1.02 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -510,7 +518,11 @@ struct HomeRowMoveButton: View {
                 .frame(width: 50, height: 50)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(isFocused ? SashimiTheme.focus : SashimiTheme.cardBackground)
+                        .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 2)
                 )
         }
         .buttonStyle(.card)
