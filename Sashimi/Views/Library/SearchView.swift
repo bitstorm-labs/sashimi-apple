@@ -56,6 +56,10 @@ final class SearchHistoryManager: ObservableObject {
 
 struct SearchView: View {
     var onBackAtRoot: (() -> Void)?
+    /// Supplied by the rail so the search field can claim default focus in the
+    /// shared main scope — without it, pressing Right from the Search rail row
+    /// has no designated target and focus never enters this screen.
+    var focusNamespace: Namespace.ID?
     @State private var searchText = ""
     @State private var results: [BaseItemDto] = []
     @State private var isSearching = false
@@ -69,8 +73,9 @@ struct SearchView: View {
     @FocusState private var isSearchFieldFocused: Bool
     @FocusState private var isClearButtonFocused: Bool
 
-    init(onBackAtRoot: (() -> Void)? = nil) {
+    init(onBackAtRoot: (() -> Void)? = nil, focusNamespace: Namespace.ID? = nil) {
         self.onBackAtRoot = onBackAtRoot
+        self.focusNamespace = focusNamespace
     }
 
     // Detect YouTube content by checking if we've identified it as YouTube
@@ -128,6 +133,7 @@ struct SearchView: View {
                     TextField("Search movies, shows...", text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.title3)
+                        .defaultFocus(in: focusNamespace)
 
                     // Clear button - show when there's text OR results
                     if !searchText.isEmpty || !results.isEmpty {
@@ -336,4 +342,18 @@ struct RecentSearchButton: View {
 
 #Preview {
     SearchView()
+}
+
+private extension View {
+    /// Claims default focus only when the rail supplies its shared namespace,
+    /// so the rightward beam from the Search rail row lands here. Previews (no
+    /// namespace) are untouched.
+    @ViewBuilder
+    func defaultFocus(in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            prefersDefaultFocus(true, in: namespace)
+        } else {
+            self
+        }
+    }
 }
