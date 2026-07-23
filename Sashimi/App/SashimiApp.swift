@@ -243,9 +243,9 @@ struct MainTabView: View {
         case .home, .avatar:
             HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
         case .search:
-            SearchView(onBackAtRoot: { selection = .home })
+            SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
-            SettingsView(onBackAtRoot: { selection = .home })
+            SettingsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .library(let id):
             if let lib = libraries.first(where: { $0.id == id }) {
                 LibraryDetailView(library: LibraryView_Model(from: lib))
