@@ -191,6 +191,7 @@ struct MobileRecentlyAddedCard: View {
 
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
+    @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
 
     private var isYouTube: Bool {
         if let name = libraryName, name.lowercased().contains("youtube") {
@@ -291,7 +292,8 @@ struct MobileRecentlyAddedCard: View {
                 }
 
                 // Review rating badge (bottom-left; TMDb community rating)
-                if showReviewRatings, !isCircular, !isLandscape, let rating = item.communityRating, rating > 0 {
+                if showReviewRatings, !isCircular, !isLandscape,
+                   let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
                     ReviewRatingBadge(rating: rating, fontSize: 11, logoHeight: 11,
                                       horizontalPadding: 6, verticalPadding: 3, cornerRadius: 5)
                         .padding(4)

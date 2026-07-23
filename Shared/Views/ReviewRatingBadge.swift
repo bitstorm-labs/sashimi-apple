@@ -33,3 +33,22 @@ struct ReviewRatingBadge: View {
         .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
     }
 }
+
+extension BaseItemDto {
+    /// Community (TMDb) rating to display on a cover badge, honoring the
+    /// `useEpisodeRatings` setting.
+    ///
+    /// A TV episode carries its own per-episode `communityRating`, which reads
+    /// as the *episode's* score — misleading on a cover that stands in for the
+    /// whole series. The episode DTO does not carry the series' overall rating
+    /// (detail views fetch the series separately for that), so unless the user
+    /// opts into episode-level ratings we suppress the badge on episode cards.
+    /// Series and movie cards always use their own (correct) rating.
+    ///
+    /// Returns `nil` when no badge should render.
+    func coverReviewRating(useEpisodeRatings: Bool) -> Double? {
+        if type == .episode && !useEpisodeRatings { return nil }
+        guard let rating = communityRating, rating > 0 else { return nil }
+        return rating
+    }
+}

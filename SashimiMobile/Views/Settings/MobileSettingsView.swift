@@ -64,6 +64,7 @@ struct MobileSettingsView: View {
             Section("Display") {
                 Toggle("Show Quality Badges", isOn: $playbackSettings.showQualityBadges)
                 Toggle("Show Review Ratings", isOn: $playbackSettings.showReviewRatings)
+                Toggle("Use Episode Ratings", isOn: $playbackSettings.useEpisodeRatings)
             }
 
             // Playback Section

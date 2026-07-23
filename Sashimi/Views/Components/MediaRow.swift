@@ -50,6 +50,7 @@ struct MediaPosterButton: View {
     @FocusState private var isFocused: Bool
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
+    @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
 
     // Card dimensions
     private var cardWidth: CGFloat { isCircular ? 200 : (isLandscape ? 320 : 220) }
@@ -184,7 +185,8 @@ struct MediaPosterButton: View {
                         }
 
                         // Review rating badge (bottom-left; TMDb community rating)
-                        if showReviewRatings, !isLandscape, let rating = item.communityRating, rating > 0 {
+                        if showReviewRatings, !isLandscape,
+                           let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
                             VStack {
                                 Spacer()
                                 HStack {

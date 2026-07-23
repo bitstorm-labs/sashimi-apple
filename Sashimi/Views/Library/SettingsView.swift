@@ -692,6 +692,7 @@ struct PlaybackSettingsView: View {
                     SettingsToggleRow(title: "24-Hour Time", isOn: $settings.use24HourTime)
                     SettingsToggleRow(title: "Show Quality Badges", isOn: $settings.showQualityBadges)
                     SettingsToggleRow(title: "Show Review Ratings", isOn: $settings.showReviewRatings)
+                    SettingsToggleRow(title: "Use Episode Ratings", isOn: $settings.useEpisodeRatings)
                 }
             }
             .padding(.horizontal, 60)
