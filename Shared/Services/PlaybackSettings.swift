@@ -18,4 +18,5 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("forceDirectPlay") var forceDirectPlay = false
     @AppStorage("use24HourTime") var use24HourTime = false
     @AppStorage("showQualityBadges") var showQualityBadges = true
+    @AppStorage("showReviewRatings") var showReviewRatings = true
 }
