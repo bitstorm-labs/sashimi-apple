@@ -308,7 +308,14 @@ struct PhoneDetailView: View {
             ZStack(alignment: .bottom) {
                 LazyImage(url: backdropImageURL) { state in
                     if let image = state.image {
+                        // When the item has no real landscape backdrop, the URL
+                        // falls back to the PORTRAIT poster — cropping it into
+                        // this 220pt-tall frame shows an ugly middle slice
+                        // ("cut in half"). Blur + darken the fallback so it
+                        // reads as an intentional ambient backdrop instead.
                         image.resizable().aspectRatio(contentMode: .fill)
+                            .blur(radius: hasRealBackdrop ? 0 : 32)
+                            .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
                     } else {
                         Rectangle().fill(MobileColors.cardBackground)
                     }
@@ -330,6 +337,15 @@ struct PhoneDetailView: View {
     private var channelAvatarURL: URL? {
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
         return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=240")
+    }
+
+    /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
+    /// serves the portrait poster as a fallback, which must be blurred so it
+    /// doesn't render as a sliced strip. Mirrors the URL's own tag checks.
+    private var hasRealBackdrop: Bool {
+        if item.backdropImageTags?.isEmpty == false { return true }
+        if item.seriesId != nil, item.parentBackdropImageTags?.isEmpty == false { return true }
+        return false
     }
 
     // MARK: - Title Section
