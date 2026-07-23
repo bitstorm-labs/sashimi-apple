@@ -122,7 +122,7 @@ struct PhoneDetailView: View {
                 .padding(.horizontal, MobileSpacing.md)
                 .padding(.top, MobileSpacing.sm)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .clipped()
         .background(MobileColors.background)
@@ -306,23 +306,32 @@ struct PhoneDetailView: View {
             }
         } else {
             ZStack(alignment: .bottom) {
-                LazyImage(url: backdropImageURL) { state in
-                    if let image = state.image {
-                        // When the item has no real landscape backdrop, the URL
-                        // falls back to the PORTRAIT poster — cropping it into
-                        // this 220pt-tall frame shows an ugly middle slice
-                        // ("cut in half"). Blur + darken the fallback so it
-                        // reads as an intentional ambient backdrop instead.
-                        image.resizable().aspectRatio(contentMode: .fill)
-                            .blur(radius: hasRealBackdrop ? 0 : 32)
-                            .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
-                    } else {
-                        Rectangle().fill(MobileColors.cardBackground)
+                // A definite screen-width × 220 frame (Color.clear) with the image
+                // as an OVERLAY. Critical: a resizable `.aspectRatio(.fill)` image
+                // reports an oversized intrinsic width for a PORTRAIT poster
+                // fallback (missing-backdrop items like Ratatouille), and if it
+                // sizes the container that width propagates to the whole detail
+                // column — shoving the title and Play button off the left edge.
+                // Overlaying it on a fixed-size Color.clear stops the image from
+                // dictating layout width.
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
+                    .overlay {
+                        LazyImage(url: backdropImageURL) { state in
+                            if let image = state.image {
+                                // No real backdrop → the URL falls back to the
+                                // portrait poster; blur + darken it so it reads
+                                // as an ambient backdrop, not a sliced strip.
+                                image.resizable().aspectRatio(contentMode: .fill)
+                                    .blur(radius: hasRealBackdrop ? 0 : 32)
+                                    .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
+                            } else {
+                                Rectangle().fill(MobileColors.cardBackground)
+                            }
+                        }
                     }
-                }
-                .frame(height: 220)
-                .frame(maxWidth: .infinity)
-                .clipped()
+                    .clipped()
 
                 LinearGradient(
                     colors: [.clear, MobileColors.background],
