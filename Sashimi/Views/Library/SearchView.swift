@@ -130,10 +130,40 @@ struct SearchView: View {
             VStack(spacing: 0) {
                 // Search field at top with clear button
                 HStack(spacing: 16) {
-                    TextField("Search movies, shows...", text: $searchText)
+                    // The raw tvOS TextField draws a solid white focus platter
+                    // that no modifier can suppress. Keep it for focus +
+                    // keyboard, but hide its text/cursor and cover its platter
+                    // with a dark overlay (sized to the field's exact frame, so
+                    // height stays right and no white edges peek) — focus then
+                    // reads as our thin ring (the stroke below), not a white box.
+                    TextField("", text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.title3)
+                        .foregroundStyle(.clear)
+                        .tint(.clear)
+                        .accessibilityLabel("Search movies and shows")
+                        .focused($isSearchFieldFocused)
                         .defaultFocus(in: focusNamespace)
+                        .overlay {
+                            ZStack(alignment: .leading) {
+                                // Over-sized dark fill: covers the platter's few-px
+                                // outset; the container's clipShape trims it back to
+                                // the rounded field, so no white rim peeks.
+                                SashimiTheme.cardBackground
+                                    .padding(-60)
+                                HStack(spacing: 16) {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.title3)
+                                        .foregroundStyle(isSearchFieldFocused ? SashimiTheme.textPrimary : SashimiTheme.textTertiary)
+                                    Text(searchText.isEmpty ? "Search movies, shows..." : searchText)
+                                        .font(.title3)
+                                        .foregroundStyle(searchText.isEmpty ? SashimiTheme.textTertiary : SashimiTheme.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                            .allowsHitTesting(false)
+                        }
 
                     // Clear button - show when there's text OR results
                     if !searchText.isEmpty || !results.isEmpty {
