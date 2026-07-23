@@ -17,6 +17,10 @@ struct SettingsView: View {
 
     var showSignOut: Bool = true
     var onBackAtRoot: (() -> Void)?
+    /// Supplied by the rail so the first settings row can claim default focus
+    /// in the shared main scope — without it, pressing Right from the Settings
+    /// rail row has no designated target and focus never enters this screen.
+    var focusNamespace: Namespace.ID?
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
@@ -37,6 +41,7 @@ struct SettingsView: View {
                             ) {
                                 navigationPath.append(SettingsDestination.servers)
                             }
+                            .defaultFocus(in: focusNamespace)
 
                             SettingsOptionRow(
                                 icon: "house",
@@ -1195,5 +1200,19 @@ struct AddServerSheet: View {
                 Task { await sessionManager.restoreActiveClient() }
             }
             .onExitCommand { dismiss() }
+    }
+}
+
+private extension View {
+    /// Claims default focus only when the rail supplies its shared namespace,
+    /// so the rightward beam from the Settings rail row lands here. Callers
+    /// without a namespace (previews) are untouched.
+    @ViewBuilder
+    func defaultFocus(in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            prefersDefaultFocus(true, in: namespace)
+        } else {
+            self
+        }
     }
 }
