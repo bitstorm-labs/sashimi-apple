@@ -31,14 +31,32 @@ enum DownloadURLBuilder {
 
     // MARK: - Video Download URLs
 
-    /// Build URL for downloading video at original quality (direct file download)
+    /// Build URL for downloading video at original quality.
+    ///
+    /// NOT the raw-file /Items/{id}/Download: an mkv original (e.g. a 4K DV8.1
+    /// HEVC WEBDL) downloads fine but AVPlayer can't render its video — black
+    /// screen with audio. Instead ask the transcode pipeline for a stream-copy
+    /// REMUX into mp4: identical video/audio bits (no re-encode, no quality
+    /// loss — VideoCodec lists the source codecs so copy applies), but in a
+    /// container AVPlayer demuxes, with HEVC tagged hvc1. Embedded subtitle
+    /// tracks are dropped by the remux; subtitles are downloaded separately as
+    /// VTT (subtitleURL), so nothing user-visible is lost.
     static func originalDownloadURL(itemId: String) -> URL? {
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
             return nil
         }
 
         var components = URLComponents(string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
-        components?.path += "/Items/\(itemId)/Download"
+        components?.path += "/Videos/\(itemId)/stream.mp4"
+        components?.queryItems = [
+            URLQueryItem(name: "MediaSourceId", value: itemId),
+            URLQueryItem(name: "VideoCodec", value: "h264,hevc"),
+            URLQueryItem(name: "AudioCodec", value: "aac,ac3,eac3"),
+            URLQueryItem(name: "Container", value: "mp4"),
+            URLQueryItem(name: "AllowVideoStreamCopy", value: "true"),
+            URLQueryItem(name: "AllowAudioStreamCopy", value: "true"),
+            URLQueryItem(name: "DeviceId", value: deviceId)
+        ]
         return components?.url
     }
 
