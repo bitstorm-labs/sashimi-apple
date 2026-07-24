@@ -105,10 +105,13 @@ final class PlayerViewModel: ObservableObject {
         let reason: String?
 
         var label: String {
+            // Viewer-facing wording: "Direct Play" vs "Direct Stream" is server
+            // plumbing — both deliver the identical video bits, so both read
+            // "Original". Only a transcode changes the picture: "Converted".
             switch method {
-            case .directPlay: return "Direct Play"
-            case .directStream: return "Direct Stream"
-            case .transcode: return "Transcode"
+            case .directPlay: return "Original"
+            case .directStream: return "Original"
+            case .transcode: return "Converted"
             }
         }
     }
