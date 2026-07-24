@@ -154,6 +154,11 @@ struct MainTabView: View {
     @FocusState private var focusedNav: NavID?
     @Namespace private var mainScope
     @Namespace private var railScope
+    // Forces the focus engine to re-evaluate mainScope's default-focus target.
+    // prefersDefaultFocus(in:) is only honored when a scope first gains focus
+    // or when this action runs — clearing focusedNav or a directional beam that
+    // misses the content does NOT trigger it on its own.
+    @Environment(\.resetFocus) private var resetFocus
     @State private var selection: NavID = .home
     @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
@@ -263,6 +268,13 @@ struct MainTabView: View {
     private func handleHeroReady() {
         guard !didInitialHomeFocus, selection == .home || selection == .avatar else { return }
         focusedNav = nil
+        // Clearing focusedNav drops the rail button but the engine keeps focus
+        // parked on the rail — it never re-evaluates the mainScope default. Kick
+        // it (next runloop, so the hero is in the tree) so the hero, the
+        // mainScope prefersDefaultFocus target, actually claims focus.
+        DispatchQueue.main.async {
+            resetFocus(in: mainScope)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             didInitialHomeFocus = true
         }
@@ -377,6 +389,17 @@ struct MainTabView: View {
         // section's row (the onChange snap is the deterministic fallback).
         .focusScope(railScope)
         .focusSection()
+        // Right enters the content. Home/libraries fill the directional beam,
+        // so the engine moves there itself and this closure never fires. Search
+        // and Settings put their controls top/center — out of the beam from a
+        // rail row — so the Right press falls through here; resetFocus then
+        // lands on the content's prefersDefaultFocus target (search field /
+        // Servers row) instead of leaving focus stranded in the rail.
+        .onMoveCommand { direction in
+            if direction == .right {
+                resetFocus(in: mainScope)
+            }
+        }
     }
 
     private func navButton(_ id: NavID, _ title: String, _ icon: String) -> some View {
