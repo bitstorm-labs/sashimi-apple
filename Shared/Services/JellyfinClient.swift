@@ -729,7 +729,13 @@ actor JellyfinClient {
             ],
             "TranscodingProfiles": [
                 [
-                    "Container": "ts",
+                    // fMP4 segments, NOT "ts": AVPlayer does not decode HEVC
+                    // inside MPEG-TS segments (Apple's HLS spec requires fMP4
+                    // for HEVC), so an mkv HEVC remux in TS played audio over
+                    // a black screen (The Crown 4K DV8.1 WEBDL). With "mp4"
+                    // the server emits fMP4 segments tagged hvc1 (+PQ range,
+                    // DV supplemental codec) that AVPlayer actually renders.
+                    "Container": "mp4",
                     "Type": "Video",
                     // tvOS plays HEVC and EAC3 in HLS natively — declaring
                     // them lets mkv remuxes stream-copy both tracks instead
