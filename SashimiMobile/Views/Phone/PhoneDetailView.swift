@@ -412,15 +412,26 @@ struct PhoneDetailView: View {
         if isEpisode {
             episodeTitleText
         } else if isSeries, !isYouTubeSeriesStyle, let logoURL = logoImageURL(for: item.id) {
-            LazyImage(url: logoURL) { state in
-                if let image = state.image {
-                    image.resizable().aspectRatio(contentMode: .fit)
-                } else if state.error != nil {
-                    seriesTitleText
+            // Bounded container + overlay: LazyImage under a height-only cap
+            // reports its IDEAL size (the raw logo pixels) when the ScrollView
+            // proposes unbounded height — a wide logo PNG then dictates the
+            // whole detail column's width, shoving every section past the
+            // screen edges (the "expanding, edges cut off" bug; same physics
+            // as the missing-backdrop movie fix). The overlay keeps the
+            // image's size out of layout entirely.
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 70)
+                .overlay(alignment: .leading) {
+                    LazyImage(url: logoURL) { state in
+                        if let image = state.image {
+                            image.resizable().aspectRatio(contentMode: .fit)
+                        } else if state.error != nil {
+                            seriesTitleText
+                        }
+                    }
                 }
-            }
-            .frame(maxHeight: 70)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
         } else {
             seriesTitleText
         }
@@ -668,13 +679,26 @@ struct PhoneDetailView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        if isSeries {
-            seriesActionButtons
-        } else if isEpisode {
-            episodeActionButtons
-        } else {
-            movieActionButtons
+        // The button row's ideal width (e.g. "Resume S3:E3" + four circle
+        // buttons, all non-compressible) can exceed the content width on
+        // smaller phones. An HStack that can't compress CHOOSES its ideal
+        // width, which silently widens the whole detail column — every
+        // section then overhangs the screen and .clipped() trims both edges
+        // (the "expanding, edges cut off" bug). Hosting the row in a
+        // horizontal ScrollView caps it at the proposed width: it scrolls
+        // when tight and looks identical when it fits.
+        ScrollView(.horizontal, showsIndicators: false) {
+            Group {
+                if isSeries {
+                    seriesActionButtons
+                } else if isEpisode {
+                    episodeActionButtons
+                } else {
+                    movieActionButtons
+                }
+            }
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
     private var seriesActionButtons: some View {
