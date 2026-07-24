@@ -348,10 +348,22 @@ struct PhoneDetailView: View {
         return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=240")
     }
 
+    /// Channel avatar for a YouTube EPISODE's header — the series' Primary.
+    private func seriesAvatarURL(for seriesId: String) -> URL? {
+        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        return URL(string: "\(serverURL)/Items/\(seriesId)/Images/Primary?maxWidth=120")
+    }
+
     /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
     /// serves the portrait poster as a fallback, which must be blurred so it
     /// doesn't render as a sliced strip. Mirrors the URL's own tag checks.
     private var hasRealBackdrop: Bool {
+        // Episodes always resolve to their OWN Primary in backdropImageURL — a
+        // 16:9 still (YouTube thumbnail / TV frame grab), never a portrait
+        // poster — so the blur fallback must not apply. Without this, YouTube
+        // videos (no backdrop/parentBackdrop tags) rendered their thumbnail as
+        // a blurred smear in the hero.
+        if isEpisode, item.imageTags?["Primary"] != nil { return true }
         if item.backdropImageTags?.isEmpty == false { return true }
         if item.seriesId != nil, item.parentBackdropImageTags?.isEmpty == false { return true }
         return false
@@ -371,6 +383,24 @@ struct PhoneDetailView: View {
                             .font(MobileTypography.caption)
                             .foregroundStyle(MobileColors.textSecondary)
                     }
+                }
+            } else if isYouTubeChannelEpisode, let seriesId = item.seriesId, let seriesName = item.seriesName {
+                // YouTube channels have no Logo image — show the circular
+                // channel avatar (series Primary) + name instead, matching the
+                // tvOS/Roku episode headers.
+                HStack(spacing: 8) {
+                    LazyImage(url: seriesAvatarURL(for: seriesId)) { state in
+                        if let image = state.image {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Circle().fill(MobileColors.cardBackground)
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+                    .clipShape(Circle())
+                    Text(seriesName.cleanedYouTubeTitle)
+                        .font(MobileTypography.caption)
+                        .foregroundStyle(MobileColors.textSecondary)
                 }
             } else if let seriesName = item.seriesName {
                 Text(isYouTubeStyle ? seriesName.cleanedYouTubeTitle : seriesName)
