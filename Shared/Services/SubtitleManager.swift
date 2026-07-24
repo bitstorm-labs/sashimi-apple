@@ -130,6 +130,13 @@ class SubtitleManager: ObservableObject {
                         let textLine = lines[i]
                             .trimmingCharacters(in: .whitespaces)
                             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                            // ASS/SSA override blocks ride along when SRT subs
+                            // with embedded styling get converted to VTT (e.g.
+                            // "{\an8}" = position top-center) — Jellyfin passes
+                            // them through verbatim and they rendered as literal
+                            // text at the start of lines. Strip any "{\...}".
+                            .replacingOccurrences(of: "\\{\\\\[^}]*\\}", with: "", options: .regularExpression)
+                            .trimmingCharacters(in: .whitespaces)
                         if !textLine.isEmpty {
                             textLines.append(textLine)
                         }
