@@ -61,7 +61,12 @@ struct HomeView: View {
                             .frame(height: 100)
                     }
                 }
-                .ignoresSafeArea(edges: .top)
+                // Horizontal too: the ScrollView applied the TRAILING safe-area
+                // inset to its content while the rail's leading padding absorbed
+                // the leading one — so the hero sat ~70pt off-center (50pt gap
+                // on the left, 120pt on the right). Ignoring both makes the
+                // hero's 50pt horizontal padding symmetric.
+                .ignoresSafeArea(edges: [.top, .horizontal])
                 .refreshable {
                     await viewModel.refresh()
                 }
@@ -304,7 +309,13 @@ struct HeroSection: View {
                     // Background color
                     SashimiTheme.background
 
-                    // Backdrop image positioned on the right with soft left edge
+                    // Backdrop image positioned on the right with soft left edge.
+                    // The fade mask is applied to the IMAGE, not the 0.7-width
+                    // container: a .fit image sizes to its fitted bounds (a 16:9
+                    // backdrop fills ~0.5 of the hero width), so a container-
+                    // relative ramp over the leftmost 25% never reached the
+                    // image's actual left edge — leaving a harsh vertical line
+                    // mid-hero. Image-relative, the ramp always covers the edge.
                     HStack(spacing: 0) {
                         Spacer()
                         SmartPosterImage(
@@ -313,18 +324,18 @@ struct HeroSection: View {
                             imageTypes: heroImageTypes,
                             contentMode: .fit
                         )
-                        .id(currentItem.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .mask(
                             LinearGradient(
                                 stops: [
                                     .init(color: .clear, location: 0.0),
-                                    .init(color: .white, location: 0.25)
+                                    .init(color: .white, location: 0.35)
                                 ],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
+                        .id(currentItem.id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .frame(width: geometry.size.width * 0.7, height: geometry.size.height)
                         .transition(.opacity)
                         .animation(.easeInOut(duration: 0.6), value: currentItem.id)
