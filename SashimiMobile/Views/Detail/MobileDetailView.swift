@@ -223,7 +223,7 @@ struct MobileDetailView: View {
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
-                MobileDetailView(item: episode, libraryName: libraryName)
+                AdaptiveDetailView(item: episode, libraryName: libraryName)
             }
         }
         .task {
@@ -878,7 +878,7 @@ struct MobileDetailView: View {
             if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
-                        MobileDetailView(item: seriesItem, libraryName: libraryName)
+                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName)
                     } else {
                         ProgressView()
                     }
