@@ -655,10 +655,10 @@ struct PlaybackSettingsView: View {
                     SettingsNavigationRow(title: "Maximum Bitrate", subtitle: bitrateLabel) {
                         VideoQualitySettingsView()
                     }
-                    SettingsToggleRow(title: "Force Direct Play", isOn: $settings.forceDirectPlay)
+                    SettingsToggleRow(title: "Always Play Original", isOn: $settings.forceDirectPlay)
                 }
 
-                Text("Direct play streams the original file without transcoding.")
+                Text("Plays the original file untouched, never converted. If your connection cannot keep up, playback may stall rather than drop quality.")
                     .font(Typography.captionSmall)
                     .foregroundStyle(SashimiTheme.textTertiary)
                     .padding(.horizontal, 8)
