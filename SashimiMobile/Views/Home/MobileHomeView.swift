@@ -66,7 +66,7 @@ struct MobileHomeView: View {
                     items: viewModel.continueWatchingItems,
                     libraryNames: libNames
                 ) { item in
-                    MobileDetailView(item: item, libraryName: libNames[item.id])
+                    AdaptiveDetailView(item: item, libraryName: libNames[item.id])
                 }
             }
 
@@ -77,7 +77,7 @@ struct MobileHomeView: View {
                 libraryName: libraryName,
                 collectionType: library?.collectionType
             ) { item in
-                MobileDetailView(item: item, libraryName: libraryName)
+                AdaptiveDetailView(item: item, libraryName: libraryName)
             }
         }
     }
