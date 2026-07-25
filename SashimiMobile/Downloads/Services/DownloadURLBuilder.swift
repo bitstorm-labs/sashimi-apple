@@ -61,14 +61,14 @@ enum DownloadURLBuilder {
     }
 
     /// Build URL for downloading video at a specific bitrate (transcoded to mp4)
-    static func transcodedDownloadURL(itemId: String, maxBitrate: Int) -> URL? {
+    static func transcodedDownloadURL(itemId: String, maxBitrate: Int, maxWidth: Int? = nil) -> URL? {
         guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
             return nil
         }
 
         var components = URLComponents(string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         components?.path += "/Videos/\(itemId)/stream.mp4"
-        components?.queryItems = [
+        var query = [
             URLQueryItem(name: "MediaSourceId", value: itemId),
             URLQueryItem(name: "MaxStreamingBitrate", value: "\(maxBitrate)"),
             URLQueryItem(name: "VideoCodec", value: "h264"),
@@ -76,13 +76,20 @@ enum DownloadURLBuilder {
             URLQueryItem(name: "Container", value: "mp4"),
             URLQueryItem(name: "DeviceId", value: deviceId)
         ]
+        // A bitrate cap alone leaves the server encoding at native resolution,
+        // so "Low (480p)" produced a blocky 4K file rather than a small 480p
+        // one -- slower to produce and worse looking at the same size.
+        if let maxWidth {
+            query.append(URLQueryItem(name: "MaxWidth", value: "\(maxWidth)"))
+        }
+        components?.queryItems = query
         return components?.url
     }
 
     /// Build download URL based on quality selection
     static func downloadURL(itemId: String, quality: DownloadQuality) -> URL? {
         if let maxBitrate = quality.maxBitrate {
-            return transcodedDownloadURL(itemId: itemId, maxBitrate: maxBitrate)
+            return transcodedDownloadURL(itemId: itemId, maxBitrate: maxBitrate, maxWidth: quality.maxWidth)
         }
         return originalDownloadURL(itemId: itemId)
     }
