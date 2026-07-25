@@ -3,6 +3,7 @@ import AVKit
 import AVFoundation
 import Combine
 import MediaPlayer
+import os
 
 // swiftlint:disable file_length type_body_length function_body_length
 // PlayerViewModel manages complex video playback state - splitting would fragment playback logic
@@ -62,6 +63,12 @@ enum QualityOption: String, CaseIterable, Identifiable {
         }
     }
 }
+
+
+// Playback reporting is best-effort by design -- a failed report must never
+// interrupt playback -- but swallowing it silently meant watch state could
+// stop syncing with no trace at all.
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "PlayerViewModel")
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
@@ -268,7 +275,11 @@ final class PlayerViewModel: ObservableObject {
         // changeQuality — auto-play-next otherwise leaves the old encode
         // running until the server times it out.
         if let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+            do {
+                try await client.stopActiveEncoding(playSessionId: playSessionId)
+            } catch {
+                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         isLoading = true
@@ -327,7 +338,11 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    do {
+                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    } catch {
+                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
+                    }
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -342,7 +357,11 @@ final class PlayerViewModel: ObservableObject {
                 // status observer re-applies it once HLS/transcode is ready.
                 await player?.seek(to: startTime)
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    do {
+                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    } catch {
+                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
+                    }
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -353,7 +372,11 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    try? await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    do {
+                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
+                    } catch {
+                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
+                    }
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -386,7 +409,11 @@ final class PlayerViewModel: ObservableObject {
         let positionTicks = Int64(currentTime.seconds * 10_000_000)
         let isPaused = player.timeControlStatus == .paused
 
-        try? await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
+        do {
+            try await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
+        } catch {
+            logger.error("reportPlaybackProgress failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func handlePlaybackEnded() async {
@@ -401,10 +428,18 @@ final class PlayerViewModel: ObservableObject {
             // Mark as watched by reporting position at the end
             if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
                 let endTicks = Int64(duration * 10_000_000)
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
+                do {
+                    try await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
+                } catch {
+                    logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
+                }
             }
             // Mark item as played
-            try? await client.markPlayed(itemId: item.id)
+            do {
+                try await client.markPlayed(itemId: item.id)
+            } catch {
+                logger.error("markPlayed failed: \(error.localizedDescription, privacy: .public)")
+            }
 
             // Check for next episode/video if this is an episode or video
             if playbackSettings.autoPlayNextEpisode, let next = await fetchNextItem(for: item) {
@@ -531,7 +566,11 @@ final class PlayerViewModel: ObservableObject {
         // Kill the old transcode session before requesting a new one, so the
         // server isn't left encoding a stream nobody is watching.
         if let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+            do {
+                try await client.stopActiveEncoding(playSessionId: playSessionId)
+            } catch {
+                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         do {
@@ -715,13 +754,21 @@ final class PlayerViewModel: ObservableObject {
             }
 
             if !isOfflinePlayback {
-                try? await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
+                do {
+                    try await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
+                } catch {
+                    logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
+                }
             }
         }
 
         // Kill the session's server-side transcode, if one was active.
         if !isOfflinePlayback, let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            try? await client.stopActiveEncoding(playSessionId: playSessionId)
+            do {
+                try await client.stopActiveEncoding(playSessionId: playSessionId)
+            } catch {
+                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
         playSessionId = nil
 
