@@ -1120,10 +1120,18 @@ struct MediaDetailView: View {
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
         do {
-            episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
+            let loaded = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
+            // Two quick tab presses race: if S1 resolves after S2 was selected,
+            // assigning here would show S1's episodes under a highlighted S2
+            // tab, and playing "S2E1" would start S1E1. Drop the stale result,
+            // and leave the spinner up for the request still in flight.
+            guard selectedSeason?.id == season.id else { return }
+            episodes = loaded
         } catch {
+            guard selectedSeason?.id == season.id else { return }
             ToastManager.shared.show("Failed to load episodes")
         }
+        guard selectedSeason?.id == season.id else { return }
         isLoadingEpisodes = false
     }
 
