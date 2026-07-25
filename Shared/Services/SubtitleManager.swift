@@ -28,6 +28,25 @@ class SubtitleManager: ObservableObject {
     // observer throws NSInternalInconsistencyException).
     private var timeObservation: (token: Any, player: AVPlayer)?
 
+    /// Loads subtitles from a downloaded .vtt on disk.
+    ///
+    /// Offline playback has no server to fetch from, so the network path above
+    /// can never work there -- downloaded subtitle files were being written and
+    /// then never read by anything.
+    func loadSubtitles(fileURL: URL) async {
+        isLoading = true
+        currentCue = nil
+        cues = []
+        defer { isLoading = false }
+
+        do {
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
+            cues = parseWebVTT(contents)
+        } catch {
+            logger.error("Failed to read downloaded subtitles at \(fileURL.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func loadSubtitles(itemId: String, subtitleIndex: Int) async {
         isLoading = true
         currentCue = nil
