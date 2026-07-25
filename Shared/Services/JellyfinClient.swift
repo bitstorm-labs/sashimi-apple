@@ -704,6 +704,7 @@ actor JellyfinClient {
     func getPlaybackInfo(
         itemId: String,
         maxBitrate: Int? = nil,
+        maxWidth: Int? = nil,
         forceDirectPlay: Bool = false,
         forceTranscode: Bool = false
     ) async throws -> PlaybackInfoResponse {
@@ -750,7 +751,20 @@ actor JellyfinClient {
                 ]
             ],
             "ContainerProfiles": [],
-            "CodecProfiles": [],
+            // A width condition is what actually downscales. MaxStreamingBitrate
+            // is only a ceiling, so a 1080p source already under the cap was
+            // passed straight through and "720p" changed nothing.
+            "CodecProfiles": maxWidth.map { width in
+                [[
+                    "Type": "Video",
+                    "Conditions": [[
+                        "Condition": "LessThanEqual",
+                        "Property": "Width",
+                        "Value": "\(width)",
+                        "IsRequired": true
+                    ]]
+                ]]
+            } ?? [],
             "SubtitleProfiles": [
                 ["Format": "vtt", "Method": "External"],
                 ["Format": "srt", "Method": "External"]
@@ -776,7 +790,11 @@ actor JellyfinClient {
             "EnableDirectPlay": !forceTranscode,
             "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
             "EnableTranscoding": !effectiveForceDirectPlay,
-            "AllowVideoStreamCopy": true,
+            // The real reason picking a tier did nothing: with video stream copy
+            // allowed, the server satisfied a "transcode" by remuxing the
+            // original video untouched (IsVideoDirect=true) whenever the source
+            // already fit under the bitrate cap. An explicit pick must re-encode.
+            "AllowVideoStreamCopy": !forceTranscode,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
         ]
