@@ -90,6 +90,14 @@ targets:
           - group.com.mondominator.sashimi
     dependencies:
       - target: TopShelf
+      # Nuke on tvOS too. It used to be iOS-only, which left the tvOS app on
+      # SwiftUI AsyncImage: no decoded-image cache, and it loads through
+      # URLSession.shared so it never saw the certificate trust delegate --
+      # every image failed on a self-signed server while the API worked.
+      - package: Nuke
+        products:
+          - Nuke
+          - NukeUI
 
   SashimiMobile:
     type: application

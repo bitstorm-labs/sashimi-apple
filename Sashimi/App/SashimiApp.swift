@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 import AVFoundation
 import os
 
@@ -11,6 +12,7 @@ struct SashimiApp: App {
     init() {
         configureAudioSession()
         resetAppIconToDefault()
+        SashimiImagePipeline.configureCaches()
     }
 
     private func resetAppIconToDefault() {
@@ -477,11 +479,14 @@ struct MainTabView: View {
                         .frame(width: 52, height: 52)
                     if let userId = sessionManager.currentUser?.id,
                        let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
-                        AsyncImage(url: imageURL) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Image(systemName: "person.fill").foregroundStyle(.white)
+                        LazyImage(url: imageURL) { state in
+                            if let image = state.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } else {
+                                Image(systemName: "person.fill").foregroundStyle(.white)
+                            }
                         }
+                        .pipeline(SashimiImagePipeline.shared)
                         .frame(width: 52, height: 52)
                         .clipShape(Circle())
                     } else {
