@@ -514,6 +514,11 @@ struct HeroSection: View {
 
     private func startAutoAdvance() {
         guard items.count > 1 else { return }
+        // A second onAppear without an intervening onDisappear (tab switch,
+        // navigation pop) would otherwise orphan the previous timer, which
+        // keeps mutating currentIndex — the hero then advances at a multiple
+        // of the intended rate and never settles.
+        autoAdvanceTimer?.invalidate()
         restartProgressAnimation()
         // One tick per slide; the progress bar fills via a single linear
         // animation instead of a 10Hz timer mutating state.

@@ -725,17 +725,23 @@ struct MobileDetailView: View {
         HStack(spacing: MobileSpacing.md) {
             if let nextEp = nextEpisodeToPlay {
                 let epHasProgress = (nextEp.userData?.playbackPositionTicks ?? 0) > 0
-                let seasonNum = nextEp.parentIndexNumber ?? 1
-                let epNum = nextEp.indexNumber ?? 1
+                // Build the String first. Passing an interpolated literal to
+                // Label picks the LocalizedStringKey overload, which formats
+                // Int with grouping separators -- YouTube items use the year as
+                // the season number, so it rendered as "S2,024:E1,234".
+                // PhoneDetailView already does it this way.
+                let epLabel: String = {
+                    if let sNum = nextEp.parentIndexNumber, let eNum = nextEp.indexNumber {
+                        return "\(epHasProgress ? "Resume" : "Play") S\(sNum):E\(eNum)"
+                    }
+                    return epHasProgress ? "Resume" : "Play"
+                }()
 
                 Button {
                     playingItem = nextEp
                 } label: {
-                    Label(
-                        epHasProgress ? "Resume S\(seasonNum):E\(epNum)" : "Play S\(seasonNum):E\(epNum)",
-                        systemImage: "play.fill"
-                    )
-                    .font(.system(size: 14, weight: .semibold))
+                    Label(epLabel, systemImage: "play.fill")
+                        .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
 
