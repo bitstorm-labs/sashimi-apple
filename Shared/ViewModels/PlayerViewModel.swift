@@ -62,6 +62,21 @@ enum QualityOption: String, CaseIterable, Identifiable {
         case .quality480p: return 4_000_000   // 4 Mbps
         }
     }
+
+    /// Pixel width cap for the tier.
+    ///
+    /// The bitrate cap alone does not change resolution: a 1080p source already
+    /// under the cap is simply passed through, so picking "720p" on a 7 Mbps
+    /// 1080p file produced a 1080p stream and the OSD correctly kept saying
+    /// 1080p. The width is what actually makes the tier mean what it says.
+    var maxWidth: Int? {
+        switch self {
+        case .auto: return nil
+        case .quality1080p: return 1920
+        case .quality720p: return 1280
+        case .quality480p: return 854
+        }
+    }
 }
 
 // Playback reporting is best-effort by design -- a failed report must never
@@ -613,7 +628,7 @@ final class PlayerViewModel: ObservableObject {
             // An explicit non-Auto pick forces a transcode so the selection
             // visibly takes effect: the tiers are caps, and a direct-played
             // source under the cap would otherwise make the pick a no-op.
-            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, forceTranscode: quality != .auto)
+            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, maxWidth: quality.maxWidth, forceTranscode: quality != .auto)
             isLoading = false
             updateNowPlayingInfo(item: item)
 
@@ -675,7 +690,7 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, forceTranscode: Bool = false) async throws {
+    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -686,6 +701,7 @@ final class PlayerViewModel: ObservableObject {
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             maxBitrate: effectiveBitrate,
+            maxWidth: maxWidth,
             forceDirectPlay: playbackSettings.forceDirectPlay,
             forceTranscode: forceTranscode
         )
