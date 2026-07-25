@@ -64,7 +64,6 @@ enum QualityOption: String, CaseIterable, Identifiable {
     }
 }
 
-
 // Playback reporting is best-effort by design -- a failed report must never
 // interrupt playback -- but swallowing it silently meant watch state could
 // stop syncing with no trace at all.
