@@ -93,10 +93,7 @@ struct MobilePlayerView: View {
         }
         .onDisappear {
             viewModel.player?.pause()
-            if localFileURL != nil, let currentTime = viewModel.player?.currentTime() {
-                let ticks = Int64(currentTime.seconds * 10_000_000)
-                DownloadManager.shared.savePlaybackPosition(itemId: item.id, positionTicks: ticks)
-            }
+            saveOfflinePositionIfNeeded()
             Task {
                 await viewModel.stop()
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
@@ -157,6 +154,12 @@ struct MobilePlayerView: View {
             // Close button
             Button {
                 viewModel.player?.pause()
+                // Capture BEFORE stop(): stop() nils the player, and for
+                // offline playback it hits no await first, so it completes long
+                // before the dismiss animation lets onDisappear run -- which is
+                // where the offline save lives. The position was silently lost
+                // every time the X was used.
+                saveOfflinePositionIfNeeded()
                 Task { await viewModel.stop() }
                 dismiss()
             } label: {
@@ -305,6 +308,12 @@ struct MobilePlayerView: View {
             // Always show a close button
             Button {
                 viewModel.player?.pause()
+                // Capture BEFORE stop(): stop() nils the player, and for
+                // offline playback it hits no await first, so it completes long
+                // before the dismiss animation lets onDisappear run -- which is
+                // where the offline save lives. The position was silently lost
+                // every time the X was used.
+                saveOfflinePositionIfNeeded()
                 Task { await viewModel.stop() }
                 dismiss()
             } label: {
@@ -340,6 +349,15 @@ struct MobilePlayerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
+    }
+
+    /// Persists the offline resume point. Safe to call more than once: the
+    /// last call before the player is torn down wins, and it no-ops once the
+    /// player is gone.
+    private func saveOfflinePositionIfNeeded() {
+        guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
+        let ticks = Int64(currentTime.seconds * 10_000_000)
+        DownloadManager.shared.savePlaybackPosition(itemId: item.id, positionTicks: ticks)
     }
 }
 
