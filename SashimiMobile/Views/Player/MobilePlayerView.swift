@@ -103,6 +103,17 @@ struct MobilePlayerView: View {
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
+        // The .task above runs once. It does not re-run when changeQuality
+        // rebuilds the player or when auto-play-next swaps in the next episode,
+        // so the menus kept describing the PREVIOUS asset -- and since stream
+        // indexes are not stable across media sources, picking a subtitle from
+        // a stale menu fetched the wrong track entirely.
+        .onChange(of: viewModel.currentItem?.id) { _, _ in
+            viewModel.loadAllTracks()
+        }
+        .onChange(of: viewModel.tracksVersion) { _, _ in
+            viewModel.loadAllTracks()
+        }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             if ended {
                 dismiss()
