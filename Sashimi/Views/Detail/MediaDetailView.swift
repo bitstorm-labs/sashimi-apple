@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // swiftlint:disable type_body_length file_length
 // MediaDetailView is a complex view handling movies, series, seasons, and episodes
@@ -1370,15 +1371,14 @@ struct CastCard: View {
         } label: {
             VStack(spacing: 8) {
                 if person.primaryImageTag != nil {
-                    AsyncImage(
-                        url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 200),
-                        content: { image in
+                    LazyImage(url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 200)) { state in
+                        if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fill)
-                        },
-                        placeholder: {
+                        } else {
                             Circle().fill(SashimiTheme.cardBackground)
                         }
-                    )
+                    }
+                    .pipeline(SashimiImagePipeline.shared)
                     .frame(width: 100, height: 100)
                     .clipShape(Circle())
                     .overlay(
