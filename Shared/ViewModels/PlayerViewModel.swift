@@ -427,6 +427,10 @@ final class PlayerViewModel: ObservableObject {
         progressReportTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
+                // Outside reportProgress on purpose: that early-returns for
+                // offline playback, but the lock screen still needs updating
+                // when watching a download.
+                refreshNowPlayingProgress()
                 await reportProgress()
             }
         }
@@ -758,6 +762,7 @@ final class PlayerViewModel: ObservableObject {
 
         rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
             Task { @MainActor in
+                self?.refreshNowPlayingProgress()
                 await self?.reportProgress()
             }
         }
@@ -1325,13 +1330,30 @@ final class PlayerViewModel: ObservableObject {
             nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = Double(runTimeTicks) / 10_000_000.0
         }
 
-        if let playbackPositionTicks = item.userData?.playbackPositionTicks {
+        // Elapsed must come from the PLAYER, not the server's saved position.
+        // Using userData meant "Start from Beginning" showed the lock screen
+        // scrubber at the old resume point and counting up from there.
+        if let current = player?.currentTime().seconds, current.isFinite {
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = current
+        } else if let playbackPositionTicks = item.userData?.playbackPositionTicks {
             nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(playbackPositionTicks) / 10_000_000.0
         }
 
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        // Hard-coding 1.0 made the lock-screen clock keep advancing while
+        // paused, because the system extrapolates elapsed time from the rate.
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = Double(player?.rate ?? 0)
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+    }
+
+    /// Refreshes the Now Playing elapsed time and rate for the current item.
+    ///
+    /// updateNowPlayingInfo was only called from loadMedia and changeQuality, so
+    /// after the first paint the lock screen never heard about seeks, pauses or
+    /// ordinary progress.
+    private func refreshNowPlayingProgress() {
+        guard let item = currentItem else { return }
+        updateNowPlayingInfo(item: item)
     }
 
     nonisolated private func cleanupRemoteCommands() {

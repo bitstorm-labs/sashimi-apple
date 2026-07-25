@@ -38,6 +38,19 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Pixel width cap matching displayName. Sent alongside MaxStreamingBitrate:
+    /// a bitrate cap alone leaves the server encoding at native resolution, so
+    /// "Low (480p)" produced a blocky 4K file rather than a small 480p one.
+    /// `.original` is a stream copy, so it has no cap.
+    var maxWidth: Int? {
+        switch self {
+        case .original: return nil
+        case .high: return 1920
+        case .medium: return 1280
+        case .low: return 854
+        }
+    }
+
     /// Resolves the quality that should actually be downloaded given whether the
     /// raw source can direct-play on this device. `.original` is only honored
     /// when the source is device-compatible; otherwise it degrades to `.high` so
