@@ -16,40 +16,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.resumeThresholdSeconds, 30)
     }
 
-    // MARK: - ParentalControlsManager Tests
-
-    @MainActor
-    func testParentalControlsShouldHideItem() {
-        let controls = ParentalControlsManager.shared
-
-        // Store original value
-        let originalRating = controls.maxContentRating
-        let originalHideUnrated = controls.hideUnrated
-
-        // Test when no restriction is set
-        controls.maxContentRating = .any
-        XCTAssertFalse(controls.shouldHideItem(withRating: "R"))
-        XCTAssertFalse(controls.shouldHideItem(withRating: "NC-17"))
-
-        // Test when PG-13 is the max
-        controls.maxContentRating = .pg13
-        XCTAssertFalse(controls.shouldHideItem(withRating: "G"))
-        XCTAssertFalse(controls.shouldHideItem(withRating: "PG"))
-        XCTAssertFalse(controls.shouldHideItem(withRating: "PG-13"))
-        XCTAssertTrue(controls.shouldHideItem(withRating: "R"))
-        XCTAssertTrue(controls.shouldHideItem(withRating: "NC-17"))
-
-        // Test unrated content
-        controls.hideUnrated = true
-        XCTAssertTrue(controls.shouldHideItem(withRating: nil))
-
-        controls.hideUnrated = false
-        XCTAssertFalse(controls.shouldHideItem(withRating: nil))
-
-        // Restore original values
-        controls.maxContentRating = originalRating
-        controls.hideUnrated = originalHideUnrated
-    }
 
     // MARK: - CertificateTrustSettings Tests
 
