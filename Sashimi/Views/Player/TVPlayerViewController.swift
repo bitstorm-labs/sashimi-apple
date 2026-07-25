@@ -365,11 +365,19 @@ struct PlayerContentOverlay: View {
     var controlsVisible: Bool = false
 
     // Check if this is a YouTube episode
+    /// Above these, a "season"/"episode" is a YouTube upload year and counter
+    /// rather than real TV numbering.
+    private static let maxPlausibleSeason = 2100
+    private static let maxPlausibleEpisode = 1000
+
     private var isYouTubeEpisode: Bool {
         guard item.type == .episode else { return false }
         if item.path?.lowercased().contains("youtube") == true { return true }
+        // Pinchflat encodes the upload year as the season and a running
+        // counter as the episode, so values far outside real TV numbering are
+        // the tell. Named rather than inline so the intent survives.
         if let season = item.parentIndexNumber, let episode = item.indexNumber {
-            if season > 2100 || episode > 1000 { return true }
+            if season > Self.maxPlausibleSeason || episode > Self.maxPlausibleEpisode { return true }
         }
         return false
     }

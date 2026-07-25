@@ -1,7 +1,10 @@
 import SwiftUI
+import os
 
 // swiftlint:disable file_length
 // SettingsView contains multiple related settings views - splitting would fragment related UI code
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "SettingsView")
 
 struct SettingsView: View {
     // Parental Controls UI is hidden because nothing in the app enforces the
@@ -312,15 +315,29 @@ class HomeScreenSettings: ObservableObject {
     }
 
     func loadSettings() {
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
-           let configs = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
-            rowConfigs = configs
+        // Falling back to defaults is correct, but doing it silently made a
+        // schema change indistinguishable from "user never customised".
+        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+              let configs = decodeSavedConfigs(data) else { return }
+        rowConfigs = configs
+    }
+
+    private func decodeSavedConfigs(_ data: Data) -> [HomeRowConfig]? {
+        do {
+            return try JSONDecoder().decode([HomeRowConfig].self, from: data)
+        } catch {
+            logger.error("Failed to decode home row config: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 
     func saveSettings() {
-        if let data = try? JSONEncoder().encode(rowConfigs) {
+        do {
+            let data = try JSONEncoder().encode(rowConfigs)
             UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        } catch {
+            // The user's row layout is silently dropped if this throws.
+            logger.error("Failed to encode home row config: \(error.localizedDescription, privacy: .public)")
         }
         needsRefresh = true
     }
@@ -361,7 +378,7 @@ class HomeScreenSettings: ObservableObject {
 
         // Preserve order from saved settings
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
-           let savedConfigs = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
+           let savedConfigs = decodeSavedConfigs(data) {
             let savedOrder = savedConfigs.map { $0.id }
             rowConfigs.sort { a, b in
                 let indexA = savedOrder.firstIndex(of: a.id) ?? Int.max
