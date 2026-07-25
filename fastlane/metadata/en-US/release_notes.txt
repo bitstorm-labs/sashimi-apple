@@ -1,4 +1,4 @@
-Initial release of Sashimi for Apple TV!
+Initial release of Sashimi for Apple TV, iPhone and iPad!
 
 - Browse your Jellyfin media library
 - Stream movies and TV shows

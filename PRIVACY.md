@@ -1,10 +1,10 @@
 # Privacy Policy for Sashimi
 
-**Last updated: January 2025**
+**Last updated: July 2026**
 
 ## Overview
 
-Sashimi is a tvOS client for Jellyfin media servers. This privacy policy explains how Sashimi handles your data.
+Sashimi is a client for Jellyfin media servers, available for Apple TV, iPhone and iPad. This privacy policy explains how Sashimi handles your data.
 
 ## Data Collection
 
@@ -12,7 +12,7 @@ Sashimi is a tvOS client for Jellyfin media servers. This privacy policy explain
 
 ### What Sashimi Stores Locally
 
-Sashimi stores the following data locally on your Apple TV device:
+Sashimi stores the following data locally on your device:
 
 1. **Server Connection Details**
    - Your Jellyfin server URL
@@ -25,11 +25,18 @@ Sashimi stores the following data locally on your Apple TV device:
 3. **Playback State**
    - Current playback position (synced with your Jellyfin server)
 
+4. **Downloaded Media (iPhone and iPad only)**
+   - Movies and episodes you explicitly choose to download, stored in the app's
+     private container so they can be played without a network connection
+   - Subtitle files accompanying those downloads
+   - A local database recording what is downloaded and how far you have watched
+   - Downloads never leave your device, and deleting the app removes all of them
+
 ### Data Transmission
 
 Sashimi only communicates with:
 
-1. **Your Jellyfin Server** - All media browsing, streaming, and playback progress is sent directly to your own Jellyfin server. This communication is between your Apple TV and your server only.
+1. **Your Jellyfin Server** - All media browsing, streaming, and playback progress is sent directly to your own Jellyfin server. This communication is between your device and your server only.
 
 2. **No Third-Party Services** - Sashimi does not use any analytics, tracking, crash reporting, or advertising services.
 

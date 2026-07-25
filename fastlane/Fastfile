@@ -98,6 +98,7 @@ platform :tvos do
     upload_to_testflight(
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
+      app_platform: "appletvos",
       skip_waiting_for_build_processing: true,
       # Only this build's changes (commits since the previous beta tag),
       # merge commits excluded — keeps TestFlight notes short.
@@ -115,7 +116,7 @@ platform :tvos do
 
     # Tag the release
     add_git_tag(
-      tag: "v#{get_version_number}-beta.#{lane_context[SharedValues::BUILD_NUMBER]}"
+      tag: "v#{get_version_number(target: 'Sashimi')}-beta.#{lane_context[SharedValues::BUILD_NUMBER]}"
     ) unless is_ci
   end
 
@@ -135,6 +136,13 @@ platform :tvos do
 
     # Upload to App Store
     upload_to_app_store(
+      # Explicit: the Appfile scopes an Array to :release for match, and
+      # deliver's app_identifier is typed String -- inheriting the Array raises
+      # "'app_identifier' value must be a String! Found Array instead."
+      app_identifier: "com.mondominator.sashimi",
+      # Without this, deliver defaults to "ios" and writes the tvOS metadata
+      # onto the iOS platform of the universal listing.
+      platform: "appletvos",
       skip_metadata: false,
       skip_screenshots: true,  # Set to false when screenshots are ready
       submit_for_review: false, # Set to true for auto-submit
@@ -143,7 +151,7 @@ platform :tvos do
     )
 
     # Tag the release
-    version = get_version_number
+    version = get_version_number(target: "Sashimi")
     add_git_tag(tag: "v#{version}") unless is_ci
     push_git_tags unless is_ci
   end
