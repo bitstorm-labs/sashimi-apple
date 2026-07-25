@@ -49,9 +49,9 @@ NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
 
 # Update project.yml. This bumps every target whose MARKETING_VERSION matches
-# the tvOS app's current version (Sashimi + TopShelf, which are kept in sync).
-# The iOS target (SashimiMobile) has an independently-managed MARKETING_VERSION
-# and is intentionally NOT touched here.
+# Global on purpose: Sashimi, SashimiMobile and TopShelf ship under ONE App Store
+# listing (Universal Purchase), so their marketing versions stay in lockstep.
+# This sed rewrites all three.
 sed -i '' "s/MARKETING_VERSION: $CURRENT_VERSION/MARKETING_VERSION: $NEW_VERSION/g" "$PROJECT_FILE"
 
 # Get current build number and increment
@@ -60,7 +60,7 @@ NEW_BUILD=$((CURRENT_BUILD + 1))
 
 echo "Bumping build: $CURRENT_BUILD -> $NEW_BUILD"
 
-# Same match-based behavior as above: bumps Sashimi + TopShelf, not SashimiMobile.
+# Same global rewrite as above -- all targets share the build number.
 sed -i '' "s/CURRENT_PROJECT_VERSION: $CURRENT_BUILD/CURRENT_PROJECT_VERSION: $NEW_BUILD/g" "$PROJECT_FILE"
 
 # Regenerate Xcode project
