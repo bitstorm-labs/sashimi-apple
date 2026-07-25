@@ -14,7 +14,6 @@ final class HomeViewModel: ObservableObject {
     @Published var recentlyAddedItems: [BaseItemDto] = []
     @Published var heroItems: [BaseItemDto] = []
     @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
-    @Published var libraryItems: [String: [BaseItemDto]] = [:]  // libraryId -> items
     @Published var libraries: [JellyfinLibrary] = []
     @Published var isLoading = false
     @Published var error: Error?
@@ -68,19 +67,34 @@ final class HomeViewModel: ObservableObject {
             return item.id
         })
 
-        for seriesId in seriesIds {
-            do {
-                let ancestors = try await client.getItemAncestors(itemId: seriesId)
-                if let library = ancestors.first(where: { $0.type == .collectionFolder }) {
-                    for item in continueWatchingItems {
-                        if item.seriesId == seriesId || item.id == seriesId {
-                            libraryNames[item.id] = library.name
-                        }
+        // Concurrent, not serial. Continue Watching holds up to 20 items, so
+        // this was up to 20 sequential round-trips gating the first render --
+        // ~0.9s on a 30ms LAN, ~3.5s at 120ms. Nothing here depends on the
+        // previous iteration.
+        let resolved = await withTaskGroup(of: (String, String)?.self) { group in
+            for seriesId in seriesIds {
+                group.addTask { [client] in
+                    do {
+                        let ancestors = try await client.getItemAncestors(itemId: seriesId)
+                        guard let library = ancestors.first(where: { $0.type == .collectionFolder }) else { return nil }
+                        return (seriesId, library.name)
+                    } catch {
+                        // Non-fatal: the row just renders without a library name
+                        return nil
                     }
                 }
-            } catch {
-                // Non-fatal: the row just renders without a library name
-                logger.error("Failed to load ancestors for \(seriesId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+            var out: [String: String] = [:]
+            for await result in group {
+                if let (seriesId, name) = result { out[seriesId] = name }
+            }
+            return out
+        }
+
+        for item in continueWatchingItems {
+            let key = item.type == .episode ? item.seriesId : item.id
+            if let key, let name = resolved[key] {
+                libraryNames[item.id] = name
             }
         }
 
@@ -137,28 +151,58 @@ final class HomeViewModel: ObservableObject {
         #endif
     }
 
+    /// One library's latest-media result, tagged with its position so the
+    /// concurrent fetches can be put back into the original library order.
+    private struct LibraryLatest {
+        let index: Int
+        let items: [BaseItemDto]
+    }
+
     private func loadHeroItems() async {
         var allHeroItems: [BaseItemDto] = []
         var libraryNames: [String: String] = [:]
-        var itemsPerLibrary: [String: [BaseItemDto]] = [:]
 
-        for library in libraries {
-            do {
-                let items = try await client.getLatestMedia(parentId: library.id, limit: 10)
-                itemsPerLibrary[library.id] = items
-                for item in items {
-                    libraryNames[item.id] = library.name
+        // Concurrent, but collected in the ORIGINAL library order: the hero
+        // rotation should not reorder itself based on which server response
+        // happened to land first.
+        let perLibrary = await withTaskGroup(of: LibraryLatest?.self) { group in
+            for (index, library) in libraries.enumerated() {
+                group.addTask { [client] in
+                    do {
+                        let items = try await client.getLatestMedia(parentId: library.id, limit: 10)
+                        return LibraryLatest(index: index, items: items)
+                    } catch {
+                        // Non-fatal: this library is just missing from the rotation
+                        return nil
+                    }
                 }
-                allHeroItems.append(contentsOf: items.prefix(5))
-            } catch {
-                // Non-fatal: this library is just missing from the hero rotation
-                logger.error("Failed to load latest media for library \(library.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
+            var out: [LibraryLatest] = []
+            for await result in group {
+                if let result { out.append(result) }
+            }
+            return out.sorted { $0.index < $1.index }
         }
 
-        heroItems = allHeroItems.shuffled()
+        for entry in perLibrary {
+            let library = libraries[entry.index]
+            for item in entry.items {
+                libraryNames[item.id] = library.name
+            }
+            allHeroItems.append(contentsOf: entry.items.prefix(5))
+        }
+
+        // Shuffled only on the FIRST load. Reshuffling on every refresh
+        // republished a reordered array while the view's currentIndex stayed
+        // put, so the hero cut to an unrelated title every 30 seconds,
+        // off-cadence from its own 6-second rotation -- and the .id(currentItem.id)
+        // change tore down and re-downloaded the backdrop each time.
+        if heroItems.isEmpty {
+            heroItems = allHeroItems.shuffled()
+        } else {
+            heroItems = allHeroItems
+        }
         heroItemLibraryNames = libraryNames
-        libraryItems = itemsPerLibrary
     }
 
     func refresh() async {
