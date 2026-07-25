@@ -130,7 +130,7 @@ class CertificateTrustSettings: ObservableObject {
 
 // MARK: - URLSession Delegate for Certificate Validation
 
-final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+final class CertificateValidationDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     private let allowSelfSigned: (String) -> Bool
     private let allowExpired: (String) -> Bool
     private let isHostTrusted: (String) -> Bool
@@ -168,6 +168,19 @@ final class CertificateValidationDelegate: NSObject, URLSessionDelegate, @unchec
             return true
         }
         return false
+    }
+
+    /// Task-level variant. Nuke's `DataLoader` forwards auth challenges through
+    /// `URLSessionTaskDelegate`, not the session-level method, so without this
+    /// the image pipeline would fall back to default handling — and every image
+    /// on a self-signed server would fail while the API worked fine.
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
     }
 
     func urlSession(
@@ -280,7 +293,10 @@ actor JellyfinClient {
 
     // Internal so SubtitleManager can use the same certificate trust config
     let urlSession: URLSession
-    private let certificateDelegate: CertificateValidationDelegate
+    /// Shared with the image pipeline so both use one trust policy. When they
+    /// disagreed, the API worked on a self-signed server while every image
+    /// silently failed.
+    let certificateDelegate: CertificateValidationDelegate
     private let maxRetries = 3
 
     static let shared = JellyfinClient()

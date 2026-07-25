@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 // Smart image that tries multiple item IDs until one works
 // For each item ID, tries specified image types in order
@@ -27,25 +28,23 @@ struct SmartPosterImage: View {
             if loadFailed {
                 placeholderView
             } else if let url = currentURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
-                    case .failure:
+                    } else if state.error != nil {
                         Color.clear
                             .task(id: attemptId) {
                                 advanceToNext()
                             }
-                    case .empty:
+                    } else {
                         Rectangle()
                             .fill(.gray.opacity(0.2))
                             .overlay { ProgressView() }
-                    @unknown default:
-                        placeholderView
                     }
                 }
+                .pipeline(SashimiImagePipeline.shared)
                 .id("\(currentIndex)-\(currentTypeIndex)-\(attemptId)")
             } else {
                 placeholderView
@@ -117,25 +116,23 @@ struct AsyncItemImage: View {
             if loadFailed {
                 placeholderView
             } else if let url = currentURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
+                LazyImage(url: url) { state in
+                    if let image = state.image {
                         image
                             .resizable()
                             .aspectRatio(contentMode: contentMode)
-                    case .failure:
+                    } else if state.error != nil {
                         Color.clear
                             .task(id: attemptId) {
                                 advanceToNextType()
                             }
-                    case .empty:
+                    } else {
                         Rectangle()
                             .fill(.gray.opacity(0.2))
                             .overlay { ProgressView() }
-                    @unknown default:
-                        placeholderView
                     }
                 }
+                .pipeline(SashimiImagePipeline.shared)
                 .id("\(currentTypeIndex)-\(attemptId)")
             } else {
                 placeholderView
