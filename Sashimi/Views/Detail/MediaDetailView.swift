@@ -127,7 +127,10 @@ struct MediaDetailView: View {
                             AsyncItemImage(
                                 itemId: backdropId,
                                 imageType: backdropImageType,
-                                maxWidth: 3840,
+                                // Rendered into geometry.size.width * 0.45; a 4K
+                                // decode here is ~33 MB of backing store for no
+                                // visible gain on a 1080p layout space.
+                                maxWidth: 1920,
                                 contentMode: .fit,
                                 fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"]
                             )
