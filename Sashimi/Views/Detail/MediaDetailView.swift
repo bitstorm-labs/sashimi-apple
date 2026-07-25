@@ -226,6 +226,12 @@ struct MediaDetailView: View {
             if !isShowing {
                 // Reset startFromBeginning and refresh item data when returning from player
                 startFromBeginning = false
+                // selectedEpisode is what the player actually played (a trailer,
+                // a shuffled episode, or next-up). Leaving it set meant the NEXT
+                // press of Play replayed that instead of the item: play a movie's
+                // trailer, come back, press Play, and you got the trailer again
+                // with no way out short of leaving the detail view.
+                selectedEpisode = nil
                 Task { await refreshItemState() }
             }
         }
@@ -254,6 +260,15 @@ struct MediaDetailView: View {
             isFavorite = refreshedItem.userData?.isFavorite ?? false
         } catch {
             // Silently ignore - non-critical refresh
+        }
+
+        // Watching an episode changes which one is next, and whether the strip
+        // should show a checkmark. loadContent() is bound to .task, which does
+        // NOT re-run here: the player is a fullScreenCover, so it never removed
+        // this view and .task never re-fires. Without this the button still read
+        // "Play S1:E1" after finishing S1:E1, and pressing it replayed it.
+        if isSeries || isEpisode {
+            await loadContent()
         }
     }
 

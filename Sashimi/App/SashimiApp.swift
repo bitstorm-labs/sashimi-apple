@@ -237,8 +237,22 @@ struct MainTabView: View {
     }
 
     private func loadLibraries() async {
-        if let libs = try? await JellyfinClient.shared.getLibraryViews() {
-            libraries = libs
+        // Retried rather than silently swallowed. This runs once from .task, so
+        // a single transient failure used to leave the sidebar with NO
+        // libraries for the entire session -- and because it renders as a
+        // plausible rail rather than an error, it reads as "my libraries are
+        // gone from the server". Force-quitting was the only recovery.
+        for attempt in 0..<3 {
+            do {
+                libraries = try await JellyfinClient.shared.getLibraryViews()
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.error("Library rail load failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+                guard attempt < 2 else { break }
+                try? await Task.sleep(for: .seconds(1 << attempt))
+            }
         }
     }
 

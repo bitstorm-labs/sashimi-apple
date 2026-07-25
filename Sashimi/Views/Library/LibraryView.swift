@@ -219,12 +219,6 @@ enum LibraryFilterOption: String, CaseIterable {
 // swiftlint:disable type_body_length
 // LibraryDetailView manages grid display, pagination, filtering, sorting, and alphabet navigation
 struct LibraryDetailView: View {
-    enum FocusArea: Hashable {
-        case grid
-        case alphabet
-        case sortPicker
-    }
-
     let library: LibraryView_Model
 
     @State private var items: [BaseItemDto] = []
@@ -240,7 +234,7 @@ struct LibraryDetailView: View {
     @State private var sortOption: LibrarySortOption = .name
     @State private var sortOrder: SortOrder = .ascending
     @State private var filterOption: LibraryFilterOption = .all
-    @FocusState private var focusedArea: FocusArea?
+    @State private var committedLetter: String?
     private let pageSize = 50
 
     // Alphabet for fast scroll
@@ -368,13 +362,19 @@ struct LibraryDetailView: View {
                         }
                     }
                 }
+                // Hover: scroll only if the letter is already loaded. Pressing
+                // is what may pull the rest of the library down.
                 .onChange(of: selectedLetter) { _, letter in
                     if let letter = letter {
-                        scrollToLetter(letter, proxy: proxy)
+                        scrollToLetter(letter, proxy: proxy, allowFullLoad: false)
+                    }
+                }
+                .onChange(of: committedLetter) { _, letter in
+                    if let letter = letter {
+                        scrollToLetter(letter, proxy: proxy, allowFullLoad: true)
                     }
                 }
                 .focusSection()
-                .focused($focusedArea, equals: .grid)
             }
 
             // Alphabet fast scroll bar (right side, aligned with grid)
@@ -382,14 +382,17 @@ struct LibraryDetailView: View {
                 ScrollView(showsIndicators: false) {
                     AlphabetScrollBar(
                         alphabet: alphabet,
-                        selectedLetter: $selectedLetter
+                        selectedLetter: $selectedLetter,
+                        committedLetter: $committedLetter
                     )
                 }
                 .focusSection()
-                .focused($focusedArea, equals: .alphabet)
-                .onExitCommand {
-                    focusedArea = .grid
-                }
+                // No .onExitCommand here. It used to set focusedArea = .grid,
+                // which moved nothing -- focusedArea is never read, and it was
+                // bound to ScrollViews, which aren't focusable on tvOS -- while
+                // still CONSUMING the Menu press. So Menu was dead inside the
+                // A-Z bar and could not return the user to Home. Left already
+                // reaches the grid geometrically.
                 .padding(.top, 100)  // Align with grid (below header)
                 .padding(.trailing, 20)
             }
@@ -410,7 +413,7 @@ struct LibraryDetailView: View {
         }
     }
 
-    private func scrollToLetter(_ letter: String, proxy: ScrollViewProxy) {
+    private func scrollToLetter(_ letter: String, proxy: ScrollViewProxy, allowFullLoad: Bool) {
         // Try to find in already-loaded items
         if let item = findItem(for: letter) {
             withAnimation(.easeOut(duration: 0.5)) {
@@ -419,8 +422,11 @@ struct LibraryDetailView: View {
             return
         }
 
-        // Not found — load all remaining items, then retry
-        guard items.count < totalCount else { return }
+        // Not found — load all remaining items, then retry.
+        // Gated on an actual button press: this used to fire on FOCUS, so
+        // holding Down through the A-Z bar kicked a full-library fetch at every
+        // letter that wasn't in the loaded page, queued one behind another.
+        guard allowFullLoad, items.count < totalCount else { return }
         Task {
             await loadAllRemainingItems()
             if let item = findItem(for: letter) {
@@ -607,14 +613,20 @@ struct LibraryDetailView: View {
 // MARK: - Alphabet Scroll Bar
 struct AlphabetScrollBar: View {
     let alphabet: [String]
+    /// Set on hover as well as press — drives scroll-if-already-loaded.
     @Binding var selectedLetter: String?
+    /// Set only on press — the one that may trigger a full-library load.
+    @Binding var committedLetter: String?
     @FocusState private var focusedLetter: String?
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(alphabet, id: \.self) { letter in
                 Button {
+                    // A press is an explicit request, so it may pull in the
+                    // rest of the library; hovering must not.
                     selectedLetter = letter
+                    committedLetter = letter
                 } label: {
                     Text(letter)
                         .font(.system(size: 18, weight: focusedLetter == letter ? .bold : .medium))
