@@ -230,6 +230,9 @@ struct LibraryDetailView: View {
     @State private var items: [BaseItemDto] = []
     @State private var isLoading = true
     @State private var isLoadingMore = false
+    /// Bumped whenever the sort/filter changes, so a page that was already in
+    /// flight can tell it belongs to a superseded ordering.
+    @State private var loadGeneration = 0
     @State private var selectedItem: BaseItemDto?
     @State private var selectedItemIsYouTube = false
     @State private var totalCount = 0
@@ -455,6 +458,7 @@ struct LibraryDetailView: View {
     private func loadAllRemainingItems() async {
         guard !isLoadingMore && items.count < totalCount else { return }
         isLoadingMore = true
+        let generation = loadGeneration
         do {
             let includeTypes: [ItemType]? = switch library.collectionType {
             case "tvshows": [.series]
@@ -472,6 +476,8 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
+            // Sort/filter changed mid-flight -- this page is from the old ordering.
+            guard generation == loadGeneration else { return }
             items.append(contentsOf: response.items)
         } catch {
             // Silent fail — alphabet jump is best-effort
@@ -527,6 +533,10 @@ struct LibraryDetailView: View {
     }
 
     private func reloadWithNewSort() async {
+        // Invalidate any page already in flight: its startIndex was computed
+        // from the pre-reset count and against the OLD ordering, so appending
+        // it would interleave two sorts and duplicate rows.
+        loadGeneration &+= 1
         items = []
         totalCount = 0
         await loadItems()
@@ -536,6 +546,7 @@ struct LibraryDetailView: View {
         guard !isLoadingMore && hasMore else { return }
 
         isLoadingMore = true
+        let generation = loadGeneration
         do {
             let includeTypes: [ItemType]? = switch library.collectionType {
             case "tvshows": [.series]
@@ -554,6 +565,8 @@ struct LibraryDetailView: View {
                 isPlayed: filter.isPlayed,
                 isFavorite: filter.isFavorite
             )
+            // Sort/filter changed while this page was in flight -- discard it.
+            guard generation == loadGeneration else { return }
             items.append(contentsOf: response.items)
         } catch is CancellationError {
             // Ignore
