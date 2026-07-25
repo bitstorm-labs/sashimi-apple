@@ -233,20 +233,7 @@ struct MobileContinueWatchingCard: View {
     }
 
     private func formatDate(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: isoDate) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "M-d-yyyy"
-            return displayFormatter.string(from: date)
-        }
-        return ""
+        DateFormatting.formatShortNumericDate(isoDate) ?? ""
     }
 }
 

@@ -421,12 +421,8 @@ struct PlayerContentOverlay: View {
 
     private var formattedReleaseDate: String? {
         if let premiereDateStr = item.premiereDate {
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = isoFormatter.date(from: premiereDateStr) ?? ISO8601DateFormatter().date(from: premiereDateStr) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "MMMM d, yyyy"
-                return formatter.string(from: date)
+            if let formatted = DateFormatting.formatLongDate(premiereDateStr) {
+                return formatted
             }
         }
         if let year = item.productionYear {

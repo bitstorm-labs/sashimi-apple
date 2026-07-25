@@ -55,9 +55,6 @@ struct HomeView: View {
                 // on the left, 120pt on the right). Ignoring both makes the
                 // hero's 50pt horizontal padding symmetric.
                 .ignoresSafeArea(edges: [.top, .horizontal])
-                .refreshable {
-                    await viewModel.refresh()
-                }
             }
             .fullScreenCover(item: $selectedItem) { item in
                 MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
