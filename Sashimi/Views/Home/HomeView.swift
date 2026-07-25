@@ -20,17 +20,6 @@ struct HomeView: View {
     @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
 
     // Order libraries according to settings
-    private var orderedLibraries: [JellyfinLibrary] {
-        let orderedIds = homeSettings.orderedLibraryIds()
-        if orderedIds.isEmpty {
-            return viewModel.libraries
-        }
-        return viewModel.libraries.sorted { lib1, lib2 in
-            let index1 = orderedIds.firstIndex(of: lib1.id) ?? Int.max
-            let index2 = orderedIds.firstIndex(of: lib2.id) ?? Int.max
-            return index1 < index2
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -174,6 +163,14 @@ struct HomeView: View {
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            // Skip while something is presented over Home. The player and the
+            // detail view are fullScreenCovers, which do NOT remove the
+            // presenting view -- so .onDisappear never fires and this timer used
+            // to keep running for the entire duration of a movie, firing ~25
+            // requests every 30 seconds at the same server that is transcoding
+            // it. Each tick also republished every @Published on the view model,
+            // re-evaluating the whole LazyVStack behind the cover.
+            guard selectedItem == nil, playingItem == nil else { return }
             Task {
                 await viewModel.refresh()
             }
@@ -303,7 +300,14 @@ struct HeroSection: View {
                         Spacer()
                         SmartPosterImage(
                             itemIds: heroFallbackIds,
-                            maxWidth: 3840,
+                            // 1920, not 3840. tvOS lays out in a 1920x1080 space
+                            // and this slot renders ~910x512pt, so a 4K request
+                            // was a 33 MB RGBA decode (3840*2160*4) for an image
+                            // that is downsampled on sight. Jellyfin treats
+                            // maxWidth as a cap, so any item with 4K artwork
+                            // really did return 4K -- and the hero rotates every
+                            // 6 seconds.
+                            maxWidth: 1920,
                             imageTypes: heroImageTypes,
                             contentMode: .fit
                         )
