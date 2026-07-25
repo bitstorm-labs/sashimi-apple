@@ -74,7 +74,11 @@ struct MobilePlayerView: View {
                 await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning, localFileURL: nil)
                 timeoutTask.cancel()
             } else {
-                await viewModel.loadMedia(item: item, localFileURL: localFileURL)
+                await viewModel.loadMedia(
+                    item: item,
+                    localFileURL: localFileURL,
+                    offlineSubtitles: DownloadManager.shared.offlineSubtitles(for: item.id)
+                )
                 // For offline content, apply locally-saved position if newer than server data
                 if let offlineTicks = DownloadManager.shared.offlinePlaybackPosition(for: item.id),
                    offlineTicks > 0 {

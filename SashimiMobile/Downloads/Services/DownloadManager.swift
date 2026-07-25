@@ -353,6 +353,24 @@ final class DownloadManager: NSObject, ObservableObject {
         return record.videoFileURL
     }
 
+    /// The downloaded subtitle tracks for an item, in a form the shared player
+    /// can consume. Without this the .vtt files written at download time were
+    /// never read by anything.
+    func offlineSubtitles(for itemId: String) -> [OfflineSubtitle] {
+        guard let record = downloadStatus(for: itemId) else { return [] }
+        return record.subtitles.compactMap { subtitle in
+            let url = DownloadFileManager.subtitlesDirectory(for: itemId)
+                .appendingPathComponent(subtitle.fileName)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return OfflineSubtitle(
+                index: subtitle.subtitleIndex,
+                language: subtitle.language,
+                displayTitle: subtitle.displayTitle,
+                fileURL: url
+            )
+        }
+    }
+
     func offlinePlaybackPosition(for itemId: String) -> Int64? {
         guard let context = mainContext else { return nil }
         let predicate = #Predicate<DownloadedItem> { $0.itemId == itemId }
