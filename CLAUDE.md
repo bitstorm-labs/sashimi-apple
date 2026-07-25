@@ -105,13 +105,19 @@ gh pr create --fill
 ```
 
 ### Testing Before Merge
-**Always wait for user testing before merging PRs.** After deploying a build to Apple TV:
-1. Create the PR and wait for CI to pass
-2. Deploy the build to Apple TV for testing
-3. **Wait for user confirmation** that the feature works correctly
-4. Only merge after user approval
+**Merge on green CI.** Hardware confirmation is no longer a gate on merging.
 
-Do not automatically merge PRs after CI passes - the user needs to test on actual hardware first.
+CI must be green first — `Build tvOS App`, `Build iOS App` and `SwiftLint` (strict).
+Beyond that, use judgement:
+
+- State plainly in the PR what was and was not verified. "Builds and tests pass"
+  is not the same claim as "exercised on a device", and conflating them is how a
+  broken build reaches a shipped app.
+- Anything that can only be judged on real hardware — focus traversal, offline
+  playback, AVPlayer behaviour, anything involving a physical remote — should say
+  so explicitly rather than implying it was checked.
+- The gate that still matters is the deploy tag, not the merge. A merge is
+  recoverable; a TestFlight build in someone's hands is less so.
 
 ### CI Monitoring
 After pushing changes or creating PRs, always monitor CI until completion:
