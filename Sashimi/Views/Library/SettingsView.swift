@@ -4,11 +4,6 @@ import SwiftUI
 // SettingsView contains multiple related settings views - splitting would fragment related UI code
 
 struct SettingsView: View {
-    // Parental Controls UI is hidden because nothing in the app enforces the
-    // PIN / rating filter / Kids Mode yet — showing it would be a placebo.
-    // Re-enable once enforcement lands (tracked in issue #173).
-    private static let parentalControlsEnabled = false
-
     // App icon picker is hidden: alternate icons are temporarily disabled for
     // the first TestFlight beta (see project.yml — each icon needs a 1280x768
     // App Store variant) and SashimiApp resets to the default icon at every
@@ -59,16 +54,6 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.playback)
                             }
 
-                            if Self.parentalControlsEnabled {
-                                SettingsOptionRow(
-                                    icon: "lock.shield",
-                                    title: "Parental Controls",
-                                    subtitle: "PIN and restrictions"
-                                ) {
-                                    navigationPath.append(SettingsDestination.parentalControls)
-                                }
-                            }
-
                             SettingsOptionRow(
                                 icon: "checkmark.shield",
                                 title: "Security",
@@ -116,8 +101,6 @@ struct SettingsView: View {
                     HomeScreenSettingsView()
                 case .playback:
                     PlaybackSettingsView()
-                case .parentalControls:
-                    ParentalControlsView()
                 case .certificates:
                     CertificateSettingsView()
                 case .appIcon:
@@ -151,7 +134,6 @@ enum SettingsDestination: Hashable {
     case servers
     case homeScreen
     case playback
-    case parentalControls
     case certificates
     case appIcon
 }
