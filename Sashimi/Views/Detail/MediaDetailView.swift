@@ -1046,7 +1046,12 @@ struct MediaDetailView: View {
 
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 30) {
+                            // Lazy: a non-lazy HStack instantiates every child
+                            // immediately, so a 24-episode season fired 24
+                            // concurrent image requests on appear, ~20 of them
+                            // off-screen — saturating the queue ahead of the
+                            // images actually on screen.
+                            LazyHStack(spacing: 30) {
                                 ForEach(episodes) { episode in
                                     EpisodeCard(episode: episode, isCurrentEpisode: episode.id == nextEpisodeToPlay?.id, showEpisodeThumbnail: true) {
                                         showingEpisodeDetail = episode
@@ -1097,7 +1102,8 @@ struct MediaDetailView: View {
             } else if !episodes.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 30) {
+                        // Lazy for the same reason as the season strip above.
+                        LazyHStack(spacing: 30) {
                             ForEach(episodes) { episode in
                                 EpisodeCard(
                                     episode: episode,
