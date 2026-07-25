@@ -299,7 +299,11 @@ final class PlayerViewModel: ObservableObject {
 
                 let asset = AVURLAsset(url: localFileURL)
                 let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
-                player = AVPlayer(playerItem: playerItem)
+                // Same observer wiring as the online path. loadMedia has already
+                // torn down the previous endObserver, so building the player
+                // directly here left downloads with no end-of-item notification
+                // and no way to surface a decode failure.
+                makePlayerAndObservers(for: playerItem)
             } else {
                 // Online playback - fetch fresh data from server
                 freshItem = try await client.getItem(itemId: item.id)
@@ -580,8 +584,14 @@ final class PlayerViewModel: ObservableObject {
             isLoading = false
             updateNowPlayingInfo(item: item)
 
-            // Seek to saved position
+            // Seek to saved position. A bare pre-ready seek is silently dropped
+            // on HLS/transcode streams -- and forceTranscode above means any
+            // non-Auto pick is ALWAYS that case -- so arm pendingResumeTicks
+            // too and let the status observer re-apply it once the item is
+            // ready. Without this the stream restarts at 0:00 and the 5s
+            // progress report then overwrites the server's resume point with 0.
             if positionTicks > 0 {
+                pendingResumeTicks = positionTicks
                 let seekTime = CMTime(value: positionTicks / 10000, timescale: 1000)
                 await player?.seek(to: seekTime)
             }
@@ -596,7 +606,12 @@ final class PlayerViewModel: ObservableObject {
                 applyPreferredSubtitles()
             }
 
-            // Resume playback and tracking
+            // Resume playback and tracking. Segments belong to the ITEM, but
+            // cleanupSegmentTracking() cleared them with the player, and
+            // fetchSegments is otherwise only called from loadMedia -- so
+            // without this the observer runs against an empty array and skip
+            // intro/credits stays dead for the rest of the episode.
+            await fetchSegments(itemId: item.id)
             startProgressReporting()
             setupSegmentTracking()
             player?.play()
@@ -669,6 +684,17 @@ final class PlayerViewModel: ObservableObject {
             setupChapterMarkers(on: playerItem, chapters: chapters, duration: duration)
         }
 
+        makePlayerAndObservers(for: playerItem)
+    }
+
+    /// Builds the AVPlayer and wires every observer it needs.
+    ///
+    /// Factored out because offline playback builds its own AVPlayer and used
+    /// to skip all of this: downloaded episodes never fired
+    /// AVPlayerItemDidPlayToEndTime (so they never dismissed and auto-play-next
+    /// was dead for downloads), and a corrupt download sat on a black screen
+    /// with no error because nothing observed .failed.
+    private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
                 if observed.status == .failed {
