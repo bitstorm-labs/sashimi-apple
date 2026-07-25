@@ -62,11 +62,27 @@ struct MediaPosterButton: View {
 
     // Image types to try
     private var imageTypes: [String] {
-        if isLandscape {
+        let candidates: [String] = isLandscape
             // For YouTube/landscape, try Thumb first (more likely to have video thumbnail)
-            return ["Thumb", "Primary", "Backdrop", "Screenshot"]
+            ? ["Thumb", "Primary", "Backdrop", "Screenshot"]
+            : ["Primary", "Thumb"]
+
+        // The server already tells us which image types an item has, in
+        // ImageTags — and this probed blindly instead, so a tile whose item has
+        // no Thumb issued a doomed request and then waited 500ms before trying
+        // the next type. In a grid showing 30 tiles that is a lot of wasted
+        // round-trips and visible placeholder time.
+        //
+        // Only applied when the item itself is the sole candidate id. For
+        // episodes we also fall back to season/series ids, and we hold no tags
+        // for those, so those must still probe.
+        guard imageFallbackIds == [item.id], let tags = item.imageTags, !tags.isEmpty else {
+            return candidates
         }
-        return ["Primary", "Thumb"]
+        let available = candidates.filter { tags[$0] != nil }
+        // If the tags name none of our candidates, fall back to probing rather
+        // than rendering a guaranteed placeholder.
+        return available.isEmpty ? candidates : available
     }
 
     // VoiceOver accessibility description

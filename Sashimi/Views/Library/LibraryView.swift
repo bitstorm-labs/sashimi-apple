@@ -339,7 +339,6 @@ struct LibraryDetailView: View {
                                     }
                                     .id(item.id)
                                     .prefersDefaultFocus(index == 0, in: namespace)
-                                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                                     .onAppear {
                                         // Load more when approaching the end
                                         if item.id == items.last?.id && hasMore && !isLoadingMore {
@@ -350,7 +349,13 @@ struct LibraryDetailView: View {
                             }
                             .padding(.horizontal, 60)
                             .padding(.bottom, 60)
-                            .animation(.easeOut(duration: 0.3), value: items.count)
+                            // No blanket animation on items.count. An alphabet
+                            // jump can insert several thousand items in one go,
+                            // and SwiftUI must resolve the opacity+scale
+                            // transition for every inserted identity -- not just
+                            // the visible ones -- which froze the UI for
+                            // seconds. Paging in 50 at a time never needed an
+                            // animation to feel right anyway.
 
                             // Loading indicator for infinite scroll
                             if isLoadingMore {
@@ -406,9 +411,9 @@ struct LibraryDetailView: View {
             MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
         }
         .onChange(of: selectedItem) { oldValue, newValue in
-            // Refresh item data when returning from detail view
-            if oldValue != nil && newValue == nil {
-                Task { await refreshCurrentItems() }
+            // Refresh only the item that was open, not the whole grid.
+            if let dismissed = oldValue, newValue == nil {
+                Task { await refreshItem(id: dismissed.id) }
             }
         }
     }
@@ -582,27 +587,28 @@ struct LibraryDetailView: View {
         isLoadingMore = false
     }
 
-    private func refreshCurrentItems() async {
-        // Just refresh userData for watched status, don't reload all
+    /// Refresh the single item the user just came back from.
+    ///
+    /// This used to do what its comment said it didn't: request `limit:
+    /// items.count, startIndex: 0` -- the entire loaded grid, with
+    /// `Fields=...,MediaStreams` -- and replace the whole array. With 500 items
+    /// scrolled in, backing out of a detail view issued one request for 500 full
+    /// items and made every `BaseItemDto` a new value, so every cell re-evaluated
+    /// and every visible image reloaded. That is the most repeated interaction in
+    /// the app.
+    ///
+    /// Only watched/favourite state can have changed, and only for the item that
+    /// was open, so fetch just that one and patch it in place.
+    private func refreshItem(id: String) async {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         do {
-            let includeTypes: [ItemType]? = switch library.collectionType {
-            case "tvshows": [.series]
-            case "movies": [.movie]
-            default: nil
+            let refreshed = try await JellyfinClient.shared.getItem(itemId: id)
+            // The index can move if a load landed while the detail view was up.
+            if let current = items.firstIndex(where: { $0.id == id }) {
+                items[current] = refreshed
+            } else {
+                items[index] = refreshed
             }
-
-            let filter = filterParams
-            let response = try await JellyfinClient.shared.getItems(
-                parentId: library.id,
-                includeTypes: includeTypes,
-                sortBy: sortOption.rawValue,
-                sortOrder: sortOrder.rawValue,
-                limit: items.count,
-                startIndex: 0,
-                isPlayed: filter.isPlayed,
-                isFavorite: filter.isFavorite
-            )
-            items = response.items
         } catch {
             // Silent fail - non-critical refresh
         }

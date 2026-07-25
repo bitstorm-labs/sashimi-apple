@@ -671,17 +671,30 @@ struct RecentlyAddedLibraryRow: View {
             return nil
         })
 
-        // Fetch each series to get its unplayed count
-        for seriesId in seriesIds {
-            do {
-                let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
-                if let unplayedCount = series.userData?.unplayedItemCount, unplayedCount > 0 {
-                    counts[seriesId] = unplayedCount
+        // Fetch each series' unplayed count CONCURRENTLY. Serially this was up
+        // to 20 round-trips per Recently-Added row, per TV library, purely to
+        // decorate a badge -- and it re-ran on every return to Home, delaying
+        // the images the user is actually looking at.
+        let fetched = await withTaskGroup(of: (String, Int)?.self) { group in
+            for seriesId in seriesIds {
+                group.addTask {
+                    do {
+                        let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
+                        guard let unplayedCount = series.userData?.unplayedItemCount, unplayedCount > 0 else { return nil }
+                        return (seriesId, unplayedCount)
+                    } catch {
+                        // Ignore errors for individual series
+                        return nil
+                    }
                 }
-            } catch {
-                // Ignore errors for individual series
             }
+            var out: [String: Int] = [:]
+            for await result in group {
+                if let (seriesId, count) = result { out[seriesId] = count }
+            }
+            return out
         }
+        counts.merge(fetched) { _, new in new }
 
         episodeCounts = counts
     }
