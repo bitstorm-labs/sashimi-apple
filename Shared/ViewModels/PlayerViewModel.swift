@@ -83,6 +83,10 @@ final class PlayerViewModel: ObservableObject {
     @Published var selectedSubtitleTrackId: String?
     @Published var subtitleManager = SubtitleManager()
     @Published var playbackEnded = false
+
+    /// Bumped whenever the player is rebuilt against a different asset, so
+    /// views can refresh track menus that would otherwise describe the old one.
+    @Published private(set) var tracksVersion = 0
     @Published var nextEpisode: BaseItemDto?
     /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
     private var isHandlingEnd = false
@@ -145,6 +149,20 @@ final class PlayerViewModel: ObservableObject {
         let isExternal: Bool
     }
     private var sessionSubtitlePreference: SubtitlePreference?
+
+    /// The audio track the viewer picked in the player this session.
+    ///
+    /// Matched by language and display name rather than raw index, for the same
+    /// reason subtitles are: a rebuilt player (quality change) or the next
+    /// episode is a different asset whose option ordering need not match.
+    /// Without this, a manual pick was silently reverted to the default track
+    /// on every quality change and every episode -- while the menu kept the
+    /// checkmark on the track that was no longer playing.
+    private struct AudioPreference {
+        let language: String?
+        let displayName: String
+    }
+    private var sessionAudioPreference: AudioPreference?
 
     // Server-side play session: sent with playback reports so the server can
     // correlate them, and used to stop the session's transcode when playback
@@ -616,6 +634,12 @@ final class PlayerViewModel: ObservableObject {
             if !applySessionSubtitlePreference() {
                 applyPreferredSubtitles()
             }
+            // Audio needs the same treatment: the rebuilt player starts on the
+            // asset's default track, so without this a manual pick silently
+            // reverted while the menu still showed it selected.
+            if await !applySessionAudioPreference() {
+                await applyPreferredAudioLanguage()
+            }
 
             // Resume playback and tracking. Segments belong to the ITEM, but
             // cleanupSegmentTracking() cleared them with the player, and
@@ -706,6 +730,7 @@ final class PlayerViewModel: ObservableObject {
     /// was dead for downloads), and a corrupt download sat on a black screen
     /// with no error because nothing observed .failed.
     private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
+        tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
                 if observed.status == .failed {
@@ -857,6 +882,34 @@ final class PlayerViewModel: ObservableObject {
         let option = audioGroup.options[track.index]
         playerItem.select(option, in: audioGroup)
         selectedAudioTrackId = track.id
+        sessionAudioPreference = AudioPreference(
+            language: track.languageCode,
+            displayName: track.displayName
+        )
+    }
+
+    /// Re-applies the session's audio pick to a rebuilt player or a new episode.
+    /// Returns false when there is no pick or nothing matches, so the caller can
+    /// fall back to the Settings preference.
+    @discardableResult
+    private func applySessionAudioPreference() async -> Bool {
+        guard let preference = sessionAudioPreference,
+              let playerItem = player?.currentItem,
+              let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible)
+        else { return false }
+
+        // Prefer an exact display-name match, then fall back to language: the
+        // same tiering the subtitle path uses, so "Japanese [5.1]" still
+        // resolves to "Japanese" on a source that labels it differently.
+        let byName = audioGroup.options.firstIndex { $0.displayName == preference.displayName }
+        let byLanguage = preference.language.flatMap { language in
+            audioGroup.options.firstIndex { $0.locale?.language.languageCode?.identifier == language }
+        }
+        guard let index = byName ?? byLanguage else { return false }
+
+        playerItem.select(audioGroup.options[index], in: audioGroup)
+        selectedAudioTrackId = "\(index)"
+        return true
     }
 
     // MARK: - Settings-based track preferences
@@ -865,7 +918,11 @@ final class PlayerViewModel: ObservableObject {
     /// starts. Selections made later in the player UI naturally override
     /// these because they happen afterwards.
     private func applyPreferredTracks() async {
-        await applyPreferredAudioLanguage()
+        // A pick made in the player this session beats the Settings default,
+        // mirroring how subtitles behave just below.
+        if await !applySessionAudioPreference() {
+            await applyPreferredAudioLanguage()
+        }
         // The session's subtitle intent (a selection made in the player,
         // e.g. during the previous episode) wins over the Settings-based
         // preference — subtitles stay on until manually turned off.
