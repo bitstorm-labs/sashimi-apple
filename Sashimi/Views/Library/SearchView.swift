@@ -326,11 +326,27 @@ struct SearchView: View {
             let searchResults = try await JellyfinClient.shared.search(query: searchText)
             // Detect YouTube items by checking ancestors for "YouTube" library
             await detectYouTubeItems(for: searchResults)
+            // A search cancelled by the next keystroke must not publish its
+            // results or clear the spinner — otherwise a slow older query that
+            // finishes late overwrites the newer one's results.
+            guard !Task.isCancelled else { return }
             results = searchResults
             // Add to history on successful search
             if !results.isEmpty {
                 historyManager.addSearch(searchText)
             }
+        } catch is CancellationError {
+            // Superseded by the next keystroke — not a failure, and showing the
+            // user an error toast for their own typing is worse than useless.
+            // On the tvOS on-screen keyboard, where keystrokes are naturally
+            // further apart than the 300ms debounce, this fired on most
+            // characters. LibraryView and HomeView already swallow this; only
+            // SearchView surfaced it.
+            return
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession reports cancellation as URLError(.cancelled) rather
+            // than CancellationError, so both have to be caught.
+            return
         } catch {
             logger.error("Search failed: \(error.localizedDescription)")
             ToastManager.shared.show("Search failed. Try again.")
