@@ -35,8 +35,10 @@ final class SettingsTests: XCTestCase {
         certSettings.untrustHost(testHost)
         XCTAssertFalse(certSettings.isHostTrusted(testHost))
 
-        // Restore original state
-        certSettings.trustedHosts = originalHosts
+        // Restore original state. trustedHosts is a read-only mirror of the
+        // defaults now, so restore through the defaults and re-read.
+        UserDefaults.standard.set(Array(originalHosts), forKey: CertificateTrustKeys.trustedHosts)
+        certSettings.reloadFromDefaults()
     }
 
     @MainActor
@@ -58,12 +60,49 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(remaining?[testHost])
 
         // Restore original state
-        certSettings.trustedHosts = originalHosts
+        UserDefaults.standard.set(Array(originalHosts), forKey: CertificateTrustKeys.trustedHosts)
+        certSettings.reloadFromDefaults()
         if let originalPins {
             defaults.set(originalPins, forKey: CertificateTrustKeys.fingerprints)
         } else {
             defaults.removeObject(forKey: CertificateTrustKeys.fingerprints)
         }
+    }
+
+    @MainActor
+    func testAToggleDoesNotClobberAHostAddedBehindItsBack() {
+        // The bug: CertificateTrustSettings loaded its Sets once in init, and a
+        // didSet wrote the whole Set back. CertificateValidationDelegate also
+        // writes those keys, from the URLSession delegate queue, when it
+        // migrates a legacy flag onto a host. So a toggle made afterwards
+        // overwrote the delegate's addition from a stale in-memory copy --
+        // silently revoking the current server's allowance, after which every
+        // request to it failed.
+        let certSettings = CertificateTrustSettings.shared
+        let defaults = UserDefaults.standard
+        let key = CertificateTrustKeys.selfSignedHosts
+        let original = defaults.array(forKey: key) as? [String]
+
+        defaults.set([String](), forKey: key)
+        certSettings.reloadFromDefaults()
+
+        // Simulate the delegate adding a host directly to the defaults while
+        // this object holds an older snapshot.
+        defaults.set(["added.behind.our.back"], forKey: key)
+
+        // Now a normal UI toggle for a different host.
+        certSettings.setSelfSignedAllowed(true, host: "user.toggled.host")
+
+        let stored = Set((defaults.array(forKey: key) as? [String]) ?? [])
+        XCTAssertTrue(stored.contains("added.behind.our.back"), "Concurrent addition must survive a later toggle")
+        XCTAssertTrue(stored.contains("user.toggled.host"))
+
+        if let original {
+            defaults.set(original, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+        certSettings.reloadFromDefaults()
     }
 
     func testLegacyGlobalAllowanceMigratesToChallengedHost() {

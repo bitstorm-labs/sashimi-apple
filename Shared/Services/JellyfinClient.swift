@@ -25,19 +25,59 @@ enum CertificateTrustKeys {
 class CertificateTrustSettings: ObservableObject {
     static let shared = CertificateTrustSettings()
 
-    /// Hosts allowed to present certificates that fail system trust because
-    /// of an unknown (self-signed) root.
-    @Published var selfSignedAllowedHosts: Set<String> {
-        didSet { UserDefaults.standard.set(Array(selfSignedAllowedHosts), forKey: CertificateTrustKeys.selfSignedHosts) }
-    }
-    /// Hosts allowed to present expired certificates.
-    @Published var expiredAllowedHosts: Set<String> {
-        didSet { UserDefaults.standard.set(Array(expiredAllowedHosts), forKey: CertificateTrustKeys.expiredHosts) }
-    }
+    // These are a MIRROR of what is on disk, not the source of truth.
+    //
+    // CertificateValidationDelegate.hostAllowance also writes these keys, from
+    // the URLSession delegate queue, when it migrates a legacy global flag onto
+    // a host. This object loads its Sets once in init(), so a didSet that wrote
+    // `Array(set)` back would overwrite whatever the delegate had added in the
+    // meantime -- silently revoking the current server's allowance the next
+    // time the user touched any toggle, after which connections just start
+    // failing. Mutations therefore go through setAllowance/setTrusted, which
+    // read-modify-write the defaults and then re-read the mirror.
+    @Published private(set) var selfSignedAllowedHosts: Set<String>
+    @Published private(set) var expiredAllowedHosts: Set<String>
     /// Manually trusted hosts. These are pinned to the SHA-256 fingerprint of
     /// the leaf certificate they present on first acceptance.
-    @Published var trustedHosts: Set<String> {
-        didSet { UserDefaults.standard.set(Array(trustedHosts), forKey: CertificateTrustKeys.trustedHosts) }
+    @Published private(set) var trustedHosts: Set<String>
+
+    /// Read-modify-write a host list, so a concurrent write from the TLS
+    /// delegate queue cannot be clobbered by a stale in-memory copy.
+    private func mutateHostList(key: String, host: String, insert: Bool) {
+        let defaults = UserDefaults.standard
+        var hosts = Set((defaults.array(forKey: key) as? [String]) ?? [])
+        if insert { hosts.insert(host) } else { hosts.remove(host) }
+        defaults.set(Array(hosts), forKey: key)
+        reloadFromDefaults()
+    }
+
+    /// Re-reads all three lists from disk. Public so the Settings UI can call
+    /// it after a connection attempt, which is when the delegate may have
+    /// migrated a legacy flag underneath us.
+    func reloadFromDefaults() {
+        let defaults = UserDefaults.standard
+        selfSignedAllowedHosts = Set((defaults.array(forKey: CertificateTrustKeys.selfSignedHosts) as? [String]) ?? [])
+        expiredAllowedHosts = Set((defaults.array(forKey: CertificateTrustKeys.expiredHosts) as? [String]) ?? [])
+        trustedHosts = Set((defaults.array(forKey: CertificateTrustKeys.trustedHosts) as? [String]) ?? [])
+    }
+
+    func setSelfSignedAllowed(_ allowed: Bool, host: String) {
+        mutateHostList(key: CertificateTrustKeys.selfSignedHosts, host: host, insert: allowed)
+    }
+
+    func setExpiredAllowed(_ allowed: Bool, host: String) {
+        mutateHostList(key: CertificateTrustKeys.expiredHosts, host: host, insert: allowed)
+    }
+
+    func setTrusted(_ trusted: Bool, host: String) {
+        mutateHostList(key: CertificateTrustKeys.trustedHosts, host: host, insert: trusted)
+        if !trusted {
+            // Drop the pin too, so re-trusting the host pins whatever it
+            // presents next rather than matching a stale fingerprint forever.
+            var pins = (UserDefaults.standard.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]) ?? [:]
+            pins.removeValue(forKey: host)
+            UserDefaults.standard.set(pins, forKey: CertificateTrustKeys.fingerprints)
+        }
     }
 
     /// Host of the currently configured server; the per-host toggles in the
@@ -57,11 +97,7 @@ class CertificateTrustSettings: ObservableObject {
         }
         set {
             guard let host = currentHost else { return }
-            if newValue {
-                selfSignedAllowedHosts.insert(host)
-            } else {
-                selfSignedAllowedHosts.remove(host)
-            }
+            setSelfSignedAllowed(newValue, host: host)
         }
     }
 
@@ -73,11 +109,7 @@ class CertificateTrustSettings: ObservableObject {
         }
         set {
             guard let host = currentHost else { return }
-            if newValue {
-                expiredAllowedHosts.insert(host)
-            } else {
-                expiredAllowedHosts.remove(host)
-            }
+            setExpiredAllowed(newValue, host: host)
         }
     }
 
@@ -100,27 +132,25 @@ class CertificateTrustSettings: ObservableObject {
         let legacyExpired = defaults.bool(forKey: CertificateTrustKeys.legacyExpired)
         guard legacySelfSigned || legacyExpired, let host = currentHost else { return }
 
+        // Must go through mutateHostList: the Sets are a mirror now, so a bare
+        // insert would update memory, never reach disk, and then the legacy
+        // flags below get cleared -- losing the allowance on the next launch.
         if legacySelfSigned {
-            selfSignedAllowedHosts.insert(host)
+            mutateHostList(key: CertificateTrustKeys.selfSignedHosts, host: host, insert: true)
         }
         if legacyExpired {
-            expiredAllowedHosts.insert(host)
+            mutateHostList(key: CertificateTrustKeys.expiredHosts, host: host, insert: true)
         }
         defaults.removeObject(forKey: CertificateTrustKeys.legacySelfSigned)
         defaults.removeObject(forKey: CertificateTrustKeys.legacyExpired)
     }
 
     func trustHost(_ host: String) {
-        trustedHosts.insert(host)
+        setTrusted(true, host: host)
     }
 
     func untrustHost(_ host: String) {
-        trustedHosts.remove(host)
-        // Drop the pinned fingerprint so re-trusting the host later pins
-        // whatever certificate it presents then.
-        var pins = (UserDefaults.standard.dictionary(forKey: CertificateTrustKeys.fingerprints) as? [String: String]) ?? [:]
-        pins.removeValue(forKey: host)
-        UserDefaults.standard.set(pins, forKey: CertificateTrustKeys.fingerprints)
+        setTrusted(false, host: host)
     }
 
     func isHostTrusted(_ host: String) -> Bool {
