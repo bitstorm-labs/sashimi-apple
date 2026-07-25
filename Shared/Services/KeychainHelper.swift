@@ -13,16 +13,27 @@ enum KeychainHelper {
             kSecAttrAccount as String: key
         ]
 
+        // ...ThisDeviceOnly: the access token must not travel in an encrypted
+        // iCloud backup to a different device. Staying on AfterFirstUnlock
+        // (rather than WhenUnlocked) is deliberate -- tvOS reads the token
+        // before any user interaction on cold boot, and WhenUnlocked has no
+        // meaning on a device with no passcode.
         var addAttributes = query
         addAttributes[kSecValueData as String] = data
-        addAttributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        addAttributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
         let status = SecItemAdd(addAttributes as CFDictionary, nil)
         if status == errSecDuplicateItem {
             // Update in place rather than delete-then-add so a failed write
-            // can't destroy the existing value (e.g. the parental PIN, whose
-            // loss would lock the user out of parental settings).
-            let update: [String: Any] = [kSecValueData as String: data]
+            // can't destroy the existing value.
+            //
+            // Accessibility is restated here on purpose: an item created by an
+            // older build carries the old class forever otherwise, so existing
+            // installs would never pick up ThisDeviceOnly.
+            let update: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
             return SecItemUpdate(query as CFDictionary, update as CFDictionary) == errSecSuccess
         }
         return status == errSecSuccess
@@ -59,14 +70,5 @@ enum KeychainHelper {
 
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
-    }
-
-    static func deleteAll() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service
-        ]
-
-        SecItemDelete(query as CFDictionary)
     }
 }

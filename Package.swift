@@ -25,20 +25,18 @@ let package = Package(
         .package(url: "https://github.com/kean/Nuke.git", from: "12.0.0"),
     ],
     targets: [
+        // Nuke is deliberately absent here: every import lives in
+        // SashimiMobile/. project.yml already attaches it to that target only,
+        // so declaring it on Shared and tvOS just pulled an unused dependency
+        // into two more build graphs.
         .target(
             name: "SashimiShared",
-            dependencies: [
-                .product(name: "Nuke", package: "Nuke"),
-                .product(name: "NukeUI", package: "Nuke"),
-            ],
             path: "Shared"
         ),
         .target(
             name: "Sashimi",
             dependencies: [
-                "SashimiShared",
-                .product(name: "Nuke", package: "Nuke"),
-                .product(name: "NukeUI", package: "Nuke"),
+                "SashimiShared"
             ],
             path: "Sashimi"
         ),
