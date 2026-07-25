@@ -290,23 +290,49 @@ final class SessionManager: ObservableObject {
     /// Sign out of the ACTIVE server (removes it from the list). A session
     /// expiry keeps the entry so the user can re-authenticate; it just
     /// drops to signed-out state.
+    /// Signs out of the active server.
+    ///
+    /// Flips the published state synchronously so the UI switches to the login
+    /// screen immediately, then does the teardown in ONE ordered task.
+    ///
+    /// This used to fire two independent tasks -- `removeServer(id:)` and
+    /// `clearCredentials()`. Both inherit @MainActor, so removeServer ran first
+    /// and, with a second saved server, called `activate(next:)`, which suspends
+    /// at `await JellyfinClient.shared.configure(...)`. clearCredentials then
+    /// landed in that suspension window and nulled the client the activate had
+    /// just configured, before activate resumed and set isAuthenticated = true.
+    /// The result was an app that looked signed in but threw notConfigured on
+    /// every request until it was force-quit. Sign-out also silently became
+    /// "switch to my other server", which is not what the button says.
     func logout(reason: LogoutReason = .userInitiated) {
+        self.serverURL = nil
+        self.currentUser = nil
+        self.logoutReason = reason
+        self.isAuthenticated = false
+        Task { await teardownSession(reason: reason) }
+    }
+
+    private func teardownSession(reason: LogoutReason) async {
         if let active = activeServerId {
             if reason == .sessionExpired {
                 // Keep the entry so the user can re-authenticate; just drop
                 // the dead token and session state.
                 KeychainHelper.delete(forKey: tokenKey(active))
             } else {
-                Task { await removeServer(id: active) }
+                // Drop the entry WITHOUT removeServer's successor-activation.
+                // That behaviour is right for "remove this server" in Settings,
+                // but signing out should sign out, not hop to another account.
+                if let idx = servers.firstIndex(where: { $0.id == active }) {
+                    KeychainHelper.delete(forKey: tokenKey(active))
+                    servers.remove(at: idx)
+                }
+                activeServerId = nil
+                saveServers()
             }
         }
         // Clear the mirrored global token so a signed-out app can't authorize a
         // download/subtitle fetch with the last session's token.
         KeychainHelper.delete(forKey: keychainAccessTokenKey)
-        Task { await JellyfinClient.shared.clearCredentials() }
-        self.serverURL = nil
-        self.currentUser = nil
-        self.logoutReason = reason
-        self.isAuthenticated = false
+        await JellyfinClient.shared.clearCredentials()
     }
 }

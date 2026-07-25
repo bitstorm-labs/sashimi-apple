@@ -55,6 +55,28 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertFalse(manager.isAuthenticated)
     }
 
+    /// Regression: signing out with a second server saved used to silently
+    /// switch to that server instead of signing out, because logout() delegated
+    /// to removeServer(id:), whose successor-activation behaviour is only right
+    /// for "remove this server" in Settings.
+    ///
+    /// The teardown is async, so this drives it to completion before asserting.
+    @MainActor
+    func testLogoutWithMultipleServersDoesNotSwitchToAnother() async throws {
+        let manager = SessionManager.shared
+
+        manager.logout(reason: .userInitiated)
+        // Let the teardown task run.
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertFalse(manager.isAuthenticated,
+                       "Sign-out must not leave the app authenticated against a successor server")
+        XCTAssertNil(manager.activeServerId,
+                     "Sign-out must clear the active server rather than activating another")
+        XCTAssertNil(manager.serverURL)
+        XCTAssertNil(manager.currentUser)
+    }
+
     // MARK: - UserDto Tests
 
     func testUserDtoDecoding() throws {
