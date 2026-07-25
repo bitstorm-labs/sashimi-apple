@@ -126,6 +126,11 @@ final class PlayerViewModel: ObservableObject {
     private var playbackStartDate: Date?
     private var isOfflinePlayback = false
 
+    /// Subtitles that came down with a download. Injected by the iOS player,
+    /// because the download store lives in the app target and this view model
+    /// is shared. Empty for online playback.
+    private var offlineSubtitles: [OfflineSubtitle] = []
+
     // Media source info for subtitle/audio selection
     private var currentMediaSource: MediaSourceInfo?
     private var currentSubtitleStreamIndex: Int?
@@ -252,7 +257,13 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
-    func loadMedia(item: BaseItemDto, startFromBeginning: Bool = false, localFileURL: URL? = nil) async {
+    func loadMedia(
+        item: BaseItemDto,
+        startFromBeginning: Bool = false,
+        localFileURL: URL? = nil,
+        offlineSubtitles: [OfflineSubtitle] = []
+    ) async {
+        self.offlineSubtitles = offlineSubtitles
         // Tear down everything tied to the previous player first — auto-play
         // next episode reuses this ViewModel, and observers left on the old
         // player crash when it deallocates (same teardown as changeQuality).
@@ -932,8 +943,20 @@ final class PlayerViewModel: ObservableObject {
             isOffOption: true
         ))
 
-        // Load subtitle tracks from Jellyfin's media source (not AVPlayer)
-        if let mediaSource = currentMediaSource {
+        // Offline playback has no media source, so the downloaded files are the
+        // only thing that can populate this menu.
+        if isOfflinePlayback {
+            for subtitle in offlineSubtitles {
+                tracks.append(SubtitleTrackOption(
+                    id: "\(subtitle.index)",
+                    displayName: subtitle.displayTitle,
+                    languageCode: subtitle.language,
+                    index: subtitle.index,
+                    isOffOption: false,
+                    isExternal: true
+                ))
+            }
+        } else if let mediaSource = currentMediaSource {
             let subtitleStreams = mediaSource.subtitleStreams
             for stream in subtitleStreams {
                 let displayName = stream.displayTitle ?? stream.language ?? "Unknown"
@@ -1009,7 +1032,12 @@ final class PlayerViewModel: ObservableObject {
         // tracking a stale player would leave a live observer on it.
         let capturedPlayer = player
         subtitleLoadTask = Task {
-            await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+            if isOfflinePlayback,
+               let downloaded = offlineSubtitles.first(where: { $0.index == track.index }) {
+                await subtitleManager.loadSubtitles(fileURL: downloaded.fileURL)
+            } else {
+                await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+            }
             guard !Task.isCancelled, self.player === capturedPlayer else { return }
             subtitleManager.startTracking(player: capturedPlayer)
         }
