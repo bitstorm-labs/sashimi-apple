@@ -1,1 +1,1 @@
-Jellyfin Client for Apple TV
+Jellyfin Client for Apple Devices
