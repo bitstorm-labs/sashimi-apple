@@ -74,11 +74,13 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 skipVC.updateTitle(title)
                 if wasHidden {
                     skipVC.view.isHidden = false
+                    skipVC.setGuideEnabled(true)
                     container.setNeedsFocusUpdate()
                     container.updateFocusIfNeeded()
                 }
             } else if !wasHidden {
                 skipVC.view.isHidden = true
+                skipVC.setGuideEnabled(false)
                 container.setNeedsFocusUpdate()
                 container.updateFocusIfNeeded()
             }
@@ -309,16 +311,48 @@ class SkipButtonViewController: UIViewController {
         view = passthrough
     }
 
+    /// Creates a navigation path BACK to the skip button.
+    ///
+    /// `preferredFocusEnvironments` only decides where focus goes when the
+    /// engine asks the container -- initial focus, or an explicit
+    /// setNeedsFocusUpdate. It is not bidirectional navigation. So once the
+    /// user swiped up to the transport bar there was no way to return to the
+    /// skip button: it stayed on screen, visibly unfocused, and no remote
+    /// direction could reach it.
+    ///
+    /// The guide occupies the band to the button's left, at the button's own
+    /// height, so a move that lands anywhere in that strip is redirected to the
+    /// button.
+    private let focusGuide = UIFocusGuide()
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
         button.addTarget(self, action: #selector(tapped), for: .primaryActionTriggered)
         view.addSubview(button)
 
+        view.addLayoutGuide(focusGuide)
+        focusGuide.preferredFocusEnvironments = [button]
+
         NSLayoutConstraint.activate([
             button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
             button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+
+            focusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            focusGuide.trailingAnchor.constraint(equalTo: button.leadingAnchor),
+            focusGuide.topAnchor.constraint(equalTo: button.topAnchor),
+            focusGuide.bottomAnchor.constraint(equalTo: button.bottomAnchor),
         ])
+
+        // Disabled until a segment is actually showing, or the guide would
+        // silently swallow focus moves toward the transport bar whenever no
+        // skip button exists.
+        focusGuide.isEnabled = false
+    }
+
+    /// Keeps the focus guide in step with the button's visibility.
+    func setGuideEnabled(_ enabled: Bool) {
+        focusGuide.isEnabled = enabled
     }
 
     func updateTitle(_ title: String) {

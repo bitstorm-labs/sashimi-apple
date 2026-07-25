@@ -17,7 +17,6 @@ struct HomeView: View {
     @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
-    @State private var showContinueWatchingDetail = false
     @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
 
     // Order libraries according to settings
@@ -76,19 +75,6 @@ struct HomeView: View {
             }
             .fullScreenCover(item: $playingItem) { item in
                 PlayerView(item: item, startFromBeginning: false)
-            }
-            .fullScreenCover(isPresented: $showContinueWatchingDetail) {
-                ContinueWatchingDetailView(
-                    items: viewModel.continueWatchingItems,
-                    onSelect: { item in
-                        let isYouTube = item.type == .episode && (item.parentBackdropImageTags ?? []).isEmpty
-                        showContinueWatchingDetail = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            selectedItemIsYouTube = isYouTube
-                            selectedItem = item
-                        }
-                    }
-                )
             }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
@@ -170,9 +156,6 @@ struct HomeView: View {
                         },
                         onPlay: { item in
                             playingItem = item
-                        },
-                        onSeeAll: {
-                            showContinueWatchingDetail = true
                         }
                     )
                     .focusSection()
