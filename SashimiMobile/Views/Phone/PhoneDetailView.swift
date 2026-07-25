@@ -469,24 +469,12 @@ struct PhoneDetailView: View {
 
     /// Premiere date "November 8, 2024" (tvOS parity)
     private var premiereDateLongText: String? {
-        guard let raw = item.premiereDate else { return nil }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMMM d, yyyy"
-        return fmt.string(from: date)
+        DateFormatting.formatLongDate(item.premiereDate)
     }
 
     /// Episode air date "Nov 8, 2024" (short form for list rows)
     private func shortAirDateText(_ episode: BaseItemDto) -> String? {
-        guard let raw = episode.premiereDate else { return nil }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d, yyyy"
-        return fmt.string(from: date)
+        DateFormatting.formatMediumDate(episode.premiereDate)
     }
 
     /// "Ends at 9:41 PM"
@@ -1322,14 +1310,7 @@ struct PhoneDetailView: View {
     }
 
     private func formatPremiereDate(_ dateStr: String) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = isoFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr) {
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "MMMM d, yyyy"
-            return displayFormatter.string(from: date)
-        }
-        return ""
+        DateFormatting.formatLongDate(dateStr) ?? ""
     }
 
     private func formatCodec(_ codec: String) -> String {
