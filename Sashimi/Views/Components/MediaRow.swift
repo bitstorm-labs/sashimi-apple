@@ -1,42 +1,5 @@
 import SwiftUI
 
-struct MediaRow: View {
-    let title: String
-    var subtitle: String?
-    let items: [BaseItemDto]
-    var isLandscape: Bool = false
-    let onSelect: (BaseItemDto) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 18))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                }
-            }
-            .padding(.horizontal, 80)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: isLandscape ? 24 : 36) {
-                    ForEach(items) { item in
-                        MediaPosterButton(item: item, isLandscape: isLandscape) {
-                            onSelect(item)
-                        }
-                    }
-                }
-                .padding(.horizontal, 80)
-                .padding(.vertical, 20)
-            }
-        }
-    }
-}
-
 struct MediaPosterButton: View {
     let item: BaseItemDto
     var libraryType: String?
@@ -426,6 +389,15 @@ struct MarqueeText: View {
                             offset = 0
                         }
                     }
+                }
+                // The ping-pong loop is `while !Task.isCancelled` and was only
+                // cancelled from the isScrolling change above. A marquee that
+                // was focused when its view got dismissed therefore kept
+                // looping on the main actor forever -- an unbounded leak per
+                // dismissed detail view.
+                .onDisappear {
+                    animationTask?.cancel()
+                    animationTask = nil
                 }
         }
         .frame(height: height)

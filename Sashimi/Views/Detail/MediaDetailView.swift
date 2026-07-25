@@ -721,12 +721,8 @@ struct MediaDetailView: View {
         if isEpisode {
             // Premiere date only - S#:E# is now in title
             if let premiereDateStr = item.premiereDate {
-                let isoFormatter = ISO8601DateFormatter()
-                isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let date = isoFormatter.date(from: premiereDateStr) ?? ISO8601DateFormatter().date(from: premiereDateStr) {
-                    let displayFormatter = DateFormatter()
-                    displayFormatter.dateFormat = "MMMM d, yyyy"
-                    parts.append(displayFormatter.string(from: date))
+                if let formatted = DateFormatting.formatLongDate(premiereDateStr) {
+                    parts.append(formatted)
                 }
             }
         }
