@@ -1,1 +1,1 @@
-jellyfin,media,streaming,movies,tv shows,video,player,home theater,plex alternative,media server
+jellyfin,media,streaming,movies,tv shows,video,player,home theater,media server,offline

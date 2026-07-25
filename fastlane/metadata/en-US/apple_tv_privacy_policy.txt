@@ -1,70 +1,70 @@
-# Privacy Policy for Sashimi
+Privacy Policy for Sashimi
 
-**Last updated: July 2026**
+Last updated: July 2026
 
-## Overview
+Overview
 
 Sashimi is a client for Jellyfin media servers, available for Apple TV, iPhone and iPad. This privacy policy explains how Sashimi handles your data.
 
-## Data Collection
+Data Collection
 
-**Sashimi does not collect, store, or transmit any personal data to us or any third parties.**
+Sashimi does not collect, store, or transmit any personal data to us or any third parties.
 
-### What Sashimi Stores Locally
+What Sashimi Stores Locally
 
 Sashimi stores the following data locally on your device:
 
-1. **Server Connection Details**
+1. Server Connection Details
    - Your Jellyfin server URL
    - Authentication tokens (stored securely in iOS Keychain)
 
-2. **User Preferences**
+2. User Preferences
    - Home screen customization settings
    - Video quality preferences
 
-3. **Playback State**
+3. Playback State
    - Current playback position (synced with your Jellyfin server)
 
-4. **Downloaded Media (iPhone and iPad only)**
+4. Downloaded Media (iPhone and iPad only)
    - Movies and episodes you explicitly choose to download, stored in the app's
      private container so they can be played without a network connection
    - Subtitle files accompanying those downloads
    - A local database recording what is downloaded and how far you have watched
    - Downloads never leave your device, and deleting the app removes all of them
 
-### Data Transmission
+Data Transmission
 
 Sashimi only communicates with:
 
-1. **Your Jellyfin Server** - All media browsing, streaming, and playback progress is sent directly to your own Jellyfin server. This communication is between your device and your server only.
+1. Your Jellyfin Server - All media browsing, streaming, and playback progress is sent directly to your own Jellyfin server. This communication is between your device and your server only.
 
-2. **No Third-Party Services** - Sashimi does not use any analytics, tracking, crash reporting, or advertising services.
+2. No Third-Party Services - Sashimi does not use any analytics, tracking, crash reporting, or advertising services.
 
-## Data Storage Security
+Data Storage Security
 
 - Authentication tokens are stored in the iOS Keychain using industry-standard encryption
 - No sensitive data is stored in plain text
 - Data is stored only on your device and your Jellyfin server
 
-## Your Jellyfin Server
+Your Jellyfin Server
 
 Your Jellyfin server has its own privacy practices. Sashimi does not control what data your Jellyfin server collects or stores. Please refer to the Jellyfin documentation and your server administrator for information about server-side data handling.
 
-## Children's Privacy
+Children's Privacy
 
 Sashimi does not knowingly collect any information from children. The app requires access to a Jellyfin server, which is typically set up by adults.
 
-## Changes to This Policy
+Changes to This Policy
 
 We may update this privacy policy from time to time. Any changes will be posted to this page and the app's App Store listing.
 
-## Contact
+Contact
 
 If you have questions about this privacy policy, please open an issue on our GitHub repository:
 
 https://github.com/bitstorm-labs/sashimi-apple/issues
 
-## Open Source
+Open Source
 
 Sashimi is open source software. You can review the complete source code to verify our privacy practices:
 

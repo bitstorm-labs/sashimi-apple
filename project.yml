@@ -35,12 +35,6 @@ targets:
       - path: Sashimi
         excludes:
           - "**/.DS_Store"
-          - "CatIcon.imagestack"
-          - "ChopsticksIcon.imagestack"
-          - "CatIcon.png"
-          - "CatIcon@2x.png"
-          - "ChopsticksIcon.png"
-          - "ChopsticksIcon@2x.png"
       - path: Shared
         excludes:
           - "**/.DS_Store"
@@ -55,6 +49,11 @@ targets:
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Without these two, tvOS 16+ denies NWBrowser outright and server
+        # discovery silently returns zero results forever.
+        NSBonjourServices:
+          - _jellyfin._tcp
+        NSLocalNetworkUsageDescription: Sashimi looks for Jellyfin servers on your local network.
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - sashimi
