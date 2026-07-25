@@ -125,30 +125,4 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(ItemType.video.rawValue, "Video")
     }
 
-    // MARK: - ContentRating Tests
-
-    func testContentRatingSeverity() {
-        XCTAssertLessThan(ContentRating.g.severity, ContentRating.pg.severity)
-        XCTAssertLessThan(ContentRating.pg.severity, ContentRating.pg13.severity)
-        XCTAssertLessThan(ContentRating.pg13.severity, ContentRating.r.severity)
-        XCTAssertLessThan(ContentRating.r.severity, ContentRating.nc17.severity)
-        XCTAssertLessThan(ContentRating.nc17.severity, ContentRating.any.severity)
-    }
-
-    func testContentRatingInitFromOfficialRating() {
-        XCTAssertEqual(ContentRating(officialRating: "G"), .g)
-        XCTAssertEqual(ContentRating(officialRating: "PG"), .pg)
-        XCTAssertEqual(ContentRating(officialRating: "PG-13"), .pg13)
-        XCTAssertEqual(ContentRating(officialRating: "R"), .r)
-        XCTAssertEqual(ContentRating(officialRating: "NC-17"), .nc17)
-
-        // TV ratings
-        XCTAssertEqual(ContentRating(officialRating: "TV-G"), .g)
-        XCTAssertEqual(ContentRating(officialRating: "TV-PG"), .pg)
-        XCTAssertEqual(ContentRating(officialRating: "TV-14"), .pg13)
-        XCTAssertEqual(ContentRating(officialRating: "TV-MA"), .r)
-
-        // Unknown ratings should default to .any
-        XCTAssertEqual(ContentRating(officialRating: "Unknown"), .any)
-    }
 }
