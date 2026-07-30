@@ -302,6 +302,20 @@ final class PlayerViewModel: ObservableObject {
         // player crash when it deallocates (same teardown as changeQuality).
         // The session subtitle intent is deliberately preserved so subtitles
         // stay on across episodes; only the overlay/tracking is cleared.
+        // Silence and release the outgoing player BEFORE anything awaits.
+        //
+        // This teardown removed the observers but never paused the player and
+        // never let go of it, so the previous episode kept playing its audio
+        // underneath the new one. The gap is not brief: everything below this
+        // point awaits the network — stopActiveEncoding, then the playback-info
+        // fetch — and the new AVPlayer is not created until well after that. On
+        // tvOS the AVPlayerViewController also goes on holding the old instance
+        // until the new one is assigned, so it really does keep decoding.
+        //
+        // changeQuality and the stop path both do this; only this one did not,
+        // which is how auto-play-next and skip-credits ended up with two
+        // players running.
+        player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
@@ -313,6 +327,7 @@ final class PlayerViewModel: ObservableObject {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
         }
+        player = nil
 
         // Kill the previous episode's transcode session, same as
         // changeQuality — auto-play-next otherwise leaves the old encode
