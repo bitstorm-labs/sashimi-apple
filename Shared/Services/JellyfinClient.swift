@@ -328,6 +328,7 @@ actor JellyfinClient {
     /// silently failed.
     let certificateDelegate: CertificateValidationDelegate
     private let maxRetries = 3
+    private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "JellyfinClient")
 
     static let shared = JellyfinClient()
 
@@ -394,34 +395,85 @@ actor JellyfinClient {
         self.serverURL = serverURL
         self.accessToken = accessToken
         self.userId = userId
-        // A new server means a new link — force a fresh measurement.
+        // A new server means a new link — force a fresh measurement, and drop
+        // any probe still in flight so it can't write the old server's result.
+        bandwidthProbeTask?.cancel()
+        bandwidthProbeTask = nil
         measuredBitrate = nil
     }
 
     /// Measured downstream bandwidth (bits/sec) from the last BitrateTest.
     private var measuredBitrate: Int?
 
+    /// Retry schedule for the bandwidth probe: one immediate attempt, then
+    /// these delays. A single failure (a router reboot, a Wi-Fi handoff, a
+    /// server still starting up) must not leave Auto guessing all session.
+    private static let bandwidthProbeBackoff: [Duration] = [.seconds(3), .seconds(15), .seconds(60)]
+
+    /// The retrying probe, so a reconnect replaces it rather than racing it.
+    private var bandwidthProbeTask: Task<Void, Never>?
+
+    /// Where the Auto bitrate cap currently comes from. Read by Settings and
+    /// logged with every PlaybackInfo request: a cap in force used to be
+    /// invisible, so an unexplained transcode sent debugging to the server.
+    struct BandwidthStatus: Equatable, Sendable {
+        /// nil until a probe succeeds — the cap is a default until then.
+        let measuredBitrate: Int?
+        let cap: Int
+        let isLocalServer: Bool
+
+        var isMeasured: Bool { measuredBitrate != nil }
+    }
+
+    var bandwidthStatus: BandwidthStatus {
+        BandwidthStatus(
+            measuredBitrate: measuredBitrate,
+            cap: autoBitrateCap(),
+            isLocalServer: PlaybackSelection.isLocalServer(serverURL)
+        )
+    }
+
     /// The bitrate to request on "Auto": the measured bandwidth with headroom,
-    /// clamped to a sane range. Falls back to a conservative default until a
-    /// measurement lands (measureBandwidth runs on connect).
+    /// clamped to a sane range. Until a measurement lands the default is keyed
+    /// on where the server is, because a failed probe says nothing about the
+    /// link (see PlaybackSelection.autoBitrateCap).
     private func autoBitrateCap() -> Int {
-        guard let measured = measuredBitrate else { return 20_000_000 }
-        let withHeadroom = Int(Double(measured) * 0.85)
-        return min(max(withHeadroom, 3_000_000), 100_000_000)
+        PlaybackSelection.autoBitrateCap(
+            measuredBitrate: measuredBitrate,
+            isLocalServer: PlaybackSelection.isLocalServer(serverURL)
+        )
+    }
+
+    /// Starts measuring the connection, retrying with backoff until a probe
+    /// succeeds. Returns immediately; the Auto cap updates when one lands.
+    /// Any probe already running is cancelled first.
+    func startBandwidthMeasurement() {
+        bandwidthProbeTask?.cancel()
+        bandwidthProbeTask = Task { await self.runBandwidthProbes() }
+    }
+
+    private func runBandwidthProbes() async {
+        if await measureBandwidth() { return }
+        for delay in Self.bandwidthProbeBackoff {
+            guard (try? await Task.sleep(for: delay)) != nil else { return }
+            if await measureBandwidth() { return }
+        }
+        logger.warning("Bandwidth probe failed after all retries; Auto uses the default cap")
     }
 
     /// Time a fixed-size download from the server's BitrateTest endpoint to
     /// estimate the connection bandwidth, then cache it for Auto bitrate.
-    /// Best-effort: on any failure the previous/​default cap stands.
-    func measureBandwidth() async {
-        guard let serverURL else { return }
+    /// Best-effort: returns false on any failure, leaving the previous/default
+    /// cap standing for the caller to retry against.
+    private func measureBandwidth() async -> Bool {
+        guard let serverURL else { return false }
         let sizeBytes = 8_000_000
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("Playback/BitrateTest"),
             resolvingAgainstBaseURL: false
-        ) else { return }
+        ) else { return false }
         components.queryItems = [URLQueryItem(name: "Size", value: String(sizeBytes))]
-        guard let url = components.url else { return }
+        guard let url = components.url else { return false }
 
         var req = URLRequest(url: url)
         req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
@@ -429,12 +481,14 @@ actor JellyfinClient {
 
         let start = Date()
         guard let (data, response) = try? await urlSession.data(for: req),
-              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return false }
         let elapsed = Date().timeIntervalSince(start)
-        guard elapsed > 0.01, !data.isEmpty else { return }
+        guard elapsed > 0.01, !data.isEmpty else { return false }
 
         let bitsPerSecond = Int((Double(data.count) * 8.0) / elapsed)
         measuredBitrate = bitsPerSecond
+        logger.info("Bandwidth probe measured \(bitsPerSecond) bps")
+        return true
     }
 
     var isConfigured: Bool {
@@ -747,26 +801,10 @@ actor JellyfinClient {
         return response.items.first
     }
 
-    func getPlaybackInfo(
-        itemId: String,
-        maxBitrate: Int? = nil,
-        maxWidth: Int? = nil,
-        forceDirectPlay: Bool = false,
-        forceTranscode: Bool = false
-    ) async throws -> PlaybackInfoResponse {
-        guard let userId else { throw JellyfinError.notConfigured }
-
-        // Auto (no explicit cap) uses the measured connection bandwidth so we
-        // don't request more than the link can carry (the cause of remote
-        // stalls); explicit picks are honored as-is.
-        let streamingBitrate = maxBitrate ?? autoBitrateCap()
-
-        // An explicit quality pick (forceTranscode) beats the global Force
-        // Direct Play setting for this request — otherwise the pick could
-        // never take effect.
-        let effectiveForceDirectPlay = forceDirectPlay && !forceTranscode
-
-        let deviceProfile: [String: Any] = [
+    /// The device profile sent with every PlaybackInfo request: what this
+    /// client can play natively, and the ceilings the server must respect.
+    private func videoDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+        [
             "MaxStreamingBitrate": streamingBitrate,
             "MaxStaticBitrate": 100000000,
             "MusicStreamingTranscodingBitrate": 384000,
@@ -816,6 +854,51 @@ actor JellyfinClient {
                 ["Format": "srt", "Method": "External"]
             ]
         ]
+    }
+
+    /// Records what Auto is actually asking the server for. Without this the
+    /// only symptom of a bogus cap is an unexplained transcode, which reads as
+    /// "the server is struggling" and sends debugging to the wrong place.
+    private func logAutoBitrateCap(width: Int?) {
+        let status = bandwidthStatus
+        logger.info(
+            """
+            Auto bitrate cap \(status.cap, privacy: .public) bps \
+            (\(status.isMeasured ? "measured" : "no measurement", privacy: .public), \
+            \(status.isLocalServer ? "local" : "remote", privacy: .public) server), \
+            width \(width.map(String.init) ?? "unrestricted", privacy: .public)
+            """
+        )
+    }
+
+    func getPlaybackInfo(
+        itemId: String,
+        maxBitrate: Int? = nil,
+        maxWidth: Int? = nil,
+        forceDirectPlay: Bool = false,
+        forceTranscode: Bool = false
+    ) async throws -> PlaybackInfoResponse {
+        guard let userId else { throw JellyfinError.notConfigured }
+
+        // Auto (no explicit cap) uses the measured connection bandwidth so we
+        // don't request more than the link can carry (the cause of remote
+        // stalls); explicit picks are honored as-is.
+        let streamingBitrate = maxBitrate ?? autoBitrateCap()
+
+        // A bitrate cap with no width condition makes the server re-encode at
+        // the source resolution, so a capped 4K stream was re-encoded at full
+        // 4K — the most expensive way to reach the ceiling. When the caller
+        // picked no tier, derive a width the cap can actually carry.
+        let effectiveMaxWidth = maxWidth ?? PlaybackSelection.autoMaxWidth(forBitrateCap: streamingBitrate)
+
+        if maxBitrate == nil { logAutoBitrateCap(width: effectiveMaxWidth) }
+
+        // An explicit quality pick (forceTranscode) beats the global Force
+        // Direct Play setting for this request — otherwise the pick could
+        // never take effect.
+        let effectiveForceDirectPlay = forceDirectPlay && !forceTranscode
+
+        let deviceProfile = videoDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: effectiveMaxWidth)
 
         // Jellyfin's PlaybackInfo API has no "force direct play" flag.
         // Disabling DirectStream and Transcoding leaves direct play as the
