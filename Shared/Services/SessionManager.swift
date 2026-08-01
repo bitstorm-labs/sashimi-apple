@@ -168,8 +168,10 @@ final class SessionManager: ObservableObject {
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
         self.isAuthenticated = true
         // Measure the connection in the background so the first play uses a
-        // bandwidth-appropriate Auto bitrate (no stall on remote links).
-        Task { await JellyfinClient.shared.measureBandwidth() }
+        // bandwidth-appropriate Auto bitrate (no stall on remote links). Runs
+        // on every activation — login, restore, server switch — and retries
+        // internally, so one failed probe no longer stands for the session.
+        await JellyfinClient.shared.startBandwidthMeasurement()
     }
 
     // MARK: - Add / switch / remove

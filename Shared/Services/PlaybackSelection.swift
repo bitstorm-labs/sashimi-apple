@@ -15,6 +15,96 @@ enum PlaybackSelection {
         return settingsMaxBitrate > 0 ? settingsMaxBitrate : nil
     }
 
+    // MARK: - Auto bitrate
+
+    /// Cap requested on "Auto" when the bandwidth probe has never succeeded and
+    /// the server is on the local network.
+    ///
+    /// A failed probe is not evidence of a slow link, and treating it as one is
+    /// what forced a 24.9 Mbps 4K HEVC source through a full re-encode on a
+    /// gigabit LAN: the old 20 Mbps fallback sits below almost every good 4K
+    /// release, so the server could no longer satisfy the request by copying
+    /// the video stream. A LAN client that has measured nothing assumes it is
+    /// fast — the same value a measured gigabit link clamps to.
+    static let unmeasuredLocalBitrateCap = 100_000_000
+
+    /// Cap on "Auto" with no measurement and a server reached over the
+    /// internet, where guessing high really can stall playback.
+    static let unmeasuredRemoteBitrateCap = 20_000_000
+
+    /// Clamp applied to a measured link. The floor keeps a badly timed probe
+    /// (a probe that raced a buffering stream) from pinning quality to nothing.
+    static let minimumMeasuredBitrateCap = 3_000_000
+    static let maximumMeasuredBitrateCap = 100_000_000
+
+    /// Fraction of the measured bandwidth to request, leaving headroom for
+    /// protocol overhead and other traffic on the link.
+    static let measuredBitrateHeadroom = 0.85
+
+    /// The bitrate cap sent on "Auto": the measured bandwidth with headroom,
+    /// clamped to a sane range, or a default keyed on where the server is when
+    /// nothing has been measured yet.
+    static func autoBitrateCap(measuredBitrate: Int?, isLocalServer: Bool) -> Int {
+        guard let measuredBitrate, measuredBitrate > 0 else {
+            return isLocalServer ? unmeasuredLocalBitrateCap : unmeasuredRemoteBitrateCap
+        }
+        let withHeadroom = Int(Double(measuredBitrate) * measuredBitrateHeadroom)
+        return min(max(withHeadroom, minimumMeasuredBitrateCap), maximumMeasuredBitrateCap)
+    }
+
+    /// Width cap to pair with a bitrate cap when the caller did not pick a
+    /// resolution tier of its own.
+    ///
+    /// A bitrate cap alone is only a ceiling — with no width condition the
+    /// server re-encodes at the source resolution, so a capped 4K stream is
+    /// re-encoded at full 4K: the most expensive possible way to reach the
+    /// ceiling, and a worse picture than the same bitrate at 1080p. Returns nil
+    /// above 25 Mbps, where 4K is plausible and nothing should be downscaled.
+    static func autoMaxWidth(forBitrateCap cap: Int) -> Int? {
+        switch cap {
+        case ..<6_000_000: return 854
+        case ..<12_000_000: return 1280
+        case ..<25_000_000: return 1920
+        default: return nil
+        }
+    }
+
+    /// Whether the server is reached over the local network. This is what
+    /// separates "the probe failed" from "the link is slow" without a
+    /// measurement: a LAN path is fast until proven otherwise.
+    ///
+    /// Matches loopback, RFC 1918 / link-local / unique-local addresses,
+    /// `.local` (mDNS) names, and single-label hostnames — none of which
+    /// resolve anywhere but the local network.
+    static func isLocalServer(_ url: URL?) -> Bool {
+        guard let host = url?.host?.lowercased(), !host.isEmpty else { return false }
+        if host.contains(":") { return isLocalIPv6(host) }
+        if host == "localhost" || host.hasSuffix(".local") { return true }
+        if let octets = ipv4Octets(host) { return isPrivateIPv4(octets) }
+        return !host.contains(".")
+    }
+
+    /// Loopback, fe80::/10 link-local, fc00::/7 unique-local.
+    private static func isLocalIPv6(_ host: String) -> Bool {
+        host == "::1" || host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd")
+    }
+
+    private static func ipv4Octets(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return nil }
+        return octets
+    }
+
+    private static func isPrivateIPv4(_ octets: [Int]) -> Bool {
+        switch (octets[0], octets[1]) {
+        case (127, _), (10, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        default: return false
+        }
+    }
+
     /// Case-insensitive language comparison tolerant of ISO 639-1 vs 639-2
     /// codes: Jellyfin streams report three-letter codes ("eng"), while the
     /// settings picker and AVFoundation locales use two-letter codes ("en").

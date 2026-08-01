@@ -640,6 +640,8 @@ struct SettingsToggleRow: View {
 
 struct PlaybackSettingsView: View {
     @StateObject private var settings = PlaybackSettings.shared
+    /// Nil until the client answers; drives the Auto-quality diagnostics row.
+    @State private var bandwidthStatus: JellyfinClient.BandwidthStatus?
 
     var body: some View {
         SettingsContainer {
@@ -655,6 +657,11 @@ struct PlaybackSettingsView: View {
                         VideoQualitySettingsView()
                     }
                     SettingsToggleRow(title: "Always Play Original", isOn: $settings.forceDirectPlay)
+                    // Auto's real ceiling was invisible: a stream capped by a
+                    // failed bandwidth probe looked like a struggling server.
+                    if settings.maxBitrate == 0 {
+                        SettingsInfoRow(label: "Auto Limit", value: autoLimitLabel)
+                    }
                 }
 
                 Text("Plays the original file untouched, never converted. If your connection cannot keep up, playback may stall rather than drop quality.")
@@ -709,6 +716,15 @@ struct PlaybackSettingsView: View {
             .padding(.horizontal, 60)
             .padding(.bottom, 60)
         }
+        .task { bandwidthStatus = await JellyfinClient.shared.bandwidthStatus }
+    }
+
+    /// The cap Auto is actually sending, and whether it came from a real
+    /// measurement or the fallback default.
+    private var autoLimitLabel: String {
+        guard let bandwidthStatus else { return "Checking…" }
+        let mbps = Int(round(Double(bandwidthStatus.cap) / 1_000_000))
+        return bandwidthStatus.isMeasured ? "\(mbps) Mbps measured" : "\(mbps) Mbps (not measured)"
     }
 
     private var bitrateLabel: String {
