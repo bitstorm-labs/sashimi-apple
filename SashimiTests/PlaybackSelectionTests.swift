@@ -48,6 +48,102 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertNil(PlaybackSelection.effectiveMaxBitrate(sessionOverride: nil, settingsMaxBitrate: 0))
     }
 
+    // MARK: - autoBitrateCap
+
+    func testUnmeasuredLocalServerGetsOptimisticCap() {
+        // The bug: a failed probe looked identical to a slow link, so a 24.9
+        // Mbps 4K source on a gigabit LAN was capped at 20 Mbps and re-encoded.
+        let cap = PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true)
+        XCTAssertEqual(cap, PlaybackSelection.unmeasuredLocalBitrateCap)
+        XCTAssertGreaterThan(cap, 24_879_906)
+    }
+
+    func testUnmeasuredRemoteServerStaysConservative() {
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false),
+            PlaybackSelection.unmeasuredRemoteBitrateCap
+        )
+    }
+
+    func testMeasuredBitrateKeepsHeadroom() {
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 40_000_000, isLocalServer: true),
+            34_000_000
+        )
+    }
+
+    func testMeasuredSlowLinkIsHonoredOnALocalServer() {
+        // A measurement is evidence; a LAN server does not override it.
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 10_000_000, isLocalServer: true),
+            8_500_000
+        )
+    }
+
+    func testMeasuredBitrateIsClampedBothWays() {
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 500_000, isLocalServer: false),
+            PlaybackSelection.minimumMeasuredBitrateCap
+        )
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 1_000_000_000, isLocalServer: false),
+            PlaybackSelection.maximumMeasuredBitrateCap
+        )
+    }
+
+    func testNonPositiveMeasurementIsTreatedAsNoMeasurement() {
+        XCTAssertEqual(
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 0, isLocalServer: true),
+            PlaybackSelection.unmeasuredLocalBitrateCap
+        )
+    }
+
+    // MARK: - autoMaxWidth
+
+    func testHighCapDoesNotConstrainWidth() {
+        // 4K must stay 4K when the link can carry it — this is the path a LAN
+        // client takes, and it must not start downscaling.
+        XCTAssertNil(PlaybackSelection.autoMaxWidth(forBitrateCap: 100_000_000))
+        XCTAssertNil(PlaybackSelection.autoMaxWidth(forBitrateCap: 25_000_000))
+    }
+
+    func testLowCapsPickAResolutionTheCapCanCarry() {
+        // Without a width the server re-encodes at source resolution, so a
+        // capped 4K stream was re-encoded at full 4K.
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 20_000_000), 1920)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 8_000_000), 1280)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 3_000_000), 854)
+    }
+
+    // MARK: - isLocalServer
+
+    func testPrivateAddressesAreLocal() {
+        for host in ["192.168.86.151", "10.0.0.5", "172.16.4.2", "172.31.255.254", "127.0.0.1", "169.254.1.1"] {
+            XCTAssertTrue(
+                PlaybackSelection.isLocalServer(URL(string: "http://\(host):8096")),
+                "\(host) should be treated as local"
+            )
+        }
+    }
+
+    func testLocalNamesAreLocal() {
+        XCTAssertTrue(PlaybackSelection.isLocalServer(URL(string: "http://localhost:8096")))
+        XCTAssertTrue(PlaybackSelection.isLocalServer(URL(string: "http://popcorn.local:8096")))
+        XCTAssertTrue(PlaybackSelection.isLocalServer(URL(string: "http://popcorn:8096")))
+        XCTAssertTrue(PlaybackSelection.isLocalServer(URL(string: "http://[::1]:8096")))
+        XCTAssertTrue(PlaybackSelection.isLocalServer(URL(string: "http://[fd00::1]:8096")))
+    }
+
+    func testPublicAddressesAreNotLocal() {
+        for host in ["jellyfin.example.com", "8.8.8.8", "172.32.0.1", "192.169.0.1", "fc.example.com"] {
+            XCTAssertFalse(
+                PlaybackSelection.isLocalServer(URL(string: "https://\(host)")),
+                "\(host) should be treated as remote"
+            )
+        }
+        XCTAssertFalse(PlaybackSelection.isLocalServer(nil))
+    }
+
     // MARK: - languagesMatch
 
     func testMatchesIso639TwoVsThreeLetterCodes() {
