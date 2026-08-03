@@ -170,27 +170,6 @@ struct OfflineStateView: View {
     }
 }
 
-// MARK: - Branded Loading Overlay
-
-struct BrandedLoadingOverlay: View {
-    var body: some View {
-        ZStack {
-            SashimiTheme.overlay
-                .ignoresSafeArea()
-
-            VStack(spacing: Spacing.md) {
-                Image("SashimiLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 120, height: 120)
-
-                ProgressView()
-                    .scaleEffect(1.2)
-            }
-        }
-    }
-}
-
 // MARK: - Progress Bar
 
 struct SashimiProgressBar: View {
