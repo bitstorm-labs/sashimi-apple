@@ -47,10 +47,10 @@ struct PhoneHomeView: View {
                         Image("SidebarLogo")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 32, height: 32)
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
                         Text("Sashimi")
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(MobileColors.textPrimary)
                     }
                 }

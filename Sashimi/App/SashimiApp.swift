@@ -337,7 +337,7 @@ struct MainTabView: View {
                 Image("SidebarLogoMark")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: expanded ? 60 : 46, height: expanded ? 60 : 46)
+                    .frame(width: expanded ? 76 : 56, height: expanded ? 76 : 56)
                 if expanded {
                     Text("Sashimi")
                         .font(.system(size: 32, weight: .heavy, design: .rounded))
@@ -346,7 +346,7 @@ struct MainTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .frame(height: 60)
+            .frame(height: 76)
 
             // Balanced spacers put the logo at the top, avatar at the foot,
             // and the nav group vertically centered between them.
@@ -370,8 +370,9 @@ struct MainTabView: View {
                 .padding(.top, 4)
         }
         .padding(.vertical, 50)
-        .padding(.leading, expanded ? 36 : 38)
-        .padding(.trailing, expanded ? 28 : 38)
+        // Collapsed h-padding 32 (was 38) so the 56pt mark fits the 120pt rail.
+        .padding(.leading, expanded ? 36 : 32)
+        .padding(.trailing, expanded ? 28 : 32)
         .frame(width: expanded ? panelWidth : railWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         // Dim the rail's contents when resting (not engaged); full on focus.
