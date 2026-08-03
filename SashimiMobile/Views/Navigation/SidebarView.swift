@@ -25,7 +25,10 @@ enum SidebarSelection: Hashable {
         case .search: return "magnifyingglass"
         case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
-        case .library(_, _, let collectionType):
+        case .library(_, let name, let collectionType):
+            // YouTube libraries report collectionType "tvshows"; match by name,
+            // same as the tvOS rail.
+            if name.lowercased().contains("youtube") { return "play.rectangle.fill" }
             switch collectionType {
             case "movies": return "film"
             case "tvshows": return "tv"
