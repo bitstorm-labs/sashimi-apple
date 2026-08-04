@@ -641,19 +641,27 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getNextUp(limit: Int = 50) async throws -> [BaseItemDto] {
+    /// Next-up episodes. Pass `seriesId` to ask the server for the next
+    /// episode of one specific series (used to resolve a Series handed to a
+    /// play action into the episode that should actually play).
+    func getNextUp(seriesId: String? = nil, limit: Int = 50) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
+
+        var queryItems = [
+            URLQueryItem(name: "UserId", value: userId),
+            URLQueryItem(name: "Limit", value: "\(limit)"),
+            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ParentBackdropImageTags,Path,MediaStreams"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
+            URLQueryItem(name: "EnableRewatching", value: "false"),
+            URLQueryItem(name: "DisableFirstEpisode", value: "false")
+        ]
+        if let seriesId {
+            queryItems.append(URLQueryItem(name: "SeriesId", value: seriesId))
+        }
 
         let data = try await request(
             path: "/Shows/NextUp",
-            queryItems: [
-                URLQueryItem(name: "UserId", value: userId),
-                URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ParentBackdropImageTags,Path,MediaStreams"),
-                URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
-                URLQueryItem(name: "EnableRewatching", value: "false"),
-                URLQueryItem(name: "DisableFirstEpisode", value: "false")
-            ]
+            queryItems: queryItems
         )
 
         let response = try JSONDecoder().decode(ItemsResponse.self, from: data)
@@ -873,11 +881,22 @@ actor JellyfinClient {
 
     func getPlaybackInfo(
         itemId: String,
+        itemType: ItemType? = nil,
         maxBitrate: Int? = nil,
         maxWidth: Int? = nil,
         forceDirectPlay: Bool = false,
         forceTranscode: Bool = false
     ) async throws -> PlaybackInfoResponse {
+        // Defensive guard: PlaybackInfo for a container type (Series, Season,
+        // BoxSet, folder) is a guaranteed server 500 — Jellyfin throws
+        // InvalidCastException casting it to IHasMediaSources. Seen in
+        // production when a series id reached this call. Callers must resolve
+        // to an episode/movie first; refuse here so the mistake is loud and
+        // local instead of a cryptic server error mid-playback.
+        if let itemType, !itemType.isPlayableMediaType {
+            logger.error("Refusing PlaybackInfo POST for non-playable item type \(itemType.rawValue, privacy: .public) (item \(itemId, privacy: .public)) — resolve to an episode/movie first")
+            throw JellyfinError.nonPlayableItem(itemType)
+        }
         guard let userId else { throw JellyfinError.notConfigured }
 
         // Auto (no explicit cap) uses the measured connection bandwidth so we
@@ -1275,11 +1294,14 @@ enum JellyfinError: LocalizedError {
     case invalidCredentials
     case sessionExpired
     case networkError(Error)
+    case nonPlayableItem(ItemType)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured:
             return "Not connected to a server. Please sign in."
+        case .nonPlayableItem(let type):
+            return "This \(type.rawValue.lowercased()) can't be played directly. Pick an episode to play."
         case .invalidResponse:
             return "The server returned an unexpected response. Try again."
         case .invalidURL:

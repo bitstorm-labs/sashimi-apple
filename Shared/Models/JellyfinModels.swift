@@ -177,6 +177,21 @@ enum ItemType: String, Codable {
         let rawValue = try container.decode(String.self)
         self = ItemType(rawValue: rawValue) ?? .unknown
     }
+
+    /// Whether an item of this type has media sources of its own and can be
+    /// posted to `/Items/{id}/PlaybackInfo`. Container types (Series, Season,
+    /// BoxSet, folders) make the server throw `InvalidCastException … to
+    /// 'IHasMediaSources'` (HTTP 500) — they must be resolved to an episode
+    /// or movie first. `.unknown` stays playable on purpose: server types this
+    /// enum doesn't model (e.g. "Trailer") are individual videos.
+    var isPlayableMediaType: Bool {
+        switch self {
+        case .series, .season, .boxSet, .folder, .collectionFolder:
+            return false
+        case .movie, .episode, .video, .unknown:
+            return true
+        }
+    }
 }
 
 struct UserItemDataDto: Codable {
