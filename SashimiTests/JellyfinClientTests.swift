@@ -199,7 +199,7 @@ final class JellyfinClientTests: XCTestCase {
 
         for type in [ItemType.series, .season, .boxSet, .folder, .collectionFolder] {
             do {
-                _ = try await client.getPlaybackInfo(itemId: "some-series-id", itemType: type)
+                _ = try await client.getPlaybackInfo(itemId: "some-series-id", itemType: type, engine: .avFoundation)
                 XCTFail("getPlaybackInfo should refuse \(type.rawValue)")
             } catch {
                 guard case JellyfinError.nonPlayableItem(let refused) = error else {
@@ -221,7 +221,7 @@ final class JellyfinClientTests: XCTestCase {
 
         for type in [ItemType.movie, .episode, .video, .unknown] {
             do {
-                _ = try await client.getPlaybackInfo(itemId: "some-item-id", itemType: type)
+                _ = try await client.getPlaybackInfo(itemId: "some-item-id", itemType: type, engine: .avFoundation)
                 XCTFail("Unauthenticated client should have thrown")
             } catch {
                 if case JellyfinError.nonPlayableItem = error {

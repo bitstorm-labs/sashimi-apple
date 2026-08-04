@@ -23,8 +23,11 @@ final class PlaybackSelectionTests: XCTestCase {
             index: index,
             isDefault: isDefault,
             isExternal: isExternal,
+            isForced: nil,
             videoRangeType: nil,
-            bitRate: nil
+            bitRate: nil,
+            deliveryUrl: nil,
+            deliveryMethod: nil
         )
     }
 
