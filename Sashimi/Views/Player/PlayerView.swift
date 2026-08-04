@@ -8,6 +8,15 @@ struct PlayerView: View {
     @StateObject private var viewModel = PlayerViewModel()
     @Environment(\.dismiss) private var dismiss
 
+    /// Distinguishes THIS presentation of the player in the log.
+    ///
+    /// SwiftUI recreating this view (a `fullScreenCover` whose binding changes,
+    /// a parent whose identity moves) produces a second `@StateObject` and a
+    /// second `.task`, and therefore a second server play session — which from
+    /// the server's side is indistinguishable from one session restarting.
+    /// A view tag plus the view model's own tag separates the two cases.
+    @State private var viewTag = String(UUID().uuidString.prefix(8))
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -21,15 +30,56 @@ struct PlayerView: View {
                     player: player,
                     viewModel: viewModel,
                     item: item,
-                    onDismiss: { Task { await viewModel.stop(); dismiss() } }
+                    onDismiss: {
+                        PlayerDiagnostics.event(.viewDismiss, [
+                            PlayerDiagnostics.field("view", viewTag),
+                            PlayerDiagnostics.field("trigger", "menu-button")
+                        ])
+                        Task { await viewModel.stop(reason: .userStop); dismiss() }
+                    }
                 )
                 .ignoresSafeArea()
                 .onAppear { viewModel.loadSubtitleTracks() }
             }
         }
-        .task { await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning) }
-        .onDisappear { Task { await viewModel.stop() } }
-        .onChange(of: viewModel.playbackEnded) { _, ended in if ended { dismiss() } }
+        .task {
+            // One `view.task` line per presentation. Two lines with different
+            // `view` tags for the same item means SwiftUI rebuilt the player;
+            // two `load.begin` lines under the same `vm` tag means one view
+            // model was asked to load twice. Those need different fixes, and
+            // the server cannot tell them apart.
+            PlayerDiagnostics.event(.viewTask, [
+                PlayerDiagnostics.field("view", viewTag),
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("type", item.type?.rawValue),
+                PlayerDiagnostics.field("startFromBeginning", startFromBeginning)
+            ])
+            await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
+        }
+        .onDisappear {
+            PlayerDiagnostics.event(.viewDisappear, [
+                PlayerDiagnostics.field("view", viewTag),
+                PlayerDiagnostics.field("item", item.id)
+            ])
+            Task { await viewModel.stop(reason: .viewDisappeared) }
+        }
+        .onChange(of: viewModel.playbackEnded) { _, ended in
+            if ended {
+                PlayerDiagnostics.event(.viewDismiss, [
+                    PlayerDiagnostics.field("view", viewTag),
+                    PlayerDiagnostics.field("trigger", "playback-ended")
+                ])
+                dismiss()
+            }
+        }
+        .onChange(of: viewModel.errorMessage) { _, message in
+            guard let message else { return }
+            PlayerDiagnostics.failure(.viewError, [
+                PlayerDiagnostics.field("view", viewTag),
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("message", message)
+            ])
+        }
     }
 
     private var errorView: some View {
@@ -37,7 +87,13 @@ struct PlayerView: View {
             Image(systemName: "exclamationmark.triangle").font(.system(size: 60)).foregroundStyle(.red)
             Text("Playback Error").font(.title2)
             Text(viewModel.errorMessage ?? "Unknown error").foregroundStyle(.secondary)
-            Button("Dismiss") { Task { await viewModel.stop(); dismiss() } }
+            Button("Dismiss") {
+                PlayerDiagnostics.event(.viewDismiss, [
+                    PlayerDiagnostics.field("view", viewTag),
+                    PlayerDiagnostics.field("trigger", "error-dismiss")
+                ])
+                Task { await viewModel.stop(reason: .userStop); dismiss() }
+            }
         }
     }
 }

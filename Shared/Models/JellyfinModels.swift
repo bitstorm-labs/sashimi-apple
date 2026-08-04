@@ -243,6 +243,11 @@ struct MediaSourceInfo: Codable {
     let directStreamUrl: String?
     let mediaStreams: [MediaStream]?
     let bitrate: Int?
+    /// Why the server decided this source cannot be played as-is
+    /// (e.g. "ContainerNotSupported", "ContainerBitrateExceedsLimit").
+    /// Decoded purely so the player's diagnostics can record it: without it,
+    /// an unexplained transcode had to be reconstructed from server logs.
+    let transcodeReasons: [String]?
 
     var videoCodec: String? {
         mediaStreams?.first(where: { $0.type == "Video" })?.codec
@@ -305,6 +310,7 @@ struct MediaSourceInfo: Codable {
         case directStreamUrl = "DirectStreamUrl"
         case mediaStreams = "MediaStreams"
         case bitrate = "Bitrate"
+        case transcodeReasons = "TranscodeReasons"
     }
 }
 

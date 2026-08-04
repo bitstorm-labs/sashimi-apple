@@ -79,13 +79,15 @@ struct MobilePlayerView: View {
                     localFileURL: localFileURL,
                     offlineSubtitles: DownloadManager.shared.offlineSubtitles(for: item.id)
                 )
-                // For offline content, apply locally-saved position if newer than server data
+                // For offline content, apply locally-saved position if newer than server data.
+                // Goes through the view model rather than seeking directly: the
+                // resume position is applied when the item reports .readyToPlay,
+                // so a seek issued here would be overwritten a moment later.
                 if let offlineTicks = DownloadManager.shared.offlinePlaybackPosition(for: item.id),
                    offlineTicks > 0 {
                     let serverTicks = item.userData?.playbackPositionTicks ?? 0
                     if offlineTicks > serverTicks {
-                        let seekTime = CMTime(value: offlineTicks / 10000, timescale: 1000)
-                        await viewModel.player?.seek(to: seekTime)
+                        viewModel.overrideResumePosition(ticks: offlineTicks)
                     }
                 }
             }
@@ -99,7 +101,7 @@ struct MobilePlayerView: View {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             Task {
-                await viewModel.stop()
+                await viewModel.stop(reason: .viewDisappeared)
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
@@ -175,7 +177,7 @@ struct MobilePlayerView: View {
                 // where the offline save lives. The position was silently lost
                 // every time the X was used.
                 saveOfflinePositionIfNeeded()
-                Task { await viewModel.stop() }
+                Task { await viewModel.stop(reason: .userStop) }
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
@@ -329,7 +331,7 @@ struct MobilePlayerView: View {
                 // where the offline save lives. The position was silently lost
                 // every time the X was used.
                 saveOfflinePositionIfNeeded()
-                Task { await viewModel.stop() }
+                Task { await viewModel.stop(reason: .userStop) }
                 dismiss()
             } label: {
                 Image(systemName: "xmark")

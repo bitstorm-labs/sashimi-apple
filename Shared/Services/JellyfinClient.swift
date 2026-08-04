@@ -809,6 +809,19 @@ actor JellyfinClient {
         return response.items.first
     }
 
+    /// Whether the HLS TranscodingProfile lets the server cut segments on
+    /// non-key frames.
+    ///
+    /// Named rather than inlined below because it is a real behavioural lever
+    /// and the player's diagnostics record it with every negotiation: when the
+    /// server STREAM-COPIES the video (`IsVideoDirect`) it cannot insert key
+    /// frames, so with this enabled a segment can begin mid-GOP — which is the
+    /// leading hypothesis for seeking failing on stream-copied 4K while a real
+    /// re-encode (an explicit quality tier) seeks fine. Changing it is a
+    /// server-behaviour experiment, so it is deliberately left as-is here and
+    /// only made observable.
+    nonisolated static let transcodingProfileBreaksOnNonKeyFrames = true
+
     /// The device profile sent with every PlaybackInfo request: what this
     /// client can play natively, and the ceilings the server must respect.
     private func videoDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
@@ -839,7 +852,7 @@ actor JellyfinClient {
                     "Context": "Streaming",
                     "MaxAudioChannels": "6",
                     "MinSegments": "2",
-                    "BreakOnNonKeyFrames": true
+                    "BreakOnNonKeyFrames": Self.transcodingProfileBreaksOnNonKeyFrames
                 ]
             ],
             "ContainerProfiles": [],
