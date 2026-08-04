@@ -122,6 +122,12 @@ struct ContinueWatchingCard: View {
                         )
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(alignment: .topLeading) {
+                        if isYouTube {
+                            YouTubeBadge()
+                                .padding(10)
+                        }
+                    }
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
