@@ -811,9 +811,38 @@ actor JellyfinClient {
 
     /// Whether the HLS TranscodingProfile lets the server cut segments on
 
-    /// The device profile sent with every PlaybackInfo request: what this
-    /// client can play natively, and the ceilings the server must respect.
-    private func videoDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+    /// The device profile sent with every PlaybackInfo request: what the
+    /// *engine this playback will use* can play natively, and the ceilings
+    /// the server must respect. Internal (not private) so the profile shape
+    /// is unit-testable — the `.vlc` shape depends on a key being absent,
+    /// which is invisible in any log line.
+    func videoDeviceProfile(engine: PlaybackEngineKind, streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+        switch engine {
+        case .avFoundation:
+            return avFoundationDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: maxWidth)
+        case .vlc:
+            return vlcDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: maxWidth)
+        }
+    }
+
+    /// A width condition is what actually downscales. MaxStreamingBitrate is
+    /// only a ceiling, so a 1080p source already under the cap was passed
+    /// straight through and "720p" changed nothing.
+    private func widthCodecProfiles(maxWidth: Int?) -> [[String: Any]] {
+        maxWidth.map { width in
+            [[
+                "Type": "Video",
+                "Conditions": [[
+                    "Condition": "LessThanEqual",
+                    "Property": "Width",
+                    "Value": "\(width)",
+                    "IsRequired": true
+                ]]
+            ]]
+        } ?? []
+    }
+
+    private func avFoundationDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
         [
             "MaxStreamingBitrate": streamingBitrate,
             "MaxStaticBitrate": 100000000,
@@ -844,23 +873,71 @@ actor JellyfinClient {
                 ]
             ],
             "ContainerProfiles": [],
-            // A width condition is what actually downscales. MaxStreamingBitrate
-            // is only a ceiling, so a 1080p source already under the cap was
-            // passed straight through and "720p" changed nothing.
-            "CodecProfiles": maxWidth.map { width in
-                [[
-                    "Type": "Video",
-                    "Conditions": [[
-                        "Condition": "LessThanEqual",
-                        "Property": "Width",
-                        "Value": "\(width)",
-                        "IsRequired": true
-                    ]]
-                ]]
-            } ?? [],
+            "CodecProfiles": widthCodecProfiles(maxWidth: maxWidth),
             "SubtitleProfiles": [
                 ["Format": "vtt", "Method": "External"],
                 ["Format": "srt", "Method": "External"]
+            ]
+        ]
+    }
+
+    private func vlcDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+        // libVLC demuxes essentially every container, so the direct-play
+        // entry names NO container at all. The "Container" key must be
+        // ABSENT — not "", not NSNull(). Jellyfin parses a null/missing
+        // container list as "no restriction" (which is what lets MKV
+        // direct-play), but an empty string becomes a one-element list
+        // [""], which matches nothing and would transcode everything.
+        let directPlay: [String: Any] = [
+            "Type": "Video",
+            "VideoCodec": "h264,hevc,mpeg4,mpeg2video,mpeg1video,vp8,vp9,av1,vc1,"
+                + "wmv1,wmv2,wmv3,msmpeg4v1,msmpeg4v2,msmpeg4v3,theora,"
+                + "prores,mjpeg,dv,flv1,h263,ffv1,dirac",
+            "AudioCodec": "aac,ac3,eac3,dts,truehd,mlp,mp1,mp2,mp3,flac,alac,opus,"
+                + "vorbis,speex,wavpack,wmav1,wmav2,wmapro,wmalossless,"
+                + "pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_u8,"
+                + "pcm_alaw,pcm_mulaw,pcm_bluray,pcm_dvd,amr_nb,amr_wb,nellymoser"
+        ]
+        return [
+            "MaxStreamingBitrate": streamingBitrate,
+            "MaxStaticBitrate": 100000000,
+            "MusicStreamingTranscodingBitrate": 384000,
+            "DirectPlayProfiles": [directPlay],
+            // A transcoding profile stays even though direct play now wins
+            // almost always: explicit quality tiers force a transcode and
+            // need a URL to come back, and remote playback can exceed the
+            // link. Same fMP4-not-ts shape as the AVPlayer profile.
+            "TranscodingProfiles": [
+                [
+                    "Container": "mp4",
+                    "Type": "Video",
+                    "VideoCodec": "h264,hevc",
+                    // Widened vs AVPlayer: VLC decodes all of these in HLS.
+                    "AudioCodec": "aac,ac3,eac3,mp3,flac,opus",
+                    "Protocol": "hls",
+                    "Context": "Streaming",
+                    "MaxAudioChannels": "8",
+                    "MinSegments": "2",
+                ]
+            ],
+            "ContainerProfiles": [],
+            "CodecProfiles": widthCodecProfiles(maxWidth: maxWidth),
+            // Embedded formats ride along inside the direct-played file and
+            // VLC renders them (incl. ASS styling and image subs), which
+            // removes SubtitleCodecNotSupported as a transcode reason.
+            "SubtitleProfiles": [
+                ["Format": "subrip", "Method": "Embed"],
+                ["Format": "ass", "Method": "Embed"],
+                ["Format": "ssa", "Method": "Embed"],
+                ["Format": "pgssub", "Method": "Embed"],
+                ["Format": "dvdsub", "Method": "Embed"],
+                ["Format": "vtt", "Method": "Embed"],
+                ["Format": "sub", "Method": "Embed"],
+                ["Format": "mov_text", "Method": "Embed"],
+                ["Format": "vtt", "Method": "External"],
+                ["Format": "srt", "Method": "External"],
+                ["Format": "ass", "Method": "External"],
+                ["Format": "ssa", "Method": "External"]
             ]
         ]
     }
@@ -883,6 +960,7 @@ actor JellyfinClient {
     func getPlaybackInfo(
         itemId: String,
         itemType: ItemType? = nil,
+        engine: PlaybackEngineKind,
         maxBitrate: Int? = nil,
         maxWidth: Int? = nil,
         forceDirectPlay: Bool = false,
@@ -918,7 +996,7 @@ actor JellyfinClient {
         // never take effect.
         let effectiveForceDirectPlay = forceDirectPlay && !forceTranscode
 
-        let deviceProfile = videoDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: effectiveMaxWidth)
+        let deviceProfile = videoDeviceProfile(engine: engine, streamingBitrate: streamingBitrate, maxWidth: effectiveMaxWidth)
 
         // Jellyfin's PlaybackInfo API has no "force direct play" flag.
         // Disabling DirectStream and Transcoding leaves direct play as the

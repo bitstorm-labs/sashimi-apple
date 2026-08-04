@@ -1268,7 +1268,7 @@ struct MediaDetailView: View {
 
     private func loadMediaInfo() async {
         do {
-            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type)
+            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation)
             mediaInfo = playbackInfo.mediaSources?.first
         } catch {
             // Silently ignore media info loading failures - not critical for playback

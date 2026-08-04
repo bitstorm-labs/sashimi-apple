@@ -994,9 +994,14 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("allowVideoStreamCopy", !forceTranscode)
         ])
 
+        // Phase 1 of the VLC work: the profile can be VLC-shaped for
+        // observation, but the player below is still AVPlayer either way.
+        let engine: PlaybackEngineKind = playbackSettings.debugVLCDeviceProfile ? .vlc : .avFoundation
+
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             itemType: item.type,
+            engine: engine,
             maxBitrate: effectiveBitrate,
             maxWidth: maxWidth,
             forceDirectPlay: playbackSettings.forceDirectPlay,

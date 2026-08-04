@@ -24,4 +24,12 @@ class PlaybackSettings: ObservableObject {
     // don't carry the series' overall rating, episode cards suppress the badge
     // unless the user opts into per-episode ratings here.
     @AppStorage("useEpisodeRatings") var useEpisodeRatings = false
+    // Phase-1 debug flag with NO settings UI (set via `defaults write` /
+    // simctl): sends the VLC-shaped device profile so the server's response
+    // to it can be observed in the pbinfo.response diagnostics, while the
+    // player itself is still AVPlayer. With this on, an MKV negotiates as
+    // direct play and AVPlayer then can't render it — that's expected; this
+    // exists to verify the negotiation, not to play video. Replaced by the
+    // real engine setting when the VLC engine lands.
+    @AppStorage("debugVLCDeviceProfile") var debugVLCDeviceProfile = false
 }

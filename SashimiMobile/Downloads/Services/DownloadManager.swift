@@ -205,7 +205,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
         let compatible: Bool
         do {
-            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: itemId)
+            // Downloads stay on the AVPlayer profile until Phase 5: an MKV
+            // downloaded under a VLC profile would be one AVPlayer can't open.
+            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: itemId, engine: .avFoundation)
             compatible = info.mediaSources?.first
                 .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
         } catch {
@@ -558,7 +560,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func downloadSubtitles(for item: BaseItemDto) async {
-        guard let playbackInfo = try? await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, maxBitrate: nil) else {
+        guard let playbackInfo = try? await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation, maxBitrate: nil) else {
             return
         }
 
