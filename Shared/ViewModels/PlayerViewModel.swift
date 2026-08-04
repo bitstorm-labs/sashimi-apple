@@ -364,8 +364,15 @@ final class PlayerViewModel: ObservableObject {
                 // and no way to surface a decode failure.
                 makePlayerAndObservers(for: playerItem)
             } else {
-                // Online playback - fetch fresh data from server
-                freshItem = try await client.getItem(itemId: item.id)
+                // Online playback - fetch fresh data from server.
+                // Resolve container types (Series/Season) to the episode that
+                // should actually play BEFORE any PlaybackInfo request — a
+                // series id posted to PlaybackInfo is a guaranteed server 500
+                // (InvalidCastException to IHasMediaSources, seen in
+                // production). Entry points like the Continue Watching Play
+                // button and Top Shelf deep links hand over whatever item the
+                // row carried, so the guarantee lives here, not in each caller.
+                freshItem = try await resolvePlayableItem(client.getItem(itemId: item.id))
                 currentItem = freshItem
 
                 let audioSession = AVAudioSession.sharedInstance()
@@ -704,6 +711,45 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Maps a container item (Series/Season) to the episode that should play:
+    /// server next-up first, then first unwatched episode, then first episode
+    /// (fully-watched series). Playable items pass through untouched. Throws
+    /// rather than letting a non-playable id reach PlaybackInfo, so the
+    /// failure is a visible "couldn't find an episode" instead of a silent
+    /// server 500 mid-startup.
+    func resolvePlayableItem(_ item: BaseItemDto) async throws -> BaseItemDto {
+        guard let type = item.type, !type.isPlayableMediaType else { return item }
+
+        if type == .series, let next = try? await client.getNextUp(seriesId: item.id, limit: 1).first {
+            return next
+        }
+
+        if type == .series || type == .season {
+            // For a series this searches all episodes (getItems is recursive);
+            // for a season, just that season's.
+            if let unwatched = try? await client.getItems(
+                parentId: item.id,
+                includeTypes: [.episode],
+                sortBy: "ParentIndexNumber,IndexNumber",
+                limit: 1,
+                isPlayed: false
+            ).items.first {
+                return unwatched
+            }
+            if let first = try? await client.getItems(
+                parentId: item.id,
+                includeTypes: [.episode],
+                sortBy: "ParentIndexNumber,IndexNumber",
+                limit: 1
+            ).items.first {
+                return first
+            }
+        }
+
+        logger.error("Could not resolve \(type.rawValue, privacy: .public) \(item.id, privacy: .public) to a playable episode")
+        throw PlayerError.noPlayableEpisode(item.name)
+    }
+
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
     private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
@@ -715,6 +761,7 @@ final class PlayerViewModel: ObservableObject {
         )
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
+            itemType: item.type,
             maxBitrate: effectiveBitrate,
             maxWidth: maxWidth,
             forceDirectPlay: playbackSettings.forceDirectPlay,
@@ -735,8 +782,18 @@ final class PlayerViewModel: ObservableObject {
             resolvedURL = await client.buildURL(path: transcodingPath)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             resolvedURL = await client.buildURL(path: directPath)
-        } else {
+        } else if mediaSource.supportsDirectPlay != false {
             resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+        } else {
+            // The server offered no transcode/remux URL AND says the source
+            // can't direct play (e.g. Force Direct Play against a container
+            // this device can't decode). The old behavior built a static
+            // stream URL anyway — a stream that bypasses the device profile,
+            // which is what forces fMP4 for HEVC — and handed AVPlayer a file
+            // it can't render: audio over a black screen instead of an error.
+            // Fail loudly instead.
+            logger.error("Media source \(mediaSource.id, privacy: .public) is not playable: no stream URLs and SupportsDirectPlay=false")
+            throw PlayerError.sourceNotPlayable
         }
 
         guard let resolvedURL else {
@@ -1410,6 +1467,8 @@ final class PlayerViewModel: ObservableObject {
 enum PlayerError: LocalizedError {
     case noMediaSource
     case noStreamURL
+    case noPlayableEpisode(String)
+    case sourceNotPlayable
 
     var errorDescription: String? {
         switch self {
@@ -1417,6 +1476,10 @@ enum PlayerError: LocalizedError {
             return "No playable media source found"
         case .noStreamURL:
             return "Could not generate stream URL"
+        case .noPlayableEpisode(let name):
+            return "Couldn't find an episode of \"\(name)\" to play"
+        case .sourceNotPlayable:
+            return "This video can't be played on this device with the current playback settings"
         }
     }
 }

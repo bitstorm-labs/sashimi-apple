@@ -125,4 +125,20 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(ItemType.video.rawValue, "Video")
     }
 
+    /// Container types have no media sources -- POSTing them to PlaybackInfo
+    /// is a guaranteed server 500 (#345). `.unknown` must stay playable:
+    /// server types the enum doesn't model (e.g. "Trailer") are single videos.
+    func testItemTypePlayability() {
+        XCTAssertTrue(ItemType.movie.isPlayableMediaType)
+        XCTAssertTrue(ItemType.episode.isPlayableMediaType)
+        XCTAssertTrue(ItemType.video.isPlayableMediaType)
+        XCTAssertTrue(ItemType.unknown.isPlayableMediaType)
+
+        XCTAssertFalse(ItemType.series.isPlayableMediaType)
+        XCTAssertFalse(ItemType.season.isPlayableMediaType)
+        XCTAssertFalse(ItemType.boxSet.isPlayableMediaType)
+        XCTAssertFalse(ItemType.folder.isPlayableMediaType)
+        XCTAssertFalse(ItemType.collectionFolder.isPlayableMediaType)
+    }
+
 }

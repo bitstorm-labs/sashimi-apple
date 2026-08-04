@@ -558,7 +558,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func downloadSubtitles(for item: BaseItemDto) async {
-        guard let playbackInfo = try? await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, maxBitrate: nil) else {
+        guard let playbackInfo = try? await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, maxBitrate: nil) else {
             return
         }
 

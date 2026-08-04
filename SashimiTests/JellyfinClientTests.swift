@@ -189,6 +189,57 @@ final class JellyfinClientTests: XCTestCase {
         XCTAssertEqual(JellyfinError.sessionExpired.errorDescription, "Session expired. Please sign in again.")
     }
 
+    // MARK: - PlaybackInfo Non-Playable Type Guard (#345)
+
+    /// PlaybackInfo POSTed with a Series id is a guaranteed Jellyfin 500
+    /// (InvalidCastException to IHasMediaSources — seen in production).
+    /// The client must refuse locally, before any network call.
+    func testGetPlaybackInfoRefusesContainerTypes() async {
+        let client = JellyfinClient.shared
+
+        for type in [ItemType.series, .season, .boxSet, .folder, .collectionFolder] {
+            do {
+                _ = try await client.getPlaybackInfo(itemId: "some-series-id", itemType: type)
+                XCTFail("getPlaybackInfo should refuse \(type.rawValue)")
+            } catch {
+                guard case JellyfinError.nonPlayableItem(let refused) = error else {
+                    XCTFail("Expected nonPlayableItem for \(type.rawValue), got \(error)")
+                    continue
+                }
+                XCTAssertEqual(refused, type)
+            }
+        }
+    }
+
+    /// Playable types must pass the guard: on an unauthenticated client the
+    /// next failure is notConfigured (no userId), proving the type guard did
+    /// not trip. `.unknown` stays playable — server types the enum doesn't
+    /// model (e.g. "Trailer") are individual videos.
+    func testGetPlaybackInfoAllowsPlayableTypes() async {
+        let client = JellyfinClient.shared
+        await client.configure(serverURL: URL(string: "http://localhost:8096")!)
+
+        for type in [ItemType.movie, .episode, .video, .unknown] {
+            do {
+                _ = try await client.getPlaybackInfo(itemId: "some-item-id", itemType: type)
+                XCTFail("Unauthenticated client should have thrown")
+            } catch {
+                if case JellyfinError.nonPlayableItem = error {
+                    XCTFail("Type guard must not trip for playable type \(type.rawValue)")
+                }
+            }
+        }
+    }
+
+    func testNonPlayableItemErrorDescription() {
+        // The refusal must surface as a user-actionable message, not a
+        // generic server error.
+        XCTAssertEqual(
+            JellyfinError.nonPlayableItem(.series).errorDescription,
+            "This series can't be played directly. Pick an episode to play."
+        )
+    }
+
     // MARK: - Media Segment Type Tests
 
     func testMediaSegmentTypeRawValues() {

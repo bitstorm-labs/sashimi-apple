@@ -196,7 +196,7 @@ struct DownloadButton: View {
         determiningOptions = true
         defer { determiningOptions = false }
         do {
-            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id)
+            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type)
             let compatible = info.mediaSources?.first
                 .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
             originalAllowed = compatible ? .yes : .no
