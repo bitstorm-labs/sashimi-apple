@@ -1174,7 +1174,14 @@ struct MediaDetailView: View {
         } else if isEpisode {
             await loadEpisodeContent()
         }
-        await loadMediaInfo()
+        // Series pages have no media sources of their own — PlaybackInfo for a
+        // series id is a guaranteed server 500 (InvalidCastException to
+        // IHasMediaSources). This call also lands at the END of the load chain
+        // above, so it raced the real episode PlaybackInfo whenever the user
+        // pressed Play quickly. The iOS detail views already have this gate.
+        if !isSeries {
+            await loadMediaInfo()
+        }
     }
 
     private func loadSeriesContent() async {
@@ -1261,7 +1268,7 @@ struct MediaDetailView: View {
 
     private func loadMediaInfo() async {
         do {
-            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id)
+            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type)
             mediaInfo = playbackInfo.mediaSources?.first
         } catch {
             // Silently ignore media info loading failures - not critical for playback

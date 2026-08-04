@@ -327,7 +327,7 @@ struct MobileDetailView: View {
             return
         }
         do {
-            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: first.id)
+            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: first.id, itemType: first.type)
             seasonOriginalAllowed = info.mediaSources?.first
                 .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
         } catch {
@@ -1066,7 +1066,7 @@ struct MobileDetailView: View {
 
     private func loadMediaInfo() async {
         do {
-            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id)
+            let playbackInfo = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type)
             mediaInfo = playbackInfo.mediaSources?.first
         } catch {
             // Not critical
