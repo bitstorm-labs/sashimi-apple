@@ -810,17 +810,21 @@ actor JellyfinClient {
     }
 
     /// Whether the HLS TranscodingProfile lets the server cut segments on
-    /// non-key frames.
+    /// non-key frames. **False, deliberately.**
     ///
-    /// Named rather than inlined below because it is a real behavioural lever
-    /// and the player's diagnostics record it with every negotiation: when the
-    /// server STREAM-COPIES the video (`IsVideoDirect`) it cannot insert key
-    /// frames, so with this enabled a segment can begin mid-GOP — which is the
-    /// leading hypothesis for seeking failing on stream-copied 4K while a real
-    /// re-encode (an explicit quality tier) seeks fine. Changing it is a
-    /// server-behaviour experiment, so it is deliberately left as-is here and
-    /// only made observable.
-    nonisolated static let transcodingProfileBreaksOnNonKeyFrames = true
+    /// With `-c:v copy` the server cannot insert key frames,
+    /// so segmenting on non-key frames yields segments that begin mid-GOP: a
+    /// seek hands the decoder a segment it cannot start from, and video freezes
+    /// while audio continues. Confirmed in production 2026-08-03 — seeking broke
+    /// on 4K stream-copied HEVC, worked on a re-encoded 1080p tier, and worked at
+    /// position zero with no seek. Each failed seek made the client tear down and
+    /// re-request, the ffmpeg start/kill storm captured server-side.
+    ///
+    /// This was never chosen for this app: it arrived in a file-move commit
+    /// (126ffaa, iPad extraction) copied from jellyfin-web, so turning it off
+    /// undoes nothing that was added to fix a problem here. The player's
+    /// diagnostics record it with every negotiation.
+    nonisolated static let transcodingProfileBreaksOnNonKeyFrames = false
 
     /// The device profile sent with every PlaybackInfo request: what this
     /// client can play natively, and the ceilings the server must respect.
