@@ -986,12 +986,12 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("maxWidth", maxWidth),
             PlayerDiagnostics.field("forceTranscode", forceTranscode),
             PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
-            // The two request flags that decide whether the server may
-            // stream-COPY the video into HLS or must re-encode it, and whether
-            // it may cut segments mid-GOP. Seeking behaves differently in each
-            // combination, and none of it was visible from the client before.
-            PlayerDiagnostics.field("allowVideoStreamCopy", !forceTranscode),
-            PlayerDiagnostics.field("breakOnNonKeyFrames", JellyfinClient.transcodingProfileBreaksOnNonKeyFrames)
+            // Whether the server may stream-COPY the video into HLS or must
+            // re-encode it. This is the flag that decides whether seeking works:
+            // on a copy, Jellyfin's playlist grid and its restarted ffmpeg's
+            // segment grid diverge after any seek (jellyfin#16070, #4188), so
+            // the decoder is handed segments the playlist mislabels.
+            PlayerDiagnostics.field("allowVideoStreamCopy", !forceTranscode)
         ])
 
         let playbackInfo = try await client.getPlaybackInfo(
