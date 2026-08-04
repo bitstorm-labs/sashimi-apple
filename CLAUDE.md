@@ -302,3 +302,20 @@ cd Sashimi/Resources/Assets.xcassets
 cp -r CatIcon.imagestack MyIcon.imagestack
 # Then replace the icon.png and icon@2x.png files in each layer
 ```
+
+## Releasing: bump MARKETING_VERSION every TestFlight build
+
+`MARKETING_VERSION` is hardcoded in **`project.yml`** in three places (tvOS, iOS,
+and the shared target) — `xcodegen` writes it into the pbxproj, so editing the
+pbxproj directly is pointless. Fastlane only auto-increments the *build* number
+(epoch seconds); nothing touches the marketing version.
+
+**Bump all three before triggering a TestFlight deploy.** Shipping several builds
+under one version makes them indistinguishable in TestFlight and in Jellyfin's
+`ApplicationVersion` — during the 2026-08-03 playback investigation three builds
+all reported `1.2.0`, so neither the user nor the server logs could say which
+code was running while a fix was being tested.
+
+```bash
+sed -i '' 's/MARKETING_VERSION: 1\.2\.0/MARKETING_VERSION: 1.2.1/g' project.yml
+```
