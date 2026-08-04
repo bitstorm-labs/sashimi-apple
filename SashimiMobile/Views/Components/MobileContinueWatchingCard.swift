@@ -154,7 +154,7 @@ struct MobileContinueWatchingCard: View {
             .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
             .overlay(alignment: .topLeading) {
                 if isYouTube {
-                    YouTubeBadge(fontSize: 11, horizontalPadding: 6, verticalPadding: 3)
+                    YouTubeBadge(glyphSize: 20)
                         .padding(8)
                 }
             }

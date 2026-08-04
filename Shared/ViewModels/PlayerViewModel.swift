@@ -986,12 +986,10 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("maxWidth", maxWidth),
             PlayerDiagnostics.field("forceTranscode", forceTranscode),
             PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
-            // Whether the server may stream-COPY the video into HLS or must
-            // re-encode it. This is the flag that decides whether seeking works:
-            // on a copy, Jellyfin's playlist grid and its restarted ffmpeg's
-            // segment grid diverge after any seek (jellyfin#16070, #4188), so
-            // the decoder is handed segments the playlist mislabels.
-            PlayerDiagnostics.field("allowVideoStreamCopy", !forceTranscode)
+            // Video stream-copy is now always disabled (see getPlaybackInfo):
+            // a stream-copied MKV's HLS grid diverges on seek and freezes, so we
+            // force a re-encode to make seeking work (jellyfin#16070, #4188).
+            PlayerDiagnostics.field("allowVideoStreamCopy", false)
         ])
 
         // Phase 1 of the VLC work: the profile can be VLC-shaped for
