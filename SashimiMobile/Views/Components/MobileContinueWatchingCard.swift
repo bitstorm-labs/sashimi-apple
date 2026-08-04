@@ -152,6 +152,12 @@ struct MobileContinueWatchingCard: View {
             }
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
+            .overlay(alignment: .topLeading) {
+                if isYouTube {
+                    YouTubeBadge(fontSize: 11, horizontalPadding: 6, verticalPadding: 3)
+                        .padding(8)
+                }
+            }
 
             // Title and episode info
             VStack(alignment: .leading, spacing: 3) {
