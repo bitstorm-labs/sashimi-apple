@@ -64,3 +64,4 @@ Thumbs.db
 *.mobileprovision
 *.provisionprofile
 .aider*
+Vendor/

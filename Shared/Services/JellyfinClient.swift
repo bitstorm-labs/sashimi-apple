@@ -1017,11 +1017,18 @@ actor JellyfinClient {
             "EnableDirectPlay": !forceTranscode,
             "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
             "EnableTranscoding": !effectiveForceDirectPlay,
-            // The real reason picking a tier did nothing: with video stream copy
-            // allowed, the server satisfied a "transcode" by remuxing the
-            // original video untouched (IsVideoDirect=true) whenever the source
-            // already fit under the bitrate cap. An explicit pick must re-encode.
-            "AllowVideoStreamCopy": !forceTranscode,
+            // Never allow video stream-copy. AVPlayer can't demux MKV, so an MKV
+            // goes through HLS; when the server stream-COPIES the video into that
+            // HLS (IsVideoDirect=true), its playlist grid and the restarted
+            // ffmpeg's segment grid diverge after any seek, freezing the picture
+            // (jellyfin#16070, #4188). Forcing a genuine re-encode makes ffmpeg
+            // manufacture keyframes on the advertised grid, so seeking works. The
+            // cost is real — the server re-encodes (CPU) and Dolby Vision dynamic
+            // metadata is lost (HDR10 base at best) on MKV titles — but seek is
+            // otherwise broken. MP4/M4V/MOV direct-play and never reach this path,
+            // so they are unaffected. (Also makes explicit quality tiers real
+            // re-encodes rather than no-op remuxes.)
+            "AllowVideoStreamCopy": false,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
         ]
