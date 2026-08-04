@@ -386,8 +386,16 @@ struct MediaStream: Codable {
     let index: Int?
     let isDefault: Bool?
     let isExternal: Bool?
+    let isForced: Bool?
     let videoRangeType: String?
     let bitRate: Int?
+    /// Server-relative URL for fetching an external (sidecar) subtitle
+    /// stream. Only populated for external streams; the VLC engine attaches
+    /// these as playback children instead of overlaying VTT app-side.
+    let deliveryUrl: String?
+    /// How the server intends the stream to reach the client
+    /// ("Embed", "External", "Encode", "Hls", "Drop").
+    let deliveryMethod: String?
 
     enum CodingKeys: String, CodingKey {
         case type = "Type"
@@ -401,8 +409,11 @@ struct MediaStream: Codable {
         case index = "Index"
         case isDefault = "IsDefault"
         case isExternal = "IsExternal"
+        case isForced = "IsForced"
         case videoRangeType = "VideoRangeType"
         case bitRate = "BitRate"
+        case deliveryUrl = "DeliveryUrl"
+        case deliveryMethod = "DeliveryMethod"
     }
 }
 
