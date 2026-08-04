@@ -91,7 +91,6 @@ final class PlayerViewModel: ObservableObject {
     @Published var error: Error?
     @Published var currentItem: BaseItemDto?
     @Published var errorMessage: String?
-    @Published var attemptedURL: String?
     @Published var audioTracks: [AudioTrackOption] = []
     @Published var selectedAudioTrackId: String?
     @Published var subtitleTracks: [SubtitleTrackOption] = []
@@ -202,8 +201,53 @@ final class PlayerViewModel: ObservableObject {
     private var errorObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
+    /// AVPlayerItem error/access log observers — see observeItemLogs.
+    private var itemErrorLogObserver: NSObjectProtocol?
+    private var itemAccessLogObserver: NSObjectProtocol?
+    /// Time-jump / stall / failed-to-end observers, kept together because they
+    /// share a lifetime with the current player item.
+    private var stallObservers: [NSObjectProtocol] = []
+    /// Last stall count already reported, so a climbing counter is logged once
+    /// per new stall instead of on every access-log entry.
+    private var lastReportedStallCount = 0
     private let client = JellyfinClient.shared
     private let playbackSettings = PlaybackSettings.shared
+
+    // MARK: - Diagnostics
+
+    /// Identifies THIS view model instance in the log.
+    ///
+    /// The production restart loop (transcode starts, client abandons it ~1s
+    /// later, a different transcode starts) has two very different causes that
+    /// are indistinguishable server-side: one view model loading twice, or two
+    /// view models each loading once (SwiftUI recreating the player view).
+    /// Tagging every line with the instance is what tells them apart.
+    nonisolated private let sessionTag = String(UUID().uuidString.prefix(8))
+
+    /// Incremented by every path that builds a player (loadMedia,
+    /// changeQuality). Two `load.begin` lines with the same `vm` and different
+    /// `attempt` values mean this instance was asked to load twice.
+    private var playbackAttempt = 0
+
+    /// Fields stamped on every diagnostic line from this instance.
+    private var diagContext: [String] {
+        [
+            PlayerDiagnostics.field("vm", sessionTag),
+            PlayerDiagnostics.field("attempt", playbackAttempt)
+        ]
+    }
+
+    private func diag(_ stage: PlayerDiagnostics.Stage, _ fields: [String] = []) {
+        PlayerDiagnostics.event(stage, diagContext + fields)
+    }
+
+    private func diagFailure(_ stage: PlayerDiagnostics.Stage, _ fields: [String] = []) {
+        PlayerDiagnostics.failure(stage, diagContext + fields)
+    }
+
+    private func diagDetail(_ stage: PlayerDiagnostics.Stage, _ fields: [String] = []) {
+        PlayerDiagnostics.detail(stage, diagContext + fields)
+    }
 
     /// Refreshes the stream-info chip from the server's own session view.
     /// Called when the player overlay becomes visible; cheap single GET.
@@ -290,12 +334,47 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Ends the server-side transcode belonging to the CURRENT play session, if
+    /// there is one, and records why.
+    ///
+    /// This is the client action Jellyfin logs as "Stopping ffmpeg process with
+    /// q command" (it is a DELETE /Videos/ActiveEncodings). From the server's
+    /// side it is indistinguishable from the client simply walking away, which
+    /// is why every call site has to name its reason here.
+    private func stopActiveEncodingIfNeeded(reason: PlayerDiagnostics.TeardownReason) async {
+        guard !isOfflinePlayback,
+              let playSessionId,
+              currentMediaSource?.transcodingUrl != nil else { return }
+
+        diag(.encodingStop, [
+            PlayerDiagnostics.field("reason", reason.rawValue),
+            PlayerDiagnostics.field("playSession", playSessionId)
+        ])
+        do {
+            try await client.stopActiveEncoding(playSessionId: playSessionId)
+        } catch {
+            logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
+            diagFailure(.encodingStop, [
+                PlayerDiagnostics.field("reason", reason.rawValue)
+            ] + PlayerDiagnostics.fields(for: error))
+        }
+    }
+
     func loadMedia(
         item: BaseItemDto,
         startFromBeginning: Bool = false,
         localFileURL: URL? = nil,
         offlineSubtitles: [OfflineSubtitle] = []
     ) async {
+        playbackAttempt += 1
+        diag(.loadBegin, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("type", item.type?.rawValue),
+            PlayerDiagnostics.field("startFromBeginning", startFromBeginning),
+            PlayerDiagnostics.field("offline", localFileURL != nil),
+            PlayerDiagnostics.field("hadPlayer", player != nil),
+            PlayerDiagnostics.field("previousItem", currentItem?.id)
+        ])
         self.offlineSubtitles = offlineSubtitles
         // Tear down everything tied to the previous player first — auto-play
         // next episode reuses this ViewModel, and observers left on the old
@@ -315,6 +394,13 @@ final class PlayerViewModel: ObservableObject {
         // changeQuality and the stop path both do this; only this one did not,
         // which is how auto-play-next and skip-credits ended up with two
         // players running.
+        if player != nil {
+            diag(.teardown, [
+                PlayerDiagnostics.field("reason", PlayerDiagnostics.TeardownReason.newItem.rawValue),
+                PlayerDiagnostics.field("outgoingItem", currentItem?.id),
+                PlayerDiagnostics.field("incomingItem", item.id)
+            ])
+        }
         player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
@@ -332,13 +418,7 @@ final class PlayerViewModel: ObservableObject {
         // Kill the previous episode's transcode session, same as
         // changeQuality — auto-play-next otherwise leaves the old encode
         // running until the server times it out.
-        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            do {
-                try await client.stopActiveEncoding(playSessionId: playSessionId)
-            } catch {
-                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        await stopActiveEncodingIfNeeded(reason: .newItem)
 
         isLoading = true
         error = nil
@@ -356,7 +436,12 @@ final class PlayerViewModel: ObservableObject {
                 try audioSession.setCategory(.playback, mode: .moviePlayback)
                 try audioSession.setActive(true)
 
+                diag(.streamSelected, [
+                    PlayerDiagnostics.field("kind", PlayerDiagnostics.StreamKind.localFile.rawValue),
+                    PlayerDiagnostics.field("ext", localFileURL.pathExtension)
+                ])
                 let asset = AVURLAsset(url: localFileURL)
+                diag(.assetCreated, [PlayerDiagnostics.field("kind", PlayerDiagnostics.StreamKind.localFile.rawValue)])
                 let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
                 // Same observer wiring as the online path. loadMedia has already
                 // torn down the previous endObserver, so building the player
@@ -395,6 +480,12 @@ final class PlayerViewModel: ObservableObject {
             isOfflinePlayback = localFileURL != nil
             let isOffline = isOfflinePlayback
 
+            diag(.loadReady, [
+                PlayerDiagnostics.field("item", freshItem.id),
+                PlayerDiagnostics.field("playSession", playSessionId),
+                PlayerDiagnostics.field("offline", isOffline)
+            ])
+
             // Fetch media segments for skip intro/credits (skip when offline)
             if !isOffline {
                 await fetchSegments(itemId: freshItem.id)
@@ -416,15 +507,41 @@ final class PlayerViewModel: ObservableObject {
                 }
                 setupSegmentTracking()
                 playbackStartDate = Date()
-                player?.play()
+                logAndPlay(positionTicks: resumePositionTicks)
             } else if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
                 // Auto-resume from saved position (no dialog)
                 resumePositionTicks = startTicks
                 pendingResumeTicks = startTicks
-                let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
-                // Best-effort immediate seek (lands for direct play); the
-                // status observer re-applies it once HLS/transcode is ready.
-                await player?.seek(to: startTime)
+                // NO seek here. The resume position is applied exactly once,
+                // from the status observer, when the item reports .readyToPlay.
+                //
+                // What used to be here was `await player?.seek(to: startTime)`,
+                // and it was wrong twice over:
+                //
+                //  1. It AWAITED a seek completion inside startup. AVFoundation
+                //     only promises to call that completion when the seek
+                //     finishes or is superseded, and on a stream that is not
+                //     ready yet that can be seconds — or never, if the item is
+                //     replaced first. Everything below it (reportPlaybackStart,
+                //     progress reporting, segment tracking, and play() itself)
+                //     was blocked behind it. That is a resume-only stall, and
+                //     resume-only is exactly the failure boundary reported.
+                //
+                //  2. It armed pendingResumeTicks as well, so the SAME resume
+                //     position was seeked to twice: once here, and again from
+                //     applyPendingResumeSeekIfNeeded — which compares against
+                //     player.currentTime(), still 0 while the first seek is in
+                //     flight, so the 3-second guard never suppressed it. On a
+                //     Jellyfin HLS session every seek makes the server kill the
+                //     running ffmpeg and restart it at the new offset, so two
+                //     seeks a second apart produce precisely the captured
+                //     start -> "Stopping ffmpeg with q command" -> start ->
+                //     stop pattern.
+                diag(.seek, [
+                    PlayerDiagnostics.field("phase", "resume-armed"),
+                    PlayerDiagnostics.field("targetSeconds", Double(startTicks) / 10_000_000),
+                    PlayerDiagnostics.field("startTimeTicksSentToServer", false)
+                ])
                 if !isOffline {
                     do {
                         try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
@@ -435,7 +552,7 @@ final class PlayerViewModel: ObservableObject {
                 }
                 setupSegmentTracking()
                 playbackStartDate = Date()
-                player?.play()
+                logAndPlay(positionTicks: resumePositionTicks)
             } else {
                 // No saved progress - start playing immediately
                 resumePositionTicks = 0
@@ -450,13 +567,43 @@ final class PlayerViewModel: ObservableObject {
                 }
                 setupSegmentTracking()
                 playbackStartDate = Date()
-                player?.play()
+                logAndPlay(positionTicks: resumePositionTicks)
             }
         } catch {
+            diagFailure(.loadFailed, [PlayerDiagnostics.field("item", item.id)] + PlayerDiagnostics.fields(for: error))
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
         }
+    }
+
+    /// Starts playback and records the position it starts from, so a stream
+    /// that begins at 0:00 when it should have resumed is visible in the log
+    /// rather than only in the server's `-ss` argument.
+    private func logAndPlay(positionTicks: Int64) {
+        diag(.play, [
+            PlayerDiagnostics.field("resumeTargetSeconds", Double(positionTicks) / 10_000_000),
+            PlayerDiagnostics.field("currentSeconds", player?.currentTime().seconds),
+            PlayerDiagnostics.field("hasPlayer", player != nil),
+            PlayerDiagnostics.field("timeControl", player.map { PlayerDiagnostics.name(timeControlStatus: $0.timeControlStatus) })
+        ])
+        player?.play()
+    }
+
+    /// Replaces the position the item will resume to once it is ready.
+    ///
+    /// The iOS player uses this when a locally-saved offline position is newer
+    /// than the server's. It must go through here rather than seeking the
+    /// player directly: the resume seek is applied on `.readyToPlay`, so a
+    /// direct seek issued before that is simply undone a moment later.
+    func overrideResumePosition(ticks: Int64) {
+        guard ticks > 0 else { return }
+        resumePositionTicks = ticks
+        pendingResumeTicks = ticks
+        diag(.seek, [
+            PlayerDiagnostics.field("phase", "resume-override"),
+            PlayerDiagnostics.field("targetSeconds", Double(ticks) / 10_000_000)
+        ])
     }
 
     private func startProgressReporting() {
@@ -492,8 +639,16 @@ final class PlayerViewModel: ObservableObject {
     private func handlePlaybackEnded() async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
-        if isHandlingEnd { return }
+        if isHandlingEnd {
+            diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
+            return
+        }
         isHandlingEnd = true
+        diag(.playbackEnded, [
+            PlayerDiagnostics.field("item", currentItem?.id),
+            PlayerDiagnostics.field("positionSeconds", player?.currentItem?.currentTime().seconds),
+            PlayerDiagnostics.field("autoPlayNext", playbackSettings.autoPlayNextEpisode)
+        ])
 
         progressReportTask?.cancel()
 
@@ -600,6 +755,7 @@ final class PlayerViewModel: ObservableObject {
 
     func playNextEpisode() async {
         guard let next = nextEpisode else { return }
+        diag(.nextEpisode, [PlayerDiagnostics.field("item", next.id)])
         nextEpisode = nil
         playbackEnded = false
         await loadMedia(item: next)
@@ -612,10 +768,22 @@ final class PlayerViewModel: ObservableObject {
         let currentPosition = player?.currentItem?.currentTime()
         let positionTicks = currentPosition.map { Int64($0.seconds * 10_000_000) } ?? 0
 
+        playbackAttempt += 1
+        diag(.qualityChange, [
+            PlayerDiagnostics.field("from", selectedQuality.rawValue),
+            PlayerDiagnostics.field("to", quality.rawValue),
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("positionSeconds", currentPosition?.seconds)
+        ])
+
         // Update quality setting
         selectedQuality = quality
 
         // Stop current playback
+        diag(.teardown, [
+            PlayerDiagnostics.field("reason", PlayerDiagnostics.TeardownReason.qualityChange.rawValue),
+            PlayerDiagnostics.field("item", item.id)
+        ])
         player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
@@ -638,13 +806,7 @@ final class PlayerViewModel: ObservableObject {
 
         // Kill the old transcode session before requesting a new one, so the
         // server isn't left encoding a stream nobody is watching.
-        if let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            do {
-                try await client.stopActiveEncoding(playSessionId: playSessionId)
-            } catch {
-                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        await stopActiveEncodingIfNeeded(reason: .qualityChange)
 
         do {
             // An explicit non-Auto pick forces a transcode so the selection
@@ -661,9 +823,15 @@ final class PlayerViewModel: ObservableObject {
             // ready. Without this the stream restarts at 0:00 and the 5s
             // progress report then overwrites the server's resume point with 0.
             if positionTicks > 0 {
+                // Armed only — same reasoning as the resume path in loadMedia:
+                // awaiting a pre-ready seek blocked startup, and issuing it here
+                // as well as from the status observer meant two seeks (two
+                // server-side transcode restarts) for one position change.
                 pendingResumeTicks = positionTicks
-                let seekTime = CMTime(value: positionTicks / 10000, timescale: 1000)
-                await player?.seek(to: seekTime)
+                diag(.seek, [
+                    PlayerDiagnostics.field("phase", "quality-change-armed"),
+                    PlayerDiagnostics.field("targetSeconds", Double(positionTicks) / 10_000_000)
+                ])
             }
 
             // Re-apply the session's subtitle selection on the rebuilt
@@ -690,23 +858,38 @@ final class PlayerViewModel: ObservableObject {
             await fetchSegments(itemId: item.id)
             startProgressReporting()
             setupSegmentTracking()
-            player?.play()
+            logAndPlay(positionTicks: positionTicks)
         } catch {
+            diagFailure(.loadFailed, [
+                PlayerDiagnostics.field("phase", "quality-change"),
+                PlayerDiagnostics.field("item", item.id)
+            ] + PlayerDiagnostics.fields(for: error))
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
         }
     }
 
-    /// Applies the saved resume position once the item can actually seek. A
-    /// pre-ready seek is silently dropped for HLS/transcode (no seekable range
-    /// yet) — direct play lands immediately, but transcode needs this retry.
-    /// Runs once, and skips if the immediate seek already landed near target.
+    /// Applies the saved resume position once the item can actually seek.
+    ///
+    /// This is now the ONLY place a resume position is applied. It runs from
+    /// the `.readyToPlay` transition, which is the first moment the item has a
+    /// seekable range at all — a seek issued before that is either dropped
+    /// (HLS/transcode) or deferred, and in both cases it duplicated this one.
+    /// `pendingResumeTicks` is cleared before seeking so a repeated
+    /// `.readyToPlay` cannot issue a second seek.
     private func applyPendingResumeSeekIfNeeded() {
         guard pendingResumeTicks > 0, let player else { return }
         let target = CMTime(value: pendingResumeTicks / 10000, timescale: 1000)
         pendingResumeTicks = 0
-        if abs(player.currentTime().seconds - target.seconds) > 3 {
+        let drift = abs(player.currentTime().seconds - target.seconds)
+        diag(.seek, [
+            PlayerDiagnostics.field("phase", "post-ready-resume"),
+            PlayerDiagnostics.field("targetSeconds", target.seconds),
+            PlayerDiagnostics.field("driftSeconds", drift),
+            PlayerDiagnostics.field("applied", drift > 3)
+        ])
+        if drift > 3 {
             player.seek(to: target)
         }
     }
@@ -718,9 +901,17 @@ final class PlayerViewModel: ObservableObject {
     /// failure is a visible "couldn't find an episode" instead of a silent
     /// server 500 mid-startup.
     func resolvePlayableItem(_ item: BaseItemDto) async throws -> BaseItemDto {
-        guard let type = item.type, !type.isPlayableMediaType else { return item }
+        guard let type = item.type, !type.isPlayableMediaType else {
+            diag(.loadResolved, [
+                PlayerDiagnostics.field("resolved", false),
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("type", item.type?.rawValue)
+            ])
+            return item
+        }
 
         if type == .series, let next = try? await client.getNextUp(seriesId: item.id, limit: 1).first {
+            logResolution(from: item, to: next, via: "next-up")
             return next
         }
 
@@ -734,6 +925,7 @@ final class PlayerViewModel: ObservableObject {
                 limit: 1,
                 isPlayed: false
             ).items.first {
+                logResolution(from: item, to: unwatched, via: "first-unwatched")
                 return unwatched
             }
             if let first = try? await client.getItems(
@@ -742,12 +934,30 @@ final class PlayerViewModel: ObservableObject {
                 sortBy: "ParentIndexNumber,IndexNumber",
                 limit: 1
             ).items.first {
+                logResolution(from: item, to: first, via: "first-episode")
                 return first
             }
         }
 
         logger.error("Could not resolve \(type.rawValue, privacy: .public) \(item.id, privacy: .public) to a playable episode")
+        diagFailure(.loadResolved, [
+            PlayerDiagnostics.field("resolved", false),
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("type", type.rawValue),
+            PlayerDiagnostics.field("outcome", "no-playable-episode")
+        ])
         throw PlayerError.noPlayableEpisode(item.name)
+    }
+
+    private func logResolution(from container: BaseItemDto, to episode: BaseItemDto, via: String) {
+        diag(.loadResolved, [
+            PlayerDiagnostics.field("resolved", true),
+            PlayerDiagnostics.field("fromType", container.type?.rawValue),
+            PlayerDiagnostics.field("fromItem", container.id),
+            PlayerDiagnostics.field("toItem", episode.id),
+            PlayerDiagnostics.field("toType", episode.type?.rawValue),
+            PlayerDiagnostics.field("via", via)
+        ])
     }
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
@@ -759,6 +969,31 @@ final class PlayerViewModel: ObservableObject {
             sessionOverride: maxBitrate ?? selectedQuality.maxBitrate,
             settingsMaxBitrate: playbackSettings.maxBitrate
         )
+
+        // The cap in force, and whether it came from a real measurement or a
+        // default (the #341/#342 Auto-cap work). An unexplained transcode is
+        // almost always this value, and it was previously only visible in the
+        // JellyfinClient log, disconnected from the play attempt it belonged to.
+        let bandwidth = await client.bandwidthStatus
+        diag(.playbackInfoRequest, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("itemType", item.type?.rawValue),
+            PlayerDiagnostics.field("requestedBitrate", effectiveBitrate),
+            PlayerDiagnostics.field("effectiveCap", effectiveBitrate ?? bandwidth.cap),
+            PlayerDiagnostics.field("capSource", effectiveBitrate != nil ? "explicit" : (bandwidth.isMeasured ? "measured" : "default")),
+            PlayerDiagnostics.field("measuredBitrate", bandwidth.measuredBitrate),
+            PlayerDiagnostics.field("localServer", bandwidth.isLocalServer),
+            PlayerDiagnostics.field("maxWidth", maxWidth),
+            PlayerDiagnostics.field("forceTranscode", forceTranscode),
+            PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
+            // The two request flags that decide whether the server may
+            // stream-COPY the video into HLS or must re-encode it, and whether
+            // it may cut segments mid-GOP. Seeking behaves differently in each
+            // combination, and none of it was visible from the client before.
+            PlayerDiagnostics.field("allowVideoStreamCopy", !forceTranscode),
+            PlayerDiagnostics.field("breakOnNonKeyFrames", JellyfinClient.transcodingProfileBreaksOnNonKeyFrames)
+        ])
+
         let playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             itemType: item.type,
@@ -769,8 +1004,30 @@ final class PlayerViewModel: ObservableObject {
         )
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
+            diagFailure(.playbackInfoResponse, [
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("outcome", "no-media-source"),
+                PlayerDiagnostics.field("sourceCount", playbackInfo.mediaSources?.count ?? 0)
+            ])
             throw PlayerError.noMediaSource
         }
+
+        diag(.playbackInfoResponse, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("mediaSource", mediaSource.id),
+            PlayerDiagnostics.field("playSession", playbackInfo.playSessionId),
+            PlayerDiagnostics.field("container", mediaSource.container),
+            PlayerDiagnostics.field("supportsDirectPlay", mediaSource.supportsDirectPlay),
+            PlayerDiagnostics.field("supportsDirectStream", mediaSource.supportsDirectStream),
+            PlayerDiagnostics.field("supportsTranscoding", mediaSource.supportsTranscoding),
+            PlayerDiagnostics.field("hasTranscodingUrl", mediaSource.transcodingUrl?.isEmpty == false),
+            PlayerDiagnostics.field("hasDirectStreamUrl", mediaSource.directStreamUrl?.isEmpty == false),
+            PlayerDiagnostics.field("videoCodec", mediaSource.videoCodec),
+            PlayerDiagnostics.field("audioCodec", mediaSource.audioCodec),
+            PlayerDiagnostics.field("sourceBitrate", mediaSource.bitrate),
+            PlayerDiagnostics.field("resolution", mediaSource.videoResolution),
+            PlayerDiagnostics.field("transcodeReasons", mediaSource.transcodeReasons?.joined(separator: ",") ?? "none")
+        ])
 
         playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
@@ -778,11 +1035,15 @@ final class PlayerViewModel: ObservableObject {
         streamInfo = nil   // stale for the new session; refreshed when the overlay opens
 
         let resolvedURL: URL?
+        let streamKind: PlayerDiagnostics.StreamKind
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
+            streamKind = .transcodeHLS
             resolvedURL = await client.buildURL(path: transcodingPath)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
+            streamKind = .directStream
             resolvedURL = await client.buildURL(path: directPath)
         } else if mediaSource.supportsDirectPlay != false {
+            streamKind = .directPlayStatic
             resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
         } else {
             // The server offered no transcode/remux URL AND says the source
@@ -793,16 +1054,48 @@ final class PlayerViewModel: ObservableObject {
             // it can't render: audio over a black screen instead of an error.
             // Fail loudly instead.
             logger.error("Media source \(mediaSource.id, privacy: .public) is not playable: no stream URLs and SupportsDirectPlay=false")
+            diagFailure(.streamSelected, [
+                PlayerDiagnostics.field("mediaSource", mediaSource.id),
+                PlayerDiagnostics.field("outcome", "source-not-playable")
+            ])
             throw PlayerError.sourceNotPlayable
         }
 
         guard let resolvedURL else {
+            diagFailure(.streamSelected, [
+                PlayerDiagnostics.field("kind", streamKind.rawValue),
+                PlayerDiagnostics.field("outcome", "no-stream-url")
+            ])
             throw PlayerError.noStreamURL
         }
 
-        attemptedURL = resolvedURL.absoluteString
+        // Which URL AVPlayer is actually being pointed at. `describe(url:)`
+        // keeps the path and drops the query — the query is where api_key lives.
+        // `avplayerPlayableContainer` is a pure observation (nothing branches on
+        // it): AVPlayer has no Matroska demuxer, so a direct-stream URL ending
+        // in .mkv is a stream it cannot render, and that should be visible here
+        // rather than inferred from a black screen.
+        let container = resolvedURL.pathExtension.lowercased()
+        diag(.streamSelected, [
+            PlayerDiagnostics.field("kind", streamKind.rawValue),
+            PlayerDiagnostics.field("mediaSource", mediaSource.id),
+            PlayerDiagnostics.field("playSession", playSessionId),
+            PlayerDiagnostics.field(
+                "avplayerPlayableContainer",
+                container.isEmpty || container == "m3u8" || DeviceMediaCompatibility.directPlayContainers.contains(container)
+            ),
+            PlayerDiagnostics.describe(url: resolvedURL)
+        ])
 
+        // NOTE: the full URL deliberately goes no further than AVURLAsset. It
+        // used to be retained in a published `attemptedURL` property that
+        // nothing ever read — a credential (`api_key`) parked in view-model
+        // state, one `Text(...)` away from being on screen.
         let asset = AVURLAsset(url: resolvedURL)
+        diag(.assetCreated, [
+            PlayerDiagnostics.field("kind", streamKind.rawValue),
+            PlayerDiagnostics.field("chapters", item.chapters?.count ?? 0)
+        ])
         let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
 
         if let chapters = item.chapters, !chapters.isEmpty,
@@ -825,33 +1118,67 @@ final class PlayerViewModel: ObservableObject {
         tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
+                guard let self else { return }
+                // EVERY transition, not just the interesting ones: an item that
+                // never leaves .unknown is a different failure from one that
+                // reaches .failed, and the two are indistinguishable to a viewer
+                // (both are a black screen).
+                self.diag(.itemStatus, [
+                    PlayerDiagnostics.field("status", PlayerDiagnostics.name(itemStatus: observed.status))
+                ] + (observed.status == .failed ? PlayerDiagnostics.fields(for: observed.error) : []))
+
                 if observed.status == .failed {
-                    self?.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
-                    self?.error = observed.error
+                    self.diagFailure(.itemStatus, [
+                        PlayerDiagnostics.field("status", "failed")
+                    ] + PlayerDiagnostics.fields(for: observed.error))
+                    self.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
+                    self.error = observed.error
                 } else if observed.status == .readyToPlay {
-                    self?.applyPendingResumeSeekIfNeeded()
+                    self.logTrackAvailability(for: observed)
+                    self.applyPendingResumeSeekIfNeeded()
                 }
             }
         }
+
+        observeItemLogs(for: playerItem)
 
         player = AVPlayer(playerItem: playerItem)
         player?.appliesMediaSelectionCriteriaAutomatically = false
         player?.volume = 1.0
         player?.isMuted = false
+        diag(.playerCreated, [
+            PlayerDiagnostics.field("tracksVersion", tracksVersion)
+        ])
 
         statusObserver = player?.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
+                guard let self else { return }
+                self.diag(.playerStatus, [
+                    PlayerDiagnostics.field("status", PlayerDiagnostics.name(playerStatus: observed.status))
+                ])
                 if observed.status == .failed {
-                    self?.errorMessage = observed.error?.localizedDescription ?? "Player failed"
-                    self?.error = observed.error
+                    self.diagFailure(.playerStatus, [
+                        PlayerDiagnostics.field("status", "failed")
+                    ] + PlayerDiagnostics.fields(for: observed.error))
+                    self.errorMessage = observed.error?.localizedDescription ?? "Player failed"
+                    self.error = observed.error
                 }
             }
         }
 
-        rateObserver = player?.observe(\.timeControlStatus) { [weak self] _, _ in
+        rateObserver = player?.observe(\.timeControlStatus) { [weak self] observed, _ in
             Task { @MainActor in
-                self?.refreshNowPlayingProgress()
-                await self?.reportProgress()
+                guard let self else { return }
+                // "waiting" for a long stretch after play() IS the stall the
+                // viewer describes as a freeze; the reason says whether it is
+                // buffering or waiting on a minimum stall-free duration.
+                self.diag(.timeControl, [
+                    PlayerDiagnostics.field("status", PlayerDiagnostics.name(timeControlStatus: observed.timeControlStatus)),
+                    PlayerDiagnostics.field("reason", observed.reasonForWaitingToPlay?.rawValue),
+                    PlayerDiagnostics.field("positionSeconds", observed.currentTime().seconds)
+                ])
+                self.refreshNowPlayingProgress()
+                await self.reportProgress()
             }
         }
 
@@ -866,6 +1193,143 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Subscribes to the AVPlayerItem notifications that explain stalls,
+    /// audio-only playback and seek failures.
+    ///
+    /// None of this reaches `AVPlayerItem.status`: an item can stall forever,
+    /// drop every video frame, or fail an individual segment fetch while its
+    /// status stays `.readyToPlay`. Until now the app observed only `status`,
+    /// which is why a failed play could only be described as "it just sat
+    /// there" and had to be reconstructed from the server's ffmpeg log.
+    private func observeItemLogs(for playerItem: AVPlayerItem) {
+        removeItemLogObservers()
+        let center = NotificationCenter.default
+
+        itemErrorLogObserver = center.addObserver(
+            forName: .AVPlayerItemNewErrorLogEntry,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            guard let item = note.object as? AVPlayerItem,
+                  let event = item.errorLog()?.events.last else { return }
+            Task { @MainActor in
+                self?.diagFailure(.errorLog, PlayerDiagnostics.summarize(errorEvent: event))
+            }
+        }
+
+        itemAccessLogObserver = center.addObserver(
+            forName: .AVPlayerItemNewAccessLogEntry,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            guard let item = note.object as? AVPlayerItem,
+                  let event = item.accessLog()?.events.last else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                // Access-log entries arrive on every rendition switch and
+                // periodically during playback, so the raw sample is .debug.
+                self.diagDetail(.accessLog, PlayerDiagnostics.summarize(accessEvent: event))
+                // A stall is the exception: promote it, because "numberOfStalls
+                // climbing" is the difference between "the link can't carry
+                // this" and "the stream itself is broken".
+                if event.numberOfStalls > self.lastReportedStallCount {
+                    self.lastReportedStallCount = event.numberOfStalls
+                    self.diag(.accessLog, [
+                        PlayerDiagnostics.field("stallDetected", true)
+                    ] + PlayerDiagnostics.summarize(accessEvent: event))
+                }
+            }
+        }
+
+        // Seeks made through the tvOS transport bar never pass through this
+        // view model — AVPlayerViewController drives AVPlayer directly. This
+        // notification is the only way to see them, and seeking is the
+        // reproducer for the 4K stream-copy failure.
+        stallObservers.append(center.addObserver(
+            forName: AVPlayerItem.timeJumpedNotification,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            guard let item = note.object as? AVPlayerItem else { return }
+            Task { @MainActor in
+                self?.logSeekLanding(on: item, cause: "time-jumped")
+            }
+        })
+
+        stallObservers.append(center.addObserver(
+            forName: .AVPlayerItemPlaybackStalled,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            guard let item = note.object as? AVPlayerItem else { return }
+            Task { @MainActor in
+                self?.logSeekLanding(on: item, cause: "playback-stalled")
+            }
+        })
+
+        stallObservers.append(center.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] note in
+            let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            Task { @MainActor in
+                self?.diagFailure(.itemStatus, [
+                    PlayerDiagnostics.field("event", "failed-to-play-to-end")
+                ] + PlayerDiagnostics.fields(for: error))
+            }
+        })
+    }
+
+    private func removeItemLogObservers() {
+        let center = NotificationCenter.default
+        if let itemErrorLogObserver {
+            center.removeObserver(itemErrorLogObserver)
+            self.itemErrorLogObserver = nil
+        }
+        if let itemAccessLogObserver {
+            center.removeObserver(itemAccessLogObserver)
+            self.itemAccessLogObserver = nil
+        }
+        for observer in stallObservers {
+            center.removeObserver(observer)
+        }
+        stallObservers.removeAll()
+        lastReportedStallCount = 0
+    }
+
+    /// Where a seek (or stall) actually landed, relative to what the stream can
+    /// serve.
+    ///
+    /// `seekable` is the range Jellyfin's playlist claims; `loaded` is what
+    /// AVPlayer actually holds. A position inside `seekable` but outside
+    /// `loaded`, with playback not advancing, is a seek into a segment the
+    /// server has not produced — the question the server log cannot answer.
+    private func logSeekLanding(on item: AVPlayerItem, cause: String) {
+        let position = item.currentTime().seconds
+        let seekable = item.seekableTimeRanges.first?.timeRangeValue
+        let loaded = item.loadedTimeRanges.first?.timeRangeValue
+        diag(.seek, [
+            PlayerDiagnostics.field("cause", cause),
+            PlayerDiagnostics.field("positionSeconds", position),
+            PlayerDiagnostics.field("seekableStart", seekable?.start.seconds),
+            PlayerDiagnostics.field("seekableEnd", seekable.map { ($0.start + $0.duration).seconds }),
+            PlayerDiagnostics.field("loadedStart", loaded?.start.seconds),
+            PlayerDiagnostics.field("loadedEnd", loaded.map { ($0.start + $0.duration).seconds }),
+            PlayerDiagnostics.field("likelyToKeepUp", item.isPlaybackLikelyToKeepUp),
+            PlayerDiagnostics.field("bufferEmpty", item.isPlaybackBufferEmpty)
+        ] + PlayerDiagnostics.trackSummary(for: item).fields)
+    }
+
+    /// How many video and audio tracks AVPlayer ended up with, and how many it
+    /// enabled. Zero enabled video tracks alongside enabled audio IS the
+    /// "audio plays, picture is frozen" report, stated rather than inferred.
+    private func logTrackAvailability(for item: AVPlayerItem) {
+        diag(.tracks, PlayerDiagnostics.trackSummary(for: item).fields + [
+            PlayerDiagnostics.field("durationSeconds", item.duration.seconds)
+        ])
+    }
+
     /// Invalidates the KVO observations tied to the current player/item.
     /// Must run before the player is dropped or replaced so no observation
     /// outlives the object it watches.
@@ -876,9 +1340,17 @@ final class PlayerViewModel: ObservableObject {
         errorObserver = nil
         rateObserver?.invalidate()
         rateObserver = nil
+        removeItemLogObservers()
     }
 
-    func stop() async {
+    func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+        diag(.teardown, [
+            PlayerDiagnostics.field("reason", reason.rawValue),
+            PlayerDiagnostics.field("item", currentItem?.id),
+            PlayerDiagnostics.field("playSession", playSessionId),
+            PlayerDiagnostics.field("positionSeconds", player?.currentItem?.currentTime().seconds),
+            PlayerDiagnostics.field("hadPlayer", player != nil)
+        ])
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
         cleanupSegmentTracking()
@@ -917,13 +1389,7 @@ final class PlayerViewModel: ObservableObject {
         }
 
         // Kill the session's server-side transcode, if one was active.
-        if !isOfflinePlayback, let playSessionId, currentMediaSource?.transcodingUrl != nil {
-            do {
-                try await client.stopActiveEncoding(playSessionId: playSessionId)
-            } catch {
-                logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        await stopActiveEncodingIfNeeded(reason: reason)
         playSessionId = nil
 
         player?.pause()
@@ -1291,6 +1757,11 @@ final class PlayerViewModel: ObservableObject {
         }
 
         let targetTime = CMTime(seconds: segment.endSeconds, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        diag(.seek, [
+            PlayerDiagnostics.field("phase", "skip-segment"),
+            PlayerDiagnostics.field("segmentType", segment.type.rawValue),
+            PlayerDiagnostics.field("targetSeconds", segment.endSeconds)
+        ])
         player.seek(to: targetTime)
     }
 
@@ -1455,11 +1926,27 @@ final class PlayerViewModel: ObservableObject {
     }
 
     deinit {
+        PlayerDiagnostics.event(.deinitialized, [
+            PlayerDiagnostics.field("vm", sessionTag),
+            PlayerDiagnostics.field("reason", PlayerDiagnostics.TeardownReason.deallocated.rawValue)
+        ])
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
         cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
+        }
+        // The diagnostics observers are block-based, so they outlive this
+        // object unless they are removed explicitly — same contract as
+        // endObserver above.
+        if let itemErrorLogObserver {
+            NotificationCenter.default.removeObserver(itemErrorLogObserver)
+        }
+        if let itemAccessLogObserver {
+            NotificationCenter.default.removeObserver(itemAccessLogObserver)
+        }
+        for observer in stallObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 }
