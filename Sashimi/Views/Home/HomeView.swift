@@ -430,7 +430,7 @@ struct HeroSection: View {
                             Text(overview)
                                 .font(.system(size: 22))
                                 .foregroundStyle(.white.opacity(0.75))
-                                .lineLimit(2)
+                                .lineLimit(3)
                                 .frame(maxWidth: 800, alignment: .leading)
                                 .padding(.top, 4)
                         }
@@ -456,6 +456,7 @@ struct HeroSection: View {
                                     .animation(.easeInOut(duration: 0.3), value: safeIndex)
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 16)
                         }
 
