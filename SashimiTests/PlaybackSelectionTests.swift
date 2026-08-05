@@ -118,6 +118,37 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 3_000_000), 854)
     }
 
+    // MARK: - constrainedAutoOverride
+
+    func testConstrainedLinkTargets1080p() {
+        // The bedroom Wi-Fi case: ~61 Mbps cap under a 68.8 Mbps 4K remux. A
+        // full-4K re-encode there stalls/OOMs, so drop to a light 1080p at a
+        // link-safe bitrate.
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 61_000_000, sourceBitrate: 68_818_483)
+        XCTAssertEqual(override?.maxWidth, 1920)
+        XCTAssertEqual(override?.maxBitrate, 20_000_000)
+    }
+
+    func testCopyableSourceIsNotConstrained() {
+        // Wired/fast client: cap clears the source, so leave Auto untouched and
+        // let it stream-copy native 4K.
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 120_000_000, sourceBitrate: 68_818_483))
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 68_818_483, sourceBitrate: 68_818_483))
+    }
+
+    func testUnknownSourceBitrateIsNotConstrained() {
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: nil))
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: 0))
+    }
+
+    func testConstrainedBitrateNeverExceedsTheCap() {
+        // A very constrained link: the 1080p target must not exceed what the
+        // link can carry.
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 12_000_000, sourceBitrate: 40_000_000)
+        XCTAssertEqual(override?.maxBitrate, 12_000_000)
+        XCTAssertEqual(override?.maxWidth, 1920)
+    }
+
     // MARK: - isLocalServer
 
     func testPrivateAddressesAreLocal() {

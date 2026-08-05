@@ -998,7 +998,7 @@ final class PlayerViewModel: ObservableObject {
         // observation, but the player below is still AVPlayer either way.
         let engine: PlaybackEngineKind = playbackSettings.debugVLCDeviceProfile ? .vlc : .avFoundation
 
-        let playbackInfo = try await client.getPlaybackInfo(
+        var playbackInfo = try await client.getPlaybackInfo(
             itemId: item.id,
             itemType: item.type,
             engine: engine,
@@ -1007,6 +1007,35 @@ final class PlayerViewModel: ObservableObject {
             forceDirectPlay: playbackSettings.forceDirectPlay,
             forceTranscode: forceTranscode
         )
+
+        // Source-aware retry (Auto path only). The source bitrate is only known
+        // from the response, so it takes a second pass: if the link cannot carry
+        // this source the server returns a transcode, and left alone that is a
+        // heavy, stutter/OOM-prone full-4K re-encode riding the link ceiling
+        // (a ~72 Mbps Wi-Fi link vs a 68.8 Mbps 4K remux). Re-request a light
+        // 1080p the link comfortably holds. A copyable source never reaches here
+        // (no transcodingUrl, or cap >= source), so a wired/fast client keeps
+        // native 4K; explicit quality picks and forceTranscode are untouched.
+        if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
+           let source = playbackInfo.mediaSources?.first,
+           source.transcodingUrl?.isEmpty == false,
+           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate) {
+            diag(.playbackInfoRequest, [
+                PlayerDiagnostics.field("phase", "constrained-retry-1080p"),
+                PlayerDiagnostics.field("sourceBitrate", source.bitrate),
+                PlayerDiagnostics.field("cap", bandwidth.cap),
+                PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
+            ])
+            playbackInfo = try await client.getPlaybackInfo(
+                itemId: item.id,
+                itemType: item.type,
+                engine: engine,
+                maxBitrate: override.maxBitrate,
+                maxWidth: override.maxWidth,
+                forceDirectPlay: playbackSettings.forceDirectPlay,
+                forceTranscode: forceTranscode
+            )
+        }
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             diagFailure(.playbackInfoResponse, [
