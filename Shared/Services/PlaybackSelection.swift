@@ -69,18 +69,34 @@ enum PlaybackSelection {
         }
     }
 
+    /// A light, smooth 4K transcode bitrate. A full-source or link-ceiling 4K
+    /// re-encode (e.g. 66 Mbps) is the worst option — heavy enough to OOM-kill
+    /// the QSV encoder, and it rides the link so it stutters. ~24 Mbps is
+    /// streaming-service 4K quality, encodes cheaply, and any decent link
+    /// carries it (this is what the Roku client ends up doing and it plays
+    /// smoothly).
+    static let smooth4KBitrate = 24_000_000
+
+    /// Below this the picture is better spent on 1080p than a blocky 4K encode.
+    static let keep4KMinimumBitrate = 12_000_000
+
     /// On the "Auto" path, decides whether the link forces a transcode of this
     /// source and, if so, what to request. When the cap is below the source
-    /// bitrate the server must transcode — and a full-4K re-encode there is the
-    /// worst option (heavy enough to OOM-kill the server, and it rides the link
-    /// ceiling so it stutters: a ~72 Mbps Wi-Fi link cannot hold a 68.8 Mbps 4K
-    /// remux). So target a light, smooth 1080p the link comfortably carries.
+    /// bitrate the server must transcode. Rather than a heavy 4K re-encode near
+    /// the link/source bitrate (which OOMs/stutters), keep 4K but cap it to a
+    /// light, smooth bitrate — matching what the Roku client does. Only drop to
+    /// 1080p on a genuinely slow link, where a 4K encode would be blocky.
     /// Returns nil when the link can copy the source (cap >= source) or the
-    /// source bitrate is unknown — in which case Auto is left untouched and a
-    /// wired/fast client still stream-copies native 4K.
+    /// source bitrate is unknown — Auto is left untouched and a wired/fast
+    /// client still stream-copies native 4K.
     static func constrainedAutoOverride(cap: Int, sourceBitrate: Int?) -> (maxWidth: Int, maxBitrate: Int)? {
         guard let sourceBitrate, sourceBitrate > 0, cap < sourceBitrate else { return nil }
-        return (maxWidth: 1920, maxBitrate: min(cap, 20_000_000))
+        if cap >= keep4KMinimumBitrate {
+            // Keep 4K (3840 keeps UHD; the source is already <= this so it is
+            // not downscaled), just cap the transcode bitrate.
+            return (maxWidth: 3840, maxBitrate: min(cap, smooth4KBitrate))
+        }
+        return (maxWidth: 1920, maxBitrate: min(cap, 8_000_000))
     }
 
     /// Whether the server is reached over the local network. This is what
