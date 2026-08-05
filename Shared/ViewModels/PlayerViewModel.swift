@@ -986,10 +986,12 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("maxWidth", maxWidth),
             PlayerDiagnostics.field("forceTranscode", forceTranscode),
             PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
-            // Video stream-copy is now always disabled (see getPlaybackInfo):
-            // a stream-copied MKV's HLS grid diverges on seek and freezes, so we
-            // force a re-encode to make seeking work (jellyfin#16070, #4188).
-            PlayerDiagnostics.field("allowVideoStreamCopy", false)
+            // Video stream-copy is allowed again (see getPlaybackInfo): the
+            // Apple TV decodes the source codec natively, so we remux + copy
+            // rather than re-encode. The stream-copy HLS seek-freeze
+            // (jellyfin#16070, #4188) is handled by re-anchoring on seek, not
+            // by transcoding.
+            PlayerDiagnostics.field("allowVideoStreamCopy", true)
         ])
 
         // Phase 1 of the VLC work: the profile can be VLC-shaped for
