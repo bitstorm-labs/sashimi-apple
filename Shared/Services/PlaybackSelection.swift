@@ -69,6 +69,20 @@ enum PlaybackSelection {
         }
     }
 
+    /// On the "Auto" path, decides whether the link forces a transcode of this
+    /// source and, if so, what to request. When the cap is below the source
+    /// bitrate the server must transcode — and a full-4K re-encode there is the
+    /// worst option (heavy enough to OOM-kill the server, and it rides the link
+    /// ceiling so it stutters: a ~72 Mbps Wi-Fi link cannot hold a 68.8 Mbps 4K
+    /// remux). So target a light, smooth 1080p the link comfortably carries.
+    /// Returns nil when the link can copy the source (cap >= source) or the
+    /// source bitrate is unknown — in which case Auto is left untouched and a
+    /// wired/fast client still stream-copies native 4K.
+    static func constrainedAutoOverride(cap: Int, sourceBitrate: Int?) -> (maxWidth: Int, maxBitrate: Int)? {
+        guard let sourceBitrate, sourceBitrate > 0, cap < sourceBitrate else { return nil }
+        return (maxWidth: 1920, maxBitrate: min(cap, 20_000_000))
+    }
+
     /// Whether the server is reached over the local network. This is what
     /// separates "the probe failed" from "the link is slow" without a
     /// measurement: a LAN path is fast until proven otherwise.
