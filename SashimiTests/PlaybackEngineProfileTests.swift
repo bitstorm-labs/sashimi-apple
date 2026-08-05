@@ -71,6 +71,24 @@ final class PlaybackEngineProfileTests: XCTestCase {
         XCTAssertTrue(embedded.contains { ($0["Format"] as? String) == "pgssub" }, "image subs must be Embed to avoid burn-in transcode")
     }
 
+    // MARK: - Forced re-encode must target a codec the Apple TV can decode at 4K
+
+    /// `AllowVideoStreamCopy` is false (getPlaybackInfo), so an MKV always
+    /// re-encodes. The Apple TV cannot decode 4K H.264 — it caps H.264 at 1080p;
+    /// 4K needs HEVC — so the transcoding profile must offer HEVC FIRST. With
+    /// H.264 first, the server emits undecodable 4K H.264: black picture, then a
+    /// transcode restart storm and crash (the v1.2.3 Oppenheimer regression).
+    /// HEVC first makes the forced re-encode produce 4K HEVC, which decodes
+    /// natively (requires the server's AllowHevcEncoding to be enabled).
+    func testAVFoundationTranscodeProfilePrefersHEVC() async {
+        let client = JellyfinClient.shared
+        let profile = await client.videoDeviceProfile(engine: .avFoundation, streamingBitrate: 120_000_000, maxWidth: nil)
+        let transcoding = (profile["TranscodingProfiles"] as? [[String: Any]]) ?? []
+        XCTAssertFalse(transcoding.isEmpty)
+        XCTAssertEqual(transcoding.first?["VideoCodec"] as? String, "hevc,h264",
+            "Forced re-encode must prefer HEVC; H.264-first yields undecodable 4K H.264 on Apple TV")
+    }
+
     // MARK: - Width condition applies to both engines
 
     func testWidthConditionPresentWhenMaxWidthGiven() async {

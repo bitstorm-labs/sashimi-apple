@@ -861,10 +861,18 @@ actor JellyfinClient {
                     // DV supplemental codec) that AVPlayer actually renders.
                     "Container": "mp4",
                     "Type": "Video",
-                    // tvOS plays HEVC and EAC3 in HLS natively — declaring
-                    // them lets mkv remuxes stream-copy both tracks instead
-                    // of re-encoding video / downmixing EAC3 5.1 to AAC.
-                    "VideoCodec": "h264,hevc",
+                    // HEVC is listed FIRST, and that order matters: because
+                    // getPlaybackInfo sends AllowVideoStreamCopy=false, an mkv
+                    // always RE-ENCODES rather than stream-copying. The Apple TV
+                    // cannot decode 4K H.264 (it caps H.264 at 1080p; 4K needs
+                    // HEVC), so an h264-first list made the server emit
+                    // undecodable 4K H.264 — black picture, transcode restart
+                    // storm, crash (the v1.2.3 Oppenheimer regression). HEVC
+                    // first makes the forced re-encode produce 4K HEVC, which
+                    // decodes natively and seeks. This requires the server's
+                    // AllowHevcEncoding to be ON; with it off the server falls
+                    // back to H.264 and 4K sources break again.
+                    "VideoCodec": "hevc,h264",
                     "AudioCodec": "aac,ac3,eac3",
                     "Protocol": "hls",
                     "Context": "Streaming",
@@ -1023,11 +1031,14 @@ actor JellyfinClient {
             // ffmpeg's segment grid diverge after any seek, freezing the picture
             // (jellyfin#16070, #4188). Forcing a genuine re-encode makes ffmpeg
             // manufacture keyframes on the advertised grid, so seeking works. The
-            // cost is real — the server re-encodes (CPU) and Dolby Vision dynamic
-            // metadata is lost (HDR10 base at best) on MKV titles — but seek is
-            // otherwise broken. MP4/M4V/MOV direct-play and never reach this path,
-            // so they are unaffected. (Also makes explicit quality tiers real
-            // re-encodes rather than no-op remuxes.)
+            // cost is real — the server re-encodes (CPU) and HDR/Dolby Vision is
+            // lost (tonemapped to SDR) on MKV titles — but seek is otherwise
+            // broken. The re-encode MUST target HEVC (the device profile lists
+            // hevc first) so 4K stays decodable on the Apple TV, which requires
+            // the server's AllowHevcEncoding to be ON; an h264 re-encode of a 4K
+            // source is undecodable there. MP4/M4V/MOV direct-play and never
+            // reach this path, so they are unaffected. (Also makes explicit
+            // quality tiers real re-encodes rather than no-op remuxes.)
             "AllowVideoStreamCopy": false,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
