@@ -861,17 +861,14 @@ actor JellyfinClient {
                     // DV supplemental codec) that AVPlayer actually renders.
                     "Container": "mp4",
                     "Type": "Video",
-                    // HEVC is listed FIRST, and that order matters: because
-                    // getPlaybackInfo sends AllowVideoStreamCopy=false, an mkv
-                    // always RE-ENCODES rather than stream-copying. The Apple TV
-                    // cannot decode 4K H.264 (it caps H.264 at 1080p; 4K needs
-                    // HEVC), so an h264-first list made the server emit
-                    // undecodable 4K H.264 — black picture, transcode restart
-                    // storm, crash (the v1.2.3 Oppenheimer regression). HEVC
-                    // first makes the forced re-encode produce 4K HEVC, which
-                    // decodes natively and seeks. This requires the server's
-                    // AllowHevcEncoding to be ON; with it off the server falls
-                    // back to H.264 and 4K sources break again.
+                    // HEVC is listed FIRST for the cases that DO transcode the
+                    // video (an unsupported source codec, a bitrate cap, or a
+                    // remote quality tier). The Apple TV cannot decode 4K H.264
+                    // (it caps H.264 at 1080p; 4K needs HEVC), so an h264-first
+                    // list would make the server emit undecodable 4K H.264. HEVC
+                    // first keeps a 4K transcode decodable (needs the server's
+                    // AllowHevcEncoding ON). Most 4K HEVC now stream-copies
+                    // (AllowVideoStreamCopy=true) and never reaches this list.
                     "VideoCodec": "hevc,h264",
                     "AudioCodec": "aac,ac3,eac3",
                     "Protocol": "hls",
@@ -1025,21 +1022,23 @@ actor JellyfinClient {
             "EnableDirectPlay": !forceTranscode,
             "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
             "EnableTranscoding": !effectiveForceDirectPlay,
-            // Never allow video stream-copy. AVPlayer can't demux MKV, so an MKV
-            // goes through HLS; when the server stream-COPIES the video into that
-            // HLS (IsVideoDirect=true), its playlist grid and the restarted
-            // ffmpeg's segment grid diverge after any seek, freezing the picture
-            // (jellyfin#16070, #4188). Forcing a genuine re-encode makes ffmpeg
-            // manufacture keyframes on the advertised grid, so seeking works. The
-            // cost is real — the server re-encodes (CPU) and HDR/Dolby Vision is
-            // lost (tonemapped to SDR) on MKV titles — but seek is otherwise
-            // broken. The re-encode MUST target HEVC (the device profile lists
-            // hevc first) so 4K stays decodable on the Apple TV, which requires
-            // the server's AllowHevcEncoding to be ON; an h264 re-encode of a 4K
-            // source is undecodable there. MP4/M4V/MOV direct-play and never
-            // reach this path, so they are unaffected. (Also makes explicit
-            // quality tiers real re-encodes rather than no-op remuxes.)
-            "AllowVideoStreamCopy": false,
+            // Allow video stream-copy (the native-correct path). AVPlayer can't
+            // demux MKV, so an MKV goes through HLS — but for content the Apple TV
+            // decodes natively (e.g. a 4K HDR10 HEVC remux), the server should
+            // stream-COPY the video untouched and only remux the container +
+            // transcode incompatible audio (DTS→AAC). That preserves native 4K
+            // HDR at near-zero server cost.
+            //
+            // History: #359 set this false to force a re-encode as a workaround
+            // for the stream-copy HLS seek-freeze (jellyfin#16070/#4188 — the
+            // playlist grid and the restarted ffmpeg's segment grid diverge on
+            // seek). That was unworkable: forcing a real-time re-encode of an
+            // 88 GB 4K HDR remux OOM-killed ffmpeg (exit 137) into a restart
+            // storm, so 4K titles could not play at all (CoreMediaError -12889).
+            // The seek-freeze is a much narrower problem and is handled on the
+            // CLIENT by re-anchoring the session on seek (a fresh stream from the
+            // seek position), NOT by transcoding the whole file.
+            "AllowVideoStreamCopy": true,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
         ]
