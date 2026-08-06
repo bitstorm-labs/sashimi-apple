@@ -54,9 +54,46 @@ final class SearchHistoryManager: ObservableObject {
     }
 }
 
+// MARK: - Result grouping
+
+/// One titled section of search results (e.g. "Movies"), rendered as a row.
+struct SearchResultGroup: Identifiable {
+    let id: String
+    let title: String
+    let items: [BaseItemDto]
+}
+
+enum SearchResultGrouping {
+    /// Splits a flat result list into ordered, Plex-style sections — Movies
+    /// then TV Shows — dropping empty sections and preserving each item's
+    /// server order. Anything the server returns that isn't a Movie or Series
+    /// (defensive: today's query asks only for those two) collects into a
+    /// trailing "Other" section so nothing is silently dropped.
+    static func groups(from items: [BaseItemDto]) -> [SearchResultGroup] {
+        let ordered: [(title: String, type: ItemType)] = [
+            ("Movies", .movie),
+            ("TV Shows", .series)
+        ]
+        var groups = ordered.compactMap { entry -> SearchResultGroup? in
+            let matching = items.filter { $0.type == entry.type }
+            guard !matching.isEmpty else { return nil }
+            return SearchResultGroup(id: entry.title, title: entry.title, items: matching)
+        }
+
+        let placed: Set<ItemType> = [.movie, .series]
+        let others = items.filter { !placed.contains($0.type ?? .unknown) }
+        if !others.isEmpty {
+            groups.append(SearchResultGroup(id: "Other", title: "Other", items: others))
+        }
+        return groups
+    }
+}
+
+// MARK: - Search View
+
 struct SearchView: View {
     var onBackAtRoot: (() -> Void)?
-    /// Supplied by the rail so the search field can claim default focus in the
+    /// Supplied by the rail so the keyboard can claim default focus in the
     /// shared main scope — without it, pressing Right from the Search rail row
     /// has no designated target and focus never enters this screen.
     var focusNamespace: Namespace.ID?
@@ -70,47 +107,31 @@ struct SearchView: View {
     @State private var youtubeItemIds: Set<String> = []
     @StateObject private var historyManager = SearchHistoryManager.shared
 
-    @FocusState private var isSearchFieldFocused: Bool
-    @FocusState private var isClearButtonFocused: Bool
-
     init(onBackAtRoot: (() -> Void)? = nil, focusNamespace: Namespace.ID? = nil) {
         self.onBackAtRoot = onBackAtRoot
         self.focusNamespace = focusNamespace
     }
 
+    private var groups: [SearchResultGroup] {
+        SearchResultGrouping.groups(from: results)
+    }
+
     // Detect YouTube content by checking if we've identified it as YouTube
     private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
         if item.type == .video { return true }
-        // Check if this specific item was identified as YouTube
-        if youtubeItemIds.contains(item.id) {
-            return true
-        }
-        // Check if the item belongs to a known YouTube library
-        if let parentId = item.parentId, youtubeLibraryIds.contains(parentId) {
-            return true
-        }
-        // Also check if "youtube" appears in the file path
-        if let path = item.path?.lowercased(), path.contains("youtube") {
-            return true
-        }
+        if youtubeItemIds.contains(item.id) { return true }
+        if let parentId = item.parentId, youtubeLibraryIds.contains(parentId) { return true }
+        if let path = item.path?.lowercased(), path.contains("youtube") { return true }
         return false
     }
 
     private func detectYouTubeItems(for items: [BaseItemDto]) async {
-        // For each Series item, check if any ancestor has "youtube" in the name
         for item in items where item.type == .series {
-            // Skip if we already know this item is YouTube
-            if youtubeItemIds.contains(item.id) {
-                continue
-            }
-
+            if youtubeItemIds.contains(item.id) { continue }
             do {
                 let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: item.id)
-                // Check if any ancestor has "youtube" in the name (the library folder)
                 for ancestor in ancestors where ancestor.name.lowercased().contains("youtube") {
-                    // Mark this item as YouTube
                     youtubeItemIds.insert(item.id)
-                    // Store the ancestor's ID for future matches
                     youtubeLibraryIds.insert(ancestor.id)
                     if let parentId = item.parentId {
                         youtubeLibraryIds.insert(parentId)
@@ -127,192 +148,148 @@ struct SearchView: View {
         ZStack {
             SashimiTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Search field at top with clear button
-                HStack(spacing: 16) {
-                    // The raw tvOS TextField draws a solid white focus platter
-                    // that no modifier can suppress. Keep it for focus +
-                    // keyboard, but hide its text/cursor and cover its platter
-                    // with a dark overlay (sized to the field's exact frame, so
-                    // height stays right and no white edges peek) — focus then
-                    // reads as our thin ring (the stroke below), not a white box.
-                    TextField("", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .foregroundStyle(.clear)
-                        .tint(.clear)
-                        .accessibilityLabel("Search movies and shows")
-                        .focused($isSearchFieldFocused)
-                        .defaultFocus(in: focusNamespace)
-                        .overlay {
-                            ZStack(alignment: .leading) {
-                                // Over-sized dark fill: covers the platter's few-px
-                                // outset; the container's clipShape trims it back to
-                                // the rounded field, so no white rim peeks.
-                                SashimiTheme.cardBackground
-                                    .padding(-60)
-                                HStack(spacing: 16) {
-                                    Image(systemName: "magnifyingglass")
-                                        .font(.title3)
-                                        .foregroundStyle(isSearchFieldFocused ? SashimiTheme.textPrimary : SashimiTheme.textTertiary)
-                                    Text(searchText.isEmpty ? "Search movies, shows..." : searchText)
-                                        .font(.title3)
-                                        .foregroundStyle(searchText.isEmpty ? SashimiTheme.textTertiary : SashimiTheme.textPrimary)
-                                        .lineLimit(1)
-                                    Spacer(minLength: 0)
-                                }
-                            }
-                            .allowsHitTesting(false)
-                        }
-
-                    // Clear button - show when there's text OR results
-                    if !searchText.isEmpty || !results.isEmpty {
-                        Button {
-                            searchText = ""
-                            results = []
-                            youtubeItemIds = []
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(isClearButtonFocused ? SashimiTheme.accent : SashimiTheme.textTertiary)
-                                .scaleEffect(isClearButtonFocused ? 1.2 : 1.0)
-                                .animation(.spring(response: 0.3), value: isClearButtonFocused)
-                        }
-                        .buttonStyle(PlainNoHighlightButtonStyle())
-                        .focused($isClearButtonFocused)
-                    }
-                }
-                .padding(20)
-                .background(SashimiTheme.cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(isSearchFieldFocused ? SashimiTheme.accent : Color.white.opacity(0.1), lineWidth: isSearchFieldFocused ? 3 : 1)
-                )
-                .focused($isSearchFieldFocused)
-                .padding(.horizontal, 80)
-                .padding(.top, 60)
-                .padding(.bottom, 30)
-                .onChange(of: searchText) { _, _ in
-                    searchTask?.cancel()
-                    searchTask = Task {
-                        try? await Task.sleep(for: .milliseconds(300))
-                        if !Task.isCancelled {
-                            await performSearch()
-                        }
-                    }
-                }
-                .onSubmit {
-                    if !searchText.isEmpty {
-                        historyManager.addSearch(searchText)
-                    }
-                }
-
-                // Results area
-                if isSearching {
-                    Spacer()
-                    ProgressView()
-                        .tint(SashimiTheme.accent)
-                        .scaleEffect(1.5)
-                    Spacer()
-                } else if results.isEmpty && !searchText.isEmpty {
-                    Spacer()
-                    EmptyStateView(
-                        icon: "magnifyingglass",
-                        title: "No results found",
-                        message: "Try a different search term"
-                    )
-                    Spacer()
-                } else if results.isEmpty {
-                    // Show search history or empty state
-                    if historyManager.recentSearches.isEmpty {
-                        Spacer()
-                        EmptyStateView(
-                            icon: "magnifyingglass",
-                            title: "Search your library",
-                            message: "Find movies and TV shows"
-                        )
-                        Spacer()
-                    } else {
-                        // Recent searches
-                        VStack(alignment: .leading, spacing: 20) {
-                            HStack {
-                                Text("Recent Searches")
-                                    .font(Typography.headlineSmall)
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-
-                                Spacer()
-
-                                Button("Clear History") {
-                                    historyManager.clearHistory()
-                                }
-                                .font(Typography.body)
-                                .foregroundStyle(SashimiTheme.accent)
-                            }
-                            .padding(.horizontal, 80)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 16) {
-                                    ForEach(historyManager.recentSearches, id: \.self) { query in
-                                        RecentSearchButton(query: query) {
-                                            searchText = query
-                                            historyManager.addSearch(query)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 80)
-                                .padding(.vertical, 20)
-                            }
-                            .focusSection()
-                        }
-                        Spacer()
-                    }
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // Results count
-                            Text("\(results.count) results")
-                                .font(.subheadline)
-                                .foregroundStyle(SashimiTheme.textTertiary)
-                                .padding(.horizontal, 80)
-                                .padding(.top, 20)
-
-                            LazyVGrid(columns: [
-                                GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 40)
-                            ], spacing: 50) {
-                                ForEach(results) { item in
-                                    MediaPosterButton(
-                                        item: item,
-                                        isCircular: isYouTubeStyle(item)
-                                    ) {
-                                        // Compute at tap time to ensure current state
-                                        selectedItemIsYouTube = isYouTubeStyle(item)
-                                        selectedItem = item
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 80)
-                            .padding(.bottom, 100)
-                        }
-                    }
+            HStack(spacing: 0) {
+                keyboardPanel
+                    .frame(width: 640)
                     .focusSection()
-                }
+
+                resultsPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .focusSection()
             }
         }
         .fullScreenCover(item: $selectedItem) { item in
             MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
         }
+        .onChange(of: searchText) { _, _ in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                if !Task.isCancelled {
+                    await performSearch()
+                }
+            }
+        }
         .onExitCommand {
             if !searchText.isEmpty {
-                // Clear search first
+                // Back clears the query before leaving the screen.
                 searchText = ""
                 results = []
+                youtubeItemIds = []
             } else {
-                // At root with empty search
                 onBackAtRoot?()
             }
         }
     }
+
+    // MARK: Left panel — query, keyboard, recents
+
+    private var keyboardPanel: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            QueryDisplayView(text: searchText)
+
+            TVSearchKeyboard(
+                defaultFocusNamespace: focusNamespace,
+                onCharacter: { character in
+                    searchText.append(character)
+                },
+                onDelete: {
+                    if !searchText.isEmpty { searchText.removeLast() }
+                }
+            )
+
+            if searchText.isEmpty && !historyManager.recentSearches.isEmpty {
+                recentSearchesSection
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 60)
+        .padding(.vertical, 60)
+    }
+
+    private var recentSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("RECENT")
+                    .font(.caption.weight(.bold))
+                    .kerning(1.2)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                Spacer()
+                Button("Clear") {
+                    historyManager.clearHistory()
+                }
+                .font(Typography.caption)
+                .foregroundStyle(SashimiTheme.accent)
+                .buttonStyle(.plain)
+            }
+
+            ForEach(historyManager.recentSearches.prefix(5), id: \.self) { query in
+                RecentSearchButton(query: query) {
+                    searchText = query
+                    historyManager.addSearch(query)
+                }
+            }
+        }
+    }
+
+    // MARK: Right panel — live results
+
+    @ViewBuilder
+    private var resultsPanel: some View {
+        if isSearching && results.isEmpty {
+            centeredMessage { ProgressView().tint(SashimiTheme.accent).scaleEffect(1.5) }
+        } else if searchText.isEmpty {
+            centeredMessage {
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "Search your library",
+                    message: "Find movies and TV shows"
+                )
+            }
+        } else if results.isEmpty {
+            centeredMessage {
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "No results found",
+                    message: "Try a different search term"
+                )
+            }
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 44) {
+                    Text("\(results.count) result\(results.count == 1 ? "" : "s") for \u{201C}\(searchText)\u{201D}")
+                        .font(.subheadline)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+
+                    ForEach(groups) { group in
+                        SearchResultRow(
+                            group: group,
+                            isYouTube: isYouTubeStyle,
+                            onSelect: { item in
+                                selectedItemIsYouTube = isYouTubeStyle(item)
+                                selectedItem = item
+                            }
+                        )
+                    }
+                }
+                .padding(.horizontal, 60)
+                .padding(.top, 60)
+                .padding(.bottom, 100)
+            }
+        }
+    }
+
+    private func centeredMessage<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack {
+            Spacer()
+            content()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Search
 
     private func performSearch() async {
         guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -324,28 +301,18 @@ struct SearchView: View {
 
         do {
             let searchResults = try await JellyfinClient.shared.search(query: searchText)
-            // Detect YouTube items by checking ancestors for "YouTube" library
             await detectYouTubeItems(for: searchResults)
             // A search cancelled by the next keystroke must not publish its
             // results or clear the spinner — otherwise a slow older query that
             // finishes late overwrites the newer one's results.
             guard !Task.isCancelled else { return }
             results = searchResults
-            // Add to history on successful search
             if !results.isEmpty {
                 historyManager.addSearch(searchText)
             }
         } catch is CancellationError {
-            // Superseded by the next keystroke — not a failure, and showing the
-            // user an error toast for their own typing is worse than useless.
-            // On the tvOS on-screen keyboard, where keystrokes are naturally
-            // further apart than the 300ms debounce, this fired on most
-            // characters. LibraryView and HomeView already swallow this; only
-            // SearchView surfaced it.
             return
         } catch let urlError as URLError where urlError.code == .cancelled {
-            // URLSession reports cancellation as URLError(.cancelled) rather
-            // than CancellationError, so both have to be caught.
             return
         } catch {
             logger.error("Search failed: \(error.localizedDescription)")
@@ -356,7 +323,164 @@ struct SearchView: View {
     }
 }
 
+// MARK: - Query display
+
+private struct QueryDisplayView: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "magnifyingglass")
+                .font(.title3)
+                .foregroundStyle(text.isEmpty ? SashimiTheme.textTertiary : SashimiTheme.textPrimary)
+
+            Text(text.isEmpty ? "Search" : text)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(text.isEmpty ? SashimiTheme.textTertiary : SashimiTheme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.head)
+
+            if !text.isEmpty {
+                Rectangle()
+                    .fill(SashimiTheme.accentSecondary)
+                    .frame(width: 2, height: 26)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .background(SashimiTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(SashimiTheme.accent, lineWidth: 2)
+        )
+    }
+}
+
+// MARK: - On-screen keyboard
+
+/// A persistent grid keyboard, the heart of the Plex-style search: it stays on
+/// screen so results update live beside it, instead of the system keyboard that
+/// covers everything until you finish typing.
+private struct TVSearchKeyboard: View {
+    var defaultFocusNamespace: Namespace.ID?
+    let onCharacter: (Character) -> Void
+    let onDelete: () -> Void
+
+    private let rows: [[Character]] = [
+        ["A", "B", "C", "D", "E", "F"],
+        ["G", "H", "I", "J", "K", "L"],
+        ["M", "N", "O", "P", "Q", "R"],
+        ["S", "T", "U", "V", "W", "X"],
+        ["Y", "Z", "0", "1", "2", "3"],
+        ["4", "5", "6", "7", "8", "9"]
+    ]
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                HStack(spacing: 10) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { colIndex, key in
+                        TVKeyButton(label: String(key)) {
+                            onCharacter(key)
+                        }
+                        // The very first key claims default focus so the
+                        // rightward beam from the Search rail lands here.
+                        .prefersDefaultFocusIfAvailable(
+                            rowIndex == 0 && colIndex == 0,
+                            in: defaultFocusNamespace
+                        )
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                TVKeyButton(label: "space", systemImage: "space", wide: true) {
+                    onCharacter(" ")
+                }
+                TVKeyButton(label: "Delete", systemImage: "delete.left", wide: true) {
+                    onDelete()
+                }
+            }
+        }
+    }
+}
+
+private struct TVKeyButton: View {
+    let label: String
+    var systemImage: String?
+    var wide: Bool = false
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.title3)
+                } else {
+                    Text(label)
+                        .font(.title3.weight(.semibold))
+                }
+            }
+            .foregroundStyle(isFocused ? Color.white : SashimiTheme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 62)
+            .background(isFocused ? SashimiTheme.accent : SashimiTheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: isFocused ? SashimiTheme.accent.opacity(0.5) : .clear, radius: 12)
+            .scaleEffect(isFocused ? 1.1 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+        .accessibilityLabel(label)
+    }
+}
+
+// MARK: - Result row
+
+private struct SearchResultRow: View {
+    let group: SearchResultGroup
+    let isYouTube: (BaseItemDto) -> Bool
+    let onSelect: (BaseItemDto) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Text(group.title)
+                    .font(Typography.headlineSmall)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                Text("\u{00B7} \(group.items.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 32) {
+                    ForEach(group.items) { item in
+                        MediaPosterButton(
+                            item: item,
+                            isCircular: isYouTube(item)
+                        ) {
+                            onSelect(item)
+                        }
+                        .frame(width: 200)
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+            .focusSection()
+        }
+    }
+}
+
 // MARK: - Recent Search Button
+
 struct RecentSearchButton: View {
     let query: String
     let action: () -> Void
@@ -365,19 +489,22 @@ struct RecentSearchButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundStyle(isFocused ? SashimiTheme.focus : SashimiTheme.textTertiary)
                 Text(query)
                     .foregroundStyle(isFocused ? .white : SashimiTheme.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
             }
             .font(Typography.body)
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.3) : SashimiTheme.cardBackground)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isFocused ? SashimiTheme.focus.opacity(0.25) : SashimiTheme.cardBackground)
             .clipShape(Capsule())
             .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
-            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .scaleEffect(isFocused ? 1.03 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
@@ -385,20 +512,22 @@ struct RecentSearchButton: View {
     }
 }
 
-#Preview {
-    SearchView()
-}
+// MARK: - Focus helper
 
 private extension View {
     /// Claims default focus only when the rail supplies its shared namespace,
-    /// so the rightward beam from the Search rail row lands here. Previews (no
-    /// namespace) are untouched.
+    /// so the rightward beam from the Search rail row lands on this view.
+    /// Previews and other non-rail contexts (no namespace) are untouched.
     @ViewBuilder
-    func defaultFocus(in namespace: Namespace.ID?) -> some View {
-        if let namespace {
+    func prefersDefaultFocusIfAvailable(_ condition: Bool, in namespace: Namespace.ID?) -> some View {
+        if condition, let namespace {
             prefersDefaultFocus(true, in: namespace)
         } else {
             self
         }
     }
+}
+
+#Preview {
+    SearchView()
 }
