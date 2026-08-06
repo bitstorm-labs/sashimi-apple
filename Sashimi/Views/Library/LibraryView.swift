@@ -240,6 +240,10 @@ struct LibraryDetailView: View {
     /// sits on the A-Z bar is ignored and no letter ever jumped. Moving focus
     /// to the target item makes the grid scroll to follow it.
     @FocusState private var focusedGridItem: String?
+    /// True while a letter press is pulling the rest of the library so it can
+    /// jump to an as-yet-unloaded letter. Drives a loading overlay so the jump
+    /// doesn't read as "nothing happened" during the fetch.
+    @State private var isJumping = false
     private let pageSize = 50
 
     // Alphabet for fast scroll
@@ -408,6 +412,24 @@ struct LibraryDetailView: View {
                 .padding(.trailing, 20)
             }
         }
+        .overlay {
+            if isJumping {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .tint(SashimiTheme.accent)
+                            .scaleEffect(1.4)
+                        Text("Jumping…")
+                            .font(Typography.body)
+                            .foregroundStyle(SashimiTheme.textSecondary)
+                    }
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isJumping)
         .focusScope(namespace)
         .ignoresSafeArea(edges: .bottom)
         .task {
@@ -451,10 +473,12 @@ struct LibraryDetailView: View {
         // at every unloaded letter.
         guard items.count < totalCount else { return }
         Task {
+            isJumping = true
             await loadAllRemainingItems()
             if let item = findItem(for: letter) {
                 focusGridItem(item, proxy: proxy)
             }
+            isJumping = false
         }
     }
 
