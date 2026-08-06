@@ -339,6 +339,13 @@ struct MediaDetailView: View {
                 .focusSection()
             }
 
+            // Action buttons in their own full-width row under the cover art
+            // (Plex layout), rather than squeezed at the bottom of the info
+            // column beside the poster. Down from the poster/info lands here.
+            actionButtonsRow
+                .padding(.horizontal, 60)
+                .focusSection()
+
             if let overview = item.overview {
                 Text(overview)
                     .font(.body)
@@ -627,12 +634,8 @@ struct MediaDetailView: View {
                     }
                 }
             }
-
-            Spacer()
-
-            actionButtonsRow
         }
-        .frame(maxWidth: .infinity, maxHeight: 300, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func mediaInfoBadge(_ text: String) -> some View {
