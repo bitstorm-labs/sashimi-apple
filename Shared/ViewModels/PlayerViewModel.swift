@@ -1019,11 +1019,13 @@ final class PlayerViewModel: ObservableObject {
         if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
            let source = playbackInfo.mediaSources?.first,
            source.transcodingUrl?.isEmpty == false,
-           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate) {
+           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired) {
             diag(.playbackInfoRequest, [
-                PlayerDiagnostics.field("phase", "constrained-retry-1080p"),
+                PlayerDiagnostics.field("phase", "constrained-retry"),
                 PlayerDiagnostics.field("sourceBitrate", source.bitrate),
                 PlayerDiagnostics.field("cap", bandwidth.cap),
+                PlayerDiagnostics.field("isWired", bandwidth.isWired),
+                PlayerDiagnostics.field("retryWidth", override.maxWidth),
                 PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
             ])
             playbackInfo = try await client.getPlaybackInfo(

@@ -124,14 +124,15 @@ final class PlaybackSelectionTests: XCTestCase {
         // The bedroom Wi-Fi case: cap ~61 Mbps under a 68.8 Mbps 4K remux. Keep
         // 4K (like Roku) but cap the transcode to a light, smooth bitrate — a
         // 66 Mbps 4K re-encode OOMs/stutters.
-        let override = PlaybackSelection.constrainedAutoOverride(cap: 61_000_000, sourceBitrate: 68_818_483)
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 61_000_000, sourceBitrate: 68_818_483, isWired: false)
         XCTAssertEqual(override?.maxWidth, 3840)
         XCTAssertEqual(override?.maxBitrate, PlaybackSelection.smooth4KBitrate)
     }
 
     func testConstrainedBitrateNeverExceedsTheCap() {
-        // A mid link still under the source keeps 4K but is capped to the link.
-        let override = PlaybackSelection.constrainedAutoOverride(cap: 18_000_000, sourceBitrate: 40_000_000)
+        // A mid Wi-Fi link under both the source and the smooth-4K ceiling keeps
+        // 4K but is capped to the link.
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 18_000_000, sourceBitrate: 40_000_000, isWired: false)
         XCTAssertEqual(override?.maxWidth, 3840)
         XCTAssertEqual(override?.maxBitrate, 18_000_000)
     }
@@ -139,21 +140,37 @@ final class PlaybackSelectionTests: XCTestCase {
     func testSlowLinkDropsTo1080p() {
         // Below the 4K floor a 4K encode would be blocky, so spend the bits on
         // 1080p instead.
-        let override = PlaybackSelection.constrainedAutoOverride(cap: 9_000_000, sourceBitrate: 40_000_000)
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 9_000_000, sourceBitrate: 40_000_000, isWired: false)
         XCTAssertEqual(override?.maxWidth, 1920)
         XCTAssertEqual(override?.maxBitrate, 8_000_000)
     }
 
-    func testCopyableSourceIsNotConstrained() {
-        // Wired/fast client: cap clears the source, so leave Auto untouched and
-        // let it stream-copy native 4K.
-        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 120_000_000, sourceBitrate: 68_818_483))
-        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 68_818_483, sourceBitrate: 68_818_483))
+    func testWirelessNeverCopiesHeavy4KEvenWhenProbeReadsHigh() {
+        // The Living Room bug: the burst probe over-reads Wi-Fi's peak (here
+        // 90 Mbps) above the 68.8 Mbps source, so the old rule (cap >= source)
+        // let the server copy it — and Wi-Fi stalled on the VBR peaks. The
+        // wireless ceiling now forces a smooth 24 Mbps 4K transcode instead.
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 90_000_000, sourceBitrate: 68_818_483, isWired: false)
+        XCTAssertEqual(override?.maxWidth, 3840)
+        XCTAssertEqual(override?.maxBitrate, PlaybackSelection.smooth4KBitrate)
+    }
+
+    func testWiredCopiesHeavy4KNatively() {
+        // Ethernet can carry what it measured, so a heavy 4K source above the
+        // smooth ceiling is left untouched and stream-copied native.
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 90_000_000, sourceBitrate: 68_818_483, isWired: true))
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 68_818_483, sourceBitrate: 68_818_483, isWired: true))
+    }
+
+    func testWirelessSafeSourceIsNotConstrained() {
+        // A source already under the smooth-4K ceiling is Wi-Fi-safe: copy it
+        // untouched rather than pointlessly transcoding.
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 30_000_000, sourceBitrate: 20_000_000, isWired: false))
     }
 
     func testUnknownSourceBitrateIsNotConstrained() {
-        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: nil))
-        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: 0))
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: nil, isWired: false))
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 20_000_000, sourceBitrate: 0, isWired: true))
     }
 
     // MARK: - isLocalServer

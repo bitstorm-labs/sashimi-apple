@@ -81,22 +81,37 @@ enum PlaybackSelection {
     static let keep4KMinimumBitrate = 12_000_000
 
     /// On the "Auto" path, decides whether the link forces a transcode of this
-    /// source and, if so, what to request. When the cap is below the source
-    /// bitrate the server must transcode. Rather than a heavy 4K re-encode near
-    /// the link/source bitrate (which OOMs/stutters), keep 4K but cap it to a
-    /// light, smooth bitrate — matching what the Roku client does. Only drop to
-    /// 1080p on a genuinely slow link, where a 4K encode would be blocky.
-    /// Returns nil when the link can copy the source (cap >= source) or the
-    /// source bitrate is unknown — Auto is left untouched and a wired/fast
-    /// client still stream-copies native 4K.
-    static func constrainedAutoOverride(cap: Int, sourceBitrate: Int?) -> (maxWidth: Int, maxBitrate: Int)? {
-        guard let sourceBitrate, sourceBitrate > 0, cap < sourceBitrate else { return nil }
-        if cap >= keep4KMinimumBitrate {
+    /// source and, if so, what to request.
+    ///
+    /// A transcode is forced when the usable ceiling is below the source
+    /// bitrate. On a wired link that ceiling is the measured cap: Ethernet can
+    /// carry whatever it measured, so a fast wired client still stream-copies
+    /// native 4K (returns nil when cap >= source).
+    ///
+    /// On a wireless link the ceiling is additionally clamped to the smooth 4K
+    /// bitrate, so a heavy 4K source is *never copied* over Wi-Fi — the Roku's
+    /// behaviour, and the fix for the copy-vs-transcode coin-flip. The 8 MB
+    /// burst probe reads Wi-Fi's peak, not its sustained rate, so it routinely
+    /// reads above a 68.8 Mbps source and the server copies it; Wi-Fi then
+    /// can't hold the VBR peaks and playback stalls. Clamping the ceiling means
+    /// any source above ~24 Mbps transcodes down to a light, smooth stream the
+    /// link comfortably holds, regardless of what the noisy probe measured.
+    ///
+    /// Once a transcode is forced, keep 4K unless the link is genuinely slow
+    /// (below `keep4KMinimumBitrate`), where a 4K encode would be blocky and
+    /// 1080p spends the bits better. Returns nil when the source is unknown or
+    /// the ceiling already covers it (a Wi-Fi-safe source under ~24 Mbps copies
+    /// untouched).
+    static func constrainedAutoOverride(cap: Int, sourceBitrate: Int?, isWired: Bool) -> (maxWidth: Int, maxBitrate: Int)? {
+        guard let sourceBitrate, sourceBitrate > 0 else { return nil }
+        let ceiling = isWired ? cap : min(cap, smooth4KBitrate)
+        guard ceiling < sourceBitrate else { return nil }
+        if ceiling >= keep4KMinimumBitrate {
             // Keep 4K (3840 keeps UHD; the source is already <= this so it is
             // not downscaled), just cap the transcode bitrate.
-            return (maxWidth: 3840, maxBitrate: min(cap, smooth4KBitrate))
+            return (maxWidth: 3840, maxBitrate: min(ceiling, smooth4KBitrate))
         }
-        return (maxWidth: 1920, maxBitrate: min(cap, 8_000_000))
+        return (maxWidth: 1920, maxBitrate: min(ceiling, 8_000_000))
     }
 
     /// Whether the server is reached over the local network. This is what
