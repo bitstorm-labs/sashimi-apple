@@ -235,6 +235,15 @@ struct LibraryDetailView: View {
     @State private var sortOrder: SortOrder = .ascending
     @State private var filterOption: LibraryFilterOption = .all
     @State private var committedLetter: String?
+    /// Programmatic grid focus target. On tvOS a ScrollView's position is
+    /// driven by the focus engine, so a `proxy.scrollTo` issued while focus
+    /// sits on the A-Z bar is ignored and no letter ever jumped. Moving focus
+    /// to the target item makes the grid scroll to follow it.
+    @FocusState private var focusedGridItem: String?
+    /// True while a letter press is pulling the rest of the library so it can
+    /// jump to an as-yet-unloaded letter. Drives a loading overlay so the jump
+    /// doesn't read as "nothing happened" during the fetch.
+    @State private var isJumping = false
     private let pageSize = 50
 
     // Alphabet for fast scroll
@@ -338,6 +347,7 @@ struct LibraryDetailView: View {
                                         selectedItem = item
                                     }
                                     .id(item.id)
+                                    .focused($focusedGridItem, equals: item.id)
                                     .prefersDefaultFocus(index == 0, in: namespace)
                                     .onAppear {
                                         // Load more when approaching the end
@@ -371,12 +381,12 @@ struct LibraryDetailView: View {
                 // is what may pull the rest of the library down.
                 .onChange(of: selectedLetter) { _, letter in
                     if let letter = letter {
-                        scrollToLetter(letter, proxy: proxy, allowFullLoad: false)
+                        scrollToLetter(letter, proxy: proxy)
                     }
                 }
                 .onChange(of: committedLetter) { _, letter in
                     if let letter = letter {
-                        scrollToLetter(letter, proxy: proxy, allowFullLoad: true)
+                        jumpToLetter(letter, proxy: proxy)
                     }
                 }
                 .focusSection()
@@ -402,6 +412,24 @@ struct LibraryDetailView: View {
                 .padding(.trailing, 20)
             }
         }
+        .overlay {
+            if isJumping {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .tint(SashimiTheme.accent)
+                            .scaleEffect(1.4)
+                        Text("Jumping…")
+                            .font(Typography.body)
+                            .foregroundStyle(SashimiTheme.textSecondary)
+                    }
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isJumping)
         .focusScope(namespace)
         .ignoresSafeArea(edges: .bottom)
         .task {
@@ -418,28 +446,47 @@ struct LibraryDetailView: View {
         }
     }
 
-    private func scrollToLetter(_ letter: String, proxy: ScrollViewProxy, allowFullLoad: Bool) {
-        // Try to find in already-loaded items
+    /// Hover (focus moving through the A-Z bar): best-effort scroll for a
+    /// letter already loaded. On tvOS this is a no-op when focus is on the bar
+    /// (scroll is focus-driven), so it never loads or moves focus — it just
+    /// previews on the platforms where `scrollTo` does take effect.
+    private func scrollToLetter(_ letter: String, proxy: ScrollViewProxy) {
         if let item = findItem(for: letter) {
             withAnimation(.easeOut(duration: 0.5)) {
                 proxy.scrollTo(item.id, anchor: .top)
             }
+        }
+    }
+
+    /// Press (a committed letter): jump to the letter by moving focus onto its
+    /// first item, which makes the grid scroll to follow. `scrollTo` alone was
+    /// ignored on tvOS because the ScrollView follows focus, which sat on the
+    /// A-Z bar. Loads the rest of the library first when the letter isn't in
+    /// the current page.
+    private func jumpToLetter(_ letter: String, proxy: ScrollViewProxy) {
+        if let item = findItem(for: letter) {
+            focusGridItem(item, proxy: proxy)
             return
         }
-
-        // Not found — load all remaining items, then retry.
-        // Gated on an actual button press: this used to fire on FOCUS, so
-        // holding Down through the A-Z bar kicked a full-library fetch at every
-        // letter that wasn't in the loaded page, queued one behind another.
-        guard allowFullLoad, items.count < totalCount else { return }
+        // Not found — pull the rest of the library, then jump. Gated on a press
+        // (not focus) so holding Down through the bar can't kick a full fetch
+        // at every unloaded letter.
+        guard items.count < totalCount else { return }
         Task {
+            isJumping = true
             await loadAllRemainingItems()
             if let item = findItem(for: letter) {
-                withAnimation(.easeOut(duration: 0.5)) {
-                    proxy.scrollTo(item.id, anchor: .top)
-                }
+                focusGridItem(item, proxy: proxy)
             }
+            isJumping = false
         }
+    }
+
+    /// Nudge the target into the rendered window (`scrollTo` renders lazy rows),
+    /// then move focus to it so the grid settles on it under focus control.
+    private func focusGridItem(_ item: BaseItemDto, proxy: ScrollViewProxy) {
+        proxy.scrollTo(item.id, anchor: .top)
+        focusedGridItem = item.id
     }
 
     private func findItem(for letter: String) -> BaseItemDto? {
