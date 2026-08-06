@@ -421,6 +421,9 @@ actor JellyfinClient {
         let measuredBitrate: Int?
         let cap: Int
         let isLocalServer: Bool
+        /// Whether the active link is wired Ethernet. Wireless links get a
+        /// smooth-4K ceiling so a heavy source is never copied over Wi-Fi.
+        let isWired: Bool
 
         var isMeasured: Bool { measuredBitrate != nil }
     }
@@ -429,7 +432,8 @@ actor JellyfinClient {
         BandwidthStatus(
             measuredBitrate: measuredBitrate,
             cap: autoBitrateCap(),
-            isLocalServer: PlaybackSelection.isLocalServer(serverURL)
+            isLocalServer: PlaybackSelection.isLocalServer(serverURL),
+            isWired: NetworkConnectionMonitor.shared.isWired
         )
     }
 
@@ -448,6 +452,9 @@ actor JellyfinClient {
     /// succeeds. Returns immediately; the Auto cap updates when one lands.
     /// Any probe already running is cancelled first.
     func startBandwidthMeasurement() {
+        // Begin (idempotent) interface monitoring alongside the bandwidth probe
+        // so the copy-vs-transcode decision knows wired from wireless.
+        NetworkConnectionMonitor.shared.start()
         bandwidthProbeTask?.cancel()
         bandwidthProbeTask = Task { await self.runBandwidthProbes() }
     }
