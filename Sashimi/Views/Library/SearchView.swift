@@ -261,6 +261,7 @@ struct SearchView: View {
                     Text("\(results.count) result\(results.count == 1 ? "" : "s") for \u{201C}\(searchText)\u{201D}")
                         .font(.subheadline)
                         .foregroundStyle(SashimiTheme.textTertiary)
+                        .padding(.horizontal, 60)
 
                     ForEach(groups) { group in
                         SearchResultRow(
@@ -273,7 +274,6 @@ struct SearchView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 60)
                 .padding(.top, 60)
                 .padding(.bottom, 100)
             }
@@ -459,6 +459,7 @@ private struct SearchResultRow: View {
                     .font(.subheadline)
                     .foregroundStyle(SashimiTheme.textTertiary)
             }
+            .padding(.horizontal, 60)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 32) {
@@ -472,7 +473,11 @@ private struct SearchResultRow: View {
                         .frame(width: 200)
                     }
                 }
-                .padding(.vertical, 12)
+                // Padding lives inside the scroll content (not on the
+                // ScrollView) so the leading poster's focus scale has room and
+                // isn't clipped at the panel edge.
+                .padding(.horizontal, 60)
+                .padding(.vertical, 20)
             }
             .focusSection()
         }
