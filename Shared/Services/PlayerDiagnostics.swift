@@ -125,6 +125,9 @@ enum PlayerDiagnostics {
         case newItem = "new-item"
         /// The quality menu rebuilt the player against a new media source.
         case qualityChange = "quality-change"
+        /// The error/stall recovery fallback rebuilt the player at the
+        /// current position (official-client onPlaybackError pattern).
+        case recovery = "recovery"
         /// Playback reached the end of the item.
         case playbackEnded = "playback-ended"
         /// The view model was deallocated.

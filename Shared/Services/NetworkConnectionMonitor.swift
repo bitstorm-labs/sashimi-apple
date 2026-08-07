@@ -24,6 +24,8 @@ final class NetworkConnectionMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var wired = false
     private var started = false
+    /// Distinguishes the initial path update from a real interface change.
+    private var hasReceivedPath = false
 
     /// Whether the current path runs over wired Ethernet. False for Wi-Fi,
     /// cellular, or before the first path update.
@@ -49,8 +51,17 @@ final class NetworkConnectionMonitor: @unchecked Sendable {
             let isWired = path.status == .satisfied && path.usesInterfaceType(.wiredEthernet)
             guard let self else { return }
             self.lock.lock()
+            let changed = self.hasReceivedPath && self.wired != isWired
+            self.hasReceivedPath = true
             self.wired = isWired
             self.lock.unlock()
+            // A wired<->wireless transition invalidates the bandwidth
+            // measurement (it was taken on the other link), so re-probe.
+            // Only on a real transition — the initial path update is covered
+            // by the login-time probe.
+            if changed {
+                Task { await JellyfinClient.shared.startBandwidthMeasurement() }
+            }
         }
         monitor.start(queue: queue)
     }

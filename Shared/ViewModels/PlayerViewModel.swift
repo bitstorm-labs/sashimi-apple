@@ -144,6 +144,26 @@ final class PlayerViewModel: ObservableObject {
     private var playbackStartDate: Date?
     private var isOfflinePlayback = false
 
+    // MARK: Recovery (official-client error fallback)
+
+    /// How many recovery rebuilds this item has burned. Two attempts max —
+    /// first forces a transcode (fresh session at the current position, video
+    /// copy still allowed), the second additionally disallows video stream
+    /// copy (a genuine re-encode, the last resort). Mirrors jellyfin-web's
+    /// onPlaybackError escalation. Reset per item in loadMedia.
+    private var recoveryAttempts = 0
+    /// Re-entrancy guard: a failed item can fire status + error-log + stall
+    /// notifications for the same underlying failure in one runloop.
+    private var isRecovering = false
+    /// Pending stall watchdog — armed on a stall notification, cancelled when
+    /// playback recovers on its own or the player is torn down.
+    private var stallWatchdogTask: Task<Void, Never>?
+
+    /// Whether the error/stall fallback can still fire for this item.
+    private var canAttemptRecovery: Bool {
+        !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
+    }
+
     /// Subtitles that came down with a download. Injected by the iOS player,
     /// because the download store lives in the app target and this view model
     /// is shared. Empty for online playback.
@@ -367,6 +387,11 @@ final class PlayerViewModel: ObservableObject {
         offlineSubtitles: [OfflineSubtitle] = []
     ) async {
         playbackAttempt += 1
+        // Fresh item, fresh recovery budget; a watchdog armed for the old
+        // player must not fire into the new one.
+        recoveryAttempts = 0
+        stallWatchdogTask?.cancel()
+        stallWatchdogTask = nil
         diag(.loadBegin, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("type", item.type?.rawValue),
@@ -870,6 +895,121 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Official-client error fallback (jellyfin-web's `onPlaybackError`):
+    /// when the stream fails or stalls unrecoverably, rebuild playback at the
+    /// current position forcing a transcode — a fresh session whose segments
+    /// are produced from where the viewer actually is. The first attempt
+    /// keeps video stream-copy allowed (a fresh remux session clears the
+    /// jellyfin#16070 seek-freeze, whose broken state is per-session); the
+    /// second disallows it (genuine re-encode — the last resort, and the
+    /// escalation jellyfin-web uses). Two attempts per item, then the error
+    /// surfaces normally.
+    private func attemptPlaybackRecovery(reason: String) async {
+        guard !isRecovering,
+              !isOfflinePlayback,
+              recoveryAttempts < 2,
+              let item = currentItem else { return }
+        isRecovering = true
+        defer { isRecovering = false }
+        recoveryAttempts += 1
+        let attempt = recoveryAttempts
+        stallWatchdogTask?.cancel()
+        stallWatchdogTask = nil
+
+        // Prefer the live position; a dead/unstarted player falls back to the
+        // last known resume point rather than restarting from zero.
+        let liveSeconds = player?.currentTime().seconds ?? 0
+        let positionTicks = (liveSeconds.isFinite && liveSeconds > 1)
+            ? Int64(liveSeconds * 10_000_000)
+            : resumePositionTicks
+
+        playbackAttempt += 1
+        diag(.loadBegin, [
+            PlayerDiagnostics.field("phase", "recovery"),
+            PlayerDiagnostics.field("recoveryAttempt", attempt),
+            PlayerDiagnostics.field("trigger", reason),
+            PlayerDiagnostics.field("allowVideoStreamCopy", attempt < 2),
+            PlayerDiagnostics.field("positionSeconds", Double(positionTicks) / 10_000_000)
+        ])
+
+        // Clear the surfaced failure — the rebuild is the response to it.
+        error = nil
+        errorMessage = nil
+
+        // Teardown mirrors changeQuality.
+        diag(.teardown, [
+            PlayerDiagnostics.field("reason", PlayerDiagnostics.TeardownReason.recovery.rawValue),
+            PlayerDiagnostics.field("item", item.id)
+        ])
+        player?.pause()
+        progressReportTask?.cancel()
+        subtitleLoadTask?.cancel()
+        cleanupSegmentTracking()
+        subtitleManager.clear()
+        selectedSubtitleTrackId = "off"
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        invalidatePlayerObservers()
+        player = nil
+        isLoading = true
+        await stopActiveEncodingIfNeeded(reason: .recovery)
+
+        do {
+            try await setupPlayer(
+                for: item,
+                maxBitrate: selectedQuality.maxBitrate,
+                maxWidth: selectedQuality.maxWidth,
+                forceTranscode: true,
+                allowVideoStreamCopy: attempt < 2
+            )
+            isLoading = false
+            updateNowPlayingInfo(item: item)
+            if positionTicks > 0 {
+                pendingResumeTicks = positionTicks
+            }
+            if !applySessionSubtitlePreference() {
+                applyPreferredSubtitles()
+            }
+            if await !applySessionAudioPreference() {
+                await applyPreferredAudioLanguage()
+            }
+            await fetchSegments(itemId: item.id)
+            startProgressReporting()
+            setupSegmentTracking()
+            logAndPlay(positionTicks: positionTicks)
+        } catch {
+            diagFailure(.loadFailed, [
+                PlayerDiagnostics.field("phase", "recovery"),
+                PlayerDiagnostics.field("recoveryAttempt", attempt),
+                PlayerDiagnostics.field("item", item.id)
+            ] + PlayerDiagnostics.fields(for: error))
+            self.error = error
+            self.errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    /// Arms (or re-arms) the stall watchdog: if the player still isn't making
+    /// progress `stallGraceSeconds` after a stall notification, treat it as
+    /// the unrecoverable freeze and run recovery. Ordinary buffering resumes
+    /// on its own well inside the grace window and cancels nothing — the
+    /// watchdog just finds the position advanced and stands down.
+    private func armStallWatchdog() {
+        stallWatchdogTask?.cancel()
+        let stalledAt = player?.currentTime().seconds ?? 0
+        stallWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, let self else { return }
+            guard let player = self.player,
+                  player.timeControlStatus != .playing else { return }
+            let now = player.currentTime().seconds
+            guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
+            await self.attemptPlaybackRecovery(reason: "stall-watchdog")
+        }
+    }
+
     /// Applies the saved resume position once the item can actually seek.
     ///
     /// This is now the ONLY place a resume position is applied. It runs from
@@ -961,7 +1101,10 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false) async throws {
+    /// `allowVideoStreamCopy` is only ever false on the second recovery
+    /// attempt (see attemptPlaybackRecovery) — the normal path always permits
+    /// the server to copy the video stream untouched.
+    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false, allowVideoStreamCopy: Bool = true) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -986,12 +1129,13 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("maxWidth", maxWidth),
             PlayerDiagnostics.field("forceTranscode", forceTranscode),
             PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
-            // Video stream-copy is allowed again (see getPlaybackInfo): the
-            // Apple TV decodes the source codec natively, so we remux + copy
-            // rather than re-encode. The stream-copy HLS seek-freeze
-            // (jellyfin#16070, #4188) is handled by re-anchoring on seek, not
-            // by transcoding.
-            PlayerDiagnostics.field("allowVideoStreamCopy", true)
+            // Video stream-copy is normally allowed (see getPlaybackInfo): the
+            // Apple TV decodes the source codec natively, so the server remuxes
+            // + copies rather than re-encodes. False only on the second
+            // recovery attempt — the stream-copy HLS seek-freeze
+            // (jellyfin#16070, #4188) is handled by the error/stall recovery
+            // fallback (attemptPlaybackRecovery), the official-client pattern.
+            PlayerDiagnostics.field("allowVideoStreamCopy", allowVideoStreamCopy)
         ])
 
         // Phase 1 of the VLC work: the profile can be VLC-shaped for
@@ -1005,7 +1149,8 @@ final class PlayerViewModel: ObservableObject {
             maxBitrate: effectiveBitrate,
             maxWidth: maxWidth,
             forceDirectPlay: playbackSettings.forceDirectPlay,
-            forceTranscode: forceTranscode
+            forceTranscode: forceTranscode,
+            allowVideoStreamCopy: allowVideoStreamCopy
         )
 
         // Source-aware retry (Auto path only). The source bitrate is only known
@@ -1035,7 +1180,8 @@ final class PlayerViewModel: ObservableObject {
                 maxBitrate: override.maxBitrate,
                 maxWidth: override.maxWidth,
                 forceDirectPlay: playbackSettings.forceDirectPlay,
-                forceTranscode: forceTranscode
+                forceTranscode: forceTranscode,
+                allowVideoStreamCopy: allowVideoStreamCopy
             )
         }
 
@@ -1167,8 +1313,15 @@ final class PlayerViewModel: ObservableObject {
                     self.diagFailure(.itemStatus, [
                         PlayerDiagnostics.field("status", "failed")
                     ] + PlayerDiagnostics.fields(for: observed.error))
-                    self.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
-                    self.error = observed.error
+                    // Recovery first (official-client pattern): rebuild at the
+                    // current position forcing a transcode. The error only
+                    // surfaces once recovery is exhausted.
+                    if self.canAttemptRecovery {
+                        await self.attemptPlaybackRecovery(reason: "item-failed")
+                    } else {
+                        self.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
+                        self.error = observed.error
+                    }
                 } else if observed.status == .readyToPlay {
                     self.logTrackAvailability(for: observed)
                     self.applyPendingResumeSeekIfNeeded()
@@ -1300,6 +1453,9 @@ final class PlayerViewModel: ObservableObject {
             guard let item = note.object as? AVPlayerItem else { return }
             Task { @MainActor in
                 self?.logSeekLanding(on: item, cause: "playback-stalled")
+                // A stall that never recovers is the seek-freeze; give normal
+                // buffering a grace window, then rebuild at position.
+                self?.armStallWatchdog()
             }
         })
 
@@ -1310,9 +1466,13 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             Task { @MainActor in
-                self?.diagFailure(.itemStatus, [
+                guard let self else { return }
+                self.diagFailure(.itemStatus, [
                     PlayerDiagnostics.field("event", "failed-to-play-to-end")
                 ] + PlayerDiagnostics.fields(for: error))
+                if self.canAttemptRecovery {
+                    await self.attemptPlaybackRecovery(reason: "failed-to-play-to-end")
+                }
             }
         })
     }
@@ -1377,6 +1537,10 @@ final class PlayerViewModel: ObservableObject {
         rateObserver?.invalidate()
         rateObserver = nil
         removeItemLogObservers()
+        // A watchdog armed for this player must not fire into whatever
+        // replaces it. (Recovery re-arms its own if the new stream stalls.)
+        stallWatchdogTask?.cancel()
+        stallWatchdogTask = nil
     }
 
     func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
