@@ -510,10 +510,29 @@ actor JellyfinClient {
         bandwidthProbeTask?.cancel()
         bandwidthProbeTask = nil
         measuredBitrate = nil
+        bandwidthMeasuredAt = nil
     }
 
     /// Measured downstream bandwidth (bits/sec) from the last BitrateTest.
     private var measuredBitrate: Int?
+
+    /// When the current measurement landed. Drives staleness re-probing: the
+    /// link can change under a long-lived session (roaming across mesh nodes,
+    /// congestion), so a measurement older than `bandwidthMaxAge` triggers a
+    /// background re-probe at the next Auto playback (jellyfin-web caches its
+    /// bitrate test for the same 1 hour). The stale value still serves the
+    /// current request — a re-probe never blocks playback.
+    private var bandwidthMeasuredAt: Date?
+    private static let bandwidthMaxAge: TimeInterval = 3600
+
+    /// Kicks a background re-probe when the measurement is stale. Called on
+    /// the Auto path at playback time; deliberately non-blocking.
+    private func refreshBandwidthIfStale() {
+        guard let bandwidthMeasuredAt,
+              Date().timeIntervalSince(bandwidthMeasuredAt) > Self.bandwidthMaxAge else { return }
+        logger.info("Bandwidth measurement stale (>1h); re-probing in background")
+        startBandwidthMeasurement()
+    }
 
     /// Retry schedule for the bandwidth probe: one immediate attempt, then
     /// these delays. A single failure (a router reboot, a Wi-Fi handoff, a
@@ -601,6 +620,7 @@ actor JellyfinClient {
         let probe = SustainedBandwidthProbe(authDelegate: certificateDelegate)
         guard let bitsPerSecond = await probe.run(request: req), bitsPerSecond > 0 else { return false }
         measuredBitrate = bitsPerSecond
+        bandwidthMeasuredAt = Date()
         logger.info("Bandwidth probe (sustained) measured \(bitsPerSecond) bps")
         return true
     }
@@ -923,8 +943,6 @@ actor JellyfinClient {
         return response.items.first
     }
 
-    /// Whether the HLS TranscodingProfile lets the server cut segments on
-
     /// The device profile sent with every PlaybackInfo request: what the
     /// *engine this playback will use* can play natively, and the ceilings
     /// the server must respect. Internal (not private) so the profile shape
@@ -1083,7 +1101,8 @@ actor JellyfinClient {
         maxBitrate: Int? = nil,
         maxWidth: Int? = nil,
         forceDirectPlay: Bool = false,
-        forceTranscode: Bool = false
+        forceTranscode: Bool = false,
+        allowVideoStreamCopy: Bool = true
     ) async throws -> PlaybackInfoResponse {
         // Defensive guard: PlaybackInfo for a container type (Series, Season,
         // BoxSet, folder) is a guaranteed server 500 — Jellyfin throws
@@ -1099,7 +1118,9 @@ actor JellyfinClient {
 
         // Auto (no explicit cap) uses the measured connection bandwidth so we
         // don't request more than the link can carry (the cause of remote
-        // stalls); explicit picks are honored as-is.
+        // stalls); explicit picks are honored as-is. A stale measurement kicks
+        // a background re-probe but still serves this request.
+        if maxBitrate == nil { refreshBandwidthIfStale() }
         let streamingBitrate = maxBitrate ?? autoBitrateCap()
 
         // A bitrate cap with no width condition makes the server re-encode at
@@ -1149,10 +1170,13 @@ actor JellyfinClient {
             // seek). That was unworkable: forcing a real-time re-encode of an
             // 88 GB 4K HDR remux OOM-killed ffmpeg (exit 137) into a restart
             // storm, so 4K titles could not play at all (CoreMediaError -12889).
-            // The seek-freeze is a much narrower problem and is handled on the
-            // CLIENT by re-anchoring the session on seek (a fresh stream from the
-            // seek position), NOT by transcoding the whole file.
-            "AllowVideoStreamCopy": true,
+            // The seek-freeze is handled the way the official clients handle
+            // broken playback: an error/stall RECOVERY fallback (see
+            // PlayerViewModel.attemptPlaybackRecovery) rebuilds the session at
+            // the current position forcing a transcode, escalating to
+            // allowVideoStreamCopy=false on a second failure — recovery only,
+            // never as the default path.
+            "AllowVideoStreamCopy": allowVideoStreamCopy,
             "AllowAudioStreamCopy": true,
             "AutoOpenLiveStream": true
         ]
