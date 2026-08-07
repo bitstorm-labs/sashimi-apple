@@ -613,6 +613,14 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("timeControl", player.map { PlayerDiagnostics.name(timeControlStatus: $0.timeControlStatus) })
         ])
         player?.play()
+        // Startup watchdog: a start that never begins playing posts NO
+        // AVPlayerItemPlaybackStalled (that notification is for streams that
+        // were playing and ran dry), so the stall-armed watchdog can't see
+        // it. Observed live: a resume seek whose segment request hung
+        // server-side (grid divergence) sat "waiting" forever with zero
+        // notifications. Give a cold transcode start a generous window, then
+        // treat a still-stuck start as recoverable.
+        armStallWatchdog(grace: 15)
     }
 
     /// Replaces the position the item will resume to once it is ready.
@@ -916,12 +924,16 @@ final class PlayerViewModel: ObservableObject {
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
 
-        // Prefer the live position; a dead/unstarted player falls back to the
-        // last known resume point rather than restarting from zero.
+        // Prefer the live position — but a playback that never actually got
+        // going (stuck near zero while a resume point exists) recovers to the
+        // RESUME point, not to the couple of seconds the wedged player
+        // reports. Observed live: a hung resume seek left currentTime ≈ 2 s
+        // while the viewer's real position was 30 minutes in.
         let liveSeconds = player?.currentTime().seconds ?? 0
-        let positionTicks = (liveSeconds.isFinite && liveSeconds > 1)
-            ? Int64(liveSeconds * 10_000_000)
-            : resumePositionTicks
+        let liveTicks = (liveSeconds.isFinite && liveSeconds > 0) ? Int64(liveSeconds * 10_000_000) : 0
+        let positionTicks = liveTicks > 100_000_000  // > 10 s: playback was really underway
+            ? liveTicks
+            : max(liveTicks, resumePositionTicks)
 
         playbackAttempt += 1
         diag(.loadBegin, [
@@ -992,21 +1004,27 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// Arms (or re-arms) the stall watchdog: if the player still isn't making
-    /// progress `stallGraceSeconds` after a stall notification, treat it as
-    /// the unrecoverable freeze and run recovery. Ordinary buffering resumes
-    /// on its own well inside the grace window and cancels nothing — the
-    /// watchdog just finds the position advanced and stands down.
-    private func armStallWatchdog() {
+    /// progress `grace` seconds from now, treat it as the unrecoverable
+    /// freeze and run recovery. Ordinary buffering resumes on its own well
+    /// inside the grace window and cancels nothing — the watchdog just finds
+    /// the position advanced (or playback running) and stands down.
+    ///
+    /// Recovery is launched in a DETACHED task: recovery's own teardown
+    /// cancels `stallWatchdogTask`, and when the watchdog task itself invoked
+    /// recovery that cancellation propagated into the in-flight rebuild's
+    /// network awaits and aborted it mid-recovery.
+    private func armStallWatchdog(grace: Double = 8) {
         stallWatchdogTask?.cancel()
         let stalledAt = player?.currentTime().seconds ?? 0
         stallWatchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(for: .seconds(grace))
             guard !Task.isCancelled, let self else { return }
             guard let player = self.player,
                   player.timeControlStatus != .playing else { return }
             let now = player.currentTime().seconds
             guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
-            await self.attemptPlaybackRecovery(reason: "stall-watchdog")
+            self.stallWatchdogTask = nil
+            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog") }
         }
     }
 
@@ -1031,6 +1049,10 @@ final class PlayerViewModel: ObservableObject {
         ])
         if drift > 3 {
             player.seek(to: target)
+            // The resume seek is the observed hang case: the segment request
+            // for the target can wedge server-side (grid divergence) with no
+            // notification ever posted. Watchdog it like a fresh start.
+            armStallWatchdog(grace: 15)
         }
     }
 
