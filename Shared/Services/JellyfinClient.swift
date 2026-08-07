@@ -305,6 +305,116 @@ final class CertificateValidationDelegate: NSObject, URLSessionDelegate, URLSess
     }
 }
 
+// MARK: - Bandwidth Probe
+
+/// Measures *sustained* download throughput by streaming the server's
+/// BitrateTest response and timing only the steady-state window — discarding a
+/// warm-up so TCP slow-start and Wi-Fi burst buffering don't inflate the
+/// reading.
+///
+/// The old probe timed a single 8 MB `data(for:)`. On strong Wi-Fi that whole
+/// download finished *inside* the ramp, so it reported the burst peak
+/// (~77 Mbps), not what the link could hold — and Auto then tried to stream a
+/// 66 Mbps 4K source the link stalled on. Streaming a larger sample and
+/// ignoring the first `warmup` seconds reports the rate the link actually
+/// sustains, which is what the copy-vs-transcode decision needs.
+///
+/// Stops at whichever of `maxBytes` / `maxDuration` comes first, so fast links
+/// get a big enough sample and slow links never hit the request timeout. A
+/// gigabit link that finishes before the warmup window returns nil (never
+/// reaches steady-state measurement) and Auto falls back to its default cap —
+/// correct, because such a link is genuinely fast.
+final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let authDelegate: CertificateValidationDelegate
+    private let warmup: TimeInterval
+    private let maxDuration: TimeInterval
+    private let maxBytes: Int
+
+    private let lock = NSLock()
+    private var start: Date?
+    private var warmupEnd: Date?
+    private var warmupEndBytes = 0
+    private var received = 0
+    private var finished = false
+    private var continuation: CheckedContinuation<Int?, Never>?
+
+    init(authDelegate: CertificateValidationDelegate,
+         warmup: TimeInterval = 1.0,
+         maxDuration: TimeInterval = 5.0,
+         maxBytes: Int = 50_000_000) {
+        self.authDelegate = authDelegate
+        self.warmup = warmup
+        self.maxDuration = maxDuration
+        self.maxBytes = maxBytes
+    }
+
+    /// bits/sec from the steady-state sample, or nil if the sample is too small
+    /// or too brief to trust.
+    static func bitsPerSecond(measuredBytes: Int, seconds: TimeInterval) -> Int? {
+        guard measuredBytes > 0, seconds >= 0.5 else { return nil }
+        return Int((Double(measuredBytes) * 8.0) / seconds)
+    }
+
+    func run(request: URLRequest) async -> Int? {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = maxDuration + 10
+        config.timeoutIntervalForResource = maxDuration + 15
+        config.urlCache = nil
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        let result = await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+            lock.lock()
+            continuation = cont
+            lock.unlock()
+            session.dataTask(with: request).resume()
+        }
+        session.invalidateAndCancel()
+        return result
+    }
+
+    private func complete(with result: Int?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        let cont = continuation
+        continuation = nil
+        lock.unlock()
+        cont?.resume(returning: result)
+    }
+
+    // MARK: URLSessionDataDelegate
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let now = Date()
+        if start == nil { start = now }
+        received += data.count
+        let elapsed = now.timeIntervalSince(start ?? now)
+        if warmupEnd == nil, elapsed >= warmup {
+            warmupEnd = now
+            warmupEndBytes = received
+        }
+        let done = elapsed >= maxDuration || received >= maxBytes
+        lock.unlock()
+        if done { dataTask.cancel() }  // -> didCompleteWithError
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let bytes = (warmupEnd != nil) ? received - warmupEndBytes : 0
+        let seconds = warmupEnd.map { Date().timeIntervalSince($0) } ?? 0
+        lock.unlock()
+        complete(with: Self.bitsPerSecond(measuredBytes: bytes, seconds: seconds))
+    }
+
+    // MARK: Auth — reuse the client's cert-trust policy so self-signed servers work
+
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        authDelegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+}
+
 // MARK: - Jellyfin Client
 
 actor JellyfinClient {
@@ -474,27 +584,24 @@ actor JellyfinClient {
     /// cap standing for the caller to retry against.
     private func measureBandwidth() async -> Bool {
         guard let serverURL else { return false }
-        let sizeBytes = 8_000_000
+        // Request far more than we'll read: the probe streams the response and
+        // stops at whichever of its byte/duration caps comes first, so this is
+        // only an upper bound that fast links hit and slow links never reach.
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("Playback/BitrateTest"),
             resolvingAgainstBaseURL: false
         ) else { return false }
-        components.queryItems = [URLQueryItem(name: "Size", value: String(sizeBytes))]
+        components.queryItems = [URLQueryItem(name: "Size", value: "50000000")]
         guard let url = components.url else { return false }
 
         var req = URLRequest(url: url)
         req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 20
 
-        let start = Date()
-        guard let (data, response) = try? await urlSession.data(for: req),
-              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return false }
-        let elapsed = Date().timeIntervalSince(start)
-        guard elapsed > 0.01, !data.isEmpty else { return false }
-
-        let bitsPerSecond = Int((Double(data.count) * 8.0) / elapsed)
+        let probe = SustainedBandwidthProbe(authDelegate: certificateDelegate)
+        guard let bitsPerSecond = await probe.run(request: req), bitsPerSecond > 0 else { return false }
         measuredBitrate = bitsPerSecond
-        logger.info("Bandwidth probe measured \(bitsPerSecond) bps")
+        logger.info("Bandwidth probe (sustained) measured \(bitsPerSecond) bps")
         return true
     }
 
