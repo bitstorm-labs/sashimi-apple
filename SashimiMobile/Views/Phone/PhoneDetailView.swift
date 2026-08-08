@@ -537,7 +537,11 @@ struct PhoneDetailView: View {
 
     private var metadataParts: [String] {
         var parts: [String] = []
-        if let dateText = premiereDateLongText {
+        // Movies lead with the release year (right before the runtime);
+        // episodes/others keep their full air date.
+        if isMovie, let year = item.productionYear {
+            parts.append(String(year))
+        } else if let dateText = premiereDateLongText {
             parts.append(dateText)
         } else if let year = item.productionYear {
             parts.append(String(year))

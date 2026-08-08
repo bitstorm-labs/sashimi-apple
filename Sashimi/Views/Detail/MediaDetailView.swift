@@ -739,9 +739,14 @@ struct MediaDetailView: View {
             if seasonCount > 0 {
                 parts.append(seasonCount == 1 ? "1 Season" : "\(seasonCount) Seasons")
             }
-        } else if let runtime = DateFormatting.formatRuntime(item.runTimeTicks) {
-            // Only show runtime for non-series content
-            parts.append(runtime)
+        } else {
+            // Movie: release year, then runtime.
+            if let year = item.productionYear {
+                parts.append(String(year))
+            }
+            if let runtime = DateFormatting.formatRuntime(item.runTimeTicks) {
+                parts.append(runtime)
+            }
         }
 
         return parts.joined(separator: " • ")
