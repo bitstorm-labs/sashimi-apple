@@ -457,7 +457,11 @@ struct MobileDetailView: View {
 
             // Metadata row
             HStack(spacing: MobileSpacing.sm) {
-                if let premiereDateStr = item.premiereDate {
+                // Movies lead with the release year (right before the runtime);
+                // episodes keep their full air date.
+                if isMovie, let year = item.productionYear {
+                    Text(String(year))
+                } else if let premiereDateStr = item.premiereDate {
                     Text(formatPremiereDate(premiereDateStr))
                 }
 
