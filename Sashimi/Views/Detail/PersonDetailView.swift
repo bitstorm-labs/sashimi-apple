@@ -77,7 +77,7 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var filmographySection: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Other Movies & Shows")
+            Text("Filmography on This Server")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(SashimiTheme.textPrimary)
 

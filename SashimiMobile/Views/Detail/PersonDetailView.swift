@@ -74,7 +74,7 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var filmographySection: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Other Movies & Shows")
+            Text("Filmography on This Server")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
 
