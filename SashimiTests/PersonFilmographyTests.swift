@@ -51,6 +51,24 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertEqual(visible.map(\.id), ["movie-1", "series-1"])
     }
 
+    func testDisplayYearUsesProductionYearThenPremiereDate() {
+        let productionYearItem = makeItem(
+            id: "production-year",
+            type: .movie,
+            productionYear: 2024,
+            premiereDate: "2024-03-01T00:00:00Z"
+        )
+        let premiereDateItem = makeItem(
+            id: "premiere-date",
+            type: .movie,
+            productionYear: nil,
+            premiereDate: "2023-11-17T00:00:00Z"
+        )
+
+        XCTAssertEqual(productionYearItem.displayYear, 2024)
+        XCTAssertEqual(premiereDateItem.displayYear, 2023)
+    }
+
     @MainActor
     func testOfflineFilmographyDoesNotShowStaleItems() async {
         let viewModel = PersonFilmographyViewModel()
@@ -63,7 +81,12 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
-    private func makeItem(id: String, type: ItemType) -> BaseItemDto {
+    private func makeItem(
+        id: String,
+        type: ItemType,
+        productionYear: Int? = nil,
+        premiereDate: String? = nil
+    ) -> BaseItemDto {
         BaseItemDto(
             id: id,
             name: id,
@@ -82,14 +105,14 @@ final class PersonFilmographyTests: XCTestCase {
             parentBackdropImageTags: nil,
             primaryImageAspectRatio: nil,
             mediaType: nil,
-            productionYear: nil,
+            productionYear: productionYear,
             communityRating: nil,
             officialRating: nil,
             genres: nil,
             taglines: nil,
             people: nil,
             criticRating: nil,
-            premiereDate: nil,
+            premiereDate: premiereDate,
             chapters: nil,
             path: nil,
             remoteTrailers: nil,

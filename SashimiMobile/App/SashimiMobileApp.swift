@@ -28,6 +28,8 @@ struct SashimiMobileApp: App {
         }
         self.modelContainer = container
         DownloadManager.shared.setModelContainer(container)
+        SashimiImagePipeline.configureCaches()
+        SashimiImagePipeline.install()
     }
 
     var body: some Scene {

@@ -152,9 +152,6 @@ final class SessionManager: ObservableObject {
         // Mirror the active server into the legacy single-server keys:
         // JellyfinClient's image-URL builders and several views still read
         // them directly (scrubbing them in migration killed all artwork).
-        UserDefaults.standard.set(server.url.absoluteString, forKey: "serverURL")
-        UserDefaults.standard.set(server.userId, forKey: "userId")
-        UserDefaults.standard.set(server.username, forKey: "userName")
         // The token, too: DownloadURLBuilder and SubtitleManager authorize their
         // background requests off the global "accessToken" keychain key. Without
         // this mirror a fresh multi-server install (no legacy token to inherit)
@@ -162,7 +159,7 @@ final class SessionManager: ObservableObject {
         // fails instantly with "Could not build download URL". Per-server tokens
         // live under "accessToken.<id>"; this keeps the active one in the global
         // slot those two consumers read.
-        _ = KeychainHelper.save(token, forKey: keychainAccessTokenKey)
+        mirrorServerDefaults(server, token: token)
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
@@ -246,7 +243,22 @@ final class SessionManager: ObservableObject {
     func restoreActiveClient() async {
         guard let server = activeServer,
               let token = KeychainHelper.get(forKey: tokenKey(server.id)) else { return }
+        mirrorServerDefaults(server, token: token)
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+    }
+
+    /// Temporarily points the shared client at a saved server without changing
+    /// the selected server in the app chrome. Search results use this when a
+    /// user opens a title from a non-active server; callers restore the active
+    /// client when the detail screen disappears.
+    func prepareClient(for serverID: String) async -> Bool {
+        guard let server = servers.first(where: { $0.id == serverID }),
+              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+            return false
+        }
+        mirrorServerDefaults(server, token: token)
+        await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+        return true
     }
 
     func switchServer(to id: String) async {
@@ -261,6 +273,13 @@ final class SessionManager: ObservableObject {
         activeServerId = id
         saveServers()
         await activate(server, token: token)
+    }
+
+    private func mirrorServerDefaults(_ server: ServerConfig, token: String) {
+        UserDefaults.standard.set(server.url.absoluteString, forKey: "serverURL")
+        UserDefaults.standard.set(server.userId, forKey: "userId")
+        UserDefaults.standard.set(server.username, forKey: "userName")
+        _ = KeychainHelper.save(token, forKey: keychainAccessTokenKey)
     }
 
     /// Remove a saved server. Removing the active one activates the next;

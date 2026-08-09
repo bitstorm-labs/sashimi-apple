@@ -1,6 +1,36 @@
 import Foundation
 import Nuke
 
+/// Adds the active Jellyfin token to artwork requests without putting it in
+/// the URL. Jellyfin protects image endpoints just like its JSON API, while
+/// Nuke's default loader only knows about the URL and therefore sent these
+/// requests unauthenticated.
+private final class JellyfinImageDataLoader: DataLoading, @unchecked Sendable {
+    private let loader: DataLoader
+
+    init(configuration: URLSessionConfiguration, delegate: URLSessionDelegate) {
+        loader = DataLoader(configuration: configuration)
+        loader.delegate = delegate
+    }
+
+    func loadData(
+        with request: URLRequest,
+        didReceiveData: @escaping @Sendable (Data, URLResponse) -> Void,
+        completion: @escaping @Sendable (Error?) -> Void
+    ) -> any Cancellable {
+        var authorizedRequest = request
+        if authorizedRequest.value(forHTTPHeaderField: "X-Emby-Token") == nil,
+           let accessToken = KeychainHelper.get(forKey: "accessToken") {
+            authorizedRequest.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
+        }
+        return loader.loadData(
+            with: authorizedRequest,
+            didReceiveData: didReceiveData,
+            completion: completion
+        )
+    }
+}
+
 /// The app's shared Nuke image pipeline.
 ///
 /// Two things this exists to fix, both of which the tvOS target had because it
@@ -31,8 +61,10 @@ enum SashimiImagePipeline {
         // only duplicate bytes on disk.
         configuration.urlCache = nil
 
-        let dataLoader = DataLoader(configuration: configuration)
-        dataLoader.delegate = JellyfinClient.shared.certificateDelegate
+        let dataLoader = JellyfinImageDataLoader(
+            configuration: configuration,
+            delegate: JellyfinClient.shared.certificateDelegate
+        )
 
         return ImagePipeline {
             $0.dataLoader = dataLoader
@@ -44,6 +76,25 @@ enum SashimiImagePipeline {
             $0.dataCachePolicy = .storeAll
         }
     }()
+
+    /// Make even plain `LazyImage(url:)` calls use the authenticated loader.
+    /// This keeps older mobile and shared views from silently bypassing the
+    /// app's certificate and Jellyfin authentication policy.
+    static func install() {
+        ImagePipeline.shared = shared
+    }
+
+    /// Builds an authenticated request for artwork owned by a saved server.
+    /// The token stays in the request header and never becomes part of the URL
+    /// or Nuke's cache key.
+    static func request(url: URL, serverID: String? = nil) -> ImageRequest {
+        var urlRequest = URLRequest(url: url)
+        if let serverID,
+           let accessToken = KeychainHelper.get(forKey: "accessToken.\(serverID)") {
+            urlRequest.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
+        }
+        return ImageRequest(urlRequest: urlRequest)
+    }
 
     /// Sized for a 4K-capable but memory-constrained Apple TV. The default is a
     /// share of physical RAM, which is generous on a phone and reckless on a box

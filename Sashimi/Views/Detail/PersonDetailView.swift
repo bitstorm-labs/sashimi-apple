@@ -122,16 +122,9 @@ struct PersonDetailView: View {
                     )
                     .frame(minHeight: 320)
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 220), spacing: 28)],
-                        spacing: 36
-                    ) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(viewModel.items) { item in
-                            MediaPosterButton(
-                                item: item,
-                                libraryName: libraryName(for: item),
-                                isCircular: isYouTube(item) && item.type == .series
-                            ) {
+                            PersonFilmographyRow(item: item) {
                                 selectedItem = item
                             }
                         }
@@ -149,12 +142,103 @@ struct PersonDetailView: View {
     private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
         item.path?.localizedCaseInsensitiveContains("youtube") == true
     }
+}
 
-    private func isYouTube(_ item: BaseItemDto) -> Bool {
-        isYouTubeStyle(item)
+private struct PersonFilmographyRow: View {
+    let item: BaseItemDto
+    let onSelect: () -> Void
+
+    @FocusState private var isFocused: Bool
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
+    @AppStorage("showReviewRatings") private var showReviewRatings = true
+    @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.displayTitle)
+                        .font(Typography.title)
+                        .foregroundStyle(isFocused ? .black : SashimiTheme.textPrimary)
+                        .lineLimit(2)
+
+                    HStack(spacing: 10) {
+                        if let year = item.displayYear {
+                            metadataText(String(year))
+                        }
+                        if let type = item.type {
+                            metadataText(type == .series ? "Show" : type.rawValue)
+                        }
+                        if let officialRating = item.officialRating {
+                            metadataText(officialRating)
+                        }
+                        if showReviewRatings,
+                           let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
+                            ReviewRatingBadge(
+                                rating: rating,
+                                fontSize: 16,
+                                logoHeight: 15,
+                                horizontalPadding: 8,
+                                verticalPadding: 4,
+                                cornerRadius: 6
+                            )
+                        }
+                        if showQualityBadges, let quality = item.qualityBadge {
+                            QualityBadge(
+                                label: quality,
+                                fontSize: 16,
+                                horizontalPadding: 8,
+                                verticalPadding: 4,
+                                cornerRadius: 6
+                            )
+                        }
+                    }
+                }
+
+                Spacer(minLength: 16)
+
+                HStack {
+                    Image(systemName: "chevron.right")
+                        .font(.headline)
+                        .foregroundStyle(isFocused ? .black : SashimiTheme.textTertiary)
+                }
+            }
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+            .background(isFocused ? Color.white : SashimiTheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
+            }
+            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
+            .scaleEffect(isFocused ? 1.02 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Double-tap to view details")
     }
 
-    private func libraryName(for item: BaseItemDto) -> String? {
-        isYouTube(item) ? "YouTube" : nil
+    private func metadataText(_ value: String) -> some View {
+        Text(value)
+            .font(Typography.bodySmall)
+            .foregroundStyle(isFocused ? .black.opacity(0.7) : SashimiTheme.textSecondary)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [item.displayTitle]
+        if let year = item.displayYear {
+            parts.append(String(year))
+        }
+        if let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
+            parts.append("rating \(String(format: "%.1f", rating))")
+        }
+        if let quality = item.qualityBadge {
+            parts.append(quality)
+        }
+        return parts.joined(separator: ", ")
     }
 }

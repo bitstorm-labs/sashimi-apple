@@ -442,7 +442,7 @@ actor JellyfinClient {
 
     static let shared = JellyfinClient()
 
-    private init() {
+    init() {
         if let stored = UserDefaults.standard.string(forKey: "deviceId") {
             self.deviceId = stored
         } else {
@@ -896,7 +896,7 @@ actor JellyfinClient {
 
         let fields = personId == nil
             ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"
-            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ImageTags,Path,MediaStreams"
+            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,MediaStreams"
         var queryItems = [
             URLQueryItem(name: "SortBy", value: sortBy),
             URLQueryItem(name: "SortOrder", value: sortOrder),
@@ -1306,9 +1306,20 @@ actor JellyfinClient {
     }
 
     /// Synchronous image URL builder - uses cached server URL from UserDefaults
-    nonisolated func syncImageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
-              let url = URL(string: serverURL) else { return nil }
+    nonisolated func syncImageURL(
+        itemId: String,
+        imageType: String = "Primary",
+        maxWidth: Int = 400,
+        serverURL overrideServerURL: URL? = nil
+    ) -> URL? {
+        let url: URL
+        if let overrideServerURL {
+            url = overrideServerURL
+        } else {
+            guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
+                  let defaultURL = URL(string: serverURL) else { return nil }
+            url = defaultURL
+        }
 
         guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(itemId)/Images/\(imageType)"), resolvingAgainstBaseURL: false) else {
             return nil
@@ -1459,7 +1470,7 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "SearchTerm", value: query),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,MediaStreams"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
                 URLQueryItem(name: "Recursive", value: "true")
@@ -1555,6 +1566,46 @@ actor JellyfinClient {
                 startSeconds: segment.start,
                 endSeconds: segment.end
             )
+        }
+    }
+}
+
+/// Searches every saved server concurrently. Each server owns its own Jellyfin
+/// client because item IDs and access tokens are server-scoped.
+enum MultiServerSearchService {
+    static func search(query: String, limit: Int = 50) async -> [ServerMediaResult] {
+        let servers = await MainActor.run { SessionManager.shared.servers }
+        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
+
+        return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
+            for server in servers {
+                let tokenKey = "accessToken.\(server.id)"
+                let token = KeychainHelper.get(forKey: tokenKey)
+                    ?? (server.id == activeServerID ? KeychainHelper.get(forKey: "accessToken") : nil)
+                guard let token else { continue }
+
+                group.addTask {
+                    let client = JellyfinClient()
+                    await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+                    guard let items = try? await client.search(query: query, limit: limit) else {
+                        return []
+                    }
+                    return items.map {
+                        ServerMediaResult(
+                            item: $0,
+                            serverID: server.id,
+                            serverName: server.name,
+                            serverURL: server.url
+                        )
+                    }
+                }
+            }
+
+            var results: [ServerMediaResult] = []
+            for await serverResults in group {
+                results.append(contentsOf: serverResults)
+            }
+            return results
         }
     }
 }

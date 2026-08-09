@@ -13,6 +13,7 @@ struct SashimiApp: App {
         configureAudioSession()
         resetAppIconToDefault()
         SashimiImagePipeline.configureCaches()
+        SashimiImagePipeline.install()
     }
 
     private func resetAppIconToDefault() {

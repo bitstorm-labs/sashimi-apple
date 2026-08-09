@@ -2,14 +2,14 @@ import XCTest
 @testable import Sashimi
 
 final class SearchResultGroupingTests: XCTestCase {
-    private func makeItem(id: String, type: ItemType) -> BaseItemDto {
+    private func makeItem(id: String, name: String? = nil, type: ItemType, productionYear: Int? = nil) -> BaseItemDto {
         BaseItemDto(
-            id: id, name: id, type: type,
+            id: id, name: name ?? id, type: type,
             seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
             indexNumber: nil, parentIndexNumber: nil, overview: nil,
             runTimeTicks: nil, userData: nil, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, productionYear: productionYear,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil,
@@ -17,49 +17,88 @@ final class SearchResultGroupingTests: XCTestCase {
         )
     }
 
+    private func makeResult(
+        id: String,
+        name: String? = nil,
+        type: ItemType,
+        serverID: String = "server-1",
+        serverName: String = "Server",
+        serverURL: URL = URL(string: "https://server.example")!
+    ) -> ServerMediaResult {
+        ServerMediaResult(
+            item: makeItem(id: id, name: name, type: type),
+            serverID: serverID,
+            serverName: serverName,
+            serverURL: serverURL
+        )
+    }
+
     func testMoviesComeBeforeShows() {
         let items = [
-            makeItem(id: "s1", type: .series),
-            makeItem(id: "m1", type: .movie),
-            makeItem(id: "s2", type: .series),
-            makeItem(id: "m2", type: .movie)
+            makeResult(id: "s1", type: .series),
+            makeResult(id: "m1", type: .movie),
+            makeResult(id: "s2", type: .series),
+            makeResult(id: "m2", type: .movie)
         ]
-        let groups = SearchResultGrouping.groups(from: items)
+        let groups = SearchResultGrouping.groups(from: ServerMediaResultGrouping.groups(from: items))
         XCTAssertEqual(groups.map(\.title), ["Movies", "TV Shows"])
-        XCTAssertEqual(groups[0].items.map(\.id), ["m1", "m2"])
-        XCTAssertEqual(groups[1].items.map(\.id), ["s1", "s2"])
+        XCTAssertEqual(groups[0].items.map { $0.primary.item.id }, ["m1", "m2"])
+        XCTAssertEqual(groups[1].items.map { $0.primary.item.id }, ["s1", "s2"])
     }
 
     func testEmptySectionsAreDropped() {
-        let groups = SearchResultGrouping.groups(from: [
-            makeItem(id: "m1", type: .movie),
-            makeItem(id: "m2", type: .movie)
-        ])
+        let groups = SearchResultGrouping.groups(from: ServerMediaResultGrouping.groups(from: [
+            makeResult(id: "m1", type: .movie),
+            makeResult(id: "m2", type: .movie)
+        ]))
         XCTAssertEqual(groups.map(\.title), ["Movies"])
     }
 
     func testServerOrderIsPreservedWithinASection() {
         let items = [
-            makeItem(id: "m3", type: .movie),
-            makeItem(id: "m1", type: .movie),
-            makeItem(id: "m2", type: .movie)
+            makeResult(id: "m3", type: .movie),
+            makeResult(id: "m1", type: .movie),
+            makeResult(id: "m2", type: .movie)
         ]
-        let groups = SearchResultGrouping.groups(from: items)
-        XCTAssertEqual(groups.first?.items.map(\.id), ["m3", "m1", "m2"])
+        let groups = SearchResultGrouping.groups(from: ServerMediaResultGrouping.groups(from: items))
+        XCTAssertEqual(groups.first?.items.map { $0.primary.item.id }, ["m3", "m1", "m2"])
     }
 
     func testUnexpectedTypesCollectIntoOther() {
         // Nothing the server returns should be silently dropped.
-        let groups = SearchResultGrouping.groups(from: [
-            makeItem(id: "m1", type: .movie),
-            makeItem(id: "e1", type: .episode),
-            makeItem(id: "v1", type: .video)
-        ])
+        let groups = SearchResultGrouping.groups(from: ServerMediaResultGrouping.groups(from: [
+            makeResult(id: "m1", type: .movie),
+            makeResult(id: "e1", type: .episode),
+            makeResult(id: "v1", type: .video)
+        ]))
         XCTAssertEqual(groups.map(\.title), ["Movies", "Other"])
-        XCTAssertEqual(groups.last?.items.map(\.id), ["e1", "v1"])
+        XCTAssertEqual(groups.last?.items.map { $0.primary.item.id }, ["e1", "v1"])
     }
 
     func testEmptyInputYieldsNoGroups() {
-        XCTAssertTrue(SearchResultGrouping.groups(from: []).isEmpty)
+        XCTAssertTrue(SearchResultGrouping.groups(from: ServerMediaResultGrouping.groups(from: [])).isEmpty)
+    }
+
+    func testSameTitleAcrossServersBecomesOneGroupWithServerSources() {
+        let results = [
+            makeResult(id: "finny-title", name: "Harry Potter", type: .movie, serverID: "finny", serverName: "finny"),
+            makeResult(id: "jelly-title", name: "Harry Potter", type: .movie, serverID: "jelly", serverName: "JellyPal")
+        ]
+
+        let groups = ServerMediaResultGrouping.groups(from: results)
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].sources.map(\.serverName), ["finny", "JellyPal"])
+    }
+
+    func testPreferredServerIsPrimarySource() {
+        let results = [
+            makeResult(id: "finny-title", name: "Harry Potter", type: .movie, serverID: "finny", serverName: "finny"),
+            makeResult(id: "jelly-title", name: "Harry Potter", type: .movie, serverID: "jelly", serverName: "JellyPal")
+        ]
+
+        let groups = ServerMediaResultGrouping.groups(from: results, preferredServerID: "jelly")
+
+        XCTAssertEqual(groups.first?.primary.serverID, "jelly")
     }
 }

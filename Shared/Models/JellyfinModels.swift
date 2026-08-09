@@ -153,6 +153,16 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         return name
     }
 
+    /// Jellyfin normally provides ProductionYear. PremiereDate is a useful
+    /// fallback for libraries whose metadata only carries the full date.
+    var displayYear: Int? {
+        if let productionYear {
+            return productionYear
+        }
+        guard let premiereDate, premiereDate.count >= 4 else { return nil }
+        return Int(premiereDate.prefix(4))
+    }
+
     var progressPercent: Double {
         guard let playbackTicks = userData?.playbackPositionTicks,
               let totalTicks = runTimeTicks,

@@ -29,8 +29,9 @@ private enum RecentSearches {
 struct MobileSearchView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var searchText = ""
-    @State private var searchResults: [BaseItemDto] = []
+    @State private var searchResults: [ServerMediaResultGroup] = []
     @State private var isSearching = false
+    @State private var selectedSource: ServerMediaResult?
     @State private var recentSearches: [String] = RecentSearches.load()
     // Only commit a query to history after the user pauses typing on a query
     // that returned results (avoids logging every keystroke prefix).
@@ -80,6 +81,11 @@ struct MobileSearchView: View {
         .background(MobileColors.background)
         .navigationTitle("Search")
         .searchable(text: $searchText, prompt: "Movies, shows, and more")
+        .sheet(item: $selectedSource) { source in
+            NavigationStack {
+                ServerScopedMobileDetailView(source: source)
+            }
+        }
         .onChange(of: searchText) { _, newValue in
             Task {
                 await performSearch(query: newValue)
@@ -148,27 +154,51 @@ struct MobileSearchView: View {
                 .padding(.horizontal, MobileSpacing.md)
 
             LazyVGrid(columns: metrics.columns, alignment: .leading, spacing: MobileSpacing.md) {
-                ForEach(searchResults, id: \.id) { item in
-                    NavigationLink {
-                        AdaptiveDetailView(item: item)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            MobileRecentlyAddedCard(
-                                item: item,
-                                width: metrics.cardWidth,
-                                libraryName: nil,
-                                isCircular: false,
-                                isLandscape: false,
-                                badgeCount: nil
-                            )
-                            Text(subtitleText(item))
-                                .font(MobileTypography.captionSmall)
-                                .foregroundStyle(MobileColors.textTertiary)
-                                .lineLimit(1)
+                ForEach(searchResults) { result in
+                    VStack(alignment: .leading, spacing: MobileSpacing.xs) {
+                        NavigationLink {
+                            ServerScopedMobileDetailView(source: result.primary)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                MobileRecentlyAddedCard(
+                                    item: result.primary.item,
+                                    width: metrics.cardWidth,
+                                    libraryName: nil,
+                                    isCircular: false,
+                                    isLandscape: false,
+                                    badgeCount: nil,
+                                    serverURL: result.primary.serverURL,
+                                    serverID: result.primary.serverID
+                                )
+                                Text(subtitleText(result.primary.item))
+                                    .font(MobileTypography.captionSmall)
+                                    .foregroundStyle(MobileColors.textTertiary)
+                                    .lineLimit(1)
+                            }
+                            .frame(width: metrics.cardWidth)
                         }
-                        .frame(width: metrics.cardWidth)
+                        .buttonStyle(.plain)
+
+                        HStack(spacing: MobileSpacing.xs) {
+                            ForEach(result.sources) { source in
+                                Button {
+                                    selectedSource = source
+                                } label: {
+                                    Text(source.serverName)
+                                        .font(MobileTypography.captionSmall.weight(.semibold))
+                                        .foregroundStyle(MobileColors.textPrimary)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(MobileColors.accent.opacity(0.35))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Open on \(source.serverName)")
+                            }
+                        }
+                        .frame(width: metrics.cardWidth, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, MobileSpacing.md)
@@ -179,7 +209,7 @@ struct MobileSearchView: View {
     /// "2024 · Movie" secondary line under each result card.
     private func subtitleText(_ item: BaseItemDto) -> String {
         var parts: [String] = []
-        if let year = item.productionYear { parts.append(String(year)) }
+        if let year = item.displayYear { parts.append(String(year)) }
         if let type = item.type {
             switch type {
             case .movie: parts.append("Movie")
@@ -201,10 +231,45 @@ struct MobileSearchView: View {
         isSearching = true
         defer { isSearching = false }
 
-        do {
-            searchResults = try await JellyfinClient.shared.search(query: query, limit: 50)
-        } catch {
-            searchResults = []
+        let serverResults = await MultiServerSearchService.search(query: query, limit: 50)
+        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
+        searchResults = ServerMediaResultGrouping.groups(
+            from: serverResults,
+            preferredServerID: activeServerID
+        )
+    }
+}
+
+private struct ServerScopedMobileDetailView: View {
+    let source: ServerMediaResult
+
+    @State private var isReady = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Group {
+            if isReady {
+                AdaptiveDetailView(item: source.item)
+            } else {
+                ProgressView("Connecting to \(source.serverName)...")
+            }
+        }
+        .task {
+            isReady = await SessionManager.shared.prepareClient(for: source.serverID)
+        }
+        .onDisappear {
+            Task { await SessionManager.shared.restoreActiveClient() }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .accessibilityLabel("Back to search results")
+            }
         }
     }
 }

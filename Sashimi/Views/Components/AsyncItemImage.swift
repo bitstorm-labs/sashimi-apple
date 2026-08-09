@@ -8,6 +8,8 @@ struct SmartPosterImage: View {
     let maxWidth: Int
     var imageTypes: [String] = ["Primary", "Thumb"]
     var contentMode: ContentMode = .fill
+    var serverURL: URL?
+    var serverID: String?
 
     @State private var currentIndex: Int = 0
     @State private var currentTypeIndex: Int = 0
@@ -19,16 +21,22 @@ struct SmartPosterImage: View {
         return JellyfinClient.shared.syncImageURL(
             itemId: itemIds[currentIndex],
             imageType: imageTypes[currentTypeIndex],
-            maxWidth: maxWidth
+            maxWidth: maxWidth,
+            serverURL: serverURL
         )
+    }
+
+    private var currentRequest: ImageRequest? {
+        guard let currentURL else { return nil }
+        return SashimiImagePipeline.request(url: currentURL, serverID: serverID)
     }
 
     var body: some View {
         Group {
             if loadFailed {
                 placeholderView
-            } else if let url = currentURL {
-                LazyImage(url: url) { state in
+            } else if currentRequest != nil {
+                LazyImage(request: currentRequest) { state in
                     if let image = state.image {
                         image
                             .resizable()

@@ -7,6 +7,8 @@ struct MediaPosterButton: View {
     var isLandscape: Bool = false
     var isCircular: Bool = false  // For YouTube channel-style circular covers
     var badgeCount: Int?  // Shows "X new" badge when >= 1
+    var serverURL: URL?
+    var serverID: String?
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
@@ -135,7 +137,9 @@ struct MediaPosterButton: View {
                                     itemIds: imageFallbackIds,
                                     maxWidth: 400,
                                     imageTypes: imageTypes,
-                                    contentMode: .fit
+                                    contentMode: .fit,
+                                    serverURL: serverURL,
+                                    serverID: serverID
                                 )
                                 .clipShape(Circle())
                             )
@@ -144,7 +148,9 @@ struct MediaPosterButton: View {
                             itemIds: imageFallbackIds,
                             maxWidth: isLandscape ? 640 : 400,
                             imageTypes: imageTypes,
-                            contentMode: .fill
+                            contentMode: .fill,
+                            serverURL: serverURL,
+                            serverID: serverID
                         )
                         .frame(width: cardWidth, height: cardHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))

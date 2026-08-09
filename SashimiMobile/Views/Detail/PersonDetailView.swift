@@ -125,22 +125,12 @@ struct PersonDetailView: View {
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: MobileSizing.posterWidth), spacing: MobileSpacing.md)],
-                        spacing: MobileSpacing.md
-                    ) {
+                    LazyVStack(spacing: MobileSpacing.xs) {
                         ForEach(viewModel.items) { item in
                             NavigationLink {
                                 AdaptiveDetailView(item: item, libraryName: libraryName(for: item))
                             } label: {
-                                MobileRecentlyAddedCard(
-                                    item: item,
-                                    width: MobileSizing.posterWidth,
-                                    libraryName: libraryName(for: item),
-                                    isCircular: isYouTube(item) && item.type == .series,
-                                    isLandscape: false,
-                                    badgeCount: nil
-                                )
+                                PersonFilmographyRow(item: item)
                             }
                             .buttonStyle(.plain)
                             .accessibilityElement(children: .combine)
@@ -167,5 +157,92 @@ struct PersonDetailView: View {
 
     private func libraryName(for item: BaseItemDto) -> String? {
         isYouTube(item) ? "YouTube" : nil
+    }
+}
+
+private struct PersonFilmographyRow: View {
+    let item: BaseItemDto
+
+    @AppStorage("showQualityBadges") private var showQualityBadges = true
+    @AppStorage("showReviewRatings") private var showReviewRatings = true
+    @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
+
+    var body: some View {
+        HStack(spacing: MobileSpacing.sm) {
+            VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
+                Text(item.displayTitle)
+                    .font(MobileTypography.title)
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(2)
+
+                HStack(spacing: MobileSpacing.xs) {
+                    if let year = item.displayYear {
+                        metadataText(String(year))
+                    }
+                    if let type = item.type {
+                        metadataText(type == .series ? "Show" : type.rawValue)
+                    }
+                    if let officialRating = item.officialRating {
+                        metadataText(officialRating)
+                    }
+                    if showReviewRatings,
+                       let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
+                        ReviewRatingBadge(
+                            rating: rating,
+                            fontSize: 11,
+                            logoHeight: 11,
+                            horizontalPadding: 6,
+                            verticalPadding: 3,
+                            cornerRadius: 5
+                        )
+                    }
+                    if showQualityBadges, let quality = item.qualityBadge {
+                        QualityBadge(
+                            label: quality,
+                            fontSize: 11,
+                            horizontalPadding: 6,
+                            verticalPadding: 3,
+                            cornerRadius: 5
+                        )
+                    }
+                }
+            }
+
+            Spacer(minLength: MobileSpacing.xs)
+
+            HStack {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+        }
+        .padding(.horizontal, MobileSpacing.sm)
+        .padding(.vertical, MobileSpacing.sm)
+        .frame(maxWidth: .infinity, minHeight: MobileSizing.minTappableSize, alignment: .leading)
+        .background(MobileColors.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Open title details")
+    }
+
+    private func metadataText(_ value: String) -> some View {
+        Text(value)
+            .font(MobileTypography.caption)
+            .foregroundStyle(MobileColors.textSecondary)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [item.displayTitle]
+        if let year = item.displayYear {
+            parts.append(String(year))
+        }
+        if let rating = item.coverReviewRating(useEpisodeRatings: useEpisodeRatings) {
+            parts.append("rating \(String(format: "%.1f", rating))")
+        }
+        if let quality = item.qualityBadge {
+            parts.append(quality)
+        }
+        return parts.joined(separator: ", ")
     }
 }
