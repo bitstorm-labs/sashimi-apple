@@ -889,15 +889,19 @@ actor JellyfinClient {
         // swiftlint:disable:next discouraged_optional_boolean
         isFavorite: Bool? = nil,
         // swiftlint:disable:next discouraged_optional_boolean
-        isResumable: Bool? = nil
+        isResumable: Bool? = nil,
+        personId: String? = nil
     ) async throws -> ItemsResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
+        let fields = personId == nil
+            ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"
+            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,UserData,ImageTags,Path,MediaStreams"
         var queryItems = [
             URLQueryItem(name: "SortBy", value: sortBy),
             URLQueryItem(name: "SortOrder", value: sortOrder),
             URLQueryItem(name: "Recursive", value: "true"),
-            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"),
+            URLQueryItem(name: "Fields", value: fields),
             URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
             URLQueryItem(name: "Limit", value: "\(limit)"),
             URLQueryItem(name: "StartIndex", value: "\(startIndex)")
@@ -905,6 +909,10 @@ actor JellyfinClient {
 
         if let parentId {
             queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
+        }
+
+        if let personId {
+            queryItems.append(URLQueryItem(name: "PersonIds", value: personId))
         }
 
         if let types = includeTypes {
@@ -929,6 +937,38 @@ actor JellyfinClient {
         )
 
         return try JSONDecoder().decode(ItemsResponse.self, from: data)
+    }
+
+    /// Returns every Movie and Series visible to the current user that credits
+    /// the person. Jellyfin paginates `/Items`, so keep following pages rather
+    /// than silently limiting a person's filmography to the first 100 items.
+    func getPersonMedia(personId: String, pageSize: Int = 100) async throws -> [BaseItemDto] {
+        let pageSize = max(1, pageSize)
+        var startIndex = 0
+        var media: [BaseItemDto] = []
+
+        while true {
+            try Task.checkCancellation()
+            let page = try await getItems(
+                includeTypes: [.movie, .series],
+                sortBy: "SortName",
+                sortOrder: "Ascending",
+                limit: pageSize,
+                startIndex: startIndex,
+                personId: personId
+            )
+            try Task.checkCancellation()
+
+            guard !page.items.isEmpty else { break }
+            media.append(contentsOf: page.items)
+            startIndex += page.items.count
+
+            if startIndex >= page.totalRecordCount || page.items.count < pageSize {
+                break
+            }
+        }
+
+        return media
     }
 
     /// Fetches one random item for the Shuffle button. `parentId` is the

@@ -32,6 +32,7 @@ struct MediaDetailView: View {
     @State private var isLoadingEpisodes = false
     @State private var showingSeriesDetail: BaseItemDto?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
     @State private var showingFileInfo = false
     @State private var showingDeleteConfirm = false
     @State private var showingFullOverview = false
@@ -189,6 +190,9 @@ struct MediaDetailView: View {
         }
         .fullScreenCover(item: $showingEpisodeDetail) { episode in
             MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle)
+        }
+        .fullScreenCover(item: $showingPersonDetail) { person in
+            PersonDetailView(person: person, excludingItemID: item.id)
         }
         .sheet(isPresented: $showingFullOverview) {
             ScrollView {
@@ -364,7 +368,7 @@ struct MediaDetailView: View {
                     .focusSection()
             }
 
-            if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+            if let people = item.people, !people.isEmpty {
                 castSection(people)
             }
 
@@ -987,10 +991,10 @@ struct MediaDetailView: View {
 
     // MARK: - Cast
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(20))
+        let cast = PersonInfo.sortedForDisplay(people)
 
         return VStack(alignment: .leading, spacing: 16) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(.headline)
                 .foregroundStyle(SashimiTheme.textPrimary)
                 .padding(.horizontal, 60)
@@ -998,7 +1002,9 @@ struct MediaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 24) {
                     ForEach(cast) { person in
-                        CastCard(person: person)
+                        CastCard(person: person) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
                 .padding(.horizontal, 60)
@@ -1380,12 +1386,11 @@ struct SeasonTab: View {
 
 struct CastCard: View {
     let person: PersonInfo
+    let action: () -> Void
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        Button {
-            // No action - cast cards are display only
-        } label: {
+        Button(action: action) {
             VStack(spacing: 8) {
                 if person.primaryImageTag != nil {
                     LazyImage(url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 200)) { state in
@@ -1427,7 +1432,7 @@ struct CastCard: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.white)
 
-                if let role = person.role, !role.isEmpty {
+                if let role = person.displayRole {
                     MarqueeText(
                         text: role,
                         isScrolling: isFocused,
@@ -1446,7 +1451,8 @@ struct CastCard: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(person.role.map { "\(person.name) as \($0)" } ?? person.name)
+        .accessibilityLabel(person.displayRole.map { "\(person.name), \($0)" } ?? person.name)
+        .accessibilityHint("Show other movies and shows with this person")
     }
 }
 

@@ -25,6 +25,7 @@ struct MobileDetailView: View {
     @State private var seriesCommunityRating: Double?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var downloadScope: DownloadScope?
@@ -148,7 +149,7 @@ struct MobileDetailView: View {
                 }
 
                 // Cast section
-                if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+                if let people = item.people, !people.isEmpty {
                     castSection(people)
                 }
 
@@ -217,6 +218,11 @@ struct MobileDetailView: View {
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
                 AdaptiveDetailView(item: episode, libraryName: libraryName)
+            }
+        }
+        .sheet(item: $showingPersonDetail) { person in
+            NavigationStack {
+                PersonDetailView(person: person, excludingItemID: item.id)
             }
         }
         .task {
@@ -1029,10 +1035,10 @@ struct MobileDetailView: View {
     // MARK: - Cast Section
 
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(15))
+        let cast = PersonInfo.sortedForDisplay(people, limit: 20)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
                 .padding(.horizontal, MobileSpacing.md)
@@ -1040,7 +1046,9 @@ struct MobileDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person)
+                        MobileCastCard(person: person) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
                 .padding(.horizontal, MobileSpacing.md)
@@ -1404,6 +1412,7 @@ struct MobileEpisodeCard: View {
 
 struct MobileCastCard: View {
     let person: PersonInfo
+    let action: () -> Void
 
     private var imageURL: URL? {
         guard person.primaryImageTag != nil else { return nil }
@@ -1411,36 +1420,42 @@ struct MobileCastCard: View {
     }
 
     var body: some View {
-        VStack(spacing: MobileSpacing.xs) {
-            if let url = imageURL {
-                LazyImage(url: url) { state in
-                    if let image = state.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        placeholderCircle
+        Button(action: action) {
+            VStack(spacing: MobileSpacing.xs) {
+                if let url = imageURL {
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            placeholderCircle
+                        }
                     }
+                    .frame(width: 70, height: 70)
+                    .clipShape(Circle())
+                } else {
+                    placeholderCircle
                 }
-                .frame(width: 70, height: 70)
-                .clipShape(Circle())
-            } else {
-                placeholderCircle
-            }
 
-            Text(person.name ?? "Unknown")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-
-            if let role = person.role, !role.isEmpty {
-                Text(role)
-                    .font(.system(size: 10))
-                    .foregroundStyle(MobileColors.textTertiary)
+                Text(person.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
                     .lineLimit(1)
+
+                if let role = person.displayRole {
+                    Text(role)
+                        .font(.system(size: 10))
+                        .foregroundStyle(MobileColors.textTertiary)
+                        .lineLimit(1)
+                }
             }
+            .frame(width: 80)
         }
-        .frame(width: 80)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(person.displayRole.map { "\(person.name), \($0)" } ?? person.name)
+        .accessibilityHint("Show other movies and shows with this person")
     }
 
     private var placeholderCircle: some View {

@@ -27,6 +27,7 @@ struct PhoneDetailView: View {
     @State private var seriesCommunityRating: Double?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var showSeriesDetail = false
@@ -113,7 +114,7 @@ struct PhoneDetailView: View {
                         seasonsSection
                     }
 
-                    if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+                    if let people = item.people, !people.isEmpty {
                         castSection(people)
                     }
 
@@ -138,6 +139,11 @@ struct PhoneDetailView: View {
             // Full detail view — one consistent episode UI (matches iPad)
             NavigationStack {
                 PhoneDetailView(item: episode, libraryName: libraryName)
+            }
+        }
+        .sheet(item: $showingPersonDetail) { person in
+            NavigationStack {
+                PersonDetailView(person: person, excludingItemID: item.id)
             }
         }
         .task {
@@ -1070,17 +1076,19 @@ struct PhoneDetailView: View {
     // MARK: - Cast Section
 
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(15))
+        let cast = PersonInfo.sortedForDisplay(people, limit: 20)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person)
+                        MobileCastCard(person: person) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
             }

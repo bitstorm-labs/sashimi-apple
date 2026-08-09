@@ -433,6 +433,38 @@ struct PersonInfo: Codable, Identifiable, Hashable {
     }
 }
 
+extension PersonInfo {
+    /// The most useful role to show when Jellyfin does not provide a character
+    /// name. Crew entries commonly have no Role, but their Type still tells a
+    /// user why they are in the roster.
+    var displayRole: String? {
+        if let role, !role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return role
+        }
+        guard let type, !type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return type
+    }
+
+    /// Actors lead the roster while directors, writers, and other people stay
+    /// discoverable behind them. A stable name sort keeps the section calm
+    /// when a server returns people in a different order.
+    static func sortedForDisplay(_ people: [PersonInfo], limit: Int = 20) -> [PersonInfo] {
+        let sorted = people.sorted { lhs, rhs in
+            let lhsIsActor = lhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            let rhsIsActor = rhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            if lhsIsActor != rhsIsActor {
+                return lhsIsActor
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        var seenIDs = Set<String>()
+        let unique = sorted.filter { seenIDs.insert($0.id).inserted }
+        return Array(unique.prefix(max(0, limit)))
+    }
+}
+
 struct JellyfinLibrary: Codable, Identifiable, Equatable {
     let id: String
     let name: String
