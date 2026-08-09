@@ -5,6 +5,7 @@ struct PersonDetailView: View {
     let person: PersonInfo
     let excludingItemID: String?
 
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = PersonFilmographyViewModel()
 
     var body: some View {
@@ -19,6 +20,17 @@ struct PersonDetailView: View {
         .background(MobileColors.background)
         .navigationTitle(person.name)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .accessibilityHint("Return to the previous screen")
+            }
+        }
         .task {
             await loadFilmography()
         }
@@ -131,6 +143,9 @@ struct PersonDetailView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(item.displayTitle)
+                            .accessibilityHint("Open title details")
                         }
                     }
                 }

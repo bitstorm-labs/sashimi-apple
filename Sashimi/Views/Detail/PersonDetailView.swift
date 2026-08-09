@@ -5,12 +5,14 @@ struct PersonDetailView: View {
     let person: PersonInfo
     let excludingItemID: String?
 
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = PersonFilmographyViewModel()
     @State private var selectedItem: BaseItemDto?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
+                backButton
                 headerSection
                 filmographySection
             }
@@ -24,6 +26,22 @@ struct PersonDetailView: View {
         .task {
             await loadFilmography()
         }
+        .onExitCommand {
+            dismiss()
+        }
+    }
+
+    private var backButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Label("Back", systemImage: "chevron.left")
+                .font(.headline)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityHint("Return to the previous screen")
     }
 
     private var headerSection: some View {
