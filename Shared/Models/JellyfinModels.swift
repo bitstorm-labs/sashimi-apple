@@ -69,6 +69,10 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let parentBackdropImageTags: [String]?
     let primaryImageAspectRatio: Double?
     let mediaType: String?
+    /// Jellyfin includes the owning library on item responses when available.
+    /// Keeping it on the item lets shared search/detail routes preserve the
+    /// library-specific YouTube presentation without guessing from a file path.
+    let libraryName: String?
     let productionYear: Int?
     let communityRating: Double?
     let officialRating: String?
@@ -119,6 +123,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case parentBackdropImageTags = "ParentBackdropImageTags"
         case primaryImageAspectRatio = "PrimaryImageAspectRatio"
         case mediaType = "MediaType"
+        case libraryName = "LibraryName"
         case productionYear = "ProductionYear"
         case communityRating = "CommunityRating"
         case officialRating = "OfficialRating"
@@ -464,6 +469,20 @@ struct PersonInfo: Codable, Identifiable, Hashable {
 }
 
 extension PersonInfo {
+    /// Matching key used when resolving the same person across Jellyfin
+    /// servers. Servers may differ in casing, diacritics, or punctuation in
+    /// their person records (for example, "Jr" versus "Jr.").
+    var matchingNameKey: String {
+        Self.matchingNameKey(for: name)
+    }
+
+    static func matchingNameKey(for name: String) -> String {
+        name
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+    }
+
     /// The most useful role to show when Jellyfin does not provide a character
     /// name. Crew entries commonly have no Role, but their Type still tells a
     /// user why they are in the roster.

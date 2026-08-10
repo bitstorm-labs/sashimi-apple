@@ -896,7 +896,7 @@ actor JellyfinClient {
 
         let fields = personId == nil
             ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"
-            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,MediaStreams"
+            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,LibraryName,MediaStreams"
         var queryItems = [
             URLQueryItem(name: "SortBy", value: sortBy),
             URLQueryItem(name: "SortOrder", value: sortOrder),
@@ -1486,7 +1486,7 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "SearchTerm", value: query),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,MediaStreams"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,LibraryName,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
                 URLQueryItem(name: "Recursive", value: "true")
@@ -1705,7 +1705,7 @@ enum MultiServerPeopleService {
             } else {
                 let candidates = try await client.searchPeople(named: person.name)
                 serverPersonID = candidates.first {
-                    $0.name.localizedCaseInsensitiveCompare(person.name) == .orderedSame
+                    $0.matchingNameKey == person.matchingNameKey
                 }?.id
             }
 

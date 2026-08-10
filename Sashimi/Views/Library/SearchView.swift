@@ -111,10 +111,10 @@ struct SearchView: View {
         SearchResultGrouping.groups(from: results)
     }
 
-    // Detect YouTube content by checking if we've identified it as YouTube
+    // Detect YouTube content from Jellyfin's owning library. The item path is
+    // not a reliable library discriminator and can vary between servers.
     private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
-        if let path = item.path?.lowercased(), path.contains("youtube") { return true }
-        return false
+        item.libraryName?.localizedCaseInsensitiveContains("youtube") == true
     }
 
     var body: some View {

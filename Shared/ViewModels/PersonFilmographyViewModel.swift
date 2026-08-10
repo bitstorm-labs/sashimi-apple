@@ -78,17 +78,4 @@ final class PersonFilmographyViewModel: ObservableObject {
             return seenIDs.insert(result.id).inserted
         }
     }
-
-    /// Kept as a focused model helper for callers that already have one
-    /// server's raw Jellyfin response (and for the existing unit coverage).
-    static func visibleMedia(from media: [BaseItemDto], excludingItemID: String?) -> [BaseItemDto] {
-        var seenIDs = Set<String>()
-        return media.filter { item in
-            guard item.id != excludingItemID,
-                  item.type == .movie || item.type == .series else {
-                return false
-            }
-            return seenIDs.insert(item.id).inserted
-        }
-    }
 }

@@ -70,22 +70,15 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertEqual(sorted[1].displayRole, "Hero")
     }
 
-    @MainActor
-    func testVisibleMediaKeepsMoviesAndSeriesOnlyAndDeduplicates() {
-        let media = [
-            makeItem(id: "movie-1", type: .movie),
-            makeItem(id: "series-1", type: .series),
-            makeItem(id: "episode-1", type: .episode),
-            makeItem(id: "movie-1", type: .movie),
-            makeItem(id: "source-item", type: .movie)
-        ]
-
-        let visible = PersonFilmographyViewModel.visibleMedia(
-            from: media,
-            excludingItemID: "source-item"
+    func testPersonMatchingKeyIgnoresPunctuationCaseAndDiacritics() {
+        XCTAssertEqual(
+            PersonInfo.matchingNameKey(for: "Robert Downey Jr."),
+            PersonInfo.matchingNameKey(for: "robert downey jr")
         )
-
-        XCTAssertEqual(visible.map(\.id), ["movie-1", "series-1"])
+        XCTAssertEqual(
+            PersonInfo.matchingNameKey(for: "Zoë Kravitz"),
+            PersonInfo.matchingNameKey(for: "Zoe Kravitz")
+        )
     }
 
     func testDisplayYearUsesProductionYearThenPremiereDate() {
@@ -186,6 +179,7 @@ final class PersonFilmographyTests: XCTestCase {
             parentBackdropImageTags: nil,
             primaryImageAspectRatio: nil,
             mediaType: nil,
+            libraryName: nil,
             productionYear: productionYear,
             communityRating: nil,
             officialRating: nil,

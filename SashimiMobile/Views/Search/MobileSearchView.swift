@@ -34,6 +34,7 @@ struct MobileSearchView: View {
     @State private var selectedGroup: ServerMediaResultGroup?
     @State private var selectedSource: ServerMediaResult?
     @State private var recentSearches: [String] = RecentSearches.load()
+    @State private var searchTask: Task<Void, Never>?
     // Only commit a query to history after the user pauses typing on a query
     // that returned results (avoids logging every keystroke prefix).
     @State private var historyTask: Task<Void, Never>?
@@ -93,18 +94,28 @@ struct MobileSearchView: View {
             }
         }
         .onChange(of: searchText) { _, newValue in
-            Task {
-                await performSearch(query: newValue)
+            searchTask?.cancel()
+            let query = newValue
+            searchTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                await performSearch(query: query)
             }
             // Debounced history commit: only record queries the user settled
             // on (1.5s pause) that produced results.
             historyTask?.cancel()
-            let query = newValue
             historyTask = Task {
                 try? await Task.sleep(for: .seconds(1.5))
-                guard !Task.isCancelled, !query.isEmpty, !searchResults.isEmpty else { return }
+                guard !Task.isCancelled,
+                      searchText == query,
+                      !query.isEmpty,
+                      !searchResults.isEmpty else { return }
                 recentSearches = RecentSearches.add(query)
             }
+        }
+        .onDisappear {
+            searchTask?.cancel()
+            historyTask?.cancel()
         }
     }
 
@@ -169,8 +180,9 @@ struct MobileSearchView: View {
                                 MobileRecentlyAddedCard(
                                     item: result.primary.item,
                                     width: metrics.cardWidth,
-                                    libraryName: nil,
-                                    isCircular: false,
+                                    libraryName: result.primary.item.libraryName,
+                                    isCircular: result.primary.item.libraryName?
+                                        .localizedCaseInsensitiveContains("youtube") == true,
                                     isLandscape: false,
                                     badgeCount: nil,
                                     serverURL: result.primary.serverURL,
@@ -213,14 +225,24 @@ struct MobileSearchView: View {
 
     private func performSearch(query: String) async {
         guard !query.isEmpty else {
-            searchResults = []
+            if searchText == query {
+                searchResults = []
+                isSearching = false
+            }
             return
         }
 
+        guard searchText == query else { return }
+
         isSearching = true
-        defer { isSearching = false }
+        defer {
+            if searchText == query {
+                isSearching = false
+            }
+        }
 
         let serverResults = await MultiServerSearchService.search(query: query, limit: 50)
+        guard !Task.isCancelled, searchText == query else { return }
         let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
         searchResults = ServerMediaResultGrouping.groups(
             from: serverResults,

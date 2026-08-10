@@ -341,8 +341,9 @@ private struct AudioQualityBadge: View {
 }
 
 /// Shared server-session scope for title detail routes. The detail view is
-/// built only after the selected server's client is configured, and the
-/// active app server is restored when the route closes.
+/// built only after the selected server's client is configured. The lifecycle
+/// task stays attached to the route so its cancellation awaits restoration of
+/// the exact parent client scope.
 struct ServerScopedMediaDetailView: View {
     let source: ServerMediaResult
 
@@ -356,7 +357,7 @@ struct ServerScopedMediaDetailView: View {
 #endif
 
     private var isYouTubeStyle: Bool {
-        source.item.path?.localizedCaseInsensitiveContains("youtube") == true
+        source.item.libraryName?.localizedCaseInsensitiveContains("youtube") == true
     }
 
     var body: some View {
@@ -371,7 +372,7 @@ struct ServerScopedMediaDetailView: View {
 #else
                 AdaptiveDetailView(
                     item: source.item,
-                    libraryName: isYouTubeStyle ? "YouTube" : nil,
+                    libraryName: source.item.libraryName,
                     serverID: source.serverID
                 )
 #endif
@@ -379,11 +380,8 @@ struct ServerScopedMediaDetailView: View {
                 ProgressView("Connecting to \(source.serverName)...")
             }
         }
-        .task {
-            isReady = await SessionManager.shared.prepareClient(for: source.serverID)
-        }
-        .onDisappear {
-            Task { await SessionManager.shared.restoreActiveClient() }
+        .task(id: source.id) {
+            await manageServerScope()
         }
         .navigationBarBackButtonHidden(true)
         .toolbar {
@@ -396,5 +394,27 @@ struct ServerScopedMediaDetailView: View {
                 .accessibilityLabel("Back to results")
             }
         }
+    }
+
+    private func manageServerScope() async {
+        guard let scope = await SessionManager.shared.beginServerScope(for: source.serverID) else {
+            return
+        }
+
+        if Task.isCancelled {
+            await SessionManager.shared.endServerScope(scope)
+            return
+        }
+
+        isReady = true
+        // SwiftUI cancels a view's task when the route disappears. Sleeping
+        // keeps the scope alive for the detail route and lets cancellation
+        // continue into the awaited restoration below.
+        do {
+            try await Task.sleep(for: .seconds(365 * 24 * 60 * 60))
+        } catch {
+            // Route cancellation is the normal way to reach restoration.
+        }
+        await SessionManager.shared.endServerScope(scope)
     }
 }
