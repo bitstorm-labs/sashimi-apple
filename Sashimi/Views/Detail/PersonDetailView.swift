@@ -4,10 +4,13 @@ import NukeUI
 struct PersonDetailView: View {
     let person: PersonInfo
     let excludingItemID: String?
+    let excludingTitleKey: String?
+    let originatingServerID: String?
+    let onSelectSource: (ServerMediaResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = PersonFilmographyViewModel()
-    @State private var selectedItem: BaseItemDto?
+    @State private var selectedGroup: ServerMediaResultGroup?
 
     var body: some View {
         ScrollView {
@@ -20,8 +23,11 @@ struct PersonDetailView: View {
             .padding(.vertical, 40)
         }
         .background(SashimiTheme.background.ignoresSafeArea())
-        .fullScreenCover(item: $selectedItem) { item in
-            MediaDetailView(item: item, forceYouTubeStyle: isYouTubeStyle(item))
+        .sheet(item: $selectedGroup) { group in
+            ServerMediaSourcePickerView(group: group) { source in
+                selectedGroup = nil
+                onSelectSource(source)
+            }
         }
         .task {
             await loadFilmography()
@@ -95,7 +101,7 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var filmographySection: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Filmography on This Server")
+            Text("Filmography Across Servers")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(SashimiTheme.textPrimary)
 
@@ -123,9 +129,9 @@ struct PersonDetailView: View {
                     .frame(minHeight: 320)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(viewModel.items) { item in
-                            PersonFilmographyRow(item: item) {
-                                selectedItem = item
+                        ForEach(viewModel.items) { group in
+                            PersonFilmographyRow(group: group) {
+                                select(group)
                             }
                         }
                     }
@@ -136,22 +142,34 @@ struct PersonDetailView: View {
     }
 
     private func loadFilmography() async {
-        await viewModel.load(personID: person.id, excludingItemID: excludingItemID)
+        let serverID = originatingServerID ?? SessionManager.shared.activeServerId
+        await viewModel.load(
+            person: person,
+            originatingServerID: serverID,
+            excludingItemID: excludingItemID,
+            excludingTitleKey: excludingTitleKey
+        )
     }
 
-    private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
-        item.path?.localizedCaseInsensitiveContains("youtube") == true
+    private func select(_ group: ServerMediaResultGroup) {
+        if group.sources.count == 1, let source = group.sources.first {
+            onSelectSource(source)
+        } else {
+            selectedGroup = group
+        }
     }
 }
 
 private struct PersonFilmographyRow: View {
-    let item: BaseItemDto
+    let group: ServerMediaResultGroup
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
     @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
+
+    private var item: BaseItemDto { group.primary.item }
 
     var body: some View {
         Button(action: onSelect) {
@@ -193,6 +211,8 @@ private struct PersonFilmographyRow: View {
                             )
                         }
                     }
+
+                    ServerSourcePillsView(sources: group.sources)
                 }
 
                 Spacer(minLength: 16)

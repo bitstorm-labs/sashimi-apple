@@ -83,7 +83,8 @@ struct ContentView: View {
                         MobileAuthView(
                             onCancel: { sessionManager.reauthServer = nil },
                             onComplete: { sessionManager.reauthServer = nil },
-                            prefillServerURL: server.url
+                            prefillServerURL: server.url,
+                            prefillUsername: server.username
                         )
                         .navigationBarTitleDisplayMode(.inline)
                     }
@@ -93,7 +94,11 @@ struct ContentView: View {
                 }
             } else {
                 NavigationStack {
-                    MobileAuthView()
+                    MobileAuthView(
+                        prefillServerURL: sessionManager.reauthServer?.url,
+                        prefillUsername: sessionManager.reauthServer?.username
+                    )
+                    .id(sessionManager.reauthServer?.id)
                 }
             }
         }

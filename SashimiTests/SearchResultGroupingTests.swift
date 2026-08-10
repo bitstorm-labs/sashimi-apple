@@ -101,4 +101,22 @@ final class SearchResultGroupingTests: XCTestCase {
 
         XCTAssertEqual(groups.first?.primary.serverID, "jelly")
     }
+
+    func testSameTitleAcrossMoreThanFiveServersRetainsEverySource() {
+        let results = (1...7).map { index in
+            makeResult(
+                id: "title-\(index)",
+                name: "Mission Impossible",
+                type: .movie,
+                serverID: "server-\(index)",
+                serverName: "Server \(index)"
+            )
+        }
+
+        let groups = ServerMediaResultGrouping.groups(from: results)
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].sources.count, 7)
+        XCTAssertEqual(Set(groups[0].sources.map(\.serverID)), Set((1...7).map { "server-\($0)" }))
+    }
 }

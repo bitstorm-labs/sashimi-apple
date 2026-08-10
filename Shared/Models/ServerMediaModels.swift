@@ -71,13 +71,20 @@ enum ServerMediaResultGrouping {
         }
     }
 
-    private static func canonicalKey(for item: BaseItemDto) -> String {
+    /// Stable presentation identity for a title. Server IDs are deliberately
+    /// excluded so copies of the same title can be grouped while their source
+    /// records remain intact.
+    static func titleKey(for item: BaseItemDto) -> String {
         let title = item.name
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .filter { $0.isLetter || $0.isNumber }
         let year = item.displayYear.map(String.init) ?? ""
         let type = item.type?.rawValue ?? "Unknown"
         return "\(type)|\(year)|\(title)"
+    }
+
+    private static func canonicalKey(for item: BaseItemDto) -> String {
+        titleKey(for: item)
     }
 
     private static func isBetter(_ candidate: ServerMediaResult, than current: ServerMediaResult) -> Bool {

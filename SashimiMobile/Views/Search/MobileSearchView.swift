@@ -31,6 +31,7 @@ struct MobileSearchView: View {
     @State private var searchText = ""
     @State private var searchResults: [ServerMediaResultGroup] = []
     @State private var isSearching = false
+    @State private var selectedGroup: ServerMediaResultGroup?
     @State private var selectedSource: ServerMediaResult?
     @State private var recentSearches: [String] = RecentSearches.load()
     // Only commit a query to history after the user pauses typing on a query
@@ -81,9 +82,14 @@ struct MobileSearchView: View {
         .background(MobileColors.background)
         .navigationTitle("Search")
         .searchable(text: $searchText, prompt: "Movies, shows, and more")
-        .sheet(item: $selectedSource) { source in
+        .fullScreenCover(item: $selectedSource) { source in
             NavigationStack {
-                ServerScopedMobileDetailView(source: source)
+                ServerScopedMediaDetailView(source: source)
+            }
+        }
+        .sheet(item: $selectedGroup) { group in
+            ServerMediaSourcePickerView(group: group) { source in
+                selectedSource = source
             }
         }
         .onChange(of: searchText) { _, newValue in
@@ -156,8 +162,8 @@ struct MobileSearchView: View {
             LazyVGrid(columns: metrics.columns, alignment: .leading, spacing: MobileSpacing.md) {
                 ForEach(searchResults) { result in
                     VStack(alignment: .leading, spacing: MobileSpacing.xs) {
-                        NavigationLink {
-                            ServerScopedMobileDetailView(source: result.primary)
+                        Button {
+                            select(result)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 MobileRecentlyAddedCard(
@@ -179,25 +185,8 @@ struct MobileSearchView: View {
                         }
                         .buttonStyle(.plain)
 
-                        HStack(spacing: MobileSpacing.xs) {
-                            ForEach(result.sources) { source in
-                                Button {
-                                    selectedSource = source
-                                } label: {
-                                    Text(source.serverName)
-                                        .font(MobileTypography.captionSmall.weight(.semibold))
-                                        .foregroundStyle(MobileColors.textPrimary)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 5)
-                                        .background(MobileColors.accent.opacity(0.35))
-                                        .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Open on \(source.serverName)")
-                            }
-                        }
-                        .frame(width: metrics.cardWidth, alignment: .leading)
+                        ServerSourcePillsView(sources: result.sources)
+                            .frame(width: metrics.cardWidth, alignment: .leading)
                     }
                 }
             }
@@ -238,38 +227,12 @@ struct MobileSearchView: View {
             preferredServerID: activeServerID
         )
     }
-}
 
-private struct ServerScopedMobileDetailView: View {
-    let source: ServerMediaResult
-
-    @State private var isReady = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Group {
-            if isReady {
-                AdaptiveDetailView(item: source.item)
-            } else {
-                ProgressView("Connecting to \(source.serverName)...")
-            }
-        }
-        .task {
-            isReady = await SessionManager.shared.prepareClient(for: source.serverID)
-        }
-        .onDisappear {
-            Task { await SessionManager.shared.restoreActiveClient() }
-        }
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .accessibilityLabel("Back to search results")
-            }
+    private func select(_ group: ServerMediaResultGroup) {
+        if group.sources.count == 1, let source = group.sources.first {
+            selectedSource = source
+        } else {
+            selectedGroup = group
         }
     }
 }

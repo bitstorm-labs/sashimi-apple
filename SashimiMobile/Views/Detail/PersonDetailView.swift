@@ -4,9 +4,13 @@ import NukeUI
 struct PersonDetailView: View {
     let person: PersonInfo
     let excludingItemID: String?
+    let excludingTitleKey: String?
+    let originatingServerID: String?
+    let onSelectSource: (ServerMediaResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = PersonFilmographyViewModel()
+    @State private var selectedGroup: ServerMediaResultGroup?
 
     var body: some View {
         ScrollView {
@@ -29,6 +33,12 @@ struct PersonDetailView: View {
                     Label("Back", systemImage: "chevron.left")
                 }
                 .accessibilityHint("Return to the previous screen")
+            }
+        }
+        .sheet(item: $selectedGroup) { group in
+            ServerMediaSourcePickerView(group: group) { source in
+                selectedGroup = nil
+                onSelectSource(source)
             }
         }
         .task {
@@ -86,7 +96,7 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var filmographySection: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Filmography on This Server")
+            Text("Filmography Across Servers")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
 
@@ -126,16 +136,16 @@ struct PersonDetailView: View {
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     LazyVStack(spacing: MobileSpacing.xs) {
-                        ForEach(viewModel.items) { item in
-                            NavigationLink {
-                                AdaptiveDetailView(item: item, libraryName: libraryName(for: item))
+                        ForEach(viewModel.items) { group in
+                            Button {
+                                select(group)
                             } label: {
-                                PersonFilmographyRow(item: item)
+                                PersonFilmographyRow(group: group)
                             }
                             .buttonStyle(.plain)
                             .accessibilityElement(children: .combine)
-                            .accessibilityLabel(item.displayTitle)
-                            .accessibilityHint("Open title details")
+                            .accessibilityLabel(group.primary.item.displayTitle)
+                            .accessibilityHint(group.sources.count > 1 ? "Choose a server to open title details" : "Open title details")
                         }
                     }
                 }
@@ -144,28 +154,33 @@ struct PersonDetailView: View {
     }
 
     private func loadFilmography() async {
+        let serverID = originatingServerID ?? SessionManager.shared.activeServerId
         await viewModel.load(
-            personID: person.id,
+            person: person,
+            originatingServerID: serverID,
             excludingItemID: excludingItemID,
+            excludingTitleKey: excludingTitleKey,
             isOffline: !NetworkMonitor.shared.isConnected
         )
     }
 
-    private func isYouTube(_ item: BaseItemDto) -> Bool {
-        item.path?.localizedCaseInsensitiveContains("youtube") == true
-    }
-
-    private func libraryName(for item: BaseItemDto) -> String? {
-        isYouTube(item) ? "YouTube" : nil
+    private func select(_ group: ServerMediaResultGroup) {
+        if group.sources.count == 1, let source = group.sources.first {
+            onSelectSource(source)
+        } else {
+            selectedGroup = group
+        }
     }
 }
 
 private struct PersonFilmographyRow: View {
-    let item: BaseItemDto
+    let group: ServerMediaResultGroup
 
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
     @AppStorage("useEpisodeRatings") private var useEpisodeRatings = false
+
+    private var item: BaseItemDto { group.primary.item }
 
     var body: some View {
         HStack(spacing: MobileSpacing.sm) {
@@ -206,6 +221,8 @@ private struct PersonFilmographyRow: View {
                         )
                     }
                 }
+
+                ServerSourcePillsView(sources: group.sources)
             }
 
             Spacer(minLength: MobileSpacing.xs)

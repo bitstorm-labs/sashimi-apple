@@ -97,6 +97,7 @@ struct SearchView: View {
     @State private var searchText = ""
     @State private var results: [ServerMediaResultGroup] = []
     @State private var isSearching = false
+    @State private var selectedGroup: ServerMediaResultGroup?
     @State private var selectedSource: ServerMediaResult?
     @State private var searchTask: Task<Void, Never>?
     @StateObject private var historyManager = SearchHistoryManager.shared
@@ -132,10 +133,12 @@ struct SearchView: View {
         }
         .fullScreenCover(item: $selectedSource) { source in
             NavigationStack {
-                ServerScopedTVDetailView(
-                    source: source,
-                    forceYouTubeStyle: isYouTubeStyle(source.item)
-                )
+                ServerScopedMediaDetailView(source: source)
+            }
+        }
+        .sheet(item: $selectedGroup) { group in
+            ServerMediaSourcePickerView(group: group) { source in
+                selectedSource = source
             }
         }
         .onChange(of: searchText) { _, _ in
@@ -243,9 +246,7 @@ struct SearchView: View {
                         SearchResultRow(
                             group: group,
                             isYouTube: isYouTubeStyle,
-                            onSelect: { source in
-                                selectedSource = source
-                            }
+                            onSelect: select
                         )
                     }
                 }
@@ -287,6 +288,14 @@ struct SearchView: View {
         )
         if !results.isEmpty {
             historyManager.addSearch(searchText)
+        }
+    }
+
+    private func select(_ group: ServerMediaResultGroup) {
+        if group.sources.count == 1, let source = group.sources.first {
+            selectedSource = source
+        } else {
+            selectedGroup = group
         }
     }
 }
@@ -415,7 +424,7 @@ private struct TVKeyButton: View {
 private struct SearchResultRow: View {
     let group: SearchResultGroup
     let isYouTube: (BaseItemDto) -> Bool
-    let onSelect: (ServerMediaResult) -> Void
+    let onSelect: (ServerMediaResultGroup) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -439,29 +448,12 @@ private struct SearchResultRow: View {
                                 serverURL: result.primary.serverURL,
                                 serverID: result.primary.serverID
                             ) {
-                                onSelect(result.primary)
+                                onSelect(result)
                             }
                             .frame(width: 200)
 
-                            HStack(spacing: 6) {
-                                ForEach(result.sources) { source in
-                                    Button {
-                                        onSelect(source)
-                                    } label: {
-                                        Text(source.serverName)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(SashimiTheme.textPrimary)
-                                            .lineLimit(1)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 5)
-                                            .background(SashimiTheme.accent.opacity(0.35))
-                                            .clipShape(Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Open on \(source.serverName)")
-                                }
-                            }
-                            .frame(width: 200)
+                            ServerSourcePillsView(sources: result.sources)
+                                .frame(width: 200)
                         }
                     }
                 }
@@ -472,42 +464,6 @@ private struct SearchResultRow: View {
                 .padding(.vertical, 20)
             }
             .focusSection()
-        }
-    }
-}
-
-private struct ServerScopedTVDetailView: View {
-    let source: ServerMediaResult
-    let forceYouTubeStyle: Bool
-
-    @State private var isReady = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Group {
-            if isReady {
-                MediaDetailView(item: source.item, forceYouTubeStyle: forceYouTubeStyle)
-            } else {
-                ProgressView("Connecting to \(source.serverName)...")
-                    .tint(SashimiTheme.accent)
-            }
-        }
-        .task {
-            isReady = await SessionManager.shared.prepareClient(for: source.serverID)
-        }
-        .onDisappear {
-            Task { await SessionManager.shared.restoreActiveClient() }
-        }
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .accessibilityLabel("Back to search results")
-            }
         }
     }
 }

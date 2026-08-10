@@ -12,6 +12,9 @@ struct MobileDetailView: View {
     // items opened from search.
     @State var item: BaseItemDto
     var libraryName: String?
+    // Keep existing detail navigation compatible with unscoped media items.
+    // swiftlint:disable:next implicit_optional_initialization
+    var serverID: String? = nil
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
     @State private var overviewExpanded = false
@@ -26,6 +29,8 @@ struct MobileDetailView: View {
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingPersonDetail: PersonInfo?
+    @State private var pendingServerMedia: ServerMediaResult?
+    @State private var selectedServerMedia: ServerMediaResult?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var downloadScope: DownloadScope?
@@ -217,12 +222,23 @@ struct MobileDetailView: View {
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
-                AdaptiveDetailView(item: episode, libraryName: libraryName)
+                AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
             }
         }
-        .sheet(item: $showingPersonDetail) { person in
+        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
             NavigationStack {
-                PersonDetailView(person: person, excludingItemID: item.id)
+                PersonDetailView(
+                    person: person,
+                    excludingItemID: item.id,
+                    excludingTitleKey: ServerMediaResultGrouping.titleKey(for: item),
+                    originatingServerID: serverID ?? SessionManager.shared.activeServerId,
+                    onSelectSource: queueServerMedia
+                )
+            }
+        }
+        .fullScreenCover(item: $selectedServerMedia) { source in
+            NavigationStack {
+                ServerScopedMediaDetailView(source: source)
             }
         }
         .task {
@@ -268,6 +284,17 @@ struct MobileDetailView: View {
         } message: {
             Text(adminError ?? "")
         }
+    }
+
+    private func queueServerMedia(_ source: ServerMediaResult) {
+        pendingServerMedia = source
+        showingPersonDetail = nil
+    }
+
+    private func presentPendingServerMedia() {
+        guard let source = pendingServerMedia else { return }
+        pendingServerMedia = nil
+        selectedServerMedia = source
     }
 
     // MARK: - Admin Menu (tvOS parity)
@@ -887,7 +914,7 @@ struct MobileDetailView: View {
             if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
-                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName)
+                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
                     } else {
                         ProgressView()
                     }

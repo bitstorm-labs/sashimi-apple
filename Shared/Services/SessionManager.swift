@@ -91,6 +91,27 @@ final class SessionManager: ObservableObject {
 
     private func tokenKey(_ id: String) -> String { "accessToken.\(id)" }
 
+    /// Returns a server-scoped token and repairs installs created before the
+    /// per-server token migration when the active server still has a legacy
+    /// token available. The legacy token is only a safe fallback for the
+    /// active server; it must never be reused for another saved server.
+    private func token(for server: ServerConfig, allowLegacyFallback: Bool = false) -> String? {
+        if let token = KeychainHelper.get(forKey: tokenKey(server.id)) {
+            return token
+        }
+        guard allowLegacyFallback,
+              server.id == activeServerId,
+              let legacyToken = KeychainHelper.get(forKey: keychainAccessTokenKey) else {
+            return nil
+        }
+        guard KeychainHelper.save(legacyToken, forKey: tokenKey(server.id)) else {
+            logger.error("Could not migrate the active server's saved credential")
+            return nil
+        }
+        logger.info("Migrated the active server's legacy credential to its server-scoped key")
+        return legacyToken
+    }
+
     // MARK: - Session lifecycle
 
     func restoreSession() async {
@@ -101,14 +122,36 @@ final class SessionManager: ObservableObject {
             migrateLegacySession()
         }
 
-        guard let server = activeServer ?? servers.first,
-              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+        guard let server = activeServer ?? servers.first else {
+            reauthServer = nil
             return
         }
         if activeServerId != server.id {
             activeServerId = server.id
             saveServers()
         }
+
+        // Keep missing non-active credentials visible in diagnostics as well.
+        // They remain selectable in Settings and can be re-authenticated, but
+        // a multi-server search must never make the omission look like an
+        // empty Jellyfin catalog.
+        for savedServer in servers where savedServer.id != server.id {
+            if token(for: savedServer) == nil {
+                logger.error(
+                    "Saved server has no readable access token: \(savedServer.url.host ?? "unknown", privacy: .public)"
+                )
+            }
+        }
+
+        guard let token = token(for: server, allowLegacyFallback: true) else {
+            // Keep the saved server visible and prefill its address/user in the
+            // auth form. A missing token is a re-authentication case, not a
+            // reason to make the user configure the server from scratch.
+            reauthServer = server
+            logger.error("Session restore could not read the saved access token; re-authentication required")
+            return
+        }
+        reauthServer = nil
         await activate(server, token: token)
     }
 
@@ -230,10 +273,8 @@ final class SessionManager: ObservableObject {
         activeServerId = config.id
         saveServers()
 
-        self.serverURL = serverURL
-        self.currentUser = result.user
         self.logoutReason = nil
-        self.isAuthenticated = true
+        await activate(config, token: result.accessToken)
     }
 
     /// Switch the active server (no-op if already active or unknown).
@@ -243,6 +284,7 @@ final class SessionManager: ObservableObject {
     func restoreActiveClient() async {
         guard let server = activeServer,
               let token = KeychainHelper.get(forKey: tokenKey(server.id)) else { return }
+        reauthServer = nil
         mirrorServerDefaults(server, token: token)
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
     }
@@ -329,6 +371,7 @@ final class SessionManager: ObservableObject {
         self.serverURL = nil
         self.currentUser = nil
         self.logoutReason = reason
+        self.reauthServer = nil
         self.isAuthenticated = false
         Task { await teardownSession(reason: reason) }
     }

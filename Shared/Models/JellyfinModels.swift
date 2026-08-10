@@ -232,6 +232,26 @@ struct ItemsResponse: Codable {
     }
 }
 
+/// Jellyfin returns `/Persons` as a paged query result on current servers.
+/// Older/server-compatible implementations may return the people as a bare
+/// array, so keep the decoder tolerant of both shapes.
+struct PeopleResponse: Decodable {
+    let items: [PersonInfo]
+
+    private enum CodingKeys: String, CodingKey {
+        case items = "Items"
+    }
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            items = try container.decode([PersonInfo].self, forKey: .items)
+        } else {
+            let container = try decoder.singleValueContainer()
+            items = try container.decode([PersonInfo].self)
+        }
+    }
+}
+
 struct PlaybackInfoResponse: Codable {
     let mediaSources: [MediaSourceInfo]?
     let playSessionId: String?

@@ -20,6 +20,43 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertEqual(person.primaryImageTag, "image-tag")
     }
 
+    func testPeopleResponseDecodesJellyfinPagedResponse() throws {
+        let json = """
+        {
+            "Items": [
+                {
+                    "Id": "person-1",
+                    "Name": "Taylor Example",
+                    "Type": "Actor"
+                }
+            ],
+            "StartIndex": 0,
+            "TotalRecordCount": 1
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(PeopleResponse.self, from: json)
+
+        XCTAssertEqual(response.items.map(\.id), ["person-1"])
+        XCTAssertEqual(response.items.first?.name, "Taylor Example")
+    }
+
+    func testPeopleResponseDecodesBareArrayForCompatibility() throws {
+        let json = """
+        [
+            {
+                "Id": "person-1",
+                "Name": "Taylor Example",
+                "Type": "Actor"
+            }
+        ]
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(PeopleResponse.self, from: json)
+
+        XCTAssertEqual(response.items.map(\.id), ["person-1"])
+    }
+
     func testPeopleSortActorsFirstAndPreservesCrew() {
         let people = [
             PersonInfo(id: "crew", name: "A Crew Member", role: nil, type: "Writer", primaryImageTag: nil),
@@ -73,7 +110,14 @@ final class PersonFilmographyTests: XCTestCase {
     func testOfflineFilmographyDoesNotShowStaleItems() async {
         let viewModel = PersonFilmographyViewModel()
 
-        await viewModel.load(personID: "person-1", isOffline: true)
+        let person = PersonInfo(
+            id: "person-1",
+            name: "Taylor Example",
+            role: nil,
+            type: "Actor",
+            primaryImageTag: nil
+        )
+        await viewModel.load(person: person, originatingServerID: nil, isOffline: true)
 
         let state = viewModel.state
         let items = viewModel.items
@@ -81,15 +125,52 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertTrue(items.isEmpty)
     }
 
+    @MainActor
+    func testVisibleServerMediaExcludesCurrentTitleAcrossServerCopies() {
+        let currentItem = makeItem(id: "origin-title", name: "Shared Title", type: .movie)
+        let copyOnAnotherServer = makeItem(id: "copy-title", name: "Shared Title", type: .movie)
+        let otherItem = makeItem(id: "other-title", name: "Other Title", type: .series)
+        let results = [
+            ServerMediaResult(
+                item: currentItem,
+                serverID: "origin",
+                serverName: "Origin",
+                serverURL: URL(string: "https://origin.example")!
+            ),
+            ServerMediaResult(
+                item: copyOnAnotherServer,
+                serverID: "other-server",
+                serverName: "Other Server",
+                serverURL: URL(string: "https://other.example")!
+            ),
+            ServerMediaResult(
+                item: otherItem,
+                serverID: "other-server",
+                serverName: "Other Server",
+                serverURL: URL(string: "https://other.example")!
+            )
+        ]
+
+        let visible = PersonFilmographyViewModel.visibleMedia(
+            from: results,
+            excludingItemID: currentItem.id,
+            excludingServerID: "origin",
+            excludingTitleKey: ServerMediaResultGrouping.titleKey(for: currentItem)
+        )
+
+        XCTAssertEqual(visible.map { $0.item.id }, ["other-title"])
+    }
+
     private func makeItem(
         id: String,
+        name: String? = nil,
         type: ItemType,
         productionYear: Int? = nil,
         premiereDate: String? = nil
     ) -> BaseItemDto {
         BaseItemDto(
             id: id,
-            name: id,
+            name: name ?? id,
             type: type,
             seriesName: nil,
             seriesId: nil,
