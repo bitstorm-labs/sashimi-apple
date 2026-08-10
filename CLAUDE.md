@@ -1,10 +1,20 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. It is the canonical project guidance shared with Codex through the `AGENTS.md` symlink.
 
 ## Project Overview
 
-Sashimi is a tvOS client for Jellyfin media servers, built with SwiftUI. It targets tvOS 17+ and uses Swift 5.9.
+Sashimi is a native SwiftUI Jellyfin client for Apple TV, iPhone, and iPad. It targets tvOS 17+ and iOS 17+ and uses Swift 5.9. The tvOS and iOS apps share networking, authentication, media models, and playback logic where the behavior is genuinely cross-platform.
+
+### Target Taxonomy
+
+- **`Sashimi/`**: tvOS application UI, including remote-focus behavior, the tvOS player, and tvOS settings.
+- **`SashimiMobile/`**: iPhone and iPad application UI, including phone tabs, iPad navigation, offline downloads, and mobile-only playback behavior.
+- **`Shared/`**: cross-platform Jellyfin models, services, view models, session/authentication, playback selection, and shared components. Put behavior here only when both application targets need the same contract.
+- **`TopShelf/`**: tvOS Top Shelf extension. Keep extension-specific content-provider behavior here.
+- **`SashimiTests/`**: the tvOS-hosted unit-test target for shared and tvOS application behavior. Do not compile `Shared/` into the test bundle a second time; the test host provides those symbols.
+
+The project is a single Universal Purchase product with separate tvOS and iOS targets. A feature is not complete if a change to shared behavior silently regresses the other platform.
 
 ## Build Commands
 
@@ -14,6 +24,9 @@ swift build
 
 # Build with Xcode (uses project.yml with XcodeGen)
 xcodebuild -project Sashimi.xcodeproj -scheme Sashimi -destination 'platform=tvOS Simulator,name=Apple TV'
+
+# Build the iOS app (iPhone/iPad)
+xcodebuild -project Sashimi.xcodeproj -scheme SashimiMobile -destination 'platform=iOS Simulator,name=iPhone 16'
 
 # Generate Xcode project from project.yml (requires XcodeGen)
 xcodegen generate
@@ -28,12 +41,12 @@ xcodegen generate
 
 ### Core Services
 - **JellyfinClient** (`Shared/Services/JellyfinClient.swift`): Swift `actor` handling all Jellyfin REST API communication. Singleton accessed via `JellyfinClient.shared`. Manages authentication headers, device identification, and playback URL generation.
-- **SessionManager** (`Shared/Services/SessionManager.swift`): `@MainActor` `ObservableObject` singleton managing auth state, token persistence via UserDefaults, and session restoration.
+- **SessionManager** (`Shared/Services/SessionManager.swift`): `@MainActor` `ObservableObject` singleton managing auth state, server metadata in UserDefaults, access tokens in the Keychain, and session restoration.
 
 ### Data Flow
-1. App entry (`SashimiApp.swift`) injects `SessionManager` as `@EnvironmentObject`
-2. `ContentView` shows `ServerConnectionView` or `MainTabView` based on `sessionManager.isAuthenticated`
-3. Views create their own `@StateObject` ViewModels which call `JellyfinClient.shared` methods
+1. App entry (`SashimiApp.swift` or `SashimiMobileApp.swift`) injects `SessionManager` as an `@EnvironmentObject`
+2. Root content shows the appropriate authentication flow or authenticated navigation based on `sessionManager.isAuthenticated`
+3. Views create their own `@StateObject` view models, which call `JellyfinClient.shared` methods
 4. API responses are decoded into `BaseItemDto` and related model types
 
 ### Key Model Types
@@ -48,6 +61,8 @@ xcodegen generate
 - Reports playback progress to Jellyfin server every 5 seconds (and immediately on play/pause)
 - Auto-resumes from saved progress when it exceeds the resume threshold setting (no dialog)
 - Supports Up Next feature for continuous episode playback
+- Preserves audio/subtitle selection, quality switching, trailers, and skip-intro/credits behavior when changing playback flows
+- Mobile playback also coordinates Picture-in-Picture and offline downloaded media; tvOS and iOS presentation differences belong in their respective targets
 
 ### Dependencies
 - **Nuke/NukeUI**: Image loading and caching (via SPM)
@@ -63,6 +78,39 @@ The app has special handling for YouTube content (from Pinchflat). YouTube libra
 - **Display preference**: Use series poster in rows, episode thumbnails only in episode detail hero
 
 When adding new views that display media items, pass `libraryName` to `MediaPosterButton` to enable proper YouTube detection. The `isYouTubeStyle` computed property handles the logic.
+
+## Feature Development Standards
+
+### Target and architecture boundaries
+
+- Classify a change by target before editing. Put shared behavior in `Shared/`, tvOS presentation and focus behavior in `Sashimi/`, mobile layouts/downloads/offline behavior in `SashimiMobile/`, and Top Shelf behavior in `TopShelf/`.
+- Follow MVVM: views present state and user actions; `@MainActor` `ObservableObject` view models own UI state and orchestration; Codable Jellyfin DTOs belong in `Shared/Models/`; reusable server, auth, playback, and persistence behavior belongs in `Shared/Services/`.
+- Route Jellyfin API calls through the actor-based `JellyfinClient`. Do not add ad-hoc URLSession calls from views, duplicate authentication headers, or bypass `SessionManager` for session state.
+- Respect Swift concurrency. Keep UI-facing state on `@MainActor`, use actors for shared mutable service state, handle cancellation and errors deliberately, and do not add unsafe isolation annotations without documenting the invariant.
+
+### UI and platform behavior
+
+- Preserve tvOS remote focus and readable focus states, iPhone tab navigation, and iPad sidebar/adaptive layouts. Do not use size-class changes to swap the entire mobile root when device identity is the actual distinction.
+- Reuse existing loading, empty, error, toast, image, theme, and navigation components before introducing variants. Keep business logic out of view composition and make loading/error transitions explicit so stale media is not displayed as current.
+- When displaying media, preserve the YouTube rules above and pass `libraryName` through the component tree rather than reconstructing library type from `collectionType`.
+
+### Domain, persistence, and security
+
+- Playback changes must account for direct play/transcoding selection, progress reporting, resume behavior, subtitles, audio tracks, trailers, Up Next, offline downloads, and Picture-in-Picture where applicable.
+- Treat persisted data as a compatibility surface. Server metadata and active-server state use UserDefaults, access tokens use the Keychain, certificate allowances/pins use per-host persisted settings, and mobile downloads use SwiftData plus app Documents storage. Preserve existing keys and add migrations when changing their meaning or shape.
+- Keep server URLs, credentials, access tokens, certificate details, and user/media data out of logs and source control. Use the existing Keychain/session flows; do not broaden entitlements or App Transport Security exceptions without a concrete requirement.
+
+### Tests and verification
+
+- Add or update focused tests in `SashimiTests/` for model decoding, validation, URL construction, playback selection, session behavior, downloads, and view-model state transitions. Tests must exercise the production path and assert the behavior that changed, not merely echo mock data.
+- For target-specific changes, build and test the affected Xcode scheme. For `Shared/` changes, validate both tvOS and iOS when the environment permits. Run SwiftLint in strict mode and use `swift build` only as a package-level check, not as a substitute for an affected Xcode build.
+- Report exactly what was and was not verified. Distinguish simulator/build results from hardware-only behavior such as tvOS remote focus, offline playback, AVPlayer codec behavior, Picture-in-Picture, and physical-remote interaction.
+
+### Generated project, dependencies, and assets
+
+- `project.yml` is the source of truth for Xcode targets, build settings, entitlements, and package attachment. Update it and run `xcodegen generate` when needed; do not hand-edit generated project files.
+- Respect the existing target/dependency graph. Keep Nuke/NukeUI image loading on the targets that use it and use `SashimiImagePipeline` so image requests share the app's caching and certificate-trust policy.
+- Add images through the appropriate asset catalog. Preserve tvOS layered icon structures, iOS app-icon structures, and required scale/device variants.
 
 ## Git Workflow & CI
 
