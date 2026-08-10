@@ -190,7 +190,6 @@ struct HeroSection: View {
 
     @FocusState private var isFocused: Bool
     @State private var autoAdvanceTimer: Timer?
-    @State private var progress: Double = 0
 
     /// Seconds each hero item stays on screen before auto-advancing
     private let slideDuration: Double = 6
@@ -435,31 +434,6 @@ struct HeroSection: View {
                                 .padding(.top, 4)
                         }
 
-                        // Page indicators
-                        if items.count > 1 {
-                            HStack(spacing: 10) {
-                                ForEach(0..<items.count, id: \.self) { index in
-                                    ZStack(alignment: .leading) {
-                                        Capsule()
-                                            .fill(.white.opacity(0.3))
-                                            .frame(width: index == safeIndex ? 48 : 12, height: 5)
-                                        if index == safeIndex {
-                                            Capsule()
-                                                .fill(.white)
-                                                .frame(width: 48 * progress, height: 5)
-                                        } else if index < safeIndex {
-                                            Capsule()
-                                                .fill(.white.opacity(0.7))
-                                                .frame(width: 12, height: 5)
-                                        }
-                                    }
-                                    .animation(.easeInOut(duration: 0.3), value: safeIndex)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 16)
-                        }
-
                         Spacer()
                     }
                     .padding(.horizontal, 80)
@@ -492,9 +466,6 @@ struct HeroSection: View {
         .onDisappear {
             stopAutoAdvance()
         }
-        .onChange(of: currentIndex) { _, _ in
-            restartProgressAnimation()
-        }
     }
 
     private func startAutoAdvance() {
@@ -504,28 +475,13 @@ struct HeroSection: View {
         // keeps mutating currentIndex — the hero then advances at a multiple
         // of the intended rate and never settles.
         autoAdvanceTimer?.invalidate()
-        restartProgressAnimation()
-        // One tick per slide; the progress bar fills via a single linear
-        // animation instead of a 10Hz timer mutating state.
+        // One tick per slide advances the hero.
         autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: slideDuration, repeats: true) { _ in
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.6)) {
                     currentIndex = (currentIndex + 1) % items.count
                 }
             }
-        }
-    }
-
-    /// Snap the progress bar back to empty (no animation), then animate it
-    /// full over the slide duration.
-    private func restartProgressAnimation() {
-        var snapBack = Transaction()
-        snapBack.disablesAnimations = true
-        withTransaction(snapBack) {
-            progress = 0
-        }
-        withAnimation(.linear(duration: slideDuration)) {
-            progress = 1
         }
     }
 
