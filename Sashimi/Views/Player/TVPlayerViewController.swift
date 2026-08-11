@@ -464,11 +464,18 @@ struct PlayerContentOverlay: View {
                 VStack {
                     topInfoBar
                         .padding(.horizontal, 80)
-                        .padding(.vertical, 24)
+                        .padding(.top, 44)
+                        .padding(.bottom, 24)
                         .frame(maxWidth: .infinity)
                         .background(.black.opacity(0.4))
                     Spacer()
                 }
+                // The overlay lives in AVPlayerViewController's contentOverlayView,
+                // which applies the tvOS overscan safe area — that ~60px top inset
+                // left a black gap above the info scrim and pushed the title too
+                // low. Extend the scrim to the top edge; the 44px top padding keeps
+                // the content itself overscan-safe (matches the Roku OSD's ~44px).
+                .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }

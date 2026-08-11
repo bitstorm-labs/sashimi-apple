@@ -18,6 +18,13 @@ struct HomeView: View {
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
+    // Fixed hero wallpaper: dims to black as the rows scroll up over it.
+    @State private var heroScrollFade: Double = 0
+    // Seeded near the real 32:9 full-width height so the reveal spacer is correct
+    // on first render; the GeometryReader corrects it once laid out.
+    @State private var heroHeight: CGFloat = 500
+    // The id of the item scrolled to the top (0 = hero reveal spacer = "at top").
+    @State private var homeTopID: Int?
 
     // Order libraries according to settings
 
@@ -31,30 +38,72 @@ struct HomeView: View {
                 )
                 .ignoresSafeArea()
 
+                // Fixed hero wallpaper pinned to the top, BEHIND the scrolling
+                // rows. It dims to black as the rows scroll up over it, so the
+                // content stays readable and the art never fights the cards.
+                if !viewModel.heroItems.isEmpty {
+                    HeroSection(
+                        items: viewModel.heroItems,
+                        libraryNames: viewModel.heroItemLibraryNames,
+                        currentIndex: $heroIndex
+                    )
+                    .overlay(Color.black.opacity(heroScrollFade))
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { heroHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, newHeight in
+                                    heroHeight = newHeight
+                                }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    // Full-bleed to the top edge too — it's a wallpaper pinned to
+                    // the top, so no top inset. Nothing important sits at the very
+                    // top (the title is at the hero's bottom), so overscan bleed is
+                    // fine and looks cleaner than a gap.
+                    .ignoresSafeArea(edges: [.top, .horizontal])
+                }
+
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 40) {
-                        // Logo + avatar now live in the pullout sidebar
-                        Spacer()
-                            .frame(height: 40)
+                        // Clear spacer revealing the fixed hero above the first row
+                        // (a touch less than the hero height so the first row
+                        // overlaps the hero's faded bottom edge). id 0 = "at top".
+                        Color.clear
+                            .frame(height: max(0, heroHeight - 48))
+                            .id(0)
 
-                        // Render rows based on settings order
-                        ForEach(homeSettings.rowConfigs) { config in
-                            if config.isVisible {
-                                rowView(for: config)
-                            }
+                        // Rows in settings order; the hero is a fixed backdrop, so
+                        // its config is skipped here. Each row is id'd so the scroll
+                        // position can report which one is at the top.
+                        ForEach(
+                            Array(homeSettings.rowConfigs
+                                .filter { $0.isVisible && $0.type != .hero }
+                                .enumerated()),
+                            id: \.element.id
+                        ) { index, config in
+                            rowView(for: config)
+                                .id(index + 1)
                         }
 
                         // Bottom spacing
                         Spacer()
                             .frame(height: 100)
                     }
+                    .scrollTargetLayout()
                 }
-                // Horizontal too: the ScrollView applied the TRAILING safe-area
-                // inset to its content while the rail's leading padding absorbed
-                // the leading one — so the hero sat ~70pt off-center (50pt gap
-                // on the left, 120pt on the right). Ignoring both makes the
-                // hero's 50pt horizontal padding symmetric.
-                .ignoresSafeArea(edges: [.top, .horizontal])
+                // tvOS focus-scroll doesn't expose a smooth offset, but it does
+                // report which laid-out item is at the top. id 0 is the hero reveal
+                // spacer; anything past it means the rows scrolled up over the hero,
+                // so dim the wallpaper to black.
+                .scrollPosition(id: $homeTopID, anchor: .top)
+                .onChange(of: homeTopID) { _, newID in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        heroScrollFade = (newID ?? 0) == 0 ? 0 : 1
+                    }
+                }
+                .ignoresSafeArea(edges: .horizontal)
             }
             .fullScreenCover(item: $selectedItem) { item in
                 MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
@@ -112,22 +161,9 @@ struct HomeView: View {
         if let type = config.type {
             switch type {
             case .hero:
-                if !viewModel.heroItems.isEmpty {
-                    HeroSection(
-                        items: viewModel.heroItems,
-                        libraryNames: viewModel.heroItemLibraryNames,
-                        currentIndex: $heroIndex,
-                        focusNamespace: focusNamespace,
-                        onSelect: { item in
-                            // Check if item comes from a library named YouTube
-                            let libraryName = viewModel.heroItemLibraryNames[item.id] ?? ""
-                            selectedItemIsYouTube = libraryName.lowercased().contains("youtube")
-                            selectedItem = item
-                        }
-                    )
-                    .padding(.top, 2)
-                    .focusSection()
-                }
+                // The hero is rendered as a fixed backdrop in the body (behind the
+                // scrolling rows), so it is never a scrolling row here.
+                EmptyView()
             case .continueWatching:
                 if !viewModel.continueWatchingItems.isEmpty {
                     ContinueWatchingRow(
@@ -185,10 +221,7 @@ struct HeroSection: View {
     let items: [BaseItemDto]
     let libraryNames: [String: String]
     @Binding var currentIndex: Int
-    var focusNamespace: Namespace.ID?
-    let onSelect: (BaseItemDto) -> Void
 
-    @FocusState private var isFocused: Bool
     @State private var autoAdvanceTimer: Timer?
 
     /// Seconds each hero item stays on screen before auto-advancing
@@ -277,13 +310,12 @@ struct HeroSection: View {
     }
 
     var body: some View {
-        Button {
-            onSelect(currentItem)
-        } label: {
-            GeometryReader { geometry in
+        GeometryReader { geometry in
                 ZStack(alignment: .bottomLeading) {
-                    // Background color
-                    SashimiTheme.background
+                    // Transparent base so the page gradient behind the hero shows
+                    // through — a solid SashimiTheme.background fill read lighter
+                    // than the rest of the screen (which fades to pure black).
+                    Color.clear
 
                     // Backdrop image positioned on the right with soft left edge.
                     // The fade mask is applied to the IMAGE, not the 0.7-width
@@ -324,12 +356,15 @@ struct HeroSection: View {
                         .animation(.easeInOut(duration: 0.6), value: currentItem.id)
                     }
 
-                    // Left side gradient for text area
+                    // Left text scrim: black (not charcoal) so the text area
+                    // matches the page's fade-to-black rather than reading lighter.
+                    // The title is white with a shadow, so a light scrim isn't
+                    // needed for legibility over the dark background.
                     HStack(spacing: 0) {
                         LinearGradient(
                             stops: [
-                                .init(color: SashimiTheme.background, location: 0.0),
-                                .init(color: SashimiTheme.background, location: 0.85),
+                                .init(color: .black.opacity(0.5), location: 0.0),
+                                .init(color: .black.opacity(0.4), location: 0.6),
                                 .init(color: .clear, location: 1.0)
                             ],
                             startPoint: .leading,
@@ -339,13 +374,14 @@ struct HeroSection: View {
                         Spacer()
                     }
 
-                    // Bottom gradient
+                    // Bottom gradient — fade to black (not charcoal) so the title
+                    // area and the hero's lower edge match the page's fade-to-black.
                     LinearGradient(
                         stops: [
                             .init(color: .clear, location: 0.0),
                             .init(color: .clear, location: 0.4),
-                            .init(color: SashimiTheme.background.opacity(0.6), location: 0.7),
-                            .init(color: SashimiTheme.background, location: 1.0)
+                            .init(color: .black.opacity(0.6), location: 0.7),
+                            .init(color: .black, location: 1.0)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -440,26 +476,25 @@ struct HeroSection: View {
                 }
             }
             .aspectRatio(32/9, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 24))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(SashimiTheme.focus.opacity(isFocused ? 0.6 : 0), lineWidth: 4)
+            // Non-interactive ambient wallpaper: full-bleed (edge to edge), not a
+            // card — no focus, no border, no scale (focus skips it to the first
+            // row). Fade only the bottom edge to transparent so the hero dissolves
+            // into the page background instead of ending on a hard horizontal seam
+            // (its fill is lighter than the page gradient lower down). Fade starts
+            // at 0.9 so the title/metadata above it stay fully opaque.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.9),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             )
-            .scaleEffect(isFocused ? 1.01 : 1.0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-        // Padding OUTSIDE the button: with it inside, the hero's focus frame
-        // stretched to the rail seam and covered the invisible double-press
-        // buffer — the focus engine saw the buffer as inside the hero and
-        // skipped straight to the rail on a single left press.
-        .padding(.horizontal, 50)
-        .focused($isFocused)
-        .defaultFocus(in: focusNamespace)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityDescription)
-        .accessibilityHint("Double-tap to view details")
-        .accessibilityAddTraits(.isButton)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityDescription)
         .onAppear {
             startAutoAdvance()
         }
