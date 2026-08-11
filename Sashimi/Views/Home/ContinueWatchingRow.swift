@@ -94,9 +94,9 @@ struct ContinueWatchingCard: View {
     }
 
     private var episodeInfoString: String {
-        // For YouTube, show date instead of S/E
-        if isYouTube, let dateStr = DateFormatting.formatDate(item.premiereDate) {
-            return "\(dateStr) - \(item.name)"
+        // For YouTube, show just the video title (no date)
+        if isYouTube {
+            return item.name
         }
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
