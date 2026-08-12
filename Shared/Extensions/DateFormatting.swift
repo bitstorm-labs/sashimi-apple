@@ -29,12 +29,6 @@ enum DateFormatting {
         return formatter
     }()
 
-    private static let shortNumericFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M-d-yyyy"
-        return formatter
-    }()
-
     /// Long form, e.g. "May 7, 2026". Callers used to build two
     /// ISO8601DateFormatters plus a DateFormatter inline, inside computed
     /// properties — so three expensive allocations on every body evaluation, per
@@ -54,12 +48,6 @@ enum DateFormatting {
     static func formatMediumDate(_ isoString: String?) -> String? {
         guard let date = parseDate(isoString) else { return nil }
         return mediumDisplayFormatter.string(from: date)
-    }
-
-    /// Compact numeric form, e.g. "5-7-2026".
-    static func formatShortNumericDate(_ isoString: String?) -> String? {
-        guard let date = parseDate(isoString) else { return nil }
-        return shortNumericFormatter.string(from: date)
     }
 
     /// Parse an ISO8601 date string (with or without fractional seconds) and return a display string.
