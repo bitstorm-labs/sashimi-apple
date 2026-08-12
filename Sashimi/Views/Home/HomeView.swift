@@ -472,7 +472,7 @@ struct HeroSection: View {
 
                         Spacer()
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 40)
                 }
             }
             .aspectRatio(32/9, contentMode: .fit)
@@ -555,7 +555,7 @@ struct RecentlyAddedLibraryRow: View {
             Text(sectionTitle)
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(SashimiTheme.textPrimary)
-                .padding(.horizontal, 80)
+                .padding(.horizontal, 40)
 
             if isLoading {
                 HStack {
@@ -611,7 +611,7 @@ struct RecentlyAddedLibraryRow: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 40)
                     .padding(.vertical, 20)
                 }
             }
