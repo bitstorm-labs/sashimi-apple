@@ -79,12 +79,13 @@ struct MobileContinueWatchingCard: View {
         }
     }
 
-    // Episode info like tvOS: "S1:E1 - Episode Name" or "date - Episode Name" for YouTube
+    // Episode info like tvOS: "S1:E1 - Episode Name", or just the video title for YouTube
     private var episodeInfoText: String? {
         guard item.type == .episode else { return nil }
 
-        if isYouTube, let dateStr = item.premiereDate {
-            return "\(formatDate(dateStr)) - \(item.name)"
+        // YouTube: show just the video title (no date) — parity across platforms.
+        if isYouTube {
+            return item.name
         }
 
         let season = item.parentIndexNumber ?? 1
@@ -236,10 +237,6 @@ struct MobileContinueWatchingCard: View {
             }
         }
         .frame(height: 4)
-    }
-
-    private func formatDate(_ isoDate: String) -> String {
-        DateFormatting.formatShortNumericDate(isoDate) ?? ""
     }
 }
 
