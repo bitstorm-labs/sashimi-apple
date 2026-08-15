@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodegen generate:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(xcrun devicectl device install app:*)",
+      "Bash(xcrun devicectl list devices:*)",
+      "Bash(xcrun devicectl device info:*)",
+      "Bash(swiftlint lint:*)",
+      "Bash(swift build:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r \".tool_input.file_path // .tool_response.filePath // empty\" | { read -r f || exit 0; case \"$f\" in *.swift) ;; *) exit 0 ;; esac; cd \"${CLAUDE_PROJECT_DIR:-.}\" || exit 0; out=$(swiftlint lint --quiet --strict \"$f\" 2>&1) || { printf \"%s\\n\" \"$out\" | head -20; exit 2; }; }",
+            "timeout": 60,
+            "statusMessage": "SwiftLint..."
+          }
+        ]
+      }
+    ]
+  }
+}

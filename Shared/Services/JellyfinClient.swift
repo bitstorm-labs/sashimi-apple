@@ -802,7 +802,7 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil, isYouTubeLibrary: Bool = false) async throws -> [BaseItemDto] {
+    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
         if includeWatched {
@@ -811,8 +811,12 @@ actor JellyfinClient {
             if let collectionType = collectionType?.lowercased() {
                 switch collectionType {
                 case "tvshows":
-                    // Fetch series directly sorted by when content was last added
-                    itemTypes = isYouTubeLibrary ? "Episode" : "Series"
+                    // Series (YouTube channels are series too) sorted by when
+                    // content was last added. YouTube used to fetch Episodes and
+                    // let the caller dedupe them down to channels — but a channel
+                    // that uploads a burst then fills the whole limit, and the row
+                    // collapses to one or two avatars until the next channel posts.
+                    itemTypes = "Series"
                 case "movies":
                     itemTypes = "Movie"
                 default:
@@ -824,7 +828,7 @@ actor JellyfinClient {
 
             // Use /Items endpoint with date sorting to include watched items
             // For TV series, sort by DateLastContentAdded to show series with newest episodes first
-            let isTVSeries = collectionType?.lowercased() == "tvshows" && !isYouTubeLibrary
+            let isTVSeries = collectionType?.lowercased() == "tvshows"
             let sortBy = isTVSeries ? "DateLastContentAdded,SortName" : "DateCreated,SortName"
 
             var queryItems = [
