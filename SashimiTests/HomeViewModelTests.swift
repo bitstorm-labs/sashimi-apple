@@ -91,7 +91,7 @@ final class HomeViewModelTests: XCTestCase {
                 unplayedItemCount: nil
             ), imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -110,7 +110,7 @@ final class HomeViewModelTests: XCTestCase {
                 unplayedItemCount: nil
             ), imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -141,7 +141,7 @@ final class HomeViewModelTests: XCTestCase {
             indexNumber: nil, parentIndexNumber: nil, overview: nil,
             runTimeTicks: nil, userData: nil, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -153,7 +153,7 @@ final class HomeViewModelTests: XCTestCase {
             indexNumber: nil, parentIndexNumber: nil, overview: nil,
             runTimeTicks: nil, userData: nil, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil

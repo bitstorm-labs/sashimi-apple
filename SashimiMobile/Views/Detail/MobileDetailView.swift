@@ -12,6 +12,9 @@ struct MobileDetailView: View {
     // items opened from search.
     @State var item: BaseItemDto
     var libraryName: String?
+    // Keep existing detail navigation compatible with unscoped media items.
+    // swiftlint:disable:next implicit_optional_initialization
+    var serverID: String? = nil
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
     @State private var overviewExpanded = false
@@ -25,6 +28,9 @@ struct MobileDetailView: View {
     @State private var seriesCommunityRating: Double?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
+    @State private var pendingServerMedia: ServerMediaResult?
+    @State private var selectedServerMedia: ServerMediaResult?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var downloadScope: DownloadScope?
@@ -148,7 +154,7 @@ struct MobileDetailView: View {
                 }
 
                 // Cast section
-                if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+                if let people = item.people, !people.isEmpty {
                     castSection(people)
                 }
 
@@ -216,7 +222,23 @@ struct MobileDetailView: View {
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
-                AdaptiveDetailView(item: episode, libraryName: libraryName)
+                AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
+            }
+        }
+        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
+            NavigationStack {
+                PersonDetailView(
+                    person: person,
+                    excludingItemID: item.id,
+                    excludingTitleKey: ServerMediaResultGrouping.titleKey(for: item),
+                    originatingServerID: serverID ?? SessionManager.shared.activeServerId,
+                    onSelectSource: queueServerMedia
+                )
+            }
+        }
+        .fullScreenCover(item: $selectedServerMedia) { source in
+            NavigationStack {
+                ServerScopedMediaDetailView(source: source)
             }
         }
         .task {
@@ -262,6 +284,17 @@ struct MobileDetailView: View {
         } message: {
             Text(adminError ?? "")
         }
+    }
+
+    private func queueServerMedia(_ source: ServerMediaResult) {
+        pendingServerMedia = source
+        showingPersonDetail = nil
+    }
+
+    private func presentPendingServerMedia() {
+        guard let source = pendingServerMedia else { return }
+        pendingServerMedia = nil
+        selectedServerMedia = source
     }
 
     // MARK: - Admin Menu (tvOS parity)
@@ -881,7 +914,7 @@ struct MobileDetailView: View {
             if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
-                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName)
+                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
                     } else {
                         ProgressView()
                     }
@@ -1029,10 +1062,10 @@ struct MobileDetailView: View {
     // MARK: - Cast Section
 
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(15))
+        let cast = PersonInfo.sortedForDisplay(people, limit: 20)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
                 .padding(.horizontal, MobileSpacing.md)
@@ -1040,7 +1073,9 @@ struct MobileDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person)
+                        MobileCastCard(person: person) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
                 .padding(.horizontal, MobileSpacing.md)
@@ -1114,7 +1149,7 @@ struct MobileDetailView: View {
                 seriesName: nil, seriesId: item.id, seasonId: nil, parentId: nil,
                 indexNumber: num, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
                 userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
-                primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
                 path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -1404,6 +1439,7 @@ struct MobileEpisodeCard: View {
 
 struct MobileCastCard: View {
     let person: PersonInfo
+    let action: () -> Void
 
     private var imageURL: URL? {
         guard person.primaryImageTag != nil else { return nil }
@@ -1411,36 +1447,42 @@ struct MobileCastCard: View {
     }
 
     var body: some View {
-        VStack(spacing: MobileSpacing.xs) {
-            if let url = imageURL {
-                LazyImage(url: url) { state in
-                    if let image = state.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        placeholderCircle
+        Button(action: action) {
+            VStack(spacing: MobileSpacing.xs) {
+                if let url = imageURL {
+                    LazyImage(url: url) { state in
+                        if let image = state.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            placeholderCircle
+                        }
                     }
+                    .frame(width: 70, height: 70)
+                    .clipShape(Circle())
+                } else {
+                    placeholderCircle
                 }
-                .frame(width: 70, height: 70)
-                .clipShape(Circle())
-            } else {
-                placeholderCircle
-            }
 
-            Text(person.name ?? "Unknown")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-
-            if let role = person.role, !role.isEmpty {
-                Text(role)
-                    .font(.system(size: 10))
-                    .foregroundStyle(MobileColors.textTertiary)
+                Text(person.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
                     .lineLimit(1)
+
+                if let role = person.displayRole {
+                    Text(role)
+                        .font(.system(size: 10))
+                        .foregroundStyle(MobileColors.textTertiary)
+                        .lineLimit(1)
+                }
             }
+            .frame(width: 80)
         }
-        .frame(width: 80)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(person.displayRole.map { "\(person.name), \($0)" } ?? person.name)
+        .accessibilityHint("Show other movies and shows with this person")
     }
 
     private var placeholderCircle: some View {

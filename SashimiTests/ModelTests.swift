@@ -11,6 +11,7 @@ final class ModelTests: XCTestCase {
             "Id": "test-id-123",
             "Name": "Test Movie",
             "Type": "Movie",
+            "LibraryName": "YouTube",
             "ProductionYear": 2024,
             "RunTimeTicks": 72000000000,
             "Overview": "A test movie description",
@@ -25,6 +26,7 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(item.id, "test-id-123")
         XCTAssertEqual(item.name, "Test Movie")
         XCTAssertEqual(item.type, .movie)
+        XCTAssertEqual(item.libraryName, "YouTube")
         XCTAssertEqual(item.productionYear, 2024)
         XCTAssertEqual(item.runTimeTicks, 72000000000)
         XCTAssertEqual(item.overview, "A test movie description")
@@ -67,7 +69,7 @@ final class ModelTests: XCTestCase {
             indexNumber: nil, parentIndexNumber: nil, overview: nil,
             runTimeTicks: nil, userData: nil, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -81,7 +83,7 @@ final class ModelTests: XCTestCase {
             indexNumber: 1, parentIndexNumber: 1, overview: nil,
             runTimeTicks: nil, userData: nil, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -106,7 +108,7 @@ final class ModelTests: XCTestCase {
             runTimeTicks: 72000000000, // 2 hours total
             userData: userData, imageTags: nil,
             backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil,
             taglines: nil, people: nil, criticRating: nil,
             premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil

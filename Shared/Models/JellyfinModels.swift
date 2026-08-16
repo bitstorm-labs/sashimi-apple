@@ -69,6 +69,10 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     let parentBackdropImageTags: [String]?
     let primaryImageAspectRatio: Double?
     let mediaType: String?
+    /// Jellyfin includes the owning library on item responses when available.
+    /// Keeping it on the item lets shared search/detail routes preserve the
+    /// library-specific YouTube presentation without guessing from a file path.
+    let libraryName: String?
     let productionYear: Int?
     let communityRating: Double?
     let officialRating: String?
@@ -119,6 +123,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case parentBackdropImageTags = "ParentBackdropImageTags"
         case primaryImageAspectRatio = "PrimaryImageAspectRatio"
         case mediaType = "MediaType"
+        case libraryName = "LibraryName"
         case productionYear = "ProductionYear"
         case communityRating = "CommunityRating"
         case officialRating = "OfficialRating"
@@ -151,6 +156,16 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
             return "\(seriesName) \(seasonEp)"
         }
         return name
+    }
+
+    /// Jellyfin normally provides ProductionYear. PremiereDate is a useful
+    /// fallback for libraries whose metadata only carries the full date.
+    var displayYear: Int? {
+        if let productionYear {
+            return productionYear
+        }
+        guard let premiereDate, premiereDate.count >= 4 else { return nil }
+        return Int(premiereDate.prefix(4))
     }
 
     var progressPercent: Double {
@@ -219,6 +234,26 @@ struct ItemsResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case items = "Items"
         case totalRecordCount = "TotalRecordCount"
+    }
+}
+
+/// Jellyfin returns `/Persons` as a paged query result on current servers.
+/// Older/server-compatible implementations may return the people as a bare
+/// array, so keep the decoder tolerant of both shapes.
+struct PeopleResponse: Decodable {
+    let items: [PersonInfo]
+
+    private enum CodingKeys: String, CodingKey {
+        case items = "Items"
+    }
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            items = try container.decode([PersonInfo].self, forKey: .items)
+        } else {
+            let container = try decoder.singleValueContainer()
+            items = try container.decode([PersonInfo].self)
+        }
     }
 }
 
@@ -430,6 +465,52 @@ struct PersonInfo: Codable, Identifiable, Hashable {
         case role = "Role"
         case type = "Type"
         case primaryImageTag = "PrimaryImageTag"
+    }
+}
+
+extension PersonInfo {
+    /// Matching key used when resolving the same person across Jellyfin
+    /// servers. Servers may differ in casing, diacritics, or punctuation in
+    /// their person records (for example, "Jr" versus "Jr.").
+    var matchingNameKey: String {
+        Self.matchingNameKey(for: name)
+    }
+
+    static func matchingNameKey(for name: String) -> String {
+        name
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The most useful role to show when Jellyfin does not provide a character
+    /// name. Crew entries commonly have no Role, but their Type still tells a
+    /// user why they are in the roster.
+    var displayRole: String? {
+        if let role, !role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return role
+        }
+        guard let type, !type.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return type
+    }
+
+    /// Actors lead the roster while directors, writers, and other people stay
+    /// discoverable behind them. A stable name sort keeps the section calm
+    /// when a server returns people in a different order.
+    static func sortedForDisplay(_ people: [PersonInfo], limit: Int = 20) -> [PersonInfo] {
+        let sorted = people.sorted { lhs, rhs in
+            let lhsIsActor = lhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            let rhsIsActor = rhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            if lhsIsActor != rhsIsActor {
+                return lhsIsActor
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        var seenIDs = Set<String>()
+        let unique = sorted.filter { seenIDs.insert($0.id).inserted }
+        return Array(unique.prefix(max(0, limit)))
     }
 }
 

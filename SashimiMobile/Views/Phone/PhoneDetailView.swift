@@ -12,6 +12,9 @@ struct PhoneDetailView: View {
     // items opened from search.
     @State var item: BaseItemDto
     var libraryName: String?
+    // Keep the existing call sites server-agnostic when no scoped source is selected.
+    // swiftlint:disable:next implicit_optional_initialization
+    var serverID: String? = nil
 
     // MARK: - State (mirrored from MobileDetailView)
 
@@ -27,6 +30,9 @@ struct PhoneDetailView: View {
     @State private var seriesCommunityRating: Double?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
+    @State private var pendingServerMedia: ServerMediaResult?
+    @State private var selectedServerMedia: ServerMediaResult?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var showSeriesDetail = false
@@ -55,6 +61,14 @@ struct PhoneDetailView: View {
     /// the parent for an episode) — drives the shared episode machinery.
     private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
     private var isMovie: Bool { item.type == .movie }
+
+    private var currentTitleKey: String {
+        ServerMediaResultGrouping.titleKey(for: item)
+    }
+
+    private var originatingPersonServerID: String? {
+        serverID ?? SessionManager.shared.activeServerId
+    }
 
     private var isYouTubeStyle: Bool {
         if let name = libraryName, name.lowercased().contains("youtube") {
@@ -113,7 +127,7 @@ struct PhoneDetailView: View {
                         seasonsSection
                     }
 
-                    if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+                    if let people = item.people, !people.isEmpty {
                         castSection(people)
                     }
 
@@ -131,13 +145,21 @@ struct PhoneDetailView: View {
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .navigationDestination(isPresented: $showSeriesDetail) {
             if let seriesItem = navigateToSeriesItem {
-                PhoneDetailView(item: seriesItem, libraryName: libraryName)
+                PhoneDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
             }
         }
         .sheet(item: $showingEpisodeDetail) { episode in
             // Full detail view — one consistent episode UI (matches iPad)
             NavigationStack {
-                PhoneDetailView(item: episode, libraryName: libraryName)
+                PhoneDetailView(item: episode, libraryName: libraryName, serverID: serverID)
+            }
+        }
+        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
+            personDetailView(for: person)
+        }
+        .fullScreenCover(item: $selectedServerMedia) { source in
+            NavigationStack {
+                ServerScopedMediaDetailView(source: source)
             }
         }
         .task {
@@ -167,7 +189,8 @@ struct PhoneDetailView: View {
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(mediaInfo?.path ?? item.path ?? "Path not available")
+            let filePath = mediaInfo?.path ?? item.path ?? "Path not available"
+            Text(filePath)
         }
         .confirmationDialog("Delete Item", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -180,8 +203,33 @@ struct PhoneDetailView: View {
         .alert("Error", isPresented: .constant(adminError != nil)) {
             Button("OK") { adminError = nil }
         } message: {
-            Text(adminError ?? "")
+            let errorMessage = adminError ?? ""
+            Text(errorMessage)
         }
+    }
+
+    @ViewBuilder
+    private func personDetailView(for person: PersonInfo) -> some View {
+        NavigationStack {
+            PersonDetailView(
+                person: person,
+                excludingItemID: item.id,
+                excludingTitleKey: currentTitleKey,
+                originatingServerID: originatingPersonServerID,
+                onSelectSource: queueServerMedia
+            )
+        }
+    }
+
+    private func queueServerMedia(_ source: ServerMediaResult) {
+        pendingServerMedia = source
+        showingPersonDetail = nil
+    }
+
+    private func presentPendingServerMedia() {
+        guard let source = pendingServerMedia else { return }
+        pendingServerMedia = nil
+        selectedServerMedia = source
     }
 
     // MARK: - Admin Menu (tvOS parity)
@@ -1070,17 +1118,19 @@ struct PhoneDetailView: View {
     // MARK: - Cast Section
 
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(15))
+        let cast = PersonInfo.sortedForDisplay(people, limit: 20)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person)
+                        MobileCastCard(person: person) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
             }
@@ -1150,7 +1200,7 @@ struct PhoneDetailView: View {
                 seriesName: nil, seriesId: item.id, seasonId: nil, parentId: nil,
                 indexNumber: num, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
                 userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
-                primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
                 path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -1349,13 +1399,16 @@ struct PhoneDetailView: View {
 struct AdaptiveDetailView: View {
     let item: BaseItemDto
     var libraryName: String?
+    // Keep the existing adaptive entry point compatible with unscoped detail views.
+    // swiftlint:disable:next implicit_optional_initialization
+    var serverID: String? = nil
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         if sizeClass == .compact {
-            PhoneDetailView(item: item, libraryName: libraryName)
+            PhoneDetailView(item: item, libraryName: libraryName, serverID: serverID)
         } else {
-            MobileDetailView(item: item, libraryName: libraryName)
+            MobileDetailView(item: item, libraryName: libraryName, serverID: serverID)
         }
     }
 }

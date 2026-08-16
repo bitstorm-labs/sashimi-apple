@@ -442,7 +442,7 @@ actor JellyfinClient {
 
     static let shared = JellyfinClient()
 
-    private init() {
+    init() {
         if let stored = UserDefaults.standard.string(forKey: "deviceId") {
             self.deviceId = stored
         } else {
@@ -693,14 +693,14 @@ actor JellyfinClient {
                 throw JellyfinError.invalidResponse
             }
 
-            // Handle 401/403 as session expiry (don't retry).
-            // Exception: /Users/AuthenticateByName returns 401 for wrong
-            // credentials — that's a login failure, not an expired session,
-            // so don't log out or report "session expired".
-            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                if isAuthRequest {
-                    throw JellyfinError.invalidCredentials
-                }
+            // A failed authentication can be reported as either 401 or 403.
+            // For normal requests, only 401 proves that the token is no
+            // longer valid. A 403 is a permission response and must not delete
+            // a healthy saved session from a read-only Jellyfin account.
+            if isAuthRequest && (httpResponse.statusCode == 401 || httpResponse.statusCode == 403) {
+                throw JellyfinError.invalidCredentials
+            }
+            if httpResponse.statusCode == 401 {
                 // Only treat as session expiry when the request was against the
                 // ACTIVE server. During an Add Server probe the shared client is
                 // briefly pointed at a different server; a 401 there must not
@@ -893,15 +893,19 @@ actor JellyfinClient {
         // swiftlint:disable:next discouraged_optional_boolean
         isFavorite: Bool? = nil,
         // swiftlint:disable:next discouraged_optional_boolean
-        isResumable: Bool? = nil
+        isResumable: Bool? = nil,
+        personId: String? = nil
     ) async throws -> ItemsResponse {
         guard let userId else { throw JellyfinError.notConfigured }
 
+        let fields = personId == nil
+            ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"
+            : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,LibraryName,MediaStreams"
         var queryItems = [
             URLQueryItem(name: "SortBy", value: sortBy),
             URLQueryItem(name: "SortOrder", value: sortOrder),
             URLQueryItem(name: "Recursive", value: "true"),
-            URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"),
+            URLQueryItem(name: "Fields", value: fields),
             URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
             URLQueryItem(name: "Limit", value: "\(limit)"),
             URLQueryItem(name: "StartIndex", value: "\(startIndex)")
@@ -909,6 +913,10 @@ actor JellyfinClient {
 
         if let parentId {
             queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
+        }
+
+        if let personId {
+            queryItems.append(URLQueryItem(name: "PersonIds", value: personId))
         }
 
         if let types = includeTypes {
@@ -933,6 +941,54 @@ actor JellyfinClient {
         )
 
         return try JSONDecoder().decode(ItemsResponse.self, from: data)
+    }
+
+    /// Returns every Movie and Series visible to the current user that credits
+    /// the person. Jellyfin paginates `/Items`, so keep following pages rather
+    /// than silently limiting a person's filmography to the first 100 items.
+    func getPersonMedia(personId: String, pageSize: Int = 100) async throws -> [BaseItemDto] {
+        let pageSize = max(1, pageSize)
+        var startIndex = 0
+        var media: [BaseItemDto] = []
+
+        while true {
+            try Task.checkCancellation()
+            let page = try await getItems(
+                includeTypes: [.movie, .series],
+                sortBy: "SortName",
+                sortOrder: "Ascending",
+                limit: pageSize,
+                startIndex: startIndex,
+                personId: personId
+            )
+            try Task.checkCancellation()
+
+            guard !page.items.isEmpty else { break }
+            media.append(contentsOf: page.items)
+            startIndex += page.items.count
+
+            if startIndex >= page.totalRecordCount || page.items.count < pageSize {
+                break
+            }
+        }
+
+        return media
+    }
+
+    /// Resolves a person on this server by display name. Person IDs are
+    /// server-scoped, so a person ID received from another Jellyfin server
+    /// cannot safely be reused when building a multi-server filmography.
+    func searchPeople(named name: String, limit: Int = 20) async throws -> [PersonInfo] {
+        guard let userId else { throw JellyfinError.notConfigured }
+
+        let data = try await request(path: "/Persons", queryItems: [
+            URLQueryItem(name: "SearchTerm", value: name),
+            URLQueryItem(name: "UserId", value: userId),
+            URLQueryItem(name: "Limit", value: "\(max(1, limit))"),
+            URLQueryItem(name: "EnableImages", value: "true")
+        ])
+
+        return try JSONDecoder().decode(PeopleResponse.self, from: data).items
     }
 
     /// Fetches one random item for the Shuffle button. `parentId` is the
@@ -1270,9 +1326,20 @@ actor JellyfinClient {
     }
 
     /// Synchronous image URL builder - uses cached server URL from UserDefaults
-    nonisolated func syncImageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
-              let url = URL(string: serverURL) else { return nil }
+    nonisolated func syncImageURL(
+        itemId: String,
+        imageType: String = "Primary",
+        maxWidth: Int = 400,
+        serverURL overrideServerURL: URL? = nil
+    ) -> URL? {
+        let url: URL
+        if let overrideServerURL {
+            url = overrideServerURL
+        } else {
+            guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
+                  let defaultURL = URL(string: serverURL) else { return nil }
+            url = defaultURL
+        }
 
         guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(itemId)/Images/\(imageType)"), resolvingAgainstBaseURL: false) else {
             return nil
@@ -1423,7 +1490,7 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "SearchTerm", value: query),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,MediaStreams"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,LibraryName,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
                 URLQueryItem(name: "Recursive", value: "true")
@@ -1523,6 +1590,163 @@ actor JellyfinClient {
     }
 }
 
+private let multiServerMediaLogger = Logger(
+    subsystem: "com.mondominator.sashimi",
+    category: "MultiServerMedia"
+)
+
+/// Searches every saved server concurrently. Each server owns its own Jellyfin
+/// client because item IDs and access tokens are server-scoped.
+enum MultiServerSearchService {
+    static func search(query: String, limit: Int = 50) async -> [ServerMediaResult] {
+        let servers = await MainActor.run { SessionManager.shared.servers }
+        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
+
+        return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
+            for server in servers {
+                let tokenKey = "accessToken.\(server.id)"
+                let token = KeychainHelper.get(forKey: tokenKey)
+                    ?? (server.id == activeServerID ? KeychainHelper.get(forKey: "accessToken") : nil)
+                guard let token else {
+                    multiServerMediaLogger.debug(
+                        "Search skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .public)"
+                    )
+                    continue
+                }
+
+                group.addTask {
+                    let client = JellyfinClient()
+                    await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+
+                    do {
+                        let items = try await client.search(query: query, limit: limit)
+                        return items.map {
+                            ServerMediaResult(
+                                item: $0,
+                                serverID: server.id,
+                                serverName: server.name,
+                                serverURL: server.url
+                            )
+                        }
+                    } catch is CancellationError {
+                        return []
+                    } catch {
+                        multiServerMediaLogger.error(
+                            "Search failed on \(server.url.host ?? "unknown", privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        )
+                        return []
+                    }
+                }
+            }
+
+            var results: [ServerMediaResult] = []
+            for await serverResults in group {
+                results.append(contentsOf: serverResults)
+            }
+            return results
+        }
+    }
+}
+
+/// Resolves a person's server-local ID and fetches their filmography on every
+/// saved server. The originating server can use the ID Jellyfin already sent
+/// with the open detail page; all other servers resolve the person by name.
+enum MultiServerPeopleService {
+    static func search(
+        person: PersonInfo,
+        originatingServerID: String?,
+        pageSize: Int = 100
+    ) async throws -> [ServerMediaResult] {
+        try Task.checkCancellation()
+        let servers = await MainActor.run { SessionManager.shared.servers }
+        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
+
+        return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
+            for server in servers {
+                let tokenKey = "accessToken.\(server.id)"
+                let token = KeychainHelper.get(forKey: tokenKey)
+                    ?? (server.id == activeServerID ? KeychainHelper.get(forKey: "accessToken") : nil)
+                guard let token else {
+                    multiServerMediaLogger.debug(
+                        "Filmography skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .public)"
+                    )
+                    continue
+                }
+
+                group.addTask {
+                    await loadFilmography(
+                        on: server,
+                        token: token,
+                        person: person,
+                        originatingServerID: originatingServerID,
+                        pageSize: pageSize
+                    )
+                }
+            }
+
+            var results: [ServerMediaResult] = []
+            for await serverResults in group {
+                results.append(contentsOf: serverResults)
+            }
+            return results
+        }
+    }
+
+    private static func loadFilmography(
+        on server: ServerConfig,
+        token: String,
+        person: PersonInfo,
+        originatingServerID: String?,
+        pageSize: Int
+    ) async -> [ServerMediaResult] {
+        let client = JellyfinClient()
+        await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+
+        do {
+            let serverPersonID: String?
+            if server.id == originatingServerID {
+                serverPersonID = person.id
+            } else {
+                let candidates = try await client.searchPeople(named: person.name)
+                serverPersonID = candidates.first {
+                    $0.matchingNameKey == person.matchingNameKey
+                }?.id
+            }
+
+            guard let serverPersonID else {
+                multiServerMediaLogger.debug(
+                    "Filmography person not found on \(server.url.host ?? "unknown", privacy: .public)"
+                )
+                return []
+            }
+
+            let items = try await client.getPersonMedia(
+                personId: serverPersonID,
+                pageSize: pageSize
+            )
+            multiServerMediaLogger.debug(
+                "Filmography loaded from \(server.url.host ?? "unknown", privacy: .public): \(items.count, privacy: .public) titles"
+            )
+
+            return items.map {
+                ServerMediaResult(
+                    item: $0,
+                    serverID: server.id,
+                    serverName: server.name,
+                    serverURL: server.url
+                )
+            }
+        } catch is CancellationError {
+            return []
+        } catch {
+            multiServerMediaLogger.error(
+                "Filmography failed on \(server.url.host ?? "unknown", privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+    }
+}
+
 enum JellyfinError: LocalizedError {
     case notConfigured
     case invalidResponse
@@ -1546,8 +1770,10 @@ enum JellyfinError: LocalizedError {
             return "Could not connect to the server. Check server address."
         case .httpError(let code):
             switch code {
-            case 401, 403:
+            case 401:
                 return "Session expired. Please sign in again."
+            case 403:
+                return "The server denied access to this request."
             case 404:
                 return "Content not found. It may have been removed."
             case 500...599:
