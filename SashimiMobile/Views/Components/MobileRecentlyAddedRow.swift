@@ -118,8 +118,7 @@ struct MobileRecentlyAddedRow<Destination: View>: View {
                 parentId: libraryId,
                 limit: fetchLimit,
                 includeWatched: true,
-                collectionType: collectionType,
-                isYouTubeLibrary: isYouTubeLibrary
+                collectionType: collectionType
             )
             let dedupedItems = deduplicateBySeries(latestItems)
             items = dedupedItems

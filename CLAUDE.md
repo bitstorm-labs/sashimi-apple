@@ -32,6 +32,15 @@ xcodebuild -project Sashimi.xcodeproj -scheme SashimiMobile -destination 'platfo
 xcodegen generate
 ```
 
+## Claude Code helpers
+
+`.claude/` holds this repo's automation (committed; `settings.local.json` is
+personal and gitignored):
+
+- **`/install-tvs`** — build the tvOS app and install it on both Apple TVs
+- A `PostToolUse` hook runs `swiftlint --strict` on each edited `.swift` file, so
+  violations surface at the edit rather than failing CI.
+
 ## Architecture
 
 ### MVVM Pattern

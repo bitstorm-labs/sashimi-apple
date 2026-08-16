@@ -232,7 +232,22 @@ struct MediaPosterButton: View {
                 }
                 .frame(width: cardWidth, height: cardHeight)
                 .clipShape(isCircular ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 12)))
-                // Circular overlays (outside the clip shape)
+                // Focus ring first: overlays stack in application order, so the
+                // badge below has to be added AFTER the ring or the 4pt stroke
+                // paints straight through it — on a circle the ring curve runs
+                // right under the top-trailing badge.
+                .overlay(
+                    Group {
+                        if isCircular {
+                            Circle()
+                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
+                        }
+                    }
+                )
+                // Circular overlays (outside the clip shape, above the ring)
                 .overlay(alignment: .topTrailing) {
                     if isCircular {
                         if let count = badgeCount, count >= 1 {
@@ -253,17 +268,6 @@ struct MediaPosterButton: View {
                         }
                     }
                 }
-                .overlay(
-                    Group {
-                        if isCircular {
-                            Circle()
-                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
-                        } else {
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
-                        }
-                    }
-                )
                 .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15, x: 0, y: 0)
 
                 MarqueeText(

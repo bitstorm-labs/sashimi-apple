@@ -472,7 +472,17 @@ struct HeroSection: View {
 
                         Spacer()
                     }
+                    // Wider margin than the rows below (which sit at 40 against
+                    // the rail): this is 64pt display type, and tightening it to
+                    // match the poster rows pushed the block uncomfortably far
+                    // left. Large type needs the extra breathing room.
                     .padding(.horizontal, 80)
+                    // Centre the text in the hero's *solid* area, not its full
+                    // height. The bottom 10% is masked to transparent (and the
+                    // first row overlaps it), so centring on the raw height puts
+                    // the block visibly low. Reserving the faded band lifts it
+                    // to the optical centre.
+                    .padding(.bottom, geometry.size.height * 0.1)
                 }
             }
             .aspectRatio(32/9, contentMode: .fit)
@@ -538,6 +548,7 @@ struct RecentlyAddedLibraryRow: View {
     let onSelect: (BaseItemDto) -> Void
     @State private var items: [BaseItemDto] = []
     @State private var episodeCounts: [String: Int] = [:]  // seriesId -> count of new episodes
+    @State private var newestEpisodes: [String: BaseItemDto] = [:]  // channelId -> newest video
     @State private var isLoading = true
     @State private var loadError = false
 
@@ -555,7 +566,7 @@ struct RecentlyAddedLibraryRow: View {
             Text(sectionTitle)
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(SashimiTheme.textPrimary)
-                .padding(.horizontal, 80)
+                .padding(.horizontal, 40)
 
             if isLoading {
                 HStack {
@@ -607,11 +618,16 @@ struct RecentlyAddedLibraryRow: View {
                                 isCircular: isYouTubeLibrary,
                                 badgeCount: (unplayedCount ?? 0) >= 1 ? unplayedCount : nil
                             ) {
-                                onSelect(item)
+                                // The row lists channels (so one prolific uploader
+                                // can't crowd the others out), but opening a channel
+                                // page isn't what you want from "Recently Added" —
+                                // jump to the video that put it here. Falls back to
+                                // the channel if the prefetch hasn't landed.
+                                onSelect(newestEpisodes[item.id] ?? item)
                             }
                         }
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 40)
                     .padding(.vertical, 20)
                 }
             }
@@ -633,8 +649,7 @@ struct RecentlyAddedLibraryRow: View {
                 parentId: library.id,
                 limit: fetchLimit,
                 includeWatched: true,
-                collectionType: library.collectionType,
-                isYouTubeLibrary: isYouTubeLibrary
+                collectionType: library.collectionType
             )
             let dedupedItems = deduplicateBySeries(latestItems)
             items = dedupedItems
@@ -642,6 +657,9 @@ struct RecentlyAddedLibraryRow: View {
             // Fetch actual unplayed counts from series (for TV shows)
             if isTVLibrary {
                 await loadUnplayedCounts(for: dedupedItems)
+            }
+            if isYouTubeLibrary {
+                await loadNewestEpisodes(for: dedupedItems)
             }
         } catch is CancellationError {
             // Ignore cancellation errors - expected during navigation
@@ -689,6 +707,43 @@ struct RecentlyAddedLibraryRow: View {
         counts.merge(fetched) { _, new in new }
 
         episodeCounts = counts
+    }
+
+    /// Resolve each channel's most recently added video, so selecting a card in a
+    /// YouTube row opens that video rather than the channel page. Prefetched
+    /// concurrently while the row renders, so the press itself never waits on a
+    /// round-trip.
+    private func loadNewestEpisodes(for items: [BaseItemDto]) async {
+        let channelIds = items.compactMap { $0.type == .series ? $0.id : nil }
+
+        let fetched = await withTaskGroup(of: (String, BaseItemDto)?.self) { group in
+            for channelId in channelIds {
+                group.addTask {
+                    do {
+                        let response = try await JellyfinClient.shared.getItems(
+                            parentId: channelId,
+                            includeTypes: [.episode],
+                            sortBy: "DateCreated",
+                            sortOrder: "Descending",
+                            limit: 1
+                        )
+                        guard let newest = response.items.first else { return nil }
+                        return (channelId, newest)
+                    } catch {
+                        // A channel that fails to resolve just falls back to
+                        // opening the channel page.
+                        return nil
+                    }
+                }
+            }
+            var out: [String: BaseItemDto] = [:]
+            for await result in group {
+                if let (channelId, episode) = result { out[channelId] = episode }
+            }
+            return out
+        }
+
+        newestEpisodes = fetched
     }
 
     private func deduplicateBySeries(_ items: [BaseItemDto]) -> [BaseItemDto] {

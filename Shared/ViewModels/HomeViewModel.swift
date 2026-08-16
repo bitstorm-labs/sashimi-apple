@@ -209,6 +209,14 @@ final class HomeViewModel: ObservableObject {
         await loadContent()
     }
 
+    /// A Continue Watching candidate paired with the activity date it sorts on.
+    private struct ContinueCandidate {
+        let item: BaseItemDto
+        let date: Date
+        /// Resume items win date ties — see the sort below.
+        let isResume: Bool
+    }
+
     private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
         // Both APIs return items sorted by activity:
         // - Resume: by DatePlayed descending (most recently played partial episode first)
@@ -218,47 +226,49 @@ final class HomeViewModel: ObservableObject {
         // For Resume items: use their lastPlayedDate
         // For NextUp items: use current time based on position (trust the API order)
 
-        let now = Date()
-
-        // Get effective dates for Resume items
-        let resumeDates: [Date] = resume.map { item in
-            parseDate(item.userData?.lastPlayedDate) ?? now
+        // Give every candidate a real, comparable activity date.
+        //
+        // Resume items carry their own lastPlayedDate. NextUp items usually do
+        // too (Jellyfin returns the in-progress episode), but a genuinely
+        // unstarted "next" episode has none — so carry the previous NextUp
+        // item's date forward a second at a time. NextUp is already ordered by
+        // series activity, which keeps each undated item beside its neighbours.
+        //
+        // NextUp used to be stamped with `now`, which is newer than every real
+        // timestamp, so all of NextUp sorted ahead of all of Resume. Episodes
+        // still looked right (most reach the row via NextUp), but a movie —
+        // Resume-only, and with no seriesId to dedupe against — always landed
+        // behind the entire NextUp block no matter how recently it was played.
+        var candidates: [ContinueCandidate] = resume.map { item in
+            ContinueCandidate(
+                item: item,
+                date: parseDate(item.userData?.lastPlayedDate) ?? .distantPast,
+                isResume: true
+            )
         }
 
-        // For NextUp, assign dates based on position: first item = now, each subsequent = 1 second earlier
-        // This trusts the NextUp API's sorting by series activity
-        let nextUpDates: [Date] = nextUp.indices.map { index in
-            now.addingTimeInterval(-Double(index))
+        var carried = Date()
+        for item in nextUp {
+            if let played = parseDate(item.userData?.lastPlayedDate) {
+                carried = played
+            } else {
+                carried = carried.addingTimeInterval(-1)
+            }
+            candidates.append(ContinueCandidate(item: item, date: carried, isResume: false))
         }
 
-        // Merge the two sorted lists
+        // Newest first. Resume wins ties so a part-watched episode is offered
+        // for resuming rather than skipped past to the next one.
+        candidates.sort { lhs, rhs in
+            lhs.date == rhs.date ? (lhs.isResume && !rhs.isResume) : (lhs.date > rhs.date)
+        }
+
         var merged: [BaseItemDto] = []
         var seenSeriesIds = Set<String>()
         var seenIds = Set<String>()
 
-        var resumeIdx = 0
-        var nextUpIdx = 0
-
-        while resumeIdx < resume.count || nextUpIdx < nextUp.count {
-            let useResume: Bool
-
-            if resumeIdx >= resume.count {
-                useResume = false
-            } else if nextUpIdx >= nextUp.count {
-                useResume = true
-            } else {
-                // Compare dates - take the more recent one
-                useResume = resumeDates[resumeIdx] >= nextUpDates[nextUpIdx]
-            }
-
-            let item: BaseItemDto
-            if useResume {
-                item = resume[resumeIdx]
-                resumeIdx += 1
-            } else {
-                item = nextUp[nextUpIdx]
-                nextUpIdx += 1
-            }
+        for candidate in candidates {
+            let item = candidate.item
 
             // Skip duplicates
             guard !seenIds.contains(item.id) else { continue }

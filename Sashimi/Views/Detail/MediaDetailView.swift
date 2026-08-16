@@ -48,6 +48,24 @@ struct MediaDetailView: View {
     private var isSeries: Bool { item.type == .series }
     private var isEpisode: Bool { item.type == .episode }
     private var isVideo: Bool { item.type == .video }
+    private var isMovie: Bool { item.type == .movie }
+
+    /// Resolution / video codec / audio codec chips. Shared so movies can put
+    /// them on their own row while series and episodes keep them inline.
+    @ViewBuilder
+    private var qualityBadges: some View {
+        if let info = mediaInfo {
+            if let resolution = info.videoResolution {
+                mediaInfoBadge(resolution)
+            }
+            if let videoCodec = info.videoCodec {
+                mediaInfoBadge(formatCodec(videoCodec))
+            }
+            if let audioCodec = info.audioCodec, let channels = info.audioChannels {
+                audioInfoBadge(codec: audioCodec, channels: channels)
+            }
+        }
+    }
 
     // YouTube-style content uses landscape thumbnails instead of portrait posters
     private var isYouTubeStyle: Bool {
@@ -111,6 +129,20 @@ struct MediaDetailView: View {
         return "Backdrop"
     }
 
+    /// Fraction of the layout width the backdrop fills in its top-right section.
+    /// Single source of truth: the frame and the image request both derive from
+    /// it, so resizing the layout can't silently leave the request undersized.
+    ///
+    /// Sized so the backdrop's left edge clears the info column rather than
+    /// sitting under it. The poster is 200pt at x=60, so text runs from ~300;
+    /// at 0.45 the backdrop starts near x=1010, leaving ~700pt of clean space
+    /// for the title — a two-column composition instead of an overlap rescued
+    /// by a scrim. Series run slightly wider (logo, less body text) and YouTube
+    /// wider still (low-detail banners, short info column).
+    private var backdropWidthFraction: CGFloat {
+        isYouTubeSeriesStyle ? 0.58 : (isSeries ? 0.50 : 0.45)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -127,21 +159,29 @@ struct MediaDetailView: View {
 
                     // Background image - top right (Plex-style)
                     VStack(spacing: 0) {
-                        Spacer().frame(height: 80)
+                        // Half the 120pt right inset: the artwork sits higher than
+                        // it is inset from the right, which reads better than an
+                        // equal inset because the page's weight is along the top.
+                        Spacer().frame(height: 60)
                         HStack {
                             Spacer()
                             AsyncItemImage(
                                 itemId: backdropId,
                                 imageType: backdropImageType,
-                                // Rendered into geometry.size.width * 0.45; a 4K
-                                // decode here is ~33 MB of backing store for no
-                                // visible gain on a 1080p layout space.
-                                maxWidth: 1920,
+                                // Request at native pixel density: tvOS lays out
+                                // in 1920pt but Apple TV 4K renders @2x, so a
+                                // point-width frame needs twice that many pixels
+                                // or the backdrop is upscaled and reads soft.
+                                maxWidth: Int(geometry.size.width * backdropWidthFraction * 2),
                                 contentMode: .fit,
                                 fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"]
                             )
                             .id(refreshID)
-                            .frame(width: geometry.size.width * (isYouTubeSeriesStyle ? 0.65 : (isSeries ? 0.55 : 0.45)), alignment: .topTrailing)
+                            // Fill the top-right section rather than floating in
+                            // it. The soft edge mask below means the extra width
+                            // reaching left under the text reads as a blend, not
+                            // a collision, so a little overlap is fine.
+                            .frame(width: geometry.size.width * backdropWidthFraction, alignment: .topTrailing)
                             // Soft edge gradients fading into background
                             .mask(
                                 // Use a combined gradient mask for smooth edges on all sides
@@ -165,7 +205,11 @@ struct MediaDetailView: View {
                                     )
                                 )
                             )
-                            .padding(.trailing, 140)
+                            // Deliberately wider than the content column's 60pt
+                            // gutter: the artwork is a background element, and
+                            // pulling it in off the right edge stops it reading as
+                            // pinned to the corner.
+                            .padding(.trailing, 120)
                         }
                         Spacer()
                     }
@@ -621,21 +665,26 @@ struct MediaDetailView: View {
                 }
             }
 
-            HStack(spacing: 16) {
-                if !isSeries {
+            if isMovie {
+                // Movies: ratings on one row, quality badges on their own row
+                // beneath, so a well-tagged release doesn't run off in one long
+                // line. The badge row is conditional on its own so nothing shows
+                // an empty row's worth of spacing before playback info lands.
+                HStack(spacing: 16) {
                     ratingsRow
                 }
-
-                if let info = mediaInfo {
-                    if let resolution = info.videoResolution {
-                        mediaInfoBadge(resolution)
+                if mediaInfo != nil {
+                    HStack(spacing: 16) {
+                        qualityBadges
                     }
-                    if let videoCodec = info.videoCodec {
-                        mediaInfoBadge(formatCodec(videoCodec))
+                }
+            } else {
+                // Series and episodes keep the single combined line.
+                HStack(spacing: 16) {
+                    if !isSeries {
+                        ratingsRow
                     }
-                    if let audioCodec = info.audioCodec, let channels = info.audioChannels {
-                        audioInfoBadge(codec: audioCodec, channels: channels)
-                    }
+                    qualityBadges
                 }
             }
 
