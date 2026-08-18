@@ -25,7 +25,7 @@ final class ThemeSongVisitStateTests: XCTestCase {
     func testReturningToTheSameShowAfterLeavingStartsAgain() {
         var s = ThemeSongVisitState()
         _ = s.showAppeared(seriesId: "A")
-        _ = s.detailDismissed(seriesId: "A")
+        XCTAssertEqual(s.detailDismissed(seriesId: "A"), .stop)
         XCTAssertEqual(s.showAppeared(seriesId: "A"), .start(seriesId: "A"))
     }
 
