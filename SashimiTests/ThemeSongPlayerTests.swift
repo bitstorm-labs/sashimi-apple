@@ -19,4 +19,97 @@ final class ThemeSongPlayerTests: XCTestCase {
         let url = await client.getAudioStreamURL(itemId: "ITEM")
         XCTAssertNil(url)
     }
+
+    // MARK: - ThemeMediaResponse decoding
+    //
+    // `getThemeSongs` swallows decode failures with `try?` and treats the
+    // result as "no theme" - the same outcome as the ~41% of series that
+    // legitimately have none. A CodingKeys typo or wrong nesting here would
+    // compile, pass lint, and be invisible at runtime. These tests decode
+    // `ThemeMediaResponse` directly (moved to file scope in
+    // Shared/Models/JellyfinModels.swift for testability, same pattern as
+    // `AuthenticationResult`/`PlaybackInfoResponse`) so they exercise the
+    // real production type, not a hand-copied re-implementation of it.
+
+    /// `Id`/`Name`/`Type` below are copied verbatim from a real
+    /// `/Items/{id}/ThemeMedia` response captured against a live Jellyfin
+    /// 10.11.11 server for a themed series (surrounding per-item fields
+    /// such as MediaSources/MediaStreams are trimmed - BaseItemDto doesn't
+    /// decode them and they don't affect this test).
+    private static let populatedThemeMediaJSON = """
+    {
+      "ThemeVideosResult": { "Items": [], "TotalRecordCount": 0 },
+      "ThemeSongsResult": {
+        "Items": [
+          {
+            "Name": "theme",
+            "Id": "502e1840465f20b46ae1bbc6412466ed",
+            "Type": "Audio"
+          }
+        ],
+        "TotalRecordCount": 1
+      },
+      "SoundtrackSongsResult": { "Items": [], "TotalRecordCount": 0 }
+    }
+    """
+
+    /// Shape of the normal (no-theme) case: all three result sets present
+    /// with empty `Items` - not an error, ~41% of a typical library.
+    private static let emptyThemeMediaJSON = """
+    {
+      "ThemeVideosResult": { "Items": [], "TotalRecordCount": 0 },
+      "ThemeSongsResult": { "Items": [], "TotalRecordCount": 0 },
+      "SoundtrackSongsResult": { "Items": [], "TotalRecordCount": 0 }
+    }
+    """
+
+    /// Synthetic (not captured) fixture: each of the three sibling result
+    /// sets holds a distinctly-named/ID'd item, so decoding the wrong key
+    /// is caught by an ID mismatch rather than an incidentally-empty array.
+    private static let siblingDiscriminationJSON = """
+    {
+      "ThemeVideosResult": {
+        "Items": [{ "Name": "decoy-video", "Id": "video-decoy-id", "Type": "Video" }],
+        "TotalRecordCount": 1
+      },
+      "ThemeSongsResult": {
+        "Items": [{ "Name": "theme", "Id": "real-theme-id", "Type": "Audio" }],
+        "TotalRecordCount": 1
+      },
+      "SoundtrackSongsResult": {
+        "Items": [{ "Name": "decoy-soundtrack", "Id": "soundtrack-decoy-id", "Type": "Audio" }],
+        "TotalRecordCount": 1
+      }
+    }
+    """
+
+    func testThemeMediaResponseDecodesPopulatedThemeSongsResult() throws {
+        let data = try XCTUnwrap(Self.populatedThemeMediaJSON.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(ThemeMediaResponse.self, from: data)
+        let items = try XCTUnwrap(decoded.themeSongsResult?.items)
+        XCTAssertEqual(items.count, 1)
+        let theme = try XCTUnwrap(items.first)
+        XCTAssertEqual(theme.id, "502e1840465f20b46ae1bbc6412466ed")
+        XCTAssertEqual(theme.name, "theme")
+        // Server sends Type "Audio", which ItemType has no case for; it must
+        // fall back to .unknown (via ItemType's custom init) rather than
+        // throwing - if that fallback is ever "tidied away", this item (and
+        // every real theme song) stops decoding.
+        XCTAssertEqual(theme.type, .unknown)
+    }
+
+    func testThemeMediaResponseDecodesEmptyResultToEmptyArray() throws {
+        let data = try XCTUnwrap(Self.emptyThemeMediaJSON.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(ThemeMediaResponse.self, from: data)
+        XCTAssertEqual(decoded.themeSongsResult?.items ?? [], [])
+    }
+
+    func testThemeMediaResponseReadsThemeSongsResultNotSiblings() throws {
+        let data = try XCTUnwrap(Self.siblingDiscriminationJSON.data(using: .utf8))
+        let decoded = try JSONDecoder().decode(ThemeMediaResponse.self, from: data)
+        let items = try XCTUnwrap(decoded.themeSongsResult?.items)
+        XCTAssertEqual(items.map(\.id), ["real-theme-id"])
+        XCTAssertFalse(items.map(\.id).contains("video-decoy-id"))
+        XCTAssertFalse(items.map(\.id).contains("soundtrack-decoy-id"))
+    }
 }

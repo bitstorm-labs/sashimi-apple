@@ -1516,12 +1516,6 @@ actor JellyfinClient {
     /// typical library, which is normal and not an error.
     func getThemeSongs(itemId: String) async throws -> [BaseItemDto] {
         let data = try await request(path: "/Items/\(itemId)/ThemeMedia", queryItems: [])
-        struct ThemeMediaResponse: Decodable {
-            struct Result: Decodable { let items: [BaseItemDto]?
-                enum CodingKeys: String, CodingKey { case items = "Items" } }
-            let themeSongsResult: Result?
-            enum CodingKeys: String, CodingKey { case themeSongsResult = "ThemeSongsResult" }
-        }
         let decoded = try? JSONDecoder().decode(ThemeMediaResponse.self, from: data)
         return decoded?.themeSongsResult?.items ?? []
     }
