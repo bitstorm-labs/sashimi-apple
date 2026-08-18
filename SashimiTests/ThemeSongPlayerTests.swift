@@ -117,7 +117,7 @@ final class ThemeSongPlayerTests: XCTestCase {
 @MainActor
 final class ThemeSongResolutionTests: XCTestCase {
     func testResolvesOncePerSeriesThenCaches() async {
-        let player = ThemeSongPlayer(startDelay: 0)
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
         var calls: [String] = []
         player.resolver = { id in calls.append(id); return URL(string: "http://x/\(id).mp3") }
 
@@ -128,7 +128,7 @@ final class ThemeSongResolutionTests: XCTestCase {
 
     func testCachesMissesToo() async {
         // ~40% of series have no theme. Re-entering one must not re-query.
-        let player = ThemeSongPlayer(startDelay: 0)
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
         var calls = 0
         player.resolver = { _ in calls += 1; return nil }
 
@@ -140,7 +140,7 @@ final class ThemeSongResolutionTests: XCTestCase {
     }
 
     func testDisabledSettingResolvesNothing() async {
-        let player = ThemeSongPlayer(startDelay: 0)
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
         var calls = 0
         player.resolver = { _ in calls += 1; return nil }
         PlaybackSettings.shared.playThemeSongs = false
@@ -159,7 +159,7 @@ final class ThemeSongResolutionTests: XCTestCase {
     /// the series would never get its theme resolved again for the session.
     func testThrowingResolverIsNotCached() async {
         struct ResolveFailure: Error {}
-        let player = ThemeSongPlayer(startDelay: 0)
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
         var calls = 0
         player.resolver = { _ in
             calls += 1
@@ -171,5 +171,58 @@ final class ThemeSongResolutionTests: XCTestCase {
         XCTAssertNil(first)
         XCTAssertNil(second)
         XCTAssertEqual(calls, 2, "a thrown error must not be cached; every visit should retry")
+    }
+}
+
+/// The `fadeOutEnding` gap this whole pass exists to fix started as a
+/// `private let` no test ever read — declared, matching spec, and silently
+/// wired to nothing. This suite reads every shipped default directly, and
+/// exercises the end-fade boundary math without loading real audio.
+final class ThemeSongTimingsTests: XCTestCase {
+    func testShippedTimingsMatchSpec() {
+        let timings = ThemeSongTimings()
+        XCTAssertEqual(timings.startDelay, 0.75)
+        XCTAssertEqual(timings.volume, 0.6)
+        XCTAssertEqual(timings.fadeIn, 1.0)
+        XCTAssertEqual(timings.fadeOutEnding, 1.5)
+        XCTAssertEqual(timings.fadeOutShowChange, 0.4)
+        XCTAssertEqual(timings.fadeOutHard, 0.25)
+    }
+
+    /// The player/trailer cut is deliberately the fastest transition
+    /// available — the theme must be gone before the player's own audio
+    /// starts.
+    func testHardCutIsTheFastestFade() {
+        let timings = ThemeSongTimings()
+        XCTAssertLessThan(timings.fadeOutHard, timings.fadeOutShowChange)
+        XCTAssertLessThan(timings.fadeOutHard, timings.fadeIn)
+        XCTAssertLessThan(timings.fadeOutHard, timings.fadeOutEnding)
+    }
+}
+
+@MainActor
+final class ThemeSongEndFadeBoundaryTests: XCTestCase {
+    func testBoundaryStartsFadeOutEndingBeforeTheEnd() {
+        let boundary = ThemeSongPlayer.endFadeBoundary(duration: 30, fadeOutEnding: 1.5)
+        XCTAssertEqual(boundary, 28.5)
+    }
+
+    /// A theme shorter than the fade must degrade to the existing abrupt
+    /// stop at end-of-track, not a negative boundary or an immediate fade.
+    func testThemeShorterThanTheFadeDegradesToNil() {
+        XCTAssertNil(ThemeSongPlayer.endFadeBoundary(duration: 1.0, fadeOutEnding: 1.5))
+    }
+
+    /// A theme exactly as long as the fade also has no room for one - the
+    /// boundary would land at (or before) the start of the track.
+    func testThemeExactlyTheFadeLengthDegradesToNil() {
+        XCTAssertNil(ThemeSongPlayer.endFadeBoundary(duration: 1.5, fadeOutEnding: 1.5))
+    }
+
+    /// `AVPlayerItem.duration` reads as indefinite (NaN) until the asset
+    /// loads; an unfinished or unusable load must degrade the same way.
+    func testUnusableDurationDegradesToNil() {
+        XCTAssertNil(ThemeSongPlayer.endFadeBoundary(duration: .nan, fadeOutEnding: 1.5))
+        XCTAssertNil(ThemeSongPlayer.endFadeBoundary(duration: .infinity, fadeOutEnding: 1.5))
     }
 }
