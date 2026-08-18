@@ -10,7 +10,7 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Th
 ///
 /// This type exists because none of it was true before: every constant was a
 /// `private let` with no test seam, which is exactly how a declared-but-
-/// unused `fadeOutEnding` survived a green suite. `ThemeSongResolutionTests
+/// unused `fadeOutEnding` survived a green suite. `ThemeSongTimingsTests
 /// .testShippedTimingsMatchSpec` reads these values directly so a constant
 /// can't go silently unused (or silently wrong) again.
 struct ThemeSongTimings {
@@ -52,26 +52,41 @@ final class ThemeSongPlayer: ObservableObject {
     /// boundary observer on an already-discarded `AVPlayer`.
     private var durationLoadTask: Task<Void, Never>?
 
-    /// seriesId -> theme URL, or nil for "this series has no theme". Misses are
-    /// cached too: ~40% of a library has none and must not be re-queried.
-    private var cache: [String: URL?] = [:]
+    /// seriesId -> theme item id, or nil for "this series has no theme".
+    /// Misses are cached too: ~40% of a library has none and must not be
+    /// re-queried. Deliberately the item id, not the playable URL:
+    /// `JellyfinClient.getAudioStreamURL` bakes the *current* access token
+    /// into the URL it returns, so caching a URL would freeze a stale token
+    /// into every future play after an in-session re-login — every
+    /// previously-visited series would go silent for the rest of the
+    /// session. The id has no such expiry, so it alone is safe to keep.
+    private var cache: [String: String?] = [:]
 
     private let timings: ThemeSongTimings
 
-    /// Overridden in tests. Production resolves through JellyfinClient.
+    /// Resolves a series to its theme item id (or nil if it has none).
+    /// Overridden in tests. Production resolves through `JellyfinClient`.
     ///
     /// Throws on a real failure (network error, cancellation) rather than
-    /// swallowing it to `nil` — `resolve(seriesId:)` relies on that
+    /// swallowing it to `nil` — `resolveThemeId(seriesId:)` relies on that
     /// distinction to avoid caching a transient failure as a permanent
     /// "this series has no theme".
-    var resolver: (String) async throws -> URL?
+    var resolver: (String) async throws -> String?
+
+    /// Builds the playable URL for a theme item id. Overridden in tests.
+    /// Deliberately **not** cached, unlike `resolver`'s result: see the
+    /// `cache` doc comment above for why a URL can't be treated the same way
+    /// an id can.
+    var urlBuilder: (String) async -> URL?
 
     init(timings: ThemeSongTimings = ThemeSongTimings()) {
         self.timings = timings
         self.resolver = { seriesId in
             let themes = try await JellyfinClient.shared.getThemeSongs(itemId: seriesId)
-            guard let theme = themes.first else { return nil }
-            return await JellyfinClient.shared.getAudioStreamURL(itemId: theme.id)
+            return themes.first?.id
+        }
+        self.urlBuilder = { themeId in
+            await JellyfinClient.shared.getAudioStreamURL(itemId: themeId)
         }
     }
 
@@ -103,7 +118,12 @@ final class ThemeSongPlayer: ObservableObject {
     func appDidBackground() {
         startTask?.cancel()
         startTask = nil
-        visit.reset()
+        // No `visit.reset()` here: the detail views are still mounted across
+        // a background/foreground cycle. Resetting would make the next
+        // `showAppeared(seriesId:)` for the *same* series look like a fresh
+        // visit and play the theme a second time. A killed process starts
+        // with an empty `ThemeSongVisitState` anyway, and a torn-down scene
+        // unwinds `depth` back to zero through `onDisappear` on its own.
         stop(fadeOver: 0)
     }
 
@@ -125,15 +145,25 @@ final class ThemeSongPlayer: ObservableObject {
     }
 
     private func resolve(seriesId: String) async -> URL? {
+        guard let themeId = await resolveThemeId(seriesId: seriesId) else { return nil }
+        // Built fresh on every call, never cached: see the `cache` doc
+        // comment for why a URL (unlike the id above it) can't be kept
+        // around for the session. A `nil` here — e.g. the client isn't
+        // configured yet — is just this attempt failing; it must not be
+        // confused with (or stored as) "this series has no theme".
+        return await urlBuilder(themeId)
+    }
+
+    private func resolveThemeId(seriesId: String) async -> String? {
         if let cached = cache[seriesId] { return cached }
         do {
-            let url = try await resolver(seriesId)
+            let themeId = try await resolver(seriesId)
             // A cancellation can slip past a `try?`-free resolver as a normal
             // return rather than a thrown error; don't let that race cache a
             // series as themeless.
             guard !Task.isCancelled else { return nil }
-            cache[seriesId] = url
-            return url
+            cache[seriesId] = themeId
+            return themeId
         } catch {
             // A thrown error (network failure, request cancellation) is never
             // cached: it says nothing about whether the series has a theme,
@@ -328,11 +358,21 @@ final class ThemeSongPlayer: ObservableObject {
     }
 
     // MARK: - Test seams
+    //
+    // Unlike `resolver`/`urlBuilder` above (which ship in the production
+    // binary because production itself needs a default implementation to
+    // override), these exist purely to let SashimiTests reach otherwise-
+    // private behavior and have no reason to compile into a release build.
 
+    #if DEBUG
     func resolveForTest(_ seriesId: String) async -> URL? { await resolve(seriesId: seriesId) }
     func playForTest(url: URL) { play(url: url) }
-    func fadeForTest(to target: Float, over duration: TimeInterval) { fade(to: target, over: duration) }
+    func fadeForTest(to target: Float, over duration: TimeInterval, completion: (() -> Void)? = nil) {
+        fade(to: target, over: duration, completion: completion)
+    }
     var fadeTimerForTest: Timer? { fadeTimer }
+    var playerForTest: AVPlayer? { player }
+    #endif
 }
 
 extension View {

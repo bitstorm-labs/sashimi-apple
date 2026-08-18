@@ -119,11 +119,39 @@ final class ThemeSongResolutionTests: XCTestCase {
     func testResolvesOncePerSeriesThenCaches() async {
         let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
         var calls: [String] = []
-        player.resolver = { id in calls.append(id); return URL(string: "http://x/\(id).mp3") }
+        player.resolver = { id in calls.append(id); return "theme-\(id)" }
+        player.urlBuilder = { themeId in URL(string: "http://x/\(themeId).mp3") }
 
         _ = await player.resolveForTest("A")
         _ = await player.resolveForTest("A")
         XCTAssertEqual(calls, ["A"], "second lookup must come from cache")
+    }
+
+    /// `getAudioStreamURL` bakes the *current* access token into the URL it
+    /// returns. If that URL were cached alongside the theme item id, an
+    /// in-session re-login would leave every previously-visited series
+    /// carrying a stale token — permanently silent for the rest of the
+    /// session. Caching only the id (never the URL) is what this test pins:
+    /// the id lookup happens once, but the URL reflects whatever credential
+    /// is current at the moment of each individual resolve.
+    func testCachedThemeIdSurvivesCredentialChangeAndBuildsAFreshURL() async {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
+        var resolverCalls = 0
+        player.resolver = { _ in resolverCalls += 1; return "theme-item-id" }
+
+        var currentToken = "TOKEN-1"
+        player.urlBuilder = { themeId in URL(string: "http://x/\(themeId).mp3?api_key=\(currentToken)") }
+
+        let first = await player.resolveForTest("A")
+        currentToken = "TOKEN-2" // simulate an in-session re-login rotating the access token
+        let second = await player.resolveForTest("A")
+
+        XCTAssertEqual(resolverCalls, 1, "the theme item id is cached - no second lookup for the same series")
+        XCTAssertEqual(first?.absoluteString, "http://x/theme-item-id.mp3?api_key=TOKEN-1")
+        XCTAssertEqual(
+            second?.absoluteString, "http://x/theme-item-id.mp3?api_key=TOKEN-2",
+            "the URL must be rebuilt fresh on every resolve, not cached alongside the id"
+        )
     }
 
     func testCachesMissesToo() async {
@@ -172,6 +200,38 @@ final class ThemeSongResolutionTests: XCTestCase {
         XCTAssertNil(second)
         XCTAssertEqual(calls, 2, "a thrown error must not be cached; every visit should retry")
     }
+
+    /// Backgrounding does not dismiss the detail screens on top of it - they
+    /// stay mounted, so returning to the same show (e.g. opening a season
+    /// after backgrounding from its Series screen) must still read as the
+    /// *same* visit, not a fresh one. `appDidBackground()` resetting the
+    /// visit state would make the very next `showAppeared` for that series
+    /// look new and replay the theme a second time.
+    func testBackgroundingDoesNotReplayTheThemeForTheSameVisit() async {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
+        player.resolver = { _ in "theme-item-id" }
+        // Counting `urlBuilder` calls, not `resolver` calls: the theme item
+        // id is cached per series, so a naive resolver-call count would stay
+        // 1 either way and silently fail to catch the regression - the id
+        // cache would mask it. `urlBuilder` runs once per *attempt* to start
+        // a theme (it is deliberately never cached, per fix 3 above), so its
+        // call count is what actually reflects whether `showAppeared`
+        // treated the second call as a new visit.
+        var urlBuilderCalls = 0
+        player.urlBuilder = { _ in urlBuilderCalls += 1; return nil }
+
+        player.showAppeared(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        player.appDidBackground()
+
+        // The season screen appears next, for the same series - still the
+        // same visit.
+        player.showAppeared(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(urlBuilderCalls, 1, "returning to the same visit after backgrounding must not re-trigger a theme start")
+    }
 }
 
 /// `fade()`'s early-return path (taken when a fade is instant, i.e.
@@ -204,6 +264,74 @@ final class ThemeSongFadeLifecycleTests: XCTestCase {
 
         player.fadeForTest(to: 0, over: 0)
         XCTAssertNil(player.fadeTimerForTest, "an immediate fade must clear fadeTimer, not merely invalidate it")
+    }
+
+    /// `play()` tears down before doing anything else, specifically so a
+    /// second `play()` before the first has finished can't strand the prior
+    /// AVPlayer - the worst failure mode: two themes audible at once.
+    ///
+    /// `fadeTimerForTest.isValid` alone does **not** distinguish this fix
+    /// from its absence: `fade(to:over:completion:)`, called unconditionally
+    /// at the end of every `play()`, invalidates whatever the *current*
+    /// `fadeTimer` is as its own first line - regardless of whether
+    /// `teardown()` ran first. Confirmed by removing the `teardown()` call
+    /// from `play()` and re-running: a timer-validity-only version of this
+    /// test still passed, which is exactly the "passes either way" trap the
+    /// review warned against. `player?.pause()`, by contrast, happens
+    /// *only* inside `teardown()` - nothing else in `play()`/`fade()` ever
+    /// pauses a player - so it's the assertion that actually exercises the
+    /// fix. `playerForTest` (added alongside this test) exposes that.
+    func testSecondPlayPausesTheFirstPlaysPlayer() throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings())
+        let firstURL = try XCTUnwrap(URL(string: "http://192.0.2.1:1/first-theme.mp3"))
+        let secondURL = try XCTUnwrap(URL(string: "http://192.0.2.1:1/second-theme.mp3"))
+
+        player.playForTest(url: firstURL)
+        let firstPlayer = try XCTUnwrap(player.playerForTest)
+        let firstTimer = try XCTUnwrap(player.fadeTimerForTest)
+
+        player.playForTest(url: secondURL)
+
+        XCTAssertEqual(firstPlayer.rate, 0, "a second play() must pause the first play's AVPlayer, not strand it running")
+        XCTAssertFalse(firstTimer.isValid, "the first play's fade-in timer should also no longer be valid")
+    }
+
+    /// The timer-identity guard inside the fade timer's own tick closure
+    /// exists so a tick that has already fired - and been *enqueued* as a
+    /// MainActor `Task`, not yet run - can't act on stale state by the time
+    /// it's finally dequeued, if a newer fade replaced `fadeTimer` in the
+    /// meantime. `Timer.fire()` triggers a timer's block synchronously
+    /// without waiting on the real run loop, which is what makes this
+    /// reproducible deterministically: fire the first fade's (single-step)
+    /// timer to enqueue its tick's Task without running it, replace it with
+    /// a second fade, then yield so the stale Task actually executes and
+    /// can be observed failing its own identity check.
+    func testStaleTimerTickCannotClobberANewerFade() async throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings())
+        let url = try XCTUnwrap(URL(string: "http://192.0.2.1:1/unreachable-theme.mp3"))
+        player.playForTest(url: url)
+
+        var staleCompletionFired = false
+        // A single-step fade (steps = max(1, 0.05/0.05) = 1): one `.fire()`
+        // is its *last* tick, the one that would otherwise invalidate the
+        // timer and run its completion.
+        player.fadeForTest(to: 0.6, over: 0.05) { staleCompletionFired = true }
+        let staleTimer = try XCTUnwrap(player.fadeTimerForTest)
+        staleTimer.fire()
+
+        var liveCompletionFired = false
+        player.fadeForTest(to: 0, over: 1.0) { liveCompletionFired = true }
+        let liveTimer = try XCTUnwrap(player.fadeTimerForTest)
+        XCTAssertFalse(liveTimer === staleTimer, "sanity: the newer fade must be a different timer instance")
+
+        // Let the stale tick's already-enqueued Task actually run. A short
+        // sleep, not a wall-clock fade duration - the same "let async work
+        // settle" pattern as `testDisabledSettingResolvesNothing` above.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertTrue(player.fadeTimerForTest === liveTimer, "a stale tick must not nil out the newer fade's live timer")
+        XCTAssertFalse(staleCompletionFired, "a stale tick must not fire the superseded fade's completion")
+        XCTAssertFalse(liveCompletionFired, "the newer fade's own completion must not fire from someone else's tick")
     }
 }
 
