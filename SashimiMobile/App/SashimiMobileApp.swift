@@ -16,6 +16,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 struct SashimiMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sessionManager = SessionManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     let modelContainer: ModelContainer
 
@@ -36,6 +37,14 @@ struct SashimiMobileApp: App {
                 .environmentObject(sessionManager)
         }
         .modelContainer(modelContainer)
+        // Mirrors SashimiApp (tvOS): background/lock is a scene-phase change,
+        // not a view teardown, so the theme has to be stopped from here
+        // rather than relying on a detail screen's `onDisappear`.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                ThemeSongPlayer.shared.appDidBackground()
+            }
+        }
     }
 }
 
