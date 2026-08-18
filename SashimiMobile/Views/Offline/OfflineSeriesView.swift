@@ -71,7 +71,10 @@ struct OfflineSeriesView: View {
                     // Episode list
                     LazyVStack(spacing: MobileSpacing.sm) {
                         ForEach(filteredEpisodes, id: \.itemId) { episode in
-                            Button { playingItem = episode.asBaseItemDto } label: {
+                            Button {
+                                ThemeSongPlayer.shared.stopForPlayback()
+                                playingItem = episode.asBaseItemDto
+                            } label: {
                                 episodeRow(episode)
                             }
                             .buttonStyle(.plain)

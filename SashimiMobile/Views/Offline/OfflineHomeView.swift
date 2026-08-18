@@ -87,7 +87,10 @@ struct OfflineHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(continueWatchingItems, id: \.itemId) { item in
-                        Button { playingItem = item.asBaseItemDto } label: {
+                        Button {
+                            ThemeSongPlayer.shared.stopForPlayback()
+                            playingItem = item.asBaseItemDto
+                        } label: {
                             offlineContinueCard(item)
                         }
                         .buttonStyle(.plain)
@@ -174,7 +177,10 @@ struct OfflineHomeView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.sm) {
                     ForEach(movieItems, id: \.itemId) { item in
-                        Button { playingItem = item.asBaseItemDto } label: {
+                        Button {
+                            ThemeSongPlayer.shared.stopForPlayback()
+                            playingItem = item.asBaseItemDto
+                        } label: {
                             offlinePosterCard(itemId: item.itemId, title: item.name)
                         }
                         .buttonStyle(.plain)
