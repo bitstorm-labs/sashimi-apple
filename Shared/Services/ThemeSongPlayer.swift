@@ -334,3 +334,31 @@ final class ThemeSongPlayer: ObservableObject {
     func fadeForTest(to target: Float, over duration: TimeInterval) { fade(to: target, over: duration) }
     var fadeTimerForTest: Timer? { fadeTimer }
 }
+
+extension View {
+    /// Reports to `ThemeSongPlayer` which show this detail screen belongs to.
+    /// Reports intent only — never starts or stops playback directly.
+    func themeSong(for item: BaseItemDto) -> some View {
+        modifier(ThemeSongModifier(item: item))
+    }
+}
+
+private struct ThemeSongModifier: ViewModifier {
+    let item: BaseItemDto
+
+    /// series -> its own id; season/episode -> the parent series. Anything else
+    /// (movies, videos) has no key and never plays a theme.
+    private var seriesKey: String? {
+        switch item.type {
+        case .series: return item.id
+        case .season, .episode: return item.seriesId
+        default: return nil
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { ThemeSongPlayer.shared.showAppeared(seriesId: seriesKey) }
+            .onDisappear { ThemeSongPlayer.shared.detailDismissed(seriesId: seriesKey) }
+    }
+}
