@@ -11,6 +11,7 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("autoPlayNextEpisode") var autoPlayNextEpisode = true
     @AppStorage("autoSkipIntro") var autoSkipIntro = false
     @AppStorage("autoSkipCredits") var autoSkipCredits = false
+    @AppStorage("playThemeSongs") var playThemeSongs = true
     @AppStorage("resumeThresholdSeconds") var resumeThresholdSeconds = 30
     @AppStorage("preferredAudioLanguage") var preferredAudioLanguage = ""
     @AppStorage("preferredSubtitleLanguage") var preferredSubtitleLanguage = ""

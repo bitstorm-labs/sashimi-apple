@@ -113,3 +113,41 @@ final class ThemeSongPlayerTests: XCTestCase {
         XCTAssertFalse(items.map(\.id).contains("soundtrack-decoy-id"))
     }
 }
+
+@MainActor
+final class ThemeSongResolutionTests: XCTestCase {
+    func testResolvesOncePerSeriesThenCaches() async {
+        let player = ThemeSongPlayer(startDelay: 0)
+        var calls: [String] = []
+        player.resolver = { id in calls.append(id); return URL(string: "http://x/\(id).mp3") }
+
+        _ = await player.resolveForTest("A")
+        _ = await player.resolveForTest("A")
+        XCTAssertEqual(calls, ["A"], "second lookup must come from cache")
+    }
+
+    func testCachesMissesToo() async {
+        // ~40% of series have no theme. Re-entering one must not re-query.
+        let player = ThemeSongPlayer(startDelay: 0)
+        var calls = 0
+        player.resolver = { _ in calls += 1; return nil }
+
+        let first = await player.resolveForTest("A")
+        let second = await player.resolveForTest("A")
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+        XCTAssertEqual(calls, 1, "a miss must be cached, not retried")
+    }
+
+    func testDisabledSettingResolvesNothing() async {
+        let player = ThemeSongPlayer(startDelay: 0)
+        var calls = 0
+        player.resolver = { _ in calls += 1; return nil }
+        PlaybackSettings.shared.playThemeSongs = false
+        defer { PlaybackSettings.shared.playThemeSongs = true }
+
+        player.showAppeared(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(calls, 0, "nothing is fetched when the setting is off")
+    }
+}
