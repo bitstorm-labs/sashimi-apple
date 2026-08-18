@@ -674,6 +674,7 @@ struct PlaybackSettingsView: View {
                     SettingsToggleRow(title: "Auto-Play Next Episode", isOn: $settings.autoPlayNextEpisode)
                     SettingsToggleRow(title: "Auto-Skip Intro", isOn: $settings.autoSkipIntro)
                     SettingsToggleRow(title: "Auto-Skip Credits", isOn: $settings.autoSkipCredits)
+                    SettingsToggleRow(title: "Play Theme Songs", isOn: $settings.playThemeSongs)
                 }
 
                 Text("Auto-skip requires the intro-skipper plugin on your server.")

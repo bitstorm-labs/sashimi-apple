@@ -1,0 +1,404 @@
+import AVFoundation
+import SwiftUI
+import os
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "ThemeSongPlayer")
+
+/// Fade/timing constants for `ThemeSongPlayer`, injected so tests can both
+/// assert the shipped values and exercise fades without waiting on real
+/// wall-clock durations.
+///
+/// This type exists because none of it was true before: every constant was a
+/// `private let` with no test seam, which is exactly how a declared-but-
+/// unused `fadeOutEnding` survived a green suite. `ThemeSongTimingsTests
+/// .testShippedTimingsMatchSpec` reads these values directly so a constant
+/// can't go silently unused (or silently wrong) again.
+struct ThemeSongTimings {
+    var startDelay: TimeInterval = 0.75
+    var volume: Float = 0.6
+    var fadeIn: TimeInterval = 1.0
+    var fadeOutEnding: TimeInterval = 1.5
+    var fadeOutShowChange: TimeInterval = 0.4
+    var fadeOutHard: TimeInterval = 0.25
+}
+
+/// Plays a series' theme song on the detail screen, once per visit to a show.
+///
+/// This is app-level rather than per-view on purpose: detail screens are
+/// presented with `fullScreenCover`, so a parent view is never removed and its
+/// `onDisappear` never fires. Views report intent here; all decisions live in
+/// one place.
+///
+/// Every failure path is silence. Background music is never worth an error.
+@MainActor
+final class ThemeSongPlayer: ObservableObject {
+    static let shared = ThemeSongPlayer()
+
+    private var visit = ThemeSongVisitState()
+    private var player: AVPlayer?
+    private var fadeTimer: Timer?
+    private var startTask: Task<Void, Never>?
+    private var endObserver: Any?
+
+    /// Boundary-time token for the pre-end fade. Removed in `teardown()` on
+    /// every path, exactly like `endObserver`: an `AVPlayer` time observer
+    /// that outlives its player leaks the same way an un-removed
+    /// `NotificationCenter` token does.
+    private var endFadeBoundaryObserver: Any?
+
+    /// Loads the current item's duration to compute the end-fade boundary.
+    /// Cancelled and cleared in `teardown()`: without that, a `play()` that
+    /// replaces the player mid-load could let a stale load install a
+    /// boundary observer on an already-discarded `AVPlayer`.
+    private var durationLoadTask: Task<Void, Never>?
+
+    /// seriesId -> theme item id, or nil for "this series has no theme".
+    /// Misses are cached too: ~40% of a library has none and must not be
+    /// re-queried. Deliberately the item id, not the playable URL:
+    /// `JellyfinClient.getAudioStreamURL` bakes the *current* access token
+    /// into the URL it returns, so caching a URL would freeze a stale token
+    /// into every future play after an in-session re-login — every
+    /// previously-visited series would go silent for the rest of the
+    /// session. The id has no such expiry, so it alone is safe to keep.
+    private var cache: [String: String?] = [:]
+
+    private let timings: ThemeSongTimings
+
+    /// Resolves a series to its theme item id (or nil if it has none).
+    /// Overridden in tests. Production resolves through `JellyfinClient`.
+    ///
+    /// Throws on a real failure (network error, cancellation) rather than
+    /// swallowing it to `nil` — `resolveThemeId(seriesId:)` relies on that
+    /// distinction to avoid caching a transient failure as a permanent
+    /// "this series has no theme".
+    var resolver: (String) async throws -> String?
+
+    /// Builds the playable URL for a theme item id. Overridden in tests.
+    /// Deliberately **not** cached, unlike `resolver`'s result: see the
+    /// `cache` doc comment above for why a URL can't be treated the same way
+    /// an id can.
+    var urlBuilder: (String) async -> URL?
+
+    init(timings: ThemeSongTimings = ThemeSongTimings()) {
+        self.timings = timings
+        self.resolver = { seriesId in
+            let themes = try await JellyfinClient.shared.getThemeSongs(itemId: seriesId)
+            return themes.first?.id
+        }
+        self.urlBuilder = { themeId in
+            await JellyfinClient.shared.getAudioStreamURL(itemId: themeId)
+        }
+    }
+
+    // MARK: - Intent from views
+
+    func showAppeared(seriesId: String?) {
+        guard PlaybackSettings.shared.playThemeSongs else { return }
+        switch visit.showAppeared(seriesId: seriesId) {
+        case .start(let id): scheduleStart(seriesId: id)
+        case .stop, .ignore: break
+        }
+    }
+
+    func detailDismissed(seriesId: String?) {
+        switch visit.detailDismissed(seriesId: seriesId) {
+        case .stop: stop(fadeOver: timings.fadeOutShowChange)
+        case .start, .ignore: break
+        }
+    }
+
+    /// Play or Trailer pressed. Deliberately the fastest transition available —
+    /// the theme must be gone before the player's own audio starts.
+    func stopForPlayback() {
+        startTask?.cancel()
+        startTask = nil
+        stop(fadeOver: timings.fadeOutHard)
+    }
+
+    func appDidBackground() {
+        startTask?.cancel()
+        startTask = nil
+        // No `visit.reset()` here: the detail views are still mounted across
+        // a background/foreground cycle. Resetting would make the next
+        // `showAppeared(seriesId:)` for the *same* series look like a fresh
+        // visit and play the theme a second time. A killed process starts
+        // with an empty `ThemeSongVisitState` anyway, and a torn-down scene
+        // unwinds `depth` back to zero through `onDisappear` on its own.
+        stop(fadeOver: 0)
+    }
+
+    // MARK: - Internals
+
+    private func scheduleStart(seriesId: String) {
+        startTask?.cancel()
+        stop(fadeOver: timings.fadeOutShowChange)
+        startTask = Task { [weak self] in
+            guard let self else { return }
+            if timings.startDelay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
+            }
+            guard !Task.isCancelled else { return }
+            guard let url = await resolve(seriesId: seriesId) else { return }
+            guard !Task.isCancelled, visit.currentSeriesId == seriesId else { return }
+            play(url: url)
+        }
+    }
+
+    private func resolve(seriesId: String) async -> URL? {
+        guard let themeId = await resolveThemeId(seriesId: seriesId) else { return nil }
+        // Built fresh on every call, never cached: see the `cache` doc
+        // comment for why a URL (unlike the id above it) can't be kept
+        // around for the session. A `nil` here — e.g. the client isn't
+        // configured yet — is just this attempt failing; it must not be
+        // confused with (or stored as) "this series has no theme".
+        return await urlBuilder(themeId)
+    }
+
+    private func resolveThemeId(seriesId: String) async -> String? {
+        if let cached = cache[seriesId] { return cached }
+        do {
+            let themeId = try await resolver(seriesId)
+            // A cancellation can slip past a `try?`-free resolver as a normal
+            // return rather than a thrown error; don't let that race cache a
+            // series as themeless.
+            guard !Task.isCancelled else { return nil }
+            cache[seriesId] = themeId
+            return themeId
+        } catch {
+            // A thrown error (network failure, request cancellation) is never
+            // cached: it says nothing about whether the series has a theme,
+            // unlike a clean empty result, which is cached above.
+            logger.debug("theme resolve failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func play(url: URL) {
+        // A prior player/observer must never be stranded: without this, a
+        // second `play()` before the first has torn down leaks the old
+        // AVPlayer and its NotificationCenter/time-observer tokens forever.
+        teardown()
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        p.volume = 0
+        player = p
+
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.stop(fadeOver: 0) }
+        }
+
+        scheduleEndOfTrackFade(item: item, player: p)
+
+        p.play()
+        fade(to: timings.volume, over: timings.fadeIn)
+        logger.debug("theme song started")
+    }
+
+    /// Starts the fade-out `fadeOutEnding` seconds before the theme's natural
+    /// end, so the track actually fades instead of cutting — by the time
+    /// `AVPlayerItemDidPlayToEndTime` fires there's no audio left to fade.
+    ///
+    /// `AVPlayerItem.duration` is `.indefinite` until the asset loads, so the
+    /// boundary can't be computed synchronously in `play()`. Uses the async
+    /// `AVAsset.load(.duration)` API rather than KVO on `item.status`/
+    /// `item.duration` so there's no sixth lifecycle object to track and
+    /// tear down — a `Task`, cancelled in `teardown()` exactly like
+    /// `startTask`, is enough.
+    private func scheduleEndOfTrackFade(item: AVPlayerItem, player: AVPlayer) {
+        durationLoadTask = Task { [weak self] in
+            guard let self else { return }
+            let duration: CMTime
+            do {
+                duration = try await item.asset.load(.duration)
+            } catch {
+                return
+            }
+            // The player this load was for may already be gone by the time
+            // it resolves — torn down, or replaced by a second `play()`
+            // that raced this load. Installing a boundary observer on it
+            // now would orphan an AVPlayer time-observer token nobody holds
+            // a reference to remove: the same shape as the leak in `play()`,
+            // one layer down.
+            guard !Task.isCancelled, self.player === player else { return }
+            guard duration.isNumeric,
+                  let boundarySeconds = Self.endFadeBoundary(
+                      duration: duration.seconds, fadeOutEnding: self.timings.fadeOutEnding
+                  ) else {
+                // Too short (or an unusable duration) to fit the fade —
+                // degrade to the existing abrupt stop at end-of-track rather
+                // than a negative boundary or fading immediately.
+                return
+            }
+            let boundaryTime = CMTime(seconds: boundarySeconds, preferredTimescale: 600)
+            // Both captures are weak: `player` is retained by the observer
+            // registration itself, so a strong capture here would be a
+            // reference cycle that only `removeTimeObserver` in `teardown()`
+            // ever breaks — exactly the fragility this pass is fixing, not
+            // reintroducing.
+            self.endFadeBoundaryObserver = player.addBoundaryTimeObserver(
+                forTimes: [NSValue(time: boundaryTime)], queue: .main
+            ) { [weak self, weak player] in
+                // `queue: .main` and the MainActor executor are the same
+                // context, but the compiler can't prove that from a plain
+                // closure — `assumeIsolated` turns the convention into a
+                // runtime-checked precondition instead of a warning (an
+                // error under Swift 6) and keeps this synchronous. Do not
+                // replace this with `Task { @MainActor in ... }`: that would
+                // defer the fade to a later dequeue, reopening the same
+                // stale-tick reordering hazard the identity guard in
+                // `fade(to:over:completion:)` exists to prevent.
+                MainActor.assumeIsolated {
+                    guard let self, let player, self.player === player else { return }
+                    // The end-of-track fade must tear itself down on
+                    // completion: if the item stalls right after this
+                    // boundary (dropped connection, server hiccup),
+                    // `AVPlayerItemDidPlayToEndTime` may never fire, and
+                    // without this the player and its notification token
+                    // would stay alive until the next `play()`/`stop()`.
+                    self.fade(to: 0, over: self.timings.fadeOutEnding) { [weak self] in
+                        self?.teardown()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Pure boundary math, kept separate from the AVAsset/AVPlayer plumbing
+    /// above so it's testable without loading real audio. Returns the offset
+    /// (in seconds) at which the end-of-track fade should begin, or `nil`
+    /// when there isn't room for one (a theme shorter than the fade, or an
+    /// unusable duration).
+    static func endFadeBoundary(duration: TimeInterval, fadeOutEnding: TimeInterval) -> TimeInterval? {
+        guard duration.isFinite, duration > 0 else { return nil }
+        let boundary = duration - fadeOutEnding
+        guard boundary > 0 else { return nil }
+        return boundary
+    }
+
+    private func stop(fadeOver duration: TimeInterval) {
+        startTask?.cancel()
+        startTask = nil
+        guard player != nil else { return }
+        if duration <= 0 {
+            teardown()
+            return
+        }
+        fade(to: 0, over: duration) { [weak self] in self?.teardown() }
+    }
+
+    private func teardown() {
+        durationLoadTask?.cancel()
+        durationLoadTask = nil
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+        if let endFadeBoundaryObserver {
+            player?.removeTimeObserver(endFadeBoundaryObserver)
+        }
+        endFadeBoundaryObserver = nil
+        player?.pause()
+        player = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+    }
+
+    private func fade(to target: Float, over duration: TimeInterval, completion: (() -> Void)? = nil) {
+        fadeTimer?.invalidate()
+        guard let p = player, duration > 0 else {
+            // `invalidate()` above stops the timer from firing again, but
+            // doesn't clear this reference. Left dangling, an already-
+            // enqueued tick from that same (now-invalidated) timer would
+            // still pass the `self.fadeTimer === timer` identity guard
+            // below — since it's comparing against itself — and nudge
+            // `p.volume` by the previous fade's delta after this "fade" was
+            // supposed to be a plain, immediate volume set.
+            fadeTimer = nil
+            player?.volume = target
+            completion?()
+            return
+        }
+        let steps = max(1, Int(duration / 0.05))
+        let delta = (target - p.volume) / Float(steps)
+        var remaining = steps
+        // Built unscheduled and added to `.common` explicitly: a timer handed
+        // to `Timer.scheduledTimer` installs in the default run-loop mode
+        // only, so it stalls whenever tvOS switches the main run loop to
+        // tracking mode (focus movement, row scrolling) — the fade freezes
+        // mid-volume and its `weak self` closure is never fired again.
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            Task { @MainActor in
+                // The closure's body runs when the Task is *dequeued*, not
+                // when the timer fires, so a newer fade can already have
+                // replaced `fadeTimer` by the time this executes. Without
+                // this identity check, a stale tick can nil out (and
+                // therefore orphan) the timer that's actually driving the
+                // current fade, and its own belated completion can later
+                // tear down a theme that only just started.
+                guard let self, self.fadeTimer === timer else {
+                    timer.invalidate()
+                    return
+                }
+                guard let p = self.player else {
+                    timer.invalidate()
+                    self.fadeTimer = nil
+                    return
+                }
+                remaining -= 1
+                p.volume = remaining <= 0 ? target : p.volume + delta
+                if remaining <= 0 {
+                    timer.invalidate()
+                    self.fadeTimer = nil
+                    completion?()
+                }
+            }
+        }
+        fadeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    // MARK: - Test seams
+    //
+    // Unlike `resolver`/`urlBuilder` above (which ship in the production
+    // binary because production itself needs a default implementation to
+    // override), these exist purely to let SashimiTests reach otherwise-
+    // private behavior and have no reason to compile into a release build.
+
+    #if DEBUG
+    func resolveForTest(_ seriesId: String) async -> URL? { await resolve(seriesId: seriesId) }
+    func playForTest(url: URL) { play(url: url) }
+    func fadeForTest(to target: Float, over duration: TimeInterval, completion: (() -> Void)? = nil) {
+        fade(to: target, over: duration, completion: completion)
+    }
+    var fadeTimerForTest: Timer? { fadeTimer }
+    var playerForTest: AVPlayer? { player }
+    #endif
+}
+
+extension View {
+    /// Reports to `ThemeSongPlayer` which show this detail screen belongs to.
+    /// Reports intent only — never starts or stops playback directly.
+    func themeSong(for item: BaseItemDto) -> some View {
+        modifier(ThemeSongModifier(item: item))
+    }
+}
+
+private struct ThemeSongModifier: ViewModifier {
+    let item: BaseItemDto
+
+    /// series -> its own id; season/episode -> the parent series. Anything else
+    /// (movies, videos) has no key and never plays a theme.
+    private var seriesKey: String? {
+        switch item.type {
+        case .series: return item.id
+        case .season, .episode: return item.seriesId
+        default: return nil
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { ThemeSongPlayer.shared.showAppeared(seriesId: seriesKey) }
+            .onDisappear { ThemeSongPlayer.shared.detailDismissed(seriesId: seriesKey) }
+    }
+}
