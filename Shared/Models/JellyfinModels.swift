@@ -232,6 +232,20 @@ struct PlaybackInfoResponse: Codable {
     }
 }
 
+/// Response shape for `/Items/{id}/ThemeMedia`. The server returns three
+/// sibling result sets (songs, videos, soundtrack); only `ThemeSongsResult`
+/// is relevant here. A file-scope (not function-local) type so tests can
+/// decode it directly via `@testable import Sashimi` and exercise the real
+/// `CodingKeys` mapping, rather than re-implementing it and testing a copy.
+struct ThemeMediaResponse: Decodable {
+    struct Result: Decodable {
+        let items: [BaseItemDto]?
+        enum CodingKeys: String, CodingKey { case items = "Items" }
+    }
+    let themeSongsResult: Result?
+    enum CodingKeys: String, CodingKey { case themeSongsResult = "ThemeSongsResult" }
+}
+
 struct MediaSourceInfo: Codable {
     let id: String
     let path: String?

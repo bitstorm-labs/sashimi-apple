@@ -68,3 +68,6 @@ Vendor/
 
 # Claude Code personal settings (project settings.json IS committed)
 .claude/settings.local.json
+
+# Superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/
