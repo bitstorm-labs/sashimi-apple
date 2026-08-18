@@ -957,8 +957,11 @@ struct MobileDetailView: View {
     /// Play the item's local trailer inline (Trailarr). The button only appears
     /// when a local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
+        // Matches tvOS: stopped before the network round-trip, not after —
+        // otherwise the theme keeps playing through the whole
+        // getLocalTrailers() fetch and never stops at all if it fails.
+        ThemeSongPlayer.shared.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
-            ThemeSongPlayer.shared.stopForPlayback()
             playingItem = trailer
         }
     }
