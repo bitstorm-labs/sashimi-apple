@@ -90,6 +90,7 @@ struct MobileLibraryBrowseView: View {
     private func shufflePlay() async {
         let types: [ItemType] = collectionType == "tvshows" ? [.episode] : [.movie]
         if let item = try? await JellyfinClient.shared.getRandomItem(parentId: libraryId, itemTypes: types) {
+            ThemeSongPlayer.shared.stopForPlayback()
             shuffleItem = item
         }
     }

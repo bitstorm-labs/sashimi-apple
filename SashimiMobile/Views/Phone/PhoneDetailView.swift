@@ -127,6 +127,7 @@ struct PhoneDetailView: View {
         .clipped()
         .background(MobileColors.background)
         .navigationBarTitleDisplayMode(.inline)
+        .themeSong(for: item)
         .fullScreenPlayer(item: $playingItem)
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .navigationDestination(isPresented: $showSeriesDetail) {
@@ -656,6 +657,7 @@ struct PhoneDetailView: View {
     /// when a local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
+            ThemeSongPlayer.shared.stopForPlayback()
             playingItem = trailer
         }
     }
@@ -663,6 +665,7 @@ struct PhoneDetailView: View {
     /// Shuffle: play a random episode of this series.
     private func shuffleEpisode() async {
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: contentSeriesId, itemTypes: [.episode]) {
+            ThemeSongPlayer.shared.stopForPlayback()
             playingItem = ep
         }
     }
@@ -705,6 +708,7 @@ struct PhoneDetailView: View {
                 }()
 
                 Button {
+                    ThemeSongPlayer.shared.stopForPlayback()
                     playingItem = nextEp
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
@@ -775,6 +779,7 @@ struct PhoneDetailView: View {
                     if let nextEp = nextEpisodeToPlay,
                        (nextEp.userData?.playbackPositionTicks ?? 0) > 0 {
                         Button {
+                            ThemeSongPlayer.shared.stopForPlayback()
                             startOverItem = nextEp
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")
@@ -817,6 +822,7 @@ struct PhoneDetailView: View {
     private var episodeActionButtons: some View {
         HStack(spacing: MobileSpacing.sm) {
             Button {
+                ThemeSongPlayer.shared.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -834,6 +840,7 @@ struct PhoneDetailView: View {
                 overflowMenu {
                     if hasProgress {
                         Button {
+                            ThemeSongPlayer.shared.stopForPlayback()
                             startOverItem = item
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")
@@ -857,6 +864,7 @@ struct PhoneDetailView: View {
     private var movieActionButtons: some View {
         HStack(spacing: MobileSpacing.sm) {
             Button {
+                ThemeSongPlayer.shared.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -874,6 +882,7 @@ struct PhoneDetailView: View {
                 overflowMenu {
                     if hasProgress {
                         Button {
+                            ThemeSongPlayer.shared.stopForPlayback()
                             startOverItem = item
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")
