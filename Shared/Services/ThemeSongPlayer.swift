@@ -210,8 +210,27 @@ final class ThemeSongPlayer: ObservableObject {
             self.endFadeBoundaryObserver = player.addBoundaryTimeObserver(
                 forTimes: [NSValue(time: boundaryTime)], queue: .main
             ) { [weak self, weak player] in
-                guard let self, let player, self.player === player else { return }
-                self.fade(to: 0, over: self.timings.fadeOutEnding)
+                // `queue: .main` and the MainActor executor are the same
+                // context, but the compiler can't prove that from a plain
+                // closure — `assumeIsolated` turns the convention into a
+                // runtime-checked precondition instead of a warning (an
+                // error under Swift 6) and keeps this synchronous. Do not
+                // replace this with `Task { @MainActor in ... }`: that would
+                // defer the fade to a later dequeue, reopening the same
+                // stale-tick reordering hazard the identity guard in
+                // `fade(to:over:completion:)` exists to prevent.
+                MainActor.assumeIsolated {
+                    guard let self, let player, self.player === player else { return }
+                    // The end-of-track fade must tear itself down on
+                    // completion: if the item stalls right after this
+                    // boundary (dropped connection, server hiccup),
+                    // `AVPlayerItemDidPlayToEndTime` may never fire, and
+                    // without this the player and its notification token
+                    // would stay alive until the next `play()`/`stop()`.
+                    self.fade(to: 0, over: self.timings.fadeOutEnding) { [weak self] in
+                        self?.teardown()
+                    }
+                }
             }
         }
     }
@@ -257,6 +276,14 @@ final class ThemeSongPlayer: ObservableObject {
     private func fade(to target: Float, over duration: TimeInterval, completion: (() -> Void)? = nil) {
         fadeTimer?.invalidate()
         guard let p = player, duration > 0 else {
+            // `invalidate()` above stops the timer from firing again, but
+            // doesn't clear this reference. Left dangling, an already-
+            // enqueued tick from that same (now-invalidated) timer would
+            // still pass the `self.fadeTimer === timer` identity guard
+            // below — since it's comparing against itself — and nudge
+            // `p.volume` by the previous fade's delta after this "fade" was
+            // supposed to be a plain, immediate volume set.
+            fadeTimer = nil
             player?.volume = target
             completion?()
             return
@@ -300,6 +327,10 @@ final class ThemeSongPlayer: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    // Test seam.
+    // MARK: - Test seams
+
     func resolveForTest(_ seriesId: String) async -> URL? { await resolve(seriesId: seriesId) }
+    func playForTest(url: URL) { play(url: url) }
+    func fadeForTest(to target: Float, over duration: TimeInterval) { fade(to: target, over: duration) }
+    var fadeTimerForTest: Timer? { fadeTimer }
 }

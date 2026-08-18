@@ -174,6 +174,39 @@ final class ThemeSongResolutionTests: XCTestCase {
     }
 }
 
+/// `fade()`'s early-return path (taken when a fade is instant, i.e.
+/// `duration <= 0`) must clear `fadeTimer`, not merely invalidate the timer
+/// it points to. Left dangling, an already-enqueued tick from that
+/// invalidated timer would pass the `fadeTimer === timer` identity guard in
+/// the timer's own closure (added to prevent exactly this class of stale-
+/// tick bug) and nudge volume after this "instant" fade already set it.
+///
+/// Unreachable through `play()` alone with shipped defaults, because `play()`
+/// always tears down (and therefore clears `fadeTimer`) immediately before
+/// its own fade call — there's nothing to dangle at that specific call site.
+/// It becomes reachable the moment an instant fade (`duration <= 0`, e.g. an
+/// injected `fadeIn: 0`, or any fade call that isn't preceded by a
+/// synchronous teardown) runs while a real fade timer is still live — which
+/// is exactly what `playForTest`/`fadeForTest` (added alongside this test)
+/// let this suite construct deterministically, without waiting on a real
+/// timer race.
+@MainActor
+final class ThemeSongFadeLifecycleTests: XCTestCase {
+    func testImmediateFadeClearsAnyPriorTimerReference() throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings())
+        // A reserved, non-routable address: AVPlayerItem/AVPlayer
+        // construction and `play()` are local operations that don't need the
+        // stream to actually resolve for this test.
+        let url = try XCTUnwrap(URL(string: "http://192.0.2.1:1/unreachable-theme.mp3"))
+
+        player.playForTest(url: url)
+        XCTAssertNotNil(player.fadeTimerForTest, "sanity: play() should install a live fade-in timer")
+
+        player.fadeForTest(to: 0, over: 0)
+        XCTAssertNil(player.fadeTimerForTest, "an immediate fade must clear fadeTimer, not merely invalidate it")
+    }
+}
+
 /// The `fadeOutEnding` gap this whole pass exists to fix started as a
 /// `private let` no test ever read — declared, matching spec, and silently
 /// wired to nothing. This suite reads every shipped default directly, and
