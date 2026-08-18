@@ -150,4 +150,26 @@ final class ThemeSongResolutionTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 20_000_000)
         XCTAssertEqual(calls, 0, "nothing is fetched when the setting is off")
     }
+
+    /// A thrown error (network failure, request cancellation) is not the
+    /// same fact as "this series has no theme" and must not be cached the
+    /// same way `testCachesMissesToo` proves a clean `nil` is. Bouncing in
+    /// and out of a detail screen inside the start delay cancels the
+    /// in-flight request every time; if that got cached as a permanent miss,
+    /// the series would never get its theme resolved again for the session.
+    func testThrowingResolverIsNotCached() async {
+        struct ResolveFailure: Error {}
+        let player = ThemeSongPlayer(startDelay: 0)
+        var calls = 0
+        player.resolver = { _ in
+            calls += 1
+            throw ResolveFailure()
+        }
+
+        let first = await player.resolveForTest("A")
+        let second = await player.resolveForTest("A")
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+        XCTAssertEqual(calls, 2, "a thrown error must not be cached; every visit should retry")
+    }
 }

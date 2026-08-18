@@ -34,12 +34,18 @@ final class ThemeSongPlayer: ObservableObject {
     private let fadeOutEnding: TimeInterval = 1.5
 
     /// Overridden in tests. Production resolves through JellyfinClient.
-    var resolver: (String) async -> URL?
+    ///
+    /// Throws on a real failure (network error, cancellation) rather than
+    /// swallowing it to `nil` — `resolve(seriesId:)` relies on that
+    /// distinction to avoid caching a transient failure as a permanent
+    /// "this series has no theme".
+    var resolver: (String) async throws -> URL?
 
     init(startDelay: TimeInterval = 0.75) {
         self.startDelay = startDelay
         self.resolver = { seriesId in
-            guard let theme = try? await JellyfinClient.shared.getThemeSongs(itemId: seriesId).first else { return nil }
+            let themes = try await JellyfinClient.shared.getThemeSongs(itemId: seriesId)
+            guard let theme = themes.first else { return nil }
             return await JellyfinClient.shared.getAudioStreamURL(itemId: theme.id)
         }
     }
@@ -95,12 +101,28 @@ final class ThemeSongPlayer: ObservableObject {
 
     private func resolve(seriesId: String) async -> URL? {
         if let cached = cache[seriesId] { return cached }
-        let url = await resolver(seriesId)
-        cache[seriesId] = url
-        return url
+        do {
+            let url = try await resolver(seriesId)
+            // A cancellation can slip past a `try?`-free resolver as a normal
+            // return rather than a thrown error; don't let that race cache a
+            // series as themeless.
+            guard !Task.isCancelled else { return nil }
+            cache[seriesId] = url
+            return url
+        } catch {
+            // A thrown error (network failure, request cancellation) is never
+            // cached: it says nothing about whether the series has a theme,
+            // unlike a clean empty result, which is cached above.
+            logger.debug("theme resolve failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private func play(url: URL) {
+        // A prior player/observer must never be stranded: without this, a
+        // second `play()` before the first has torn down leaks the old
+        // AVPlayer and its NotificationCenter token forever.
+        teardown()
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.volume = 0
@@ -147,9 +169,29 @@ final class ThemeSongPlayer: ObservableObject {
         let steps = max(1, Int(duration / 0.05))
         let delta = (target - p.volume) / Float(steps)
         var remaining = steps
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+        // Built unscheduled and added to `.common` explicitly: a timer handed
+        // to `Timer.scheduledTimer` installs in the default run-loop mode
+        // only, so it stalls whenever tvOS switches the main run loop to
+        // tracking mode (focus movement, row scrolling) — the fade freezes
+        // mid-volume and its `weak self` closure is never fired again.
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
             Task { @MainActor in
-                guard let self, let p = self.player else { timer.invalidate(); return }
+                // The closure's body runs when the Task is *dequeued*, not
+                // when the timer fires, so a newer fade can already have
+                // replaced `fadeTimer` by the time this executes. Without
+                // this identity check, a stale tick can nil out (and
+                // therefore orphan) the timer that's actually driving the
+                // current fade, and its own belated completion can later
+                // tear down a theme that only just started.
+                guard let self, self.fadeTimer === timer else {
+                    timer.invalidate()
+                    return
+                }
+                guard let p = self.player else {
+                    timer.invalidate()
+                    self.fadeTimer = nil
+                    return
+                }
                 remaining -= 1
                 p.volume = remaining <= 0 ? target : p.volume + delta
                 if remaining <= 0 {
@@ -159,6 +201,8 @@ final class ThemeSongPlayer: ObservableObject {
                 }
             }
         }
+        fadeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     // Test seam.
