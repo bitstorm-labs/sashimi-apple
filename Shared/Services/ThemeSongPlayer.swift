@@ -30,6 +30,37 @@ struct ThemeSongTimings {
 /// one place.
 ///
 /// Every failure path is silence. Background music is never worth an error.
+///
+/// ## `AVAudioSession` — what this type is allowed to do
+///
+/// The original rule here was "never touch `AVAudioSession`", because tvOS
+/// configures it once at launch (`SashimiApp.configureAudioSession`) and
+/// reconfiguring it would break video playback. That rule is deliberately
+/// relaxed for **one narrow iOS-only case** (issue #393): the mobile app
+/// configures no session at all, so a theme played under iOS's default
+/// `.soloAmbient` category obeys the Ring/Silent switch and is inaudible on
+/// a phone that's on silent. A user who turned theme songs on asked for
+/// them; a hardware switch they set weeks ago shouldn't veto that.
+///
+/// So, on iOS only, and only immediately before starting a theme, this type
+/// sets `.playback` / `.moviePlayback` and activates the session — the exact
+/// category `PlayerViewModel.loadMedia` already sets for every video and
+/// never reverts, so the session ends up there regardless. The theme just
+/// gets there first.
+///
+/// Three parts of that are load-bearing; do not "tidy" any of them away:
+///
+/// - **It never deactivates the session.** `PlayerViewModel` doesn't either.
+///   Deactivating on stop is what would break video, Picture-in-Picture and
+///   background audio.
+/// - **It never takes audio from the user.** `.playback` claims audio focus,
+///   which would stop a podcast or album the user deliberately started, so
+///   the theme is skipped entirely — no session change, no request, no
+///   retry — whenever `isOtherAudioPlaying` reports another app is already
+///   playing.
+/// - **None of it applies to tvOS.** There is no silent switch there, the
+///   session is already configured at launch, and the tvOS behaviour of this
+///   type is unchanged.
 @MainActor
 final class ThemeSongPlayer: ObservableObject {
     static let shared = ThemeSongPlayer()
@@ -78,6 +109,33 @@ final class ThemeSongPlayer: ObservableObject {
     /// `cache` doc comment above for why a URL can't be treated the same way
     /// an id can.
     var urlBuilder: (String) async -> URL?
+
+    /// Reports whether audio belonging to *another* app is already playing.
+    /// A theme must never interrupt it (see the type's `AVAudioSession`
+    /// note above).
+    ///
+    /// Injectable purely so the gate is unit-testable: `SashimiTests` is
+    /// tvOS-hosted, and there is no way to make a simulator report another
+    /// app's audio. Tests override this; nothing else does.
+    ///
+    /// The production default is platform-specific rather than the whole
+    /// gate being `#if os(iOS)`, so there is exactly one code path to reason
+    /// about. On tvOS it is a constant `false`: no silent switch, no
+    /// competing-audio concern in the same form, and the tvOS behaviour of
+    /// this type must not change.
+    ///
+    /// `AVAudioSession.isOtherAudioPlaying` is specifically *other* apps'
+    /// audio — it does not report this app's own theme back to itself, so
+    /// there is no need for the "I already own the audio" escape hatch a
+    /// same-process signal (e.g. Android's `AudioManager.isMusicActive`)
+    /// would require to survive its own fade-out during a show change.
+    var isOtherAudioPlaying: () -> Bool = {
+        #if os(iOS)
+        return AVAudioSession.sharedInstance().isOtherAudioPlaying
+        #else
+        return false
+        #endif
+    }
 
     init(timings: ThemeSongTimings = ThemeSongTimings()) {
         self.timings = timings
@@ -138,6 +196,17 @@ final class ThemeSongPlayer: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
             }
             guard !Task.isCancelled else { return }
+            // Placed *after* the delay so a show flicked past never asks the
+            // question, and *before* the lookup so a skipped visit costs no
+            // network request. The visit needs no extra "spent" bookkeeping:
+            // `ThemeSongVisitState` only returns `.start` when the series
+            // actually changes, so returning here ends this visit's one and
+            // only attempt — drilling into a season, or coming back from
+            // background, is still the same visit and won't retry.
+            guard !isOtherAudioPlaying() else {
+                logger.debug("theme skipped: another app is playing audio")
+                return
+            }
             guard let url = await resolve(seriesId: seriesId) else { return }
             guard !Task.isCancelled, visit.currentSeriesId == seriesId else { return }
             play(url: url)
@@ -178,6 +247,7 @@ final class ThemeSongPlayer: ObservableObject {
         // second `play()` before the first has torn down leaks the old
         // AVPlayer and its NotificationCenter/time-observer tokens forever.
         teardown()
+        activatePlaybackSessionIfNeeded()
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.volume = 0
@@ -194,6 +264,27 @@ final class ThemeSongPlayer: ObservableObject {
         p.play()
         fade(to: timings.volume, over: timings.fadeIn)
         logger.debug("theme song started")
+    }
+
+    /// Points the shared session at the category a theme needs to be audible
+    /// with the Ring/Silent switch on, immediately before the theme starts.
+    /// See the type's `AVAudioSession` note for why this is allowed at all,
+    /// why it is iOS-only, and why the session is never deactivated again.
+    ///
+    /// Reached only once `isOtherAudioPlaying()` has said no other app owns
+    /// the audio, so it can't take playback away from anyone. Failure is
+    /// silence, like every other path here: the theme still tries to play,
+    /// it just stays subject to whatever category the session already had.
+    private func activatePlaybackSessionIfNeeded() {
+        #if os(iOS)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+        } catch {
+            logger.debug("theme audio session setup failed: \(error.localizedDescription)")
+        }
+        #endif
     }
 
     /// Starts the fade-out `fadeOutEnding` seconds before the theme's natural
