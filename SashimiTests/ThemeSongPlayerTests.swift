@@ -234,6 +234,109 @@ final class ThemeSongResolutionTests: XCTestCase {
     }
 }
 
+/// The theme is allowed to override the iOS Ring/Silent switch (it sets
+/// `.playback` before starting, issue #393), which means it also claims audio
+/// focus. That is only acceptable because it never does so while another app
+/// owns the audio: a podcast or album the user deliberately started must not
+/// be stopped by walking onto a detail screen.
+///
+/// `isOtherAudioPlaying` is the injectable seam that decision hangs off,
+/// because the real signal (`AVAudioSession.isOtherAudioPlaying`) cannot be
+/// produced on a simulator — and this suite is tvOS-hosted, where the
+/// production default is a constant `false` by design.
+///
+/// Red-verified: inverting the guard in `scheduleStart` to
+/// `guard isOtherAudioPlaying()` makes
+/// `testOtherAudioPlayingSkipsTheThemeEntirely` and
+/// `testNoOtherAudioLetsTheThemeStart` fail, and deleting the guard outright
+/// makes `testOtherAudioPlayingSkipsTheThemeEntirely` fail. Neither passes
+/// against code without the fix.
+@MainActor
+final class ThemeSongOtherAudioGateTests: XCTestCase {
+    /// A reserved, non-routable address: `AVPlayerItem`/`AVPlayer`
+    /// construction and `play()` are local operations, so nothing here needs
+    /// the stream to resolve.
+    private func themeURL() throws -> URL {
+        try XCTUnwrap(URL(string: "http://192.0.2.1:1/theme.mp3"))
+    }
+
+    /// The whole point of the gate: not "start quietly", not "start and duck"
+    /// — nothing happens at all. No session change (there is none to observe
+    /// here, hence the player assertion), and crucially no network request,
+    /// which is why the resolver/urlBuilder counts must both stay at zero.
+    func testOtherAudioPlayingSkipsTheThemeEntirely() async throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
+        PlaybackSettings.shared.playThemeSongs = true
+        var resolverCalls = 0
+        var urlBuilderCalls = 0
+        player.resolver = { _ in resolverCalls += 1; return "theme-item-id" }
+        let url = try themeURL()
+        player.urlBuilder = { _ in urlBuilderCalls += 1; return url }
+        player.isOtherAudioPlaying = { true }
+
+        player.showAppeared(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(resolverCalls, 0, "a skipped visit must not cost a theme lookup")
+        XCTAssertEqual(urlBuilderCalls, 0, "a skipped visit must not build a stream URL either")
+        XCTAssertNil(player.playerForTest, "no AVPlayer may be created when another app owns the audio")
+    }
+
+    /// The other half of the pair. Without this, a gate that skipped
+    /// unconditionally would still satisfy the test above — the exact shape
+    /// of "passes against broken code" this feature has already been bitten
+    /// by on other clients.
+    func testNoOtherAudioLetsTheThemeStart() async throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0))
+        PlaybackSettings.shared.playThemeSongs = true
+        var urlBuilderCalls = 0
+        player.resolver = { _ in "theme-item-id" }
+        let url = try themeURL()
+        player.urlBuilder = { _ in urlBuilderCalls += 1; return url }
+        player.isOtherAudioPlaying = { false }
+
+        player.showAppeared(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(urlBuilderCalls, 1, "with no competing audio the theme must resolve and start")
+        XCTAssertNotNil(player.playerForTest, "an AVPlayer should have been created")
+    }
+
+    /// The gate lives *after* the start delay on purpose: a show the user
+    /// flicks past is cancelled before the delay elapses and must ask no
+    /// question at all — not of `AVAudioSession`, not of the server. Moving
+    /// the check ahead of the sleep would make every scrolled-past row
+    /// interrogate the audio session.
+    func testShowFlickedPastNeverConsultsTheGate() async {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(startDelay: 0.75))
+        PlaybackSettings.shared.playThemeSongs = true
+        var probeCalls = 0
+        player.isOtherAudioPlaying = { probeCalls += 1; return false }
+        player.resolver = { _ in "theme-item-id" }
+        player.urlBuilder = { _ in nil }
+
+        player.showAppeared(seriesId: "A")
+        player.detailDismissed(seriesId: "A")
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(probeCalls, 0, "a visit abandoned inside the start delay must not probe the audio session")
+    }
+
+    /// tvOS has no Ring/Silent switch, configures its session once at launch
+    /// in `SashimiApp`, and its theme behaviour is unchanged by this fix. The
+    /// shipped probe must therefore be inert here — if someone ever makes the
+    /// default `AVAudioSession.isOtherAudioPlaying` on every platform, tvOS
+    /// starts silently dropping themes and this catches it.
+    func testShippedProbeIsInertOnTVOS() {
+        let player = ThemeSongPlayer()
+        #if os(tvOS)
+        XCTAssertFalse(player.isOtherAudioPlaying(), "the tvOS default must be a constant false")
+        #else
+        _ = player
+        #endif
+    }
+}
+
 /// `fade()`'s early-return path (taken when a fade is instant, i.e.
 /// `duration <= 0`) must clear `fadeTimer`, not merely invalidate the timer
 /// it points to. Left dangling, an already-enqueued tick from that
