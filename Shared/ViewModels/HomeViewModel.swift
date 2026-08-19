@@ -169,7 +169,7 @@ final class HomeViewModel: ObservableObject {
             for (index, library) in libraries.enumerated() {
                 group.addTask { [client] in
                     do {
-                        let items = try await client.getLatestMedia(parentId: library.id, limit: 10)
+                        let items = try await client.getLatestMedia(parentId: library.id, limit: 10, groupItems: false)
                         return LibraryLatest(index: index, items: items)
                     } catch {
                         // Non-fatal: this library is just missing from the rotation

@@ -802,7 +802,7 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil) async throws -> [BaseItemDto] {
+    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil, groupItems: Bool = true) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
         if includeWatched {
@@ -859,6 +859,16 @@ actor JellyfinClient {
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
             ]
+
+            // Grouping is ON by default (the Recently Added row wants it: a
+            // channel's burst of new videos should be one card, not five). The
+            // hero passes false — grouped, a channel that posted several videos
+            // collapses into its Series and the hero shows the CHANNEL rather
+            // than a video. Verified against the server: grouped returns a
+            // Series/Episode mix, ungrouped returns 10/10 Episodes.
+            if !groupItems {
+                queryItems.append(URLQueryItem(name: "GroupItems", value: "false"))
+            }
 
             if let parentId {
                 queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
