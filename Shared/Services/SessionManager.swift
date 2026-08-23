@@ -129,6 +129,7 @@ struct ServerClientScopeStack {
 // scopes; keeping those transitions together is safer than splitting the
 // state machine across unrelated services.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class SessionManager: ObservableObject {
     static let shared = SessionManager()
 
@@ -150,6 +151,10 @@ final class SessionManager: ObservableObject {
     private let userDefaultsServerURLKey = "serverURL"
     private let userDefaultsUserIdKey = "userId"
     private let keychainAccessTokenKey = "accessToken"
+    /// Identifies which saved server last populated the legacy global token
+    /// slot. Token fallback must never mistake that token for another saved
+    /// server's credential.
+    private let legacyTokenServerIDKey = "legacyAccessTokenServerID"
     /// Pre-Keychain builds stored the token in plaintext under this key.
     private let legacyUserDefaultsTokenKey = "accessToken"
 
@@ -199,6 +204,7 @@ final class SessionManager: ObservableObject {
         }
         guard allowLegacyFallback,
               server.id == activeServerId,
+              legacyTokenBelongsTo(server),
               let legacyToken = KeychainHelper.get(forKey: keychainAccessTokenKey) else {
             return nil
         }
@@ -206,8 +212,42 @@ final class SessionManager: ObservableObject {
             logger.error("Could not migrate the active server's saved credential")
             return nil
         }
+        UserDefaults.standard.set(server.id, forKey: legacyTokenServerIDKey)
         logger.info("Migrated the active server's legacy credential to its server-scoped key")
         return legacyToken
+    }
+
+    /// Older installs have no marker and are safe to migrate only for the
+    /// active server. New activations record the source server whenever they
+    /// update the legacy slot.
+    private func legacyTokenBelongsTo(_ server: ServerConfig) -> Bool {
+        if let sourceServerID = UserDefaults.standard.string(forKey: legacyTokenServerIDKey) {
+            return sourceServerID == server.id
+        }
+
+        // A pre-marker install can only be migrated when the old server
+        // identity is still present and agrees with the saved account. Never
+        // infer ownership from "active" alone once more than one server is
+        // saved; the global token may belong to any of them.
+        guard servers.count == 1,
+              let legacyURLString = UserDefaults.standard.string(forKey: userDefaultsServerURLKey),
+              let legacyURL = URL(string: legacyURLString),
+              let legacyUserID = UserDefaults.standard.string(forKey: userDefaultsUserIdKey),
+              legacyUserID == server.userId else {
+            return false
+        }
+
+        return legacyURL.scheme?.caseInsensitiveCompare(server.url.scheme ?? "") == .orderedSame
+            && legacyURL.host?.caseInsensitiveCompare(server.url.host ?? "") == .orderedSame
+            && (legacyURL.port ?? defaultPort(for: legacyURL)) == (server.url.port ?? defaultPort(for: server.url))
+    }
+
+    private func defaultPort(for url: URL) -> Int? {
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
     }
 
     // MARK: - Session lifecycle
@@ -290,24 +330,18 @@ final class SessionManager: ObservableObject {
     }
 
     private func activate(_ server: ServerConfig, token: String) async {
-        // Mirror the active server into the legacy single-server keys:
-        // JellyfinClient's image-URL builders and several views still read
-        // them directly (scrubbing them in migration killed all artwork).
-        // The token, too: DownloadURLBuilder and SubtitleManager authorize their
-        // background requests off the global "accessToken" keychain key. Without
-        // this mirror a fresh multi-server install (no legacy token to inherit)
-        // has an empty global key, so every download and external-subtitle fetch
-        // fails instantly with "Could not build download URL". Per-server tokens
-        // live under "accessToken.<id>"; this keeps the active one in the global
-        // slot those two consumers read.
+        // Keep the legacy single-server keys in sync for unscoped legacy routes
+        // that still read them directly. Multi-server downloads, subtitles, and
+        // scoped artwork resolve their own server URL and token explicitly, so
+        // temporary server scopes deliberately do not update this mirror.
         await clientConfigurationMutex.lock()
-        await configureClient(for: server, token: token)
+        await configureClient(for: server, token: token, mirrorDefaults: true)
+        await clientConfigurationMutex.unlock()
         // Measure the connection in the background so the first play uses a
         // bandwidth-appropriate Auto bitrate (no stall on remote links). Runs
         // on every activation — login, restore, server switch — and retries
         // internally, so one failed probe no longer stands for the session.
         await JellyfinClient.shared.startBandwidthMeasurement()
-        await clientConfigurationMutex.unlock()
 
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
@@ -390,7 +424,7 @@ final class SessionManager: ObservableObject {
             return
         }
         reauthServer = nil
-        await configureClient(for: server, token: token)
+        await configureClient(for: server, token: token, mirrorDefaults: true)
         await clientConfigurationMutex.unlock()
     }
 
@@ -408,7 +442,7 @@ final class SessionManager: ObservableObject {
         let scope = clientScopeStack.begin(
             previousServerID: configuredServerID ?? activeServerId
         )
-        await configureClient(for: server, token: token)
+        await configureClient(for: server, token: token, mirrorDefaults: false)
         await clientConfigurationMutex.unlock()
         return scope
     }
@@ -429,7 +463,10 @@ final class SessionManager: ObservableObject {
             return
         }
 
-        await configureClient(forServerID: removal.entry.previousServerID)
+        await configureClient(
+            forServerID: removal.entry.previousServerID,
+            mirrorDefaults: clientScopeStack.isEmpty
+        )
         await clientConfigurationMutex.unlock()
     }
 
@@ -452,15 +489,18 @@ final class SessionManager: ObservableObject {
         UserDefaults.standard.set(server.userId, forKey: "userId")
         UserDefaults.standard.set(server.username, forKey: "userName")
         _ = KeychainHelper.save(token, forKey: keychainAccessTokenKey)
+        UserDefaults.standard.set(server.id, forKey: legacyTokenServerIDKey)
     }
 
-    private func configureClient(for server: ServerConfig, token: String) async {
-        mirrorServerDefaults(server, token: token)
+    private func configureClient(for server: ServerConfig, token: String, mirrorDefaults: Bool) async {
+        if mirrorDefaults {
+            mirrorServerDefaults(server, token: token)
+        }
         await JellyfinClient.shared.configure(serverURL: server.url, accessToken: token, userId: server.userId)
         configuredServerID = server.id
     }
 
-    private func configureClient(forServerID serverID: String?) async {
+    private func configureClient(forServerID serverID: String?, mirrorDefaults: Bool = true) async {
         guard let serverID,
               let server = servers.first(where: { $0.id == serverID }),
               let token = token(for: server, allowLegacyFallback: true) else {
@@ -468,7 +508,7 @@ final class SessionManager: ObservableObject {
             configuredServerID = nil
             return
         }
-        await configureClient(for: server, token: token)
+        await configureClient(for: server, token: token, mirrorDefaults: mirrorDefaults)
     }
 
     /// Remove a saved server. Removing the active one activates the next;

@@ -1,6 +1,8 @@
 import Foundation
 import Nuke
 
+private let scopedServerRequestHeader = "X-Sashimi-Scoped-Server"
+
 /// Adds the active Jellyfin token to artwork requests without putting it in
 /// the URL. Jellyfin protects image endpoints just like its JSON API, while
 /// Nuke's default loader only knows about the URL and therefore sent these
@@ -19,10 +21,13 @@ private final class JellyfinImageDataLoader: DataLoading, @unchecked Sendable {
         completion: @escaping @Sendable (Error?) -> Void
     ) -> any Cancellable {
         var authorizedRequest = request
-        if authorizedRequest.value(forHTTPHeaderField: "X-Emby-Token") == nil,
-           let accessToken = KeychainHelper.get(forKey: "accessToken") {
+        let isExplicitlyScoped = authorizedRequest.value(forHTTPHeaderField: scopedServerRequestHeader) == "true"
+        if !isExplicitlyScoped,
+           authorizedRequest.value(forHTTPHeaderField: "X-Emby-Token") == nil,
+           let accessToken = SashimiImagePipeline.accessToken(for: request.url) {
             authorizedRequest.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
         }
+        authorizedRequest.setValue(nil, forHTTPHeaderField: scopedServerRequestHeader)
         return loader.loadData(
             with: authorizedRequest,
             didReceiveData: didReceiveData,
@@ -89,11 +94,71 @@ enum SashimiImagePipeline {
     /// or Nuke's cache key.
     static func request(url: URL, serverID: String? = nil) -> ImageRequest {
         var urlRequest = URLRequest(url: url)
-        if let serverID,
-           let accessToken = KeychainHelper.get(forKey: "accessToken.\(serverID)") {
+        if let serverID {
+            // An explicitly scoped request must never fall back to the global
+            // token if its server credential is missing. The private marker
+            // tells the loader to fail closed; it is removed before transport.
+            urlRequest.setValue("true", forHTTPHeaderField: scopedServerRequestHeader)
+            if let accessToken = KeychainHelper.get(forKey: "accessToken.\(serverID)") {
+                urlRequest.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
+            }
+        } else if let accessToken = accessToken(for: url) {
             urlRequest.setValue(accessToken, forHTTPHeaderField: "X-Emby-Token")
         }
         return ImageRequest(urlRequest: urlRequest)
+    }
+
+    /// Resolve credentials from the URL's saved server rather than from the
+    /// mutable global active-server slot. This keeps plain `LazyImage(url:)`
+    /// callers safe while a temporary detail scope points the shared client at
+    /// another server.
+    fileprivate static func accessToken(for url: URL?) -> String? {
+        guard let url else { return KeychainHelper.get(forKey: "accessToken") }
+        guard let data = UserDefaults.standard.data(forKey: "servers"),
+              let servers = try? JSONDecoder().decode([ServerConfig].self, from: data) else {
+            return KeychainHelper.get(forKey: "accessToken")
+        }
+        let matchingServer = servers
+            .filter { savedServer in
+                serverURLMatches(savedServer.url, requestURL: url)
+            }
+            .max { lhs, rhs in
+                normalizedPath(lhs.url.path).count < normalizedPath(rhs.url.path).count
+            }
+        guard let matchingServer else {
+            return KeychainHelper.get(forKey: "accessToken")
+        }
+        // Once the URL identifies a saved server, fail closed if that server's
+        // scoped credential is unavailable instead of leaking the global token.
+        return KeychainHelper.get(forKey: "accessToken.\(matchingServer.id)")
+    }
+
+    private static func serverURLMatches(_ savedURL: URL, requestURL: URL) -> Bool {
+        guard savedURL.scheme?.lowercased() == requestURL.scheme?.lowercased(),
+              savedURL.host?.lowercased() == requestURL.host?.lowercased(),
+              effectivePort(for: savedURL) == effectivePort(for: requestURL) else {
+            return false
+        }
+
+        let basePath = normalizedPath(savedURL.path)
+        let requestPath = normalizedPath(requestURL.path)
+        return basePath.isEmpty
+            || requestPath == basePath
+            || requestPath.hasPrefix("\(basePath)/")
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? "" : "/\(trimmed)"
+    }
+
+    private static func effectivePort(for url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
     }
 
     /// Sized for a 4K-capable but memory-constrained Apple TV. The default is a

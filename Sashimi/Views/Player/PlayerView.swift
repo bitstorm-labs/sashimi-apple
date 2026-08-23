@@ -3,10 +3,18 @@ import AVKit
 
 struct PlayerView: View {
     let item: BaseItemDto
+    var serverID: String?
     var startFromBeginning: Bool = false
 
-    @StateObject private var viewModel = PlayerViewModel()
+    @StateObject private var viewModel: PlayerViewModel
     @Environment(\.dismiss) private var dismiss
+
+    init(item: BaseItemDto, serverID: String? = nil, startFromBeginning: Bool = false) {
+        self.item = item
+        self.serverID = serverID
+        self.startFromBeginning = startFromBeginning
+        _viewModel = StateObject(wrappedValue: PlayerViewModel(serverID: serverID))
+    }
 
     /// Distinguishes THIS presentation of the player in the log.
     ///

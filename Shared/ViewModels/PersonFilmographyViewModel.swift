@@ -54,7 +54,7 @@ final class PersonFilmographyViewModel: ObservableObject {
         } catch {
             guard !Task.isCancelled else { return }
             personFilmographyLogger.error(
-                "Filmography load failed: \(error.localizedDescription, privacy: .public)"
+                "Filmography load failed: \(error.localizedDescription, privacy: .private)"
             )
             state = .failed("Check your server connection and try again.")
         }

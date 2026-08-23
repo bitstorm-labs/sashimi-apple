@@ -86,6 +86,12 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
+    let serverID: String?
+
+    init(serverID: String? = nil) {
+        self.serverID = serverID
+    }
+
     @Published var player: AVPlayer?
     @Published var isLoading = true
     @Published var error: Error?
@@ -1874,7 +1880,11 @@ final class PlayerViewModel: ObservableObject {
                let downloaded = offlineSubtitles.first(where: { $0.index == track.index }) {
                 await subtitleManager.loadSubtitles(fileURL: downloaded.fileURL)
             } else {
-                await subtitleManager.loadSubtitles(itemId: item.id, subtitleIndex: track.index)
+                await subtitleManager.loadSubtitles(
+                    itemId: item.id,
+                    subtitleIndex: track.index,
+                    serverID: serverID
+                )
             }
             guard !Task.isCancelled, self.player === capturedPlayer else { return }
             subtitleManager.startTracking(player: capturedPlayer)

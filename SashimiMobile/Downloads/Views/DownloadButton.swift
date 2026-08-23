@@ -3,6 +3,7 @@ import SwiftData
 
 struct DownloadButton: View {
     let item: BaseItemDto
+    var serverID: String?
     let quality: Binding<DownloadQuality>?
     var showQualityPicker: Bool = true
 
@@ -34,6 +35,10 @@ struct DownloadButton: View {
         case no
     }
 
+    private var downloadRecordID: String {
+        "\(serverID ?? "legacy"):\(item.id)"
+    }
+
     var body: some View {
         Button {
             handleTap()
@@ -60,7 +65,7 @@ struct DownloadButton: View {
         }
         .confirmationDialog("Remove Download?", isPresented: $showingDeleteConfirmation) {
             Button("Remove Download", role: .destructive) {
-                Task { await downloadManager.deleteDownload(itemId: item.id) }
+                Task { await downloadManager.deleteDownload(itemId: item.id, serverID: serverID) }
             }
         } message: {
             Text("This will remove the downloaded file from your device.")
@@ -127,7 +132,7 @@ struct DownloadButton: View {
     private var qualityOptions: some View {
         ForEach(availableQualities) { option in
             Button("\(option.displayName) — \(option.subtitle)") {
-                downloadManager.enqueueDownload(item: item, quality: option)
+                downloadManager.enqueueDownload(item: item, quality: option, serverID: serverID)
             }
         }
         Button("Cancel", role: .cancel) {}
@@ -145,16 +150,16 @@ struct DownloadButton: View {
             }
 
         case .queued, .preparing, .downloading:
-            Task { await downloadManager.cancelDownload(itemId: item.id) }
+            Task { await downloadManager.cancelDownload(itemId: item.id, serverID: serverID) }
 
         case .paused:
-            Task { await downloadManager.retryDownload(itemId: item.id) }
+            Task { await downloadManager.retryDownload(itemId: item.id, serverID: serverID) }
 
         case .completed:
             showingDeleteConfirmation = true
 
         case .failed:
-            Task { await downloadManager.retryDownload(itemId: item.id) }
+            Task { await downloadManager.retryDownload(itemId: item.id, serverID: serverID) }
         }
     }
 
@@ -178,13 +183,13 @@ struct DownloadButton: View {
     private func enqueueBoundQuality(_ requested: DownloadQuality) {
         guard !determiningOptions else { return }
         guard requested == .original else {
-            downloadManager.enqueueDownload(item: item, quality: requested)
+            downloadManager.enqueueDownload(item: item, quality: requested, serverID: serverID)
             return
         }
         Task {
             await determineOriginalAllowed()
             let resolved: DownloadQuality = (originalAllowed == .yes) ? .original : .high
-            downloadManager.enqueueDownload(item: item, quality: resolved)
+            downloadManager.enqueueDownload(item: item, quality: resolved, serverID: serverID)
         }
     }
 
@@ -196,7 +201,19 @@ struct DownloadButton: View {
         determiningOptions = true
         defer { determiningOptions = false }
         do {
-            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation)
+            let info: PlaybackInfoResponse
+            if let serverID {
+                guard let server = SessionManager.shared.servers.first(where: { $0.id == serverID }),
+                      let token = SessionManager.shared.token(for: server, allowLegacyFallback: true) else {
+                    originalAllowed = .no
+                    return
+                }
+                let client = JellyfinClient()
+                await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+                info = try await client.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation)
+            } else {
+                info = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation)
+            }
             let compatible = info.mediaSources?.first
                 .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
             originalAllowed = compatible ? .yes : .no
@@ -206,7 +223,7 @@ struct DownloadButton: View {
     }
 
     private func refreshState() {
-        guard let record = downloadManager.downloadStatus(for: item.id) else {
+        guard let record = downloadManager.downloadStatus(for: item.id, serverID: serverID) else {
             downloadState = .notDownloaded
             progress = 0
             return
@@ -216,11 +233,11 @@ struct DownloadButton: View {
         case .queued:
             downloadState = .queued
         case .preparing, .downloading:
-            if downloadManager.preparingItems.contains(item.id) {
+            if downloadManager.preparingItems.contains(downloadRecordID) {
                 downloadState = .preparing
             } else {
                 downloadState = .downloading
-                progress = downloadManager.activeDownloads[item.id] ?? record.progress
+                progress = downloadManager.activeDownloads[downloadRecordID] ?? record.progress
             }
         case .paused:
             downloadState = .paused

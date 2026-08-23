@@ -69,8 +69,12 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var personImage: some View {
         if person.primaryImageTag != nil,
-           let imageURL = JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 320) {
-            LazyImage(url: imageURL) { state in
+           let imageURL = JellyfinClient.shared.personImageURL(
+               personId: person.id,
+               maxWidth: 320,
+               serverURL: personServerURL
+           ) {
+            LazyImage(request: SashimiImagePipeline.request(url: imageURL, serverID: originatingServerID)) { state in
                 if let image = state.image {
                     image
                         .resizable()
@@ -85,6 +89,13 @@ struct PersonDetailView: View {
         } else {
             personPlaceholder
         }
+    }
+
+    private var personServerURL: URL? {
+        if let originatingServerID {
+            return SessionManager.shared.servers.first(where: { $0.id == originatingServerID })?.url
+        }
+        return SessionManager.shared.serverURL
     }
 
     private var personPlaceholder: some View {

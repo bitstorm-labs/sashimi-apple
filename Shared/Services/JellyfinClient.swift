@@ -1339,9 +1339,19 @@ actor JellyfinClient {
         return components.url
     }
 
-    nonisolated func personImageURL(personId: String, maxWidth: Int = 150) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
-              let url = URL(string: serverURL) else { return nil }
+    nonisolated func personImageURL(
+        personId: String,
+        maxWidth: Int = 150,
+        serverURL overrideServerURL: URL? = nil
+    ) -> URL? {
+        let url: URL
+        if let overrideServerURL {
+            url = overrideServerURL
+        } else {
+            guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
+                  let defaultURL = URL(string: serverURL) else { return nil }
+            url = defaultURL
+        }
 
         guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(personId)/Images/Primary"), resolvingAgainstBaseURL: false) else {
             return nil
@@ -1669,7 +1679,7 @@ enum MultiServerSearchService {
                         return []
                     } catch {
                         multiServerMediaLogger.error(
-                            "Search failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .public)"
+                            "Search failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private)"
                         )
                         return []
                     }
@@ -1688,97 +1698,173 @@ enum MultiServerSearchService {
 /// Resolves a person's server-local ID and fetches their filmography on every
 /// saved server. The originating server can use the ID Jellyfin already sent
 /// with the open detail page; all other servers resolve the person by name.
+protocol PeopleFilmographyClient: Sendable {
+    func searchPeople(named name: String, limit: Int) async throws -> [PersonInfo]
+    func getPersonMedia(personId: String, pageSize: Int) async throws -> [BaseItemDto]
+}
+
+extension JellyfinClient: PeopleFilmographyClient {}
+
+enum MultiServerPeopleError: LocalizedError, Equatable {
+    case noAvailableServerSessions
+    case allServersFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noAvailableServerSessions, .allServersFailed:
+            return "No connected server could load this person's filmography."
+        }
+    }
+}
+
+struct MultiServerPeopleServerResult {
+    let items: [ServerMediaResult]
+    let succeeded: Bool
+}
+
 enum MultiServerPeopleService {
+    typealias TokenProvider = @Sendable (ServerConfig) async -> String?
+    typealias ClientFactory = @Sendable (ServerConfig, String) async -> any PeopleFilmographyClient
+
+    private struct FilmographyRequest {
+        let server: ServerConfig
+        let token: String
+        let person: PersonInfo
+        let originatingServerID: String?
+        let pageSize: Int
+        let clientFactory: ClientFactory
+    }
+
+    // The production path and its injectable test seams intentionally stay
+    // together so token/session accounting cannot diverge from aggregation.
+    // swiftlint:disable:next function_body_length
     static func search(
         person: PersonInfo,
         originatingServerID: String?,
-        pageSize: Int = 100
+        pageSize: Int = 100,
+        servers suppliedServers: [ServerConfig]? = nil,
+        tokenProvider suppliedTokenProvider: TokenProvider? = nil,
+        clientFactory suppliedClientFactory: ClientFactory? = nil
     ) async throws -> [ServerMediaResult] {
         try Task.checkCancellation()
-        let servers = await MainActor.run { SessionManager.shared.servers }
+        let servers: [ServerConfig]
+        if let suppliedServers {
+            servers = suppliedServers
+        } else {
+            servers = await MainActor.run { SessionManager.shared.servers }
+        }
+        let tokenProvider = suppliedTokenProvider ?? { server in
+            await MainActor.run {
+                SessionManager.shared.token(for: server, allowLegacyFallback: true)
+            }
+        }
+        let clientFactory = suppliedClientFactory ?? { server, token in
+            let client = JellyfinClient()
+            await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+            return client
+        }
+        var attemptedServerCount = 0
 
-        return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
+        let responses = await withTaskGroup(
+            of: MultiServerPeopleServerResult.self,
+            returning: [MultiServerPeopleServerResult].self
+        ) { group in
             for server in servers {
-                let token = await MainActor.run {
-                    SessionManager.shared.token(for: server, allowLegacyFallback: true)
-                }
+                let token = await tokenProvider(server)
                 guard let token else {
                     multiServerMediaLogger.debug(
                         "Filmography skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .private(mask: .hash))"
                     )
                     continue
                 }
+                attemptedServerCount += 1
 
                 group.addTask {
-                    await loadFilmography(
-                        on: server,
-                        token: token,
-                        person: person,
-                        originatingServerID: originatingServerID,
-                        pageSize: pageSize
-                    )
+                    do {
+                        return MultiServerPeopleServerResult(
+                            items: try await loadFilmography(FilmographyRequest(
+                                server: server,
+                                token: token,
+                                person: person,
+                                originatingServerID: originatingServerID,
+                                pageSize: pageSize,
+                                clientFactory: clientFactory
+                            )),
+                            succeeded: true
+                        )
+                    } catch is CancellationError {
+                        return MultiServerPeopleServerResult(items: [], succeeded: false)
+                    } catch {
+                        multiServerMediaLogger.error(
+                            "Filmography failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private)"
+                        )
+                        return MultiServerPeopleServerResult(items: [], succeeded: false)
+                    }
                 }
             }
 
-            var results: [ServerMediaResult] = []
-            for await serverResults in group {
-                results.append(contentsOf: serverResults)
+            return await group.reduce(into: []) { results, response in
+                results.append(response)
             }
-            return results
         }
+
+        try Task.checkCancellation()
+        return try aggregateFilmographyResults(
+            responses,
+            attemptedServerCount: attemptedServerCount
+        )
     }
 
-    private static func loadFilmography(
-        on server: ServerConfig,
-        token: String,
-        person: PersonInfo,
-        originatingServerID: String?,
-        pageSize: Int
-    ) async -> [ServerMediaResult] {
-        let client = JellyfinClient()
-        await client.configure(serverURL: server.url, accessToken: token, userId: server.userId)
+    /// Keeps partial successes visible while making an all-server outage a
+    /// real error instead of a misleading empty filmography.
+    static func aggregateFilmographyResults(
+        _ responses: [MultiServerPeopleServerResult],
+        attemptedServerCount: Int
+    ) throws -> [ServerMediaResult] {
+        guard attemptedServerCount > 0 else {
+            throw MultiServerPeopleError.noAvailableServerSessions
+        }
+        guard responses.contains(where: \.succeeded) else {
+            throw MultiServerPeopleError.allServersFailed
+        }
+        return responses.flatMap(\.items)
+    }
 
-        do {
-            let serverPersonID: String?
-            if server.id == originatingServerID {
-                serverPersonID = person.id
-            } else {
-                let candidates = try await client.searchPeople(named: person.name)
-                serverPersonID = candidates.first {
-                    $0.matchingNameKey == person.matchingNameKey
-                }?.id
-            }
+    private static func loadFilmography(_ request: FilmographyRequest) async throws -> [ServerMediaResult] {
+        let client = await request.clientFactory(request.server, request.token)
 
-            guard let serverPersonID else {
-                multiServerMediaLogger.debug(
-                    "Filmography person not found on \(server.url.host ?? "unknown", privacy: .private(mask: .hash))"
-                )
-                return []
-            }
+        let serverPersonID: String?
+        if request.server.id == request.originatingServerID {
+            serverPersonID = request.person.id
+        } else {
+            let candidates = try await client.searchPeople(named: request.person.name, limit: 20)
+            serverPersonID = candidates.first {
+                $0.matchingNameKey == request.person.matchingNameKey
+            }?.id
+        }
 
-            let items = try await client.getPersonMedia(
-                personId: serverPersonID,
-                pageSize: pageSize
-            )
+        guard let serverPersonID else {
             multiServerMediaLogger.debug(
-                "Filmography loaded from \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(items.count, privacy: .public) titles"
+                "Filmography person not found on \(request.server.url.host ?? "unknown", privacy: .private(mask: .hash))"
             )
+            return []
+        }
 
-            return items.map {
-                ServerMediaResult(
-                    item: $0,
-                    serverID: server.id,
-                    serverName: server.name,
-                    serverURL: server.url
-                )
-            }
-        } catch is CancellationError {
-            return []
-        } catch {
-            multiServerMediaLogger.error(
-                "Filmography failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .public)"
+        let items = try await client.getPersonMedia(
+            personId: serverPersonID,
+            pageSize: request.pageSize
+        )
+        multiServerMediaLogger.debug(
+            "Filmography loaded from \(request.server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(items.count, privacy: .public) titles"
+        )
+
+        return items.map {
+            ServerMediaResult(
+                item: $0,
+                serverID: request.server.id,
+                serverName: request.server.name,
+                serverURL: request.server.url
             )
-            return []
         }
     }
 }

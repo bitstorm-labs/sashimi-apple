@@ -22,8 +22,14 @@ struct SmartPosterImage: View {
             itemId: itemIds[currentIndex],
             imageType: imageTypes[currentTypeIndex],
             maxWidth: maxWidth,
-            serverURL: serverURL
+            serverURL: resolvedServerURL
         )
+    }
+
+    private var resolvedServerURL: URL? {
+        if let serverURL { return serverURL }
+        guard let serverID else { return nil }
+        return SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
     }
 
     private var currentRequest: ImageRequest? {
@@ -101,6 +107,7 @@ struct AsyncItemImage: View {
     let maxWidth: Int
     var contentMode: ContentMode = .fill
     var fallbackImageTypes: [String] = []
+    var serverID: String?
 
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
@@ -115,8 +122,14 @@ struct AsyncItemImage: View {
         return JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: allImageTypes[currentTypeIndex],
-            maxWidth: maxWidth
+            maxWidth: maxWidth,
+            serverURL: resolvedServerURL
         )
+    }
+
+    private var resolvedServerURL: URL? {
+        guard let serverID else { return nil }
+        return SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
     }
 
     var body: some View {
@@ -124,7 +137,7 @@ struct AsyncItemImage: View {
             if loadFailed {
                 placeholderView
             } else if let url = currentURL {
-                LazyImage(url: url) { state in
+                LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
                     if let image = state.image {
                         image
                             .resizable()

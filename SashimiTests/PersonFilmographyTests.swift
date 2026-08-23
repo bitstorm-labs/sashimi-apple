@@ -1,6 +1,26 @@
 import XCTest
 @testable import Sashimi
 
+private struct FilmographyClientStub: PeopleFilmographyClient {
+    let person: PersonInfo
+    let items: [BaseItemDto]
+    let shouldFail: Bool
+
+    func searchPeople(named name: String, limit: Int) async throws -> [PersonInfo] {
+        if shouldFail { throw StubError.unavailable }
+        return [person]
+    }
+
+    func getPersonMedia(personId: String, pageSize: Int) async throws -> [BaseItemDto] {
+        if shouldFail { throw StubError.unavailable }
+        return items
+    }
+
+    private enum StubError: Error {
+        case unavailable
+    }
+}
+
 final class PersonFilmographyTests: XCTestCase {
     func testPersonInfoDecodingAndDisplayRole() throws {
         let json = """
@@ -152,6 +172,123 @@ final class PersonFilmographyTests: XCTestCase {
         )
 
         XCTAssertEqual(visible.map { $0.item.id }, ["other-title"])
+    }
+
+    func testFilmographyAggregationKeepsPartialSuccess() throws {
+        let item = makeItem(id: "server-a-title", type: .movie)
+        let response = MultiServerPeopleServerResult(
+            items: [
+                ServerMediaResult(
+                    item: item,
+                    serverID: "server-a",
+                    serverName: "Server A",
+                    serverURL: URL(string: "https://server-a.example")!
+                )
+            ],
+            succeeded: true
+        )
+
+        let results = try MultiServerPeopleService.aggregateFilmographyResults(
+            [response, MultiServerPeopleServerResult(items: [], succeeded: false)],
+            attemptedServerCount: 2
+        )
+
+        XCTAssertEqual(results.map(\.serverID), ["server-a"])
+    }
+
+    func testFilmographyAggregationFailsWhenEveryServerFails() {
+        XCTAssertThrowsError(
+            try MultiServerPeopleService.aggregateFilmographyResults(
+                [MultiServerPeopleServerResult(items: [], succeeded: false)],
+                attemptedServerCount: 1
+            )
+        ) { error in
+            XCTAssertEqual(error as? MultiServerPeopleError, .allServersFailed)
+        }
+    }
+
+    func testFilmographyAggregationFailsWhenNoServerSessionIsAvailable() {
+        XCTAssertThrowsError(
+            try MultiServerPeopleService.aggregateFilmographyResults([], attemptedServerCount: 0)
+        ) { error in
+            XCTAssertEqual(error as? MultiServerPeopleError, .noAvailableServerSessions)
+        }
+    }
+
+    func testFilmographySearchKeepsAProductionPathPartialSuccess() async throws {
+        let person = PersonInfo(
+            id: "person-a",
+            name: "Taylor Example",
+            role: nil,
+            type: "Actor",
+            primaryImageTag: nil
+        )
+        let servers = [
+            ServerConfig(
+                id: "server-a",
+                name: "Server A",
+                url: URL(string: "https://server-a.example")!,
+                username: "user",
+                userId: "user-a"
+            ),
+            ServerConfig(
+                id: "server-b",
+                name: "Server B",
+                url: URL(string: "https://server-b.example")!,
+                username: "user",
+                userId: "user-b"
+            )
+        ]
+        let media = makeItem(id: "movie-a", type: .movie)
+
+        let results = try await MultiServerPeopleService.search(
+            person: person,
+            originatingServerID: "server-a",
+            servers: servers,
+            tokenProvider: { _ in "test-token" },
+            clientFactory: { server, _ in
+                FilmographyClientStub(
+                    person: person,
+                    items: media.id == "movie-a" && server.id == "server-a" ? [media] : [],
+                    shouldFail: server.id == "server-b"
+                )
+            }
+        )
+
+        XCTAssertEqual(results.map(\.item.id), ["movie-a"])
+        XCTAssertEqual(results.first?.serverID, "server-a")
+    }
+
+    func testFilmographySearchReportsProductionPathOutage() async {
+        let person = PersonInfo(
+            id: "person-a",
+            name: "Taylor Example",
+            role: nil,
+            type: "Actor",
+            primaryImageTag: nil
+        )
+        let server = ServerConfig(
+            id: "server-a",
+            name: "Server A",
+            url: URL(string: "https://server-a.example")!,
+            username: "user",
+            userId: "user-a"
+        )
+
+        do {
+            _ = try await MultiServerPeopleService.search(
+                person: person,
+                originatingServerID: server.id,
+                servers: [server],
+                tokenProvider: { _ in "test-token" },
+                clientFactory: { _, _ in
+                    FilmographyClientStub(person: person, items: [], shouldFail: true)
+                }
+            )
+            XCTFail("An all-server filmography outage should throw")
+        } catch {
+            XCTAssertEqual(error as? MultiServerPeopleError, .allServersFailed)
+        }
     }
 
     private func makeItem(

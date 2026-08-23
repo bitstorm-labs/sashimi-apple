@@ -5,6 +5,7 @@ struct OfflineSeriesView: View {
     let seriesName: String
     let episodes: [DownloadedItem]
     @State private var playingItem: BaseItemDto?
+    @State private var playingServerID: String?
     @State private var selectedSeason: Int?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -70,10 +71,11 @@ struct OfflineSeriesView: View {
 
                     // Episode list
                     LazyVStack(spacing: MobileSpacing.sm) {
-                        ForEach(filteredEpisodes, id: \.itemId) { episode in
+                        ForEach(filteredEpisodes, id: \.recordID) { episode in
                             Button {
                                 ThemeSongPlayer.shared.stopForPlayback()
                                 playingItem = episode.asBaseItemDto
+                                playingServerID = episode.serverID
                             } label: {
                                 episodeRow(episode)
                             }
@@ -89,7 +91,7 @@ struct OfflineSeriesView: View {
         }
         .background(MobileColors.background)
         .navigationBarTitleDisplayMode(.inline)
-        .fullScreenPlayer(item: $playingItem)
+        .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
         .onAppear {
             if seasons.count == 1 {
                 selectedSeason = seasons.first
@@ -102,7 +104,12 @@ struct OfflineSeriesView: View {
     private var backdropSection: some View {
         ZStack(alignment: .bottom) {
             // Try backdrop from first episode
-            if let firstEp = episodes.first, let image = loadLocalImage(itemId: firstEp.itemId, fileNames: ["backdrop.jpg", "poster.jpg"]) {
+            if let firstEp = episodes.first,
+               let image = loadLocalImage(
+                   itemId: firstEp.itemId,
+                   serverID: firstEp.serverID,
+                   fileNames: ["backdrop.jpg", "poster.jpg"]
+               ) {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -128,7 +135,11 @@ struct OfflineSeriesView: View {
     private func episodeRow(_ episode: DownloadedItem) -> some View {
         HStack(spacing: MobileSpacing.sm) {
             // Thumbnail — use UIImage for reliable local loading
-            if let image = loadLocalImage(itemId: episode.itemId, fileNames: ["poster.jpg"]) {
+            if let image = loadLocalImage(
+                itemId: episode.itemId,
+                serverID: episode.serverID,
+                fileNames: ["poster.jpg"]
+            ) {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -189,8 +200,8 @@ struct OfflineSeriesView: View {
 
     // MARK: - Local Image Loading (UIImage — reliable for file:// URLs)
 
-    private func loadLocalImage(itemId: String, fileNames: [String]) -> UIImage? {
-        let dir = DownloadFileManager.itemDirectory(for: itemId)
+    private func loadLocalImage(itemId: String, serverID: String?, fileNames: [String]) -> UIImage? {
+        let dir = DownloadFileManager.itemDirectory(for: itemId, serverID: serverID)
         for fileName in fileNames {
             let path = dir.appendingPathComponent(fileName).path
             if let image = UIImage(contentsOfFile: path) {

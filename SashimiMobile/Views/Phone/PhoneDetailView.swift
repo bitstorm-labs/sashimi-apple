@@ -142,8 +142,8 @@ struct PhoneDetailView: View {
         .background(MobileColors.background)
         .navigationBarTitleDisplayMode(.inline)
         .themeSong(for: item)
-        .fullScreenPlayer(item: $playingItem)
-        .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
+        .fullScreenPlayer(item: $playingItem, serverID: serverID)
+        .fullScreenPlayer(item: $startOverItem, serverID: serverID, startFromBeginning: true)
         .navigationDestination(isPresented: $showSeriesDetail) {
             if let seriesItem = navigateToSeriesItem {
                 PhoneDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
@@ -322,7 +322,7 @@ struct PhoneDetailView: View {
             VStack(spacing: 0) {
                 // Banner
                 ZStack(alignment: .bottom) {
-                    LazyImage(url: backdropImageURL) { state in
+                    LazyImage(request: imageRequest(for: backdropImageURL)) { state in
                         if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fill)
                         } else {
@@ -341,7 +341,7 @@ struct PhoneDetailView: View {
                 }
 
                 // Channel avatar overlapping banner
-                LazyImage(url: channelAvatarURL) { state in
+                LazyImage(request: imageRequest(for: channelAvatarURL)) { state in
                     if let image = state.image {
                         image.resizable().aspectRatio(contentMode: .fill)
                     } else {
@@ -367,7 +367,7 @@ struct PhoneDetailView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 220)
                     .overlay {
-                        LazyImage(url: backdropImageURL) { state in
+                        LazyImage(request: imageRequest(for: backdropImageURL)) { state in
                             if let image = state.image {
                                 // No real backdrop → the URL falls back to the
                                 // portrait poster; blur + darken it so it reads
@@ -393,14 +393,18 @@ struct PhoneDetailView: View {
     }
 
     private var channelAvatarURL: URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=240")
+        guard let serverURL = detailServerURL else { return nil }
+        return serverURL
+            .appendingPathComponent("Items/\(item.id)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "240")])
     }
 
     /// Channel avatar for a YouTube EPISODE's header — the series' Primary.
     private func seriesAvatarURL(for seriesId: String) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(seriesId)/Images/Primary?maxWidth=120")
+        guard let serverURL = detailServerURL else { return nil }
+        return serverURL
+            .appendingPathComponent("Items/\(seriesId)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "120")])
     }
 
     /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
@@ -424,7 +428,7 @@ struct PhoneDetailView: View {
     private var titleSection: some View {
         if isEpisode {
             if !isYouTubeChannelEpisode, let seriesId = item.seriesId, let logoURL = logoImageURL(for: seriesId) {
-                LazyImage(url: logoURL) { state in
+                LazyImage(request: imageRequest(for: logoURL)) { state in
                     if let image = state.image {
                         image.resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 56)
                     } else if state.error != nil, let seriesName = item.seriesName {
@@ -438,7 +442,7 @@ struct PhoneDetailView: View {
                 // channel avatar (series Primary) + name instead, matching the
                 // tvOS/Roku episode headers.
                 HStack(spacing: 8) {
-                    LazyImage(url: seriesAvatarURL(for: seriesId)) { state in
+                    LazyImage(request: imageRequest(for: seriesAvatarURL(for: seriesId))) { state in
                         if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fill)
                         } else {
@@ -472,7 +476,7 @@ struct PhoneDetailView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 70)
                 .overlay(alignment: .leading) {
-                    LazyImage(url: logoURL) { state in
+                    LazyImage(request: imageRequest(for: logoURL)) { state in
                         if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fit)
                         } else if state.error != nil {
@@ -513,7 +517,24 @@ struct PhoneDetailView: View {
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
-        JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
+        JellyfinClient.shared.syncImageURL(
+            itemId: itemId,
+            imageType: "Logo",
+            maxWidth: 500,
+            serverURL: detailServerURL
+        )
+    }
+
+    private var detailServerURL: URL? {
+        if let serverID {
+            return SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
+        }
+        return SessionManager.shared.serverURL
+    }
+
+    private func imageRequest(for url: URL?) -> ImageRequest? {
+        guard let url else { return nil }
+        return SashimiImagePipeline.request(url: url, serverID: serverID)
     }
 
     /// Premiere date "November 8, 2024" (tvOS parity)
@@ -815,7 +836,9 @@ struct PhoneDetailView: View {
                     ForEach(availableSeasonQualities) { quality in
                         Button("\(quality.displayName) \u{2014} \(quality.subtitle)") {
                             DownloadManager.shared.downloadSeason(
-                                episodes: episodesForDownload, quality: quality
+                                episodes: episodesForDownload,
+                                quality: quality,
+                                serverID: serverID
                             )
                         }
                     }
@@ -886,7 +909,7 @@ struct PhoneDetailView: View {
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
-                DownloadButton(item: item, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil)
 
                 overflowMenu {
                     if hasProgress {
@@ -928,7 +951,7 @@ struct PhoneDetailView: View {
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
-                DownloadButton(item: item, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil)
 
                 overflowMenu {
                     if hasProgress {
@@ -1057,7 +1080,7 @@ struct PhoneDetailView: View {
                 } label: {
                     HStack(spacing: MobileSpacing.sm) {
                         ZStack(alignment: .topTrailing) {
-                            LazyImage(url: episodeThumbnailURL(episode)) { state in
+                            LazyImage(request: imageRequest(for: episodeThumbnailURL(episode))) { state in
                                 if let image = state.image {
                                     image
                                         .resizable()
@@ -1140,7 +1163,7 @@ struct PhoneDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person) {
+                        MobileCastCard(person: person, serverID: serverID) {
                             showingPersonDetail = person
                         }
                     }
@@ -1328,22 +1351,26 @@ struct PhoneDetailView: View {
             if isSeries {
                 let downloaded = offlineEpisodes(for: item.id)
                 if let firstEp = downloaded.first {
-                    return OfflineImageHelper.backdropURL(for: firstEp.itemId)
-                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId)
+                    return OfflineImageHelper.backdropURL(for: firstEp.itemId, serverID: firstEp.serverID)
+                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId, serverID: firstEp.serverID)
                 }
             }
-            return OfflineImageHelper.backdropURL(for: item.id)
-                ?? OfflineImageHelper.thumbnailURL(for: item.id)
+            return OfflineImageHelper.backdropURL(for: item.id, serverID: serverID)
+                ?? OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
         }
 
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        guard let serverURL = detailServerURL else { return nil }
 
         if isEpisode {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
+            return serverURL
+                .appendingPathComponent("Items/\(item.id)/Images/Primary")
+                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
         }
 
         if isYouTubeSeriesStyle {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
+            return serverURL
+                .appendingPathComponent("Items/\(item.id)/Images/Banner")
+                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1920")])
         }
 
         let imageId: String
@@ -1352,18 +1379,24 @@ struct PhoneDetailView: View {
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
             imageId = seriesId
         } else {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
+            return serverURL
+                .appendingPathComponent("Items/\(item.id)/Images/Primary")
+                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
         }
 
-        return URL(string: "\(serverURL)/Items/\(imageId)/Images/Backdrop?maxWidth=1280")
+        return serverURL
+            .appendingPathComponent("Items/\(imageId)/Images/Backdrop")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
         if !NetworkMonitor.shared.isConnected {
-            return OfflineImageHelper.thumbnailURL(for: episode.id)
+            return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(episode.id)/Images/Primary?maxWidth=400")
+        guard let serverURL = detailServerURL else { return nil }
+        return serverURL
+            .appendingPathComponent("Items/\(episode.id)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "400")])
     }
 
     // MARK: - Formatting

@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 import NukeUI
 
+// The list owns row, state, and empty-state presentation in one cohesive view.
+// swiftlint:disable type_body_length
 struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
@@ -59,7 +61,7 @@ struct DownloadsListView: View {
                             .padding(.horizontal, MobileSpacing.md)
 
                         VStack(spacing: 1) {
-                            ForEach(active, id: \.itemId) { item in
+                            ForEach(active, id: \.recordID) { item in
                                 activeDownloadRow(item)
                             }
                         }
@@ -79,7 +81,7 @@ struct DownloadsListView: View {
                             .padding(.horizontal, MobileSpacing.md)
 
                         VStack(spacing: 1) {
-                            ForEach(completed, id: \.itemId) { item in
+                            ForEach(completed, id: \.recordID) { item in
                                 completedDownloadRow(item)
                             }
                         }
@@ -107,7 +109,7 @@ struct DownloadsListView: View {
                         .padding(.horizontal, MobileSpacing.md)
 
                         VStack(spacing: 1) {
-                            ForEach(failed, id: \.itemId) { item in
+                            ForEach(failed, id: \.recordID) { item in
                                 failedDownloadRow(item)
                             }
                         }
@@ -169,9 +171,9 @@ struct DownloadsListView: View {
     // MARK: - Active Download Row
 
     private func activeDownloadRow(_ item: DownloadedItem) -> some View {
-        let isPreparing = downloadManager.preparingItems.contains(item.itemId)
-        let isDownloading = downloadManager.activeDownloads[item.itemId] != nil && !isPreparing
-        let progress = downloadManager.activeDownloads[item.itemId] ?? 0
+        let isPreparing = downloadManager.preparingItems.contains(item.recordID)
+        let isDownloading = downloadManager.activeDownloads[item.recordID] != nil && !isPreparing
+        let progress = downloadManager.activeDownloads[item.recordID] ?? 0
 
         return HStack(spacing: MobileSpacing.md) {
             posterImage(for: item)
@@ -219,7 +221,7 @@ struct DownloadsListView: View {
             }
 
             Button {
-                Task { await downloadManager.cancelDownload(itemId: item.itemId) }
+                Task { await downloadManager.cancelDownload(itemId: item.itemId, serverID: item.serverID) }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
@@ -257,7 +259,7 @@ struct DownloadsListView: View {
             Spacer()
 
             Button {
-                Task { await downloadManager.deleteDownload(itemId: item.itemId) }
+                Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
             } label: {
                 Image(systemName: "trash.circle.fill")
                     .font(.system(size: 22))
@@ -290,7 +292,7 @@ struct DownloadsListView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    Task { await downloadManager.retryDownload(itemId: item.itemId) }
+                    Task { await downloadManager.retryDownload(itemId: item.itemId, serverID: item.serverID) }
                 } label: {
                     Image(systemName: "arrow.clockwise.circle.fill")
                         .font(.system(size: 22))
@@ -299,7 +301,7 @@ struct DownloadsListView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    Task { await downloadManager.deleteDownload(itemId: item.itemId) }
+                    Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
                 } label: {
                     Image(systemName: "trash.circle.fill")
                         .font(.system(size: 22))
@@ -316,7 +318,7 @@ struct DownloadsListView: View {
     @ViewBuilder
     private func posterImage(for item: DownloadedItem) -> some View {
         if let serverURL = serverPosterURL(for: item) {
-            LazyImage(url: serverURL) { state in
+            LazyImage(request: SashimiImagePipeline.request(url: serverURL, serverID: item.serverID)) { state in
                 if let image = state.image {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } else {
@@ -342,17 +344,25 @@ struct DownloadsListView: View {
     }
 
     private func serverPosterURL(for item: DownloadedItem) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        let serverURL: URL?
+        if let serverID = item.serverID {
+            serverURL = SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
+        } else {
+            serverURL = SessionManager.shared.serverURL
+        }
+        guard let serverURL else { return nil }
         // For episodes, use the series poster if available
         let imageItemId = item.seriesId ?? item.itemId
-        return URL(string: "\(serverURL)/Items/\(imageItemId)/Images/Primary?maxWidth=200")
+        return serverURL
+            .appendingPathComponent("Items/\(imageItemId)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "200")])
     }
 
     // MARK: - Helpers
 
     private func isActive(_ item: DownloadedItem) -> Bool {
-        if downloadManager.preparingItems.contains(item.itemId) { return true }
-        if downloadManager.activeDownloads[item.itemId] != nil { return true }
+        if downloadManager.preparingItems.contains(item.recordID) { return true }
+        if downloadManager.activeDownloads[item.recordID] != nil { return true }
         let status = item.status
         return status == .queued || status == .downloading || status == .preparing
     }

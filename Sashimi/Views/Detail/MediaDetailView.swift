@@ -174,7 +174,8 @@ struct MediaDetailView: View {
                                 // or the backdrop is upscaled and reads soft.
                                 maxWidth: Int(geometry.size.width * backdropWidthFraction * 2),
                                 contentMode: .fit,
-                                fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"]
+                                fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"],
+                                serverID: serverID
                             )
                             .id(refreshID)
                             // Fill the top-right section rather than floating in
@@ -232,7 +233,11 @@ struct MediaDetailView: View {
         }
         .themeSong(for: item)
         .fullScreenCover(isPresented: $showingPlayer) {
-            PlayerView(item: selectedEpisode ?? item, startFromBeginning: startFromBeginning)
+            PlayerView(
+                item: selectedEpisode ?? item,
+                serverID: serverID,
+                startFromBeginning: startFromBeginning
+            )
         }
         .fullScreenCover(item: $showingSeriesDetail) { series in
             MediaDetailView(item: series, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID)
@@ -463,7 +468,8 @@ struct MediaDetailView: View {
                                     imageType: "Primary",
                                     maxWidth: 240,
                                     contentMode: .fill,
-                                    fallbackImageTypes: ["Thumb"]
+                                    fallbackImageTypes: ["Thumb"],
+                                    serverID: serverID
                                 )
                                 .clipShape(Circle())
                             )
@@ -483,7 +489,8 @@ struct MediaDetailView: View {
                         imageType: "Logo",
                         maxWidth: 1400,
                         contentMode: .fit,
-                        fallbackImageTypes: []
+                        fallbackImageTypes: [],
+                        serverID: serverID
                     )
                     .frame(maxHeight: 220, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -513,7 +520,8 @@ struct MediaDetailView: View {
                     imageType: "Logo",
                     maxWidth: 1400,
                     contentMode: .fit,
-                    fallbackImageTypes: []
+                    fallbackImageTypes: [],
+                    serverID: serverID
                 )
                 .frame(maxHeight: 220, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -564,7 +572,8 @@ struct MediaDetailView: View {
                         itemIds: posterFallbackIds,
                         maxWidth: 400,
                         imageTypes: ["Primary", "Thumb"],
-                        contentMode: .fit
+                        contentMode: .fit,
+                        serverID: serverID
                     )
                     .clipShape(Circle())
                 )
@@ -573,7 +582,8 @@ struct MediaDetailView: View {
             SmartPosterImage(
                 itemIds: posterFallbackIds,
                 maxWidth: isYouTubeStyle ? 640 : 400,
-                imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"]
+                imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"],
+                serverID: serverID
             )
             .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -611,7 +621,8 @@ struct MediaDetailView: View {
                                 imageType: "Primary",
                                 maxWidth: 120,
                                 contentMode: .fill,
-                                fallbackImageTypes: ["Thumb"]
+                                fallbackImageTypes: ["Thumb"],
+                                serverID: serverID
                             )
                             .clipShape(Circle())
                         )
@@ -1083,7 +1094,7 @@ struct MediaDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 24) {
                     ForEach(cast) { person in
-                        CastCard(person: person) {
+                        CastCard(person: person, serverID: serverID) {
                             showingPersonDetail = person
                         }
                     }
@@ -1467,14 +1478,27 @@ struct SeasonTab: View {
 
 struct CastCard: View {
     let person: PersonInfo
+    let serverID: String?
     let action: () -> Void
     @FocusState private var isFocused: Bool
+
+    private var imageURL: URL? {
+        guard person.primaryImageTag != nil else { return nil }
+        let serverURL = serverID.flatMap { id in
+            SessionManager.shared.servers.first(where: { $0.id == id })?.url
+        } ?? SessionManager.shared.serverURL
+        return JellyfinClient.shared.personImageURL(
+            personId: person.id,
+            maxWidth: 200,
+            serverURL: serverURL
+        )
+    }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                if person.primaryImageTag != nil {
-                    LazyImage(url: JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 200)) { state in
+                if let imageURL {
+                    LazyImage(request: SashimiImagePipeline.request(url: imageURL, serverID: serverID)) { state in
                         if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fill)
                         } else {
