@@ -18,6 +18,10 @@ enum KeychainHelper {
     private static func saveSimulatorFallback(_ value: String, forKey key: String) {
         UserDefaults.standard.set(value, forKey: simulatorFallbackPrefix + key)
     }
+
+    private static func clearSimulatorFallback(forKey key: String) {
+        UserDefaults.standard.removeObject(forKey: simulatorFallbackPrefix + key)
+    }
 #endif
 
     static func save(_ value: String, forKey key: String) -> Bool {
@@ -53,7 +57,7 @@ enum KeychainHelper {
             let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
             if updateStatus == errSecSuccess {
 #if targetEnvironment(simulator)
-                saveSimulatorFallback(value, forKey: key)
+                clearSimulatorFallback(forKey: key)
 #endif
                 return true
             }
@@ -69,7 +73,7 @@ enum KeychainHelper {
         }
         if status == errSecSuccess {
 #if targetEnvironment(simulator)
-            saveSimulatorFallback(value, forKey: key)
+            clearSimulatorFallback(forKey: key)
 #endif
             return true
         }

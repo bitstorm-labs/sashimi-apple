@@ -1,5 +1,11 @@
 import Foundation
 import Combine
+import os
+
+private let personFilmographyLogger = Logger(
+    subsystem: "com.mondominator.sashimi",
+    category: "PersonFilmography"
+)
 
 enum PersonFilmographyState: Equatable {
     case idle
@@ -47,7 +53,10 @@ final class PersonFilmographyViewModel: ObservableObject {
             // The view disappeared or a newer load replaced this one.
         } catch {
             guard !Task.isCancelled else { return }
-            state = .failed(error.localizedDescription)
+            personFilmographyLogger.error(
+                "Filmography load failed: \(error.localizedDescription, privacy: .public)"
+            )
+            state = .failed("Check your server connection and try again.")
         }
     }
 

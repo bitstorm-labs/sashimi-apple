@@ -1600,16 +1600,15 @@ private let multiServerMediaLogger = Logger(
 enum MultiServerSearchService {
     static func search(query: String, limit: Int = 50) async -> [ServerMediaResult] {
         let servers = await MainActor.run { SessionManager.shared.servers }
-        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
 
         return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
             for server in servers {
-                let tokenKey = "accessToken.\(server.id)"
-                let token = KeychainHelper.get(forKey: tokenKey)
-                    ?? (server.id == activeServerID ? KeychainHelper.get(forKey: "accessToken") : nil)
+                let token = await MainActor.run {
+                    SessionManager.shared.token(for: server, allowLegacyFallback: true)
+                }
                 guard let token else {
                     multiServerMediaLogger.debug(
-                        "Search skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .public)"
+                        "Search skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .private(mask: .hash))"
                     )
                     continue
                 }
@@ -1632,7 +1631,7 @@ enum MultiServerSearchService {
                         return []
                     } catch {
                         multiServerMediaLogger.error(
-                            "Search failed on \(server.url.host ?? "unknown", privacy: .public): \(error.localizedDescription, privacy: .public)"
+                            "Search failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .public)"
                         )
                         return []
                     }
@@ -1659,16 +1658,15 @@ enum MultiServerPeopleService {
     ) async throws -> [ServerMediaResult] {
         try Task.checkCancellation()
         let servers = await MainActor.run { SessionManager.shared.servers }
-        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
 
         return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
             for server in servers {
-                let tokenKey = "accessToken.\(server.id)"
-                let token = KeychainHelper.get(forKey: tokenKey)
-                    ?? (server.id == activeServerID ? KeychainHelper.get(forKey: "accessToken") : nil)
+                let token = await MainActor.run {
+                    SessionManager.shared.token(for: server, allowLegacyFallback: true)
+                }
                 guard let token else {
                     multiServerMediaLogger.debug(
-                        "Filmography skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .public)"
+                        "Filmography skipped for server without a saved session: \(server.url.host ?? "unknown", privacy: .private(mask: .hash))"
                     )
                     continue
                 }
@@ -1715,7 +1713,7 @@ enum MultiServerPeopleService {
 
             guard let serverPersonID else {
                 multiServerMediaLogger.debug(
-                    "Filmography person not found on \(server.url.host ?? "unknown", privacy: .public)"
+                    "Filmography person not found on \(server.url.host ?? "unknown", privacy: .private(mask: .hash))"
                 )
                 return []
             }
@@ -1725,7 +1723,7 @@ enum MultiServerPeopleService {
                 pageSize: pageSize
             )
             multiServerMediaLogger.debug(
-                "Filmography loaded from \(server.url.host ?? "unknown", privacy: .public): \(items.count, privacy: .public) titles"
+                "Filmography loaded from \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(items.count, privacy: .public) titles"
             )
 
             return items.map {
@@ -1740,7 +1738,7 @@ enum MultiServerPeopleService {
             return []
         } catch {
             multiServerMediaLogger.error(
-                "Filmography failed on \(server.url.host ?? "unknown", privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Filmography failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .public)"
             )
             return []
         }

@@ -76,7 +76,10 @@ enum ServerMediaResultGrouping {
     /// records remain intact.
     static func titleKey(for item: BaseItemDto) -> String {
         let title = item.name
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .folding(
+                options: [.diacriticInsensitive, .caseInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
             .filter { $0.isLetter || $0.isNumber }
         let year = item.displayYear.map(String.init) ?? ""
         let type = item.type?.rawValue ?? "Unknown"

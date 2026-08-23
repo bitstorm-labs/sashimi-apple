@@ -70,12 +70,64 @@ private actor AsyncMutex {
 /// nested or disappear out of order during a navigation transition.
 struct ServerClientScopeToken: Hashable {
     fileprivate let id: UUID
+
+    init(id: UUID = UUID()) {
+        self.id = id
+    }
+}
+
+struct ServerClientScopeStack {
+    struct Entry: Equatable {
+        let token: ServerClientScopeToken
+        var previousScopeToken: ServerClientScopeToken?
+        var previousServerID: String?
+    }
+
+    struct Removal {
+        let entry: Entry
+        let wasTop: Bool
+    }
+
+    private(set) var entries: [Entry] = []
+
+    var isEmpty: Bool {
+        entries.isEmpty
+    }
+
+    mutating func begin(previousServerID: String?) -> ServerClientScopeToken {
+        let scope = ServerClientScopeToken()
+        entries.append(
+            Entry(
+                token: scope,
+                previousScopeToken: entries.last?.token,
+                previousServerID: previousServerID
+            )
+        )
+        return scope
+    }
+
+    mutating func end(_ scope: ServerClientScopeToken) -> Removal? {
+        guard let index = entries.firstIndex(where: { $0.token == scope }) else {
+            return nil
+        }
+
+        let entry = entries.remove(at: index)
+        let wasTop = index == entries.count
+        if !wasTop {
+            for childIndex in index..<entries.count
+                where entries[childIndex].previousScopeToken == entry.token {
+                entries[childIndex].previousServerID = entry.previousServerID
+                entries[childIndex].previousScopeToken = entry.previousScopeToken
+            }
+        }
+
+        return Removal(entry: entry, wasTop: wasTop)
+    }
 }
 
 // SessionManager owns authentication, persistence, and temporary client
 // scopes; keeping those transitions together is safer than splitting the
 // state machine across unrelated services.
-// swiftlint:disable type_body_length
 @MainActor
 final class SessionManager: ObservableObject {
     static let shared = SessionManager()
@@ -90,12 +142,6 @@ final class SessionManager: ObservableObject {
     /// session expiry — the UI presents a prefilled re-auth for it. Cleared on
     /// success or cancel.
     @Published var reauthServer: ServerConfig?
-
-    private struct ServerClientScopeEntry {
-        let token: ServerClientScopeToken
-        let previousScopeToken: ServerClientScopeToken?
-        var previousServerID: String?
-    }
 
     private let serversKey = "servers"
     private let activeServerIdKey = "activeServerId"
@@ -112,7 +158,7 @@ final class SessionManager: ObservableObject {
     /// deliberately separate from activeServerId because a detail route can
     /// temporarily use another saved server without changing app chrome.
     private var configuredServerID: String?
-    private var clientScopeStack: [ServerClientScopeEntry] = []
+    private var clientScopeStack = ServerClientScopeStack()
 
     var activeServer: ServerConfig? {
         servers.first(where: { $0.id == activeServerId })
@@ -147,7 +193,7 @@ final class SessionManager: ObservableObject {
     /// per-server token migration when the active server still has a legacy
     /// token available. The legacy token is only a safe fallback for the
     /// active server; it must never be reused for another saved server.
-    private func token(for server: ServerConfig, allowLegacyFallback: Bool = false) -> String? {
+    func token(for server: ServerConfig, allowLegacyFallback: Bool = false) -> String? {
         if let token = KeychainHelper.get(forKey: tokenKey(server.id)) {
             return token
         }
@@ -190,7 +236,7 @@ final class SessionManager: ObservableObject {
         for savedServer in servers where savedServer.id != server.id {
             if token(for: savedServer) == nil {
                 logger.error(
-                    "Saved server has no readable access token: \(savedServer.url.host ?? "unknown", privacy: .public)"
+                    "Saved server has no readable access token: \(savedServer.url.host ?? "unknown", privacy: .private(mask: .hash))"
                 )
             }
         }
@@ -339,7 +385,7 @@ final class SessionManager: ObservableObject {
         await clientConfigurationMutex.lock()
         guard clientScopeStack.isEmpty,
               let server = activeServer,
-              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+              let token = token(for: server, allowLegacyFallback: true) else {
             await clientConfigurationMutex.unlock()
             return
         }
@@ -354,19 +400,13 @@ final class SessionManager: ObservableObject {
     /// nested title and person routes restore the exact client they inherited.
     func beginServerScope(for serverID: String) async -> ServerClientScopeToken? {
         guard let server = servers.first(where: { $0.id == serverID }),
-              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+              let token = token(for: server, allowLegacyFallback: true) else {
             return nil
         }
 
         await clientConfigurationMutex.lock()
-        let scope = ServerClientScopeToken(id: UUID())
-        let parent = clientScopeStack.last
-        clientScopeStack.append(
-            ServerClientScopeEntry(
-                token: scope,
-                previousScopeToken: parent?.token,
-                previousServerID: configuredServerID ?? activeServerId
-            )
+        let scope = clientScopeStack.begin(
+            previousServerID: configuredServerID ?? activeServerId
         )
         await configureClient(for: server, token: token)
         await clientConfigurationMutex.unlock()
@@ -379,23 +419,17 @@ final class SessionManager: ObservableObject {
     func endServerScope(_ scope: ServerClientScopeToken) async {
         await clientConfigurationMutex.lock()
 
-        guard let index = clientScopeStack.firstIndex(where: { $0.token == scope }) else {
+        guard let removal = clientScopeStack.end(scope) else {
             await clientConfigurationMutex.unlock()
             return
         }
 
-        let entry = clientScopeStack.remove(at: index)
-        let wasTop = index == clientScopeStack.count
-        if !wasTop {
-            for childIndex in index..<clientScopeStack.count
-                where clientScopeStack[childIndex].previousScopeToken == entry.token {
-                clientScopeStack[childIndex].previousServerID = entry.previousServerID
-            }
+        if !removal.wasTop {
             await clientConfigurationMutex.unlock()
             return
         }
 
-        await configureClient(forServerID: entry.previousServerID)
+        await configureClient(forServerID: removal.entry.previousServerID)
         await clientConfigurationMutex.unlock()
     }
 
@@ -429,7 +463,7 @@ final class SessionManager: ObservableObject {
     private func configureClient(forServerID serverID: String?) async {
         guard let serverID,
               let server = servers.first(where: { $0.id == serverID }),
-              let token = KeychainHelper.get(forKey: tokenKey(server.id)) else {
+              let token = token(for: server, allowLegacyFallback: true) else {
             await JellyfinClient.shared.clearCredentials()
             configuredServerID = nil
             return
@@ -519,4 +553,3 @@ final class SessionManager: ObservableObject {
         await clientConfigurationMutex.unlock()
     }
 }
-// swiftlint:enable type_body_length

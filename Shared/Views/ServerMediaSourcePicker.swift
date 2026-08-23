@@ -348,6 +348,7 @@ struct ServerScopedMediaDetailView: View {
     let source: ServerMediaResult
 
     @State private var isReady = false
+    @State private var scopeError: String?
     @Environment(\.dismiss) private var dismiss
 
 #if os(tvOS)
@@ -362,7 +363,18 @@ struct ServerScopedMediaDetailView: View {
 
     var body: some View {
         Group {
-            if isReady {
+            if let scopeError {
+                ContentUnavailableView {
+                    Label("Unable to Open Title", systemImage: "key.slash")
+                } description: {
+                    Text(scopeError)
+                } actions: {
+                    Button("Back") {
+                        dismiss()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if isReady {
 #if os(tvOS)
                 MediaDetailView(
                     item: source.item,
@@ -398,6 +410,8 @@ struct ServerScopedMediaDetailView: View {
 
     private func manageServerScope() async {
         guard let scope = await SessionManager.shared.beginServerScope(for: source.serverID) else {
+            guard !Task.isCancelled else { return }
+            scopeError = "The saved session for \(source.serverName) is unavailable. Reconnect this server in Settings, then try again."
             return
         }
 

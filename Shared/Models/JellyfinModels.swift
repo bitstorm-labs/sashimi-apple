@@ -478,7 +478,10 @@ extension PersonInfo {
 
     static func matchingNameKey(for name: String) -> String {
         name
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
             .lowercased()
             .filter { $0.isLetter || $0.isNumber }
     }
