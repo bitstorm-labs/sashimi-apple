@@ -802,7 +802,7 @@ actor JellyfinClient {
         return response.items
     }
 
-    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil) async throws -> [BaseItemDto] {
+    func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil, groupItems: Bool = true) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 
         if includeWatched {
@@ -859,6 +859,16 @@ actor JellyfinClient {
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
             ]
+
+            // Grouping is ON by default (the Recently Added row wants it: a
+            // channel's burst of new videos should be one card, not five). The
+            // hero passes false — grouped, a channel that posted several videos
+            // collapses into its Series and the hero shows the CHANNEL rather
+            // than a video. Verified against the server: grouped returns a
+            // Series/Episode mix, ungrouped returns 10/10 Episodes.
+            if !groupItems {
+                queryItems.append(URLQueryItem(name: "GroupItems", value: "false"))
+            }
 
             if let parentId {
                 queryItems.append(URLQueryItem(name: "ParentId", value: parentId))
@@ -1284,6 +1294,24 @@ actor JellyfinClient {
         return components?.url
     }
 
+    /// Direct audio stream for a theme. `/Audio/{id}/universal` returns 400
+    /// without a full device profile; `stream.mp3` serves the file as-is,
+    /// which is what a theme is.
+    func getAudioStreamURL(itemId: String) -> URL? {
+        guard let serverURL, let accessToken else { return nil }
+        var components = URLComponents(string: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        components?.path += "/Audio/\(itemId)/stream.mp3"
+        components?.queryItems = [
+            URLQueryItem(name: "Static", value: "true"),
+            // api_key stays in the URL because AVPlayer fetches this itself and
+            // has no supported way to attach auth headers - same reasoning as
+            // getPlaybackURL above.
+            URLQueryItem(name: "api_key", value: accessToken),
+            URLQueryItem(name: "DeviceId", value: deviceId)
+        ]
+        return components?.url
+    }
+
     func imageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
         guard let serverURL else { return nil }
 
@@ -1557,6 +1585,16 @@ actor JellyfinClient {
         guard let userId else { throw JellyfinError.notConfigured }
         let data = try await request(path: "/Users/\(userId)/Items/\(itemId)/LocalTrailers", queryItems: [])
         return (try? JSONDecoder().decode([BaseItemDto].self, from: data)) ?? []
+    }
+
+    /// Theme songs Jellyfin has for an item. Populated by the Theme Songs
+    /// server plugin, which writes `theme.mp3` into the series folder.
+    /// Returns an empty array when the series has none — roughly 40% of a
+    /// typical library, which is normal and not an error.
+    func getThemeSongs(itemId: String) async throws -> [BaseItemDto] {
+        let data = try await request(path: "/Items/\(itemId)/ThemeMedia", queryItems: [])
+        let decoded = try? JSONDecoder().decode(ThemeMediaResponse.self, from: data)
+        return decoded?.themeSongsResult?.items ?? []
     }
 
     func getItemAncestors(itemId: String) async throws -> [BaseItemDto] {

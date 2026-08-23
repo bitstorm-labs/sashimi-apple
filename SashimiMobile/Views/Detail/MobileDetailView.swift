@@ -218,6 +218,7 @@ struct MobileDetailView: View {
             }
             .ignoresSafeArea()
         }
+        .themeSong(for: item)
         .fullScreenPlayer(item: $playingItem)
         .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
@@ -745,6 +746,7 @@ struct MobileDetailView: View {
     private func shuffleEpisode() async {
         let seriesId = isSeries ? item.id : (item.seriesId ?? item.id)
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: seriesId, itemTypes: [.episode]) {
+            ThemeSongPlayer.shared.stopForPlayback()
             playingItem = ep
         }
     }
@@ -768,6 +770,7 @@ struct MobileDetailView: View {
                 }()
 
                 Button {
+                    ThemeSongPlayer.shared.stopForPlayback()
                     playingItem = nextEp
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
@@ -777,6 +780,7 @@ struct MobileDetailView: View {
 
                 if epHasProgress {
                     Button {
+                        ThemeSongPlayer.shared.stopForPlayback()
                         startOverItem = nextEp
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
@@ -886,6 +890,7 @@ struct MobileDetailView: View {
     private var episodeActionButtons: some View {
         HStack(spacing: MobileSpacing.md) {
             Button {
+                ThemeSongPlayer.shared.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -895,6 +900,7 @@ struct MobileDetailView: View {
 
             if hasProgress {
                 Button {
+                    ThemeSongPlayer.shared.stopForPlayback()
                     startOverItem = item
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
@@ -937,6 +943,7 @@ struct MobileDetailView: View {
     private var movieActionButtons: some View {
         HStack(spacing: MobileSpacing.md) {
             Button {
+                ThemeSongPlayer.shared.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -946,6 +953,7 @@ struct MobileDetailView: View {
 
             if hasProgress {
                 Button {
+                    ThemeSongPlayer.shared.stopForPlayback()
                     startOverItem = item
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
@@ -982,6 +990,10 @@ struct MobileDetailView: View {
     /// Play the item's local trailer inline (Trailarr). The button only appears
     /// when a local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
+        // Matches tvOS: stopped before the network round-trip, not after —
+        // otherwise the theme keeps playing through the whole
+        // getLocalTrailers() fetch and never stops at all if it fails.
+        ThemeSongPlayer.shared.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             playingItem = trailer
         }

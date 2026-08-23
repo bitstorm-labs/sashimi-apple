@@ -230,6 +230,7 @@ struct MediaDetailView: View {
                 }
             }
         }
+        .themeSong(for: item)
         .fullScreenCover(isPresented: $showingPlayer) {
             PlayerView(item: selectedEpisode ?? item, startFromBeginning: startFromBeginning)
         }
@@ -868,6 +869,7 @@ struct MediaDetailView: View {
     /// Play the item's local trailer inline. The button only appears when a
     /// local trailer exists (LocalTrailerCount > 0), matching Roku.
     private func playLocalTrailer() async {
+        ThemeSongPlayer.shared.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             selectedEpisode = trailer
             startFromBeginning = true
@@ -881,6 +883,7 @@ struct MediaDetailView: View {
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: seriesId, itemTypes: [.episode]) {
             selectedEpisode = ep
             startFromBeginning = false
+            ThemeSongPlayer.shared.stopForPlayback()
             showingPlayer = true
         }
     }
@@ -900,6 +903,7 @@ struct MediaDetailView: View {
                 ) {
                     selectedEpisode = nextEp
                     startFromBeginning = false
+                    ThemeSongPlayer.shared.stopForPlayback()
                     showingPlayer = true
                 }
             }
@@ -923,6 +927,7 @@ struct MediaDetailView: View {
                     isPrimary: true
                 ) {
                     startFromBeginning = false
+                    ThemeSongPlayer.shared.stopForPlayback()
                     showingPlayer = true
                 }
 
@@ -933,6 +938,7 @@ struct MediaDetailView: View {
                         isPrimary: false
                     ) {
                         startFromBeginning = true
+                        ThemeSongPlayer.shared.stopForPlayback()
                         showingPlayer = true
                     }
                 }

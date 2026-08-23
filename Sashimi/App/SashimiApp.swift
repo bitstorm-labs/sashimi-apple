@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.sashimi.app", category: "App")
 @main
 struct SashimiApp: App {
     @StateObject private var sessionManager = SessionManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         configureAudioSession()
@@ -38,6 +39,15 @@ struct SashimiApp: App {
             ContentView()
                 .environmentObject(sessionManager)
                 .toastOverlay()
+        }
+        // The TV button and other backgrounding transitions leave `.active`
+        // without the detail screen's `onDisappear` ever firing (it's a
+        // `fullScreenCover`), so the theme song must be stopped here rather
+        // than relying on the view hierarchy.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                ThemeSongPlayer.shared.appDidBackground()
+            }
         }
     }
 }

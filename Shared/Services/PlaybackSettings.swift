@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 class PlaybackSettings: ObservableObject {
@@ -11,6 +12,13 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("autoPlayNextEpisode") var autoPlayNextEpisode = true
     @AppStorage("autoSkipIntro") var autoSkipIntro = false
     @AppStorage("autoSkipCredits") var autoSkipCredits = false
+    // On by default everywhere except iPhone: a phone theme plays under
+    // whatever's in someone's pocket or on a table nearby, which reads as
+    // noisy in a way the same feature doesn't on a TV across the room or an
+    // iPad usually held with intent. `@AppStorage`'s default only applies
+    // when nothing is stored yet, so this only affects a fresh install —
+    // an iPhone user who explicitly turns it on keeps that choice.
+    @AppStorage("playThemeSongs") var playThemeSongs = PlaybackSettings.defaultPlayThemeSongs()
     @AppStorage("resumeThresholdSeconds") var resumeThresholdSeconds = 30
     @AppStorage("preferredAudioLanguage") var preferredAudioLanguage = ""
     @AppStorage("preferredSubtitleLanguage") var preferredSubtitleLanguage = ""
@@ -32,4 +40,14 @@ class PlaybackSettings: ObservableObject {
     // exists to verify the negotiation, not to play video. Replaced by the
     // real engine setting when the VLC engine lands.
     @AppStorage("debugVLCDeviceProfile") var debugVLCDeviceProfile = false
+
+    /// Pure idiom -> default mapping, pulled out of the `@AppStorage`
+    /// initializer so a test can exercise the logic for every idiom without
+    /// needing to fake `UIDevice.current` (which isn't mockable) or spin up
+    /// a real `UserDefaults` suite. `.phone` is the only idiom that defaults
+    /// off; tvOS's `.tv` and iPad's `.pad` both stay on, matching the
+    /// pre-existing (shipped) tvOS default of `true`.
+    nonisolated static func defaultPlayThemeSongs(idiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) -> Bool {
+        idiom != .phone
+    }
 }
