@@ -47,24 +47,30 @@ class SubtitleManager: ObservableObject {
         }
     }
 
-    func loadSubtitles(itemId: String, subtitleIndex: Int) async {
+    func loadSubtitles(itemId: String, subtitleIndex: Int, serverID: String? = nil) async {
         isLoading = true
         currentCue = nil
         cues = []
 
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL"),
-              let accessToken = KeychainHelper.get(forKey: "accessToken") else {
+        let serverURL: URL?
+        let accessToken: String?
+        if let serverID,
+           let server = SessionManager.shared.servers.first(where: { $0.id == serverID }) {
+            serverURL = server.url
+            accessToken = SessionManager.shared.token(for: server, allowLegacyFallback: true)
+        } else {
+            serverURL = SessionManager.shared.serverURL
+            accessToken = KeychainHelper.get(forKey: "accessToken")
+        }
+
+        guard let serverURL, let accessToken else {
             isLoading = false
             return
         }
 
         // Build subtitle URL
-        let urlString = "\(serverURL)/Videos/\(itemId)/\(itemId)/Subtitles/\(subtitleIndex)/Stream.vtt"
-
-        guard let url = URL(string: urlString) else {
-            isLoading = false
-            return
-        }
+        let url = serverURL
+            .appendingPathComponent("Videos/\(itemId)/\(itemId)/Subtitles/\(subtitleIndex)/Stream.vtt")
 
         // Use header for authentication instead of query parameter
         var request = URLRequest(url: url)

@@ -187,6 +187,8 @@ struct MobileRecentlyAddedCard: View {
     let isCircular: Bool
     let isLandscape: Bool
     let badgeCount: Int?
+    var serverURL: URL?
+    var serverID: String?
 
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
@@ -214,8 +216,6 @@ struct MobileRecentlyAddedCard: View {
     private var titleFontSize: CGFloat { min(16, max(13, width * 0.095)) }
 
     private var imageURL: URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-
         let imageId: String
         let imageType: String
 
@@ -232,7 +232,17 @@ struct MobileRecentlyAddedCard: View {
             imageType = "Primary"
         }
 
-        return URL(string: "\(serverURL)/Items/\(imageId)/Images/\(imageType)?maxWidth=\(Int(width * 2))")
+        return JellyfinClient.shared.syncImageURL(
+            itemId: imageId,
+            imageType: imageType,
+            maxWidth: Int(width * 2),
+            serverURL: serverURL
+        )
+    }
+
+    private var imageRequest: ImageRequest? {
+        guard let imageURL else { return nil }
+        return SashimiImagePipeline.request(url: imageURL, serverID: serverID)
     }
 
     // Title only, no subtitle (matches tvOS)
@@ -311,8 +321,8 @@ struct MobileRecentlyAddedCard: View {
 
     private var posterImage: some View {
         Group {
-            if let url = imageURL {
-                LazyImage(url: url) { state in
+            if imageRequest != nil {
+                LazyImage(request: imageRequest) { state in
                     if let image = state.image {
                         image
                             .resizable()

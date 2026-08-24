@@ -3,6 +3,47 @@ import XCTest
 
 final class SessionManagerTests: XCTestCase {
 
+    // MARK: - Temporary Client Scope Tests
+
+    func testScopeStackRelinksOutOfOrderTeardownToOriginalParent() {
+        var stack = ServerClientScopeStack()
+        let scopeA = stack.begin(previousServerID: "server0")
+        let scopeB = stack.begin(previousServerID: "serverA")
+        let scopeC = stack.begin(previousServerID: "serverB")
+
+        let removedB = stack.end(scopeB)
+        XCTAssertFalse(removedB?.wasTop ?? true)
+        XCTAssertEqual(stack.entries.first?.token, scopeA)
+        XCTAssertEqual(stack.entries.last?.previousScopeToken, scopeA)
+        XCTAssertEqual(stack.entries.last?.previousServerID, "serverA")
+
+        let removedA = stack.end(scopeA)
+        XCTAssertFalse(removedA?.wasTop ?? true)
+        XCTAssertNil(stack.entries.first?.previousScopeToken)
+        XCTAssertEqual(stack.entries.first?.previousServerID, "server0")
+
+        let removedC = stack.end(scopeC)
+        XCTAssertTrue(removedC?.wasTop ?? false)
+        XCTAssertEqual(removedC?.entry.previousServerID, "server0")
+        XCTAssertNil(removedC?.entry.previousScopeToken)
+        XCTAssertTrue(stack.isEmpty)
+    }
+
+    func testScopeStackLifoTeardownRestoresImmediateParent() {
+        var stack = ServerClientScopeStack()
+        let parent = stack.begin(previousServerID: "server0")
+        let child = stack.begin(previousServerID: "serverA")
+
+        let removedChild = stack.end(child)
+        XCTAssertTrue(removedChild?.wasTop ?? false)
+        XCTAssertEqual(removedChild?.entry.previousServerID, "serverA")
+
+        let removedParent = stack.end(parent)
+        XCTAssertTrue(removedParent?.wasTop ?? false)
+        XCTAssertEqual(removedParent?.entry.previousServerID, "server0")
+        XCTAssertTrue(stack.isEmpty)
+    }
+
     // MARK: - LogoutReason Tests
 
     func testLogoutReasonEnum() {

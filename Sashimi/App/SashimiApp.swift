@@ -14,6 +14,7 @@ struct SashimiApp: App {
         configureAudioSession()
         resetAppIconToDefault()
         SashimiImagePipeline.configureCaches()
+        SashimiImagePipeline.install()
     }
 
     private func resetAppIconToDefault() {
@@ -70,7 +71,11 @@ struct ContentView: View {
                 MainTabView()
                     .id(sessionManager.activeServerId)
             } else {
-                ServerConnectionView()
+                ServerConnectionView(
+                    prefillServerURL: sessionManager.reauthServer?.url,
+                    prefillUsername: sessionManager.reauthServer?.username
+                )
+                .id(sessionManager.reauthServer?.id)
             }
         }
         .onOpenURL { url in

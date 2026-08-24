@@ -11,6 +11,7 @@ struct MobileAuthView: View {
     /// Pre-fills and jumps straight to the password step for this server (used
     /// to re-authenticate a saved server whose session expired).
     var prefillServerURL: URL?
+    var prefillUsername: String?
 
     @EnvironmentObject var sessionManager: SessionManager
     @State private var serverURL = ""
@@ -50,6 +51,9 @@ struct MobileAuthView: View {
             await JellyfinClient.shared.configure(serverURL: prefillServerURL)
             serverURL = prefillServerURL.absoluteString
             normalizedServerURL = prefillServerURL
+            if let prefillUsername {
+                username = prefillUsername
+            }
             showLogin = true
         }
     }
