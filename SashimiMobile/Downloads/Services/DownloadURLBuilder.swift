@@ -20,8 +20,8 @@ enum DownloadURLBuilder {
     /// token doesn't end up in server/proxy logs. Background download tasks
     /// created from a URLRequest keep their headers across app relaunches,
     /// so resumed downloads stay authenticated.
-    static func authorizedRequest(for url: URL) -> URLRequest? {
-        guard let accessToken = KeychainHelper.get(forKey: "accessToken") else {
+    static func authorizedRequest(for url: URL, accessToken: String? = nil) -> URLRequest? {
+        guard let accessToken = accessToken ?? KeychainHelper.get(forKey: "accessToken") else {
             return nil
         }
         var request = URLRequest(url: url)
@@ -41,12 +41,10 @@ enum DownloadURLBuilder {
     /// container AVPlayer demuxes, with HEVC tagged hvc1. Embedded subtitle
     /// tracks are dropped by the remux; subtitles are downloaded separately as
     /// VTT (subtitleURL), so nothing user-visible is lost.
-    static func originalDownloadURL(itemId: String) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
+    static func originalDownloadURL(itemId: String, serverURL: URL? = nil) -> URL? {
+        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
 
-        var components = URLComponents(string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var components = URLComponents(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         components?.path += "/Videos/\(itemId)/stream.mp4"
         components?.queryItems = [
             URLQueryItem(name: "MediaSourceId", value: itemId),
@@ -61,12 +59,15 @@ enum DownloadURLBuilder {
     }
 
     /// Build URL for downloading video at a specific bitrate (transcoded to mp4)
-    static func transcodedDownloadURL(itemId: String, maxBitrate: Int, maxWidth: Int? = nil) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
+    static func transcodedDownloadURL(
+        itemId: String,
+        maxBitrate: Int,
+        maxWidth: Int? = nil,
+        serverURL: URL? = nil
+    ) -> URL? {
+        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
 
-        var components = URLComponents(string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var components = URLComponents(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         components?.path += "/Videos/\(itemId)/stream.mp4"
         var query = [
             URLQueryItem(name: "MediaSourceId", value: itemId),
@@ -87,23 +88,25 @@ enum DownloadURLBuilder {
     }
 
     /// Build download URL based on quality selection
-    static func downloadURL(itemId: String, quality: DownloadQuality) -> URL? {
+    static func downloadURL(itemId: String, quality: DownloadQuality, serverURL: URL? = nil) -> URL? {
         if let maxBitrate = quality.maxBitrate {
-            return transcodedDownloadURL(itemId: itemId, maxBitrate: maxBitrate, maxWidth: quality.maxWidth)
+            return transcodedDownloadURL(
+                itemId: itemId,
+                maxBitrate: maxBitrate,
+                maxWidth: quality.maxWidth,
+                serverURL: serverURL
+            )
         }
-        return originalDownloadURL(itemId: itemId)
+        return originalDownloadURL(itemId: itemId, serverURL: serverURL)
     }
 
     // MARK: - Subtitle URLs
 
     /// Build URL for downloading a subtitle track as WebVTT
-    static func subtitleURL(itemId: String, subtitleIndex: Int) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
-
+    static func subtitleURL(itemId: String, subtitleIndex: Int, serverURL: URL? = nil) -> URL? {
+        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
         var components = URLComponents(
-            string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         )
         components?.path += "/Videos/\(itemId)/\(itemId)/Subtitles/\(subtitleIndex)/Stream.vtt"
         return components?.url
@@ -112,13 +115,10 @@ enum DownloadURLBuilder {
     // MARK: - Image URLs
 
     /// Build URL for downloading poster image
-    static func posterURL(itemId: String, maxWidth: Int = 400) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
-
+    static func posterURL(itemId: String, maxWidth: Int = 400, serverURL: URL? = nil) -> URL? {
+        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
         var components = URLComponents(
-            string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         )
         components?.path += "/Items/\(itemId)/Images/Primary"
         components?.queryItems = [
@@ -129,13 +129,10 @@ enum DownloadURLBuilder {
     }
 
     /// Build URL for downloading backdrop image
-    static func backdropURL(itemId: String, maxWidth: Int = 1280) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
-
+    static func backdropURL(itemId: String, maxWidth: Int = 1280, serverURL: URL? = nil) -> URL? {
+        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
         var components = URLComponents(
-            string: serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         )
         components?.path += "/Items/\(itemId)/Images/Backdrop"
         components?.queryItems = [
@@ -143,5 +140,11 @@ enum DownloadURLBuilder {
             URLQueryItem(name: "quality", value: "80")
         ]
         return components?.url
+    }
+
+    private static func resolvedServerURL(_ serverURL: URL?) -> URL? {
+        if let serverURL { return serverURL }
+        guard let stored = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        return URL(string: stored)
     }
 }

@@ -9,6 +9,7 @@ struct OfflineHomeView: View {
         order: .reverse
     ) private var downloads: [DownloadedItem]
     @State private var playingItem: BaseItemDto?
+    @State private var playingServerID: String?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var continueWatchingItems: [DownloadedItem] {
@@ -72,7 +73,7 @@ struct OfflineHomeView: View {
         }
         .background(MobileColors.background)
         .navigationTitle("Downloads")
-        .fullScreenPlayer(item: $playingItem)
+        .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
     }
 
     // MARK: - Continue Watching
@@ -86,10 +87,11 @@ struct OfflineHomeView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
-                    ForEach(continueWatchingItems, id: \.itemId) { item in
+                    ForEach(continueWatchingItems, id: \.recordID) { item in
                         Button {
                             ThemeSongPlayer.shared.stopForPlayback()
                             playingItem = item.asBaseItemDto
+                            playingServerID = item.serverID
                         } label: {
                             offlineContinueCard(item)
                         }
@@ -107,7 +109,11 @@ struct OfflineHomeView: View {
 
         return VStack(alignment: .leading, spacing: MobileSpacing.xs) {
             ZStack(alignment: .bottom) {
-                localImage(itemId: item.itemId, fileNames: ["backdrop.jpg", "poster.jpg"])
+                localImage(
+                    itemId: item.itemId,
+                    serverID: item.serverID,
+                    fileNames: ["backdrop.jpg", "poster.jpg"]
+                )
                     .frame(width: width, height: height)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
 
@@ -176,12 +182,13 @@ struct OfflineHomeView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.sm) {
-                    ForEach(movieItems, id: \.itemId) { item in
+                    ForEach(movieItems, id: \.recordID) { item in
                         Button {
                             ThemeSongPlayer.shared.stopForPlayback()
                             playingItem = item.asBaseItemDto
+                            playingServerID = item.serverID
                         } label: {
-                            offlinePosterCard(itemId: item.itemId, title: item.name)
+                            offlinePosterCard(item: item)
                         }
                         .buttonStyle(.plain)
                     }
@@ -224,7 +231,11 @@ struct OfflineHomeView: View {
         return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
             ZStack(alignment: .topTrailing) {
                 // Use series_poster.jpg if available, fall back to episode poster
-                localImage(itemId: group.representative.itemId, fileNames: ["series_poster.jpg", "poster.jpg"])
+                localImage(
+                    itemId: group.representative.itemId,
+                    serverID: group.representative.serverID,
+                    fileNames: ["series_poster.jpg", "poster.jpg"]
+                )
                     .frame(width: posterWidth, height: height)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
 
@@ -248,15 +259,15 @@ struct OfflineHomeView: View {
 
     // MARK: - Poster Card
 
-    private func offlinePosterCard(itemId: String, title: String) -> some View {
+    private func offlinePosterCard(item: DownloadedItem) -> some View {
         let height = posterWidth * (1 / PosterAspectRatio.portrait)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-            localImage(itemId: itemId, fileNames: ["poster.jpg"])
+            localImage(itemId: item.itemId, serverID: item.serverID, fileNames: ["poster.jpg"])
                 .frame(width: posterWidth, height: height)
                 .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
 
-            Text(title)
+            Text(item.name)
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textPrimary)
                 .lineLimit(1)
@@ -267,8 +278,8 @@ struct OfflineHomeView: View {
     // MARK: - Local Image Helper (UIImage for reliable file:// loading)
 
     @ViewBuilder
-    private func localImage(itemId: String, fileNames: [String]) -> some View {
-        if let uiImage = loadLocalImage(itemId: itemId, fileNames: fileNames) {
+    private func localImage(itemId: String, serverID: String?, fileNames: [String]) -> some View {
+        if let uiImage = loadLocalImage(itemId: itemId, serverID: serverID, fileNames: fileNames) {
             Image(uiImage: uiImage)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
@@ -283,8 +294,8 @@ struct OfflineHomeView: View {
         }
     }
 
-    private func loadLocalImage(itemId: String, fileNames: [String]) -> UIImage? {
-        let dir = DownloadFileManager.itemDirectory(for: itemId)
+    private func loadLocalImage(itemId: String, serverID: String?, fileNames: [String]) -> UIImage? {
+        let dir = DownloadFileManager.itemDirectory(for: itemId, serverID: serverID)
         for fileName in fileNames {
             let path = dir.appendingPathComponent(fileName).path
             if let image = UIImage(contentsOfFile: path) {
@@ -343,7 +354,7 @@ extension DownloadedItem {
             seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
             indexNumber: nil, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
             userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
             communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
             people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
             path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -378,6 +389,7 @@ extension DownloadedItem {
             parentBackdropImageTags: nil,
             primaryImageAspectRatio: nil,
             mediaType: nil,
+            libraryName: nil,
             productionYear: productionYear,
             communityRating: nil,
             officialRating: nil,

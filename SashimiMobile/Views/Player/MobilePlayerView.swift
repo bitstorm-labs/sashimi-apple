@@ -32,15 +32,23 @@ private struct PlayerViewController: UIViewControllerRepresentable {
 
 struct MobilePlayerView: View {
     let item: BaseItemDto
+    var serverID: String?
     var startFromBeginning: Bool = false
-    @StateObject private var viewModel = PlayerViewModel()
+    @StateObject private var viewModel: PlayerViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
     @State private var playbackSpeed: Float = 1.0
 
+    init(item: BaseItemDto, serverID: String? = nil, startFromBeginning: Bool = false) {
+        self.item = item
+        self.serverID = serverID
+        self.startFromBeginning = startFromBeginning
+        _viewModel = StateObject(wrappedValue: PlayerViewModel(serverID: serverID))
+    }
+
     private var localFileURL: URL? {
-        DownloadManager.shared.localVideoURL(for: item.id)
+        DownloadManager.shared.localVideoURL(for: item.id, serverID: serverID)
     }
 
     var body: some View {
@@ -77,13 +85,13 @@ struct MobilePlayerView: View {
                 await viewModel.loadMedia(
                     item: item,
                     localFileURL: localFileURL,
-                    offlineSubtitles: DownloadManager.shared.offlineSubtitles(for: item.id)
+                    offlineSubtitles: DownloadManager.shared.offlineSubtitles(for: item.id, serverID: serverID)
                 )
                 // For offline content, apply locally-saved position if newer than server data.
                 // Goes through the view model rather than seeking directly: the
                 // resume position is applied when the item reports .readyToPlay,
                 // so a seek issued here would be overwritten a moment later.
-                if let offlineTicks = DownloadManager.shared.offlinePlaybackPosition(for: item.id),
+                if let offlineTicks = DownloadManager.shared.offlinePlaybackPosition(for: item.id, serverID: serverID),
                    offlineTicks > 0 {
                     let serverTicks = item.userData?.playbackPositionTicks ?? 0
                     if offlineTicks > serverTicks {
@@ -374,7 +382,7 @@ struct MobilePlayerView: View {
     private func saveOfflinePositionIfNeeded() {
         guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
         let ticks = Int64(currentTime.seconds * 10_000_000)
-        DownloadManager.shared.savePlaybackPosition(itemId: item.id, positionTicks: ticks)
+        DownloadManager.shared.savePlaybackPosition(itemId: item.id, serverID: serverID, positionTicks: ticks)
     }
 }
 
@@ -481,18 +489,33 @@ private struct PlayerSettingsMenu: View {
 
 struct FullScreenPlayerModifier: ViewModifier {
     @Binding var item: BaseItemDto?
+    var serverID: String?
     var startFromBeginning: Bool = false
 
     func body(content: Content) -> some View {
         content
             .fullScreenCover(item: $item) { mediaItem in
-                MobilePlayerView(item: mediaItem, startFromBeginning: startFromBeginning)
+                MobilePlayerView(
+                    item: mediaItem,
+                    serverID: serverID,
+                    startFromBeginning: startFromBeginning
+                )
             }
     }
 }
 
 extension View {
-    func fullScreenPlayer(item: Binding<BaseItemDto?>, startFromBeginning: Bool = false) -> some View {
-        modifier(FullScreenPlayerModifier(item: item, startFromBeginning: startFromBeginning))
+    func fullScreenPlayer(
+        item: Binding<BaseItemDto?>,
+        serverID: String? = nil,
+        startFromBeginning: Bool = false
+    ) -> some View {
+        modifier(
+            FullScreenPlayerModifier(
+                item: item,
+                serverID: serverID,
+                startFromBeginning: startFromBeginning
+            )
+        )
     }
 }

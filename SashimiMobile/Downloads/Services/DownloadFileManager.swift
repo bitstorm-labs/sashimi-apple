@@ -8,18 +8,30 @@ enum DownloadFileManager {
             .appendingPathComponent("Downloads", isDirectory: true)
     }
 
-    static func itemDirectory(for itemId: String) -> URL {
-        downloadsRoot.appendingPathComponent(itemId, isDirectory: true)
+    static func itemDirectory(for itemId: String, serverID: String? = nil) -> URL {
+        guard let serverID, !serverID.isEmpty else {
+            // Preserve the path used by pre-multi-server downloads.
+            return downloadsRoot.appendingPathComponent(itemId, isDirectory: true)
+        }
+        return downloadsRoot
+            .appendingPathComponent("server-\(safePathComponent(serverID))", isDirectory: true)
+            .appendingPathComponent(itemId, isDirectory: true)
     }
 
-    static func subtitlesDirectory(for itemId: String) -> URL {
-        itemDirectory(for: itemId).appendingPathComponent("subtitles", isDirectory: true)
+    static func subtitlesDirectory(for itemId: String, serverID: String? = nil) -> URL {
+        itemDirectory(for: itemId, serverID: serverID)
+            .appendingPathComponent("subtitles", isDirectory: true)
+    }
+
+    private static func safePathComponent(_ value: String) -> String {
+        value.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
     }
 
     // MARK: - Directory Management
 
-    static func createItemDirectory(for itemId: String) throws {
-        let dir = itemDirectory(for: itemId)
+    static func createItemDirectory(for itemId: String, serverID: String? = nil) throws {
+        let dir = itemDirectory(for: itemId, serverID: serverID)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         // Exclude from iCloud backup
@@ -29,35 +41,58 @@ enum DownloadFileManager {
         try mutableDir.setResourceValues(resourceValues)
     }
 
-    static func createSubtitlesDirectory(for itemId: String) throws {
-        let dir = subtitlesDirectory(for: itemId)
+    static func createSubtitlesDirectory(for itemId: String, serverID: String? = nil) throws {
+        let dir = subtitlesDirectory(for: itemId, serverID: serverID)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
-    static func deleteItemDirectory(for itemId: String) throws {
-        let dir = itemDirectory(for: itemId)
+    static func deleteItemDirectory(for itemId: String, serverID: String? = nil) throws {
+        let dir = itemDirectory(for: itemId, serverID: serverID)
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
         }
     }
 
+    /// Moves a legacy unscoped download into the active server namespace when
+    /// an older record is first reused. Existing files remain playable while
+    /// new copies from another server get an independent directory.
+    static func migrateItemDirectory(itemId: String, to serverID: String) throws -> Bool {
+        let legacy = itemDirectory(for: itemId)
+        let scoped = itemDirectory(for: itemId, serverID: serverID)
+        guard FileManager.default.fileExists(atPath: legacy.path) else {
+            // There is no legacy payload to move, so rebinding the record is safe.
+            return true
+        }
+        guard !FileManager.default.fileExists(atPath: scoped.path) else {
+            // Do not guess which directory is authoritative when both exist.
+            return false
+        }
+        try FileManager.default.createDirectory(
+            at: scoped.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: legacy, to: scoped)
+        return true
+    }
+
     // MARK: - File Paths
 
-    static func videoPath(for itemId: String, container: String) -> URL {
+    static func videoPath(for itemId: String, container: String, serverID: String? = nil) -> URL {
         let ext = container.isEmpty ? "mp4" : container
-        return itemDirectory(for: itemId).appendingPathComponent("video.\(ext)")
+        return itemDirectory(for: itemId, serverID: serverID).appendingPathComponent("video.\(ext)")
     }
 
-    static func posterPath(for itemId: String) -> URL {
-        itemDirectory(for: itemId).appendingPathComponent("poster.jpg")
+    static func posterPath(for itemId: String, serverID: String? = nil) -> URL {
+        itemDirectory(for: itemId, serverID: serverID).appendingPathComponent("poster.jpg")
     }
 
-    static func backdropPath(for itemId: String) -> URL {
-        itemDirectory(for: itemId).appendingPathComponent("backdrop.jpg")
+    static func backdropPath(for itemId: String, serverID: String? = nil) -> URL {
+        itemDirectory(for: itemId, serverID: serverID).appendingPathComponent("backdrop.jpg")
     }
 
-    static func subtitlePath(for itemId: String, index: Int, language: String) -> URL {
-        subtitlesDirectory(for: itemId).appendingPathComponent("\(index)_\(language).vtt")
+    static func subtitlePath(for itemId: String, index: Int, language: String, serverID: String? = nil) -> URL {
+        subtitlesDirectory(for: itemId, serverID: serverID)
+            .appendingPathComponent("\(index)_\(language).vtt")
     }
 
     // MARK: - File Operations
@@ -85,8 +120,8 @@ enum DownloadFileManager {
         directorySize(at: downloadsRoot)
     }
 
-    static func itemSize(for itemId: String) -> Int64 {
-        directorySize(at: itemDirectory(for: itemId))
+    static func itemSize(for itemId: String, serverID: String? = nil) -> Int64 {
+        directorySize(at: itemDirectory(for: itemId, serverID: serverID))
     }
 
     static func formattedTotalSize() -> String {

@@ -12,6 +12,9 @@ struct MobileDetailView: View {
     // items opened from search.
     @State var item: BaseItemDto
     var libraryName: String?
+    // Keep existing detail navigation compatible with unscoped media items.
+    // swiftlint:disable:next implicit_optional_initialization
+    var serverID: String? = nil
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
     @State private var overviewExpanded = false
@@ -25,6 +28,9 @@ struct MobileDetailView: View {
     @State private var seriesCommunityRating: Double?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    @State private var showingPersonDetail: PersonInfo?
+    @State private var pendingServerMedia: ServerMediaResult?
+    @State private var selectedServerMedia: ServerMediaResult?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
     @State private var downloadScope: DownloadScope?
@@ -148,7 +154,7 @@ struct MobileDetailView: View {
                 }
 
                 // Cast section
-                if let people = item.people, people.contains(where: { $0.type == "Actor" }) {
+                if let people = item.people, !people.isEmpty {
                     castSection(people)
                 }
 
@@ -168,7 +174,7 @@ struct MobileDetailView: View {
                     HStack {
                         Spacer()
                         if let backdropURL = backdropImageURL {
-                            LazyImage(url: backdropURL) { state in
+                            LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
                                 if let image = state.image {
                                     image
                                         .resizable()
@@ -213,11 +219,27 @@ struct MobileDetailView: View {
             .ignoresSafeArea()
         }
         .themeSong(for: item)
-        .fullScreenPlayer(item: $playingItem)
-        .fullScreenPlayer(item: $startOverItem, startFromBeginning: true)
+        .fullScreenPlayer(item: $playingItem, serverID: serverID)
+        .fullScreenPlayer(item: $startOverItem, serverID: serverID, startFromBeginning: true)
         .sheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
-                AdaptiveDetailView(item: episode, libraryName: libraryName)
+                AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
+            }
+        }
+        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
+            NavigationStack {
+                PersonDetailView(
+                    person: person,
+                    excludingItemID: item.id,
+                    excludingTitleKey: ServerMediaResultGrouping.titleKey(for: item),
+                    originatingServerID: serverID ?? SessionManager.shared.activeServerId,
+                    onSelectSource: queueServerMedia
+                )
+            }
+        }
+        .fullScreenCover(item: $selectedServerMedia) { source in
+            NavigationStack {
+                ServerScopedMediaDetailView(source: source)
             }
         }
         .task {
@@ -263,6 +285,17 @@ struct MobileDetailView: View {
         } message: {
             Text(adminError ?? "")
         }
+    }
+
+    private func queueServerMedia(_ source: ServerMediaResult) {
+        pendingServerMedia = source
+        showingPersonDetail = nil
+    }
+
+    private func presentPendingServerMedia() {
+        guard let source = pendingServerMedia else { return }
+        pendingServerMedia = nil
+        selectedServerMedia = source
     }
 
     // MARK: - Admin Menu (tvOS parity)
@@ -345,7 +378,7 @@ struct MobileDetailView: View {
                 // Circular channel art + cleaned title (matches tvOS)
                 HStack(spacing: 12) {
                     if let channelArtURL = channelArtURL(for: item.id) {
-                        LazyImage(url: channelArtURL) { state in
+                        LazyImage(request: SashimiImagePipeline.request(url: channelArtURL, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
                                     .resizable()
@@ -362,7 +395,7 @@ struct MobileDetailView: View {
                         .foregroundStyle(MobileColors.textPrimary)
                 }
             } else if let logoURL = logoImageURL(for: item.id) {
-                LazyImage(url: logoURL) { state in
+                    LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
                             .resizable()
@@ -409,7 +442,7 @@ struct MobileDetailView: View {
                 // Circular channel art (matches tvOS)
                 HStack(spacing: 12) {
                     if let channelArtURL = channelArtURL(for: seriesId) {
-                        LazyImage(url: channelArtURL) { state in
+                        LazyImage(request: SashimiImagePipeline.request(url: channelArtURL, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
                                     .resizable()
@@ -426,7 +459,7 @@ struct MobileDetailView: View {
                         .foregroundStyle(MobileColors.textSecondary)
                 }
             } else if let seriesId = item.seriesId, let logoURL = logoImageURL(for: seriesId) {
-                LazyImage(url: logoURL) { state in
+                        LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
                             .resizable()
@@ -496,7 +529,7 @@ struct MobileDetailView: View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
             // Movie logo or title
             if let logoURL = logoImageURL(for: item.id) {
-                LazyImage(url: logoURL) { state in
+                LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
                             .resizable()
@@ -816,7 +849,9 @@ struct MobileDetailView: View {
                     ForEach(availableSeasonQualities) { quality in
                         Button("\(quality.displayName) — \(quality.subtitle)") {
                             DownloadManager.shared.downloadSeason(
-                                episodes: episodesForDownload, quality: quality
+                                episodes: episodesForDownload,
+                                quality: quality,
+                                serverID: serverID
                             )
                         }
                     }
@@ -881,13 +916,13 @@ struct MobileDetailView: View {
             watchedButton
 
             if NetworkMonitor.shared.isConnected {
-                DownloadButton(item: item, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil)
             }
 
             if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
-                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName)
+                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
                     } else {
                         ProgressView()
                     }
@@ -946,7 +981,7 @@ struct MobileDetailView: View {
             }
 
             if NetworkMonitor.shared.isConnected {
-                DownloadButton(item: item, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil)
                 adminMenu
             }
 
@@ -1025,7 +1060,8 @@ struct MobileDetailView: View {
                                 MobileEpisodeCard(
                                     episode: episode,
                                     isCurrentEpisode: episode.id == currentEpisodeId,
-                                    isYouTube: isYouTubeStyle
+                                    isYouTube: isYouTubeStyle,
+                                    serverID: serverID
                                 ) {
                                     showingEpisodeDetail = episode
                                 }
@@ -1041,10 +1077,10 @@ struct MobileDetailView: View {
     // MARK: - Cast Section
 
     private func castSection(_ people: [PersonInfo]) -> some View {
-        let cast = Array(people.filter { $0.type == "Actor" }.prefix(15))
+        let cast = PersonInfo.sortedForDisplay(people, limit: 20)
 
         return VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Cast")
+            Text("Cast & Crew")
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
                 .padding(.horizontal, MobileSpacing.md)
@@ -1052,7 +1088,9 @@ struct MobileDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {
                     ForEach(cast) { person in
-                        MobileCastCard(person: person)
+                        MobileCastCard(person: person, serverID: serverID) {
+                            showingPersonDetail = person
+                        }
                     }
                 }
                 .padding(.horizontal, MobileSpacing.md)
@@ -1126,7 +1164,7 @@ struct MobileDetailView: View {
                 seriesName: nil, seriesId: item.id, seasonId: nil, parentId: nil,
                 indexNumber: num, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
                 userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
-                primaryImageAspectRatio: nil, mediaType: nil, productionYear: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
                 communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
                 people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
                 path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
@@ -1248,15 +1286,15 @@ struct MobileDetailView: View {
             if isSeries {
                 let downloaded = offlineEpisodes(for: item.id)
                 if let firstEp = downloaded.first {
-                    return OfflineImageHelper.backdropURL(for: firstEp.itemId)
-                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId)
+                    return OfflineImageHelper.backdropURL(for: firstEp.itemId, serverID: firstEp.serverID)
+                        ?? OfflineImageHelper.thumbnailURL(for: firstEp.itemId, serverID: firstEp.serverID)
                 }
             }
-            return OfflineImageHelper.backdropURL(for: item.id)
-                ?? OfflineImageHelper.thumbnailURL(for: item.id)
+            return OfflineImageHelper.backdropURL(for: item.id, serverID: serverID)
+                ?? OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
         }
 
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
+        guard let serverURL = detailServerURL else { return nil }
 
         if isEpisode {
             return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
@@ -1282,13 +1320,27 @@ struct MobileDetailView: View {
         // Built via the client (not raw UserDefaults) and NOT gated on
         // NetworkMonitor: a false negative at view-build time permanently
         // hid the logo even though every other image loaded fine.
-        JellyfinClient.shared.imageURL(itemId: itemId, imageType: "Logo", maxWidth: 500)
+        JellyfinClient.shared.syncImageURL(
+            itemId: itemId,
+            imageType: "Logo",
+            maxWidth: 500,
+            serverURL: detailServerURL
+        )
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
         guard NetworkMonitor.shared.isConnected else { return nil }
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(itemId)/Images/Primary?maxWidth=240")
+        guard let serverURL = detailServerURL else { return nil }
+        return serverURL
+            .appendingPathComponent("Items/\(itemId)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "240")])
+    }
+
+    private var detailServerURL: URL? {
+        if let serverID {
+            return SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
+        }
+        return SessionManager.shared.serverURL
     }
 
     // MARK: - Formatting
@@ -1311,14 +1363,23 @@ struct MobileEpisodeCard: View {
     let episode: BaseItemDto
     var isCurrentEpisode: Bool = false
     var isYouTube: Bool = false
+    var serverID: String?
     let action: () -> Void
 
     private var imageURL: URL? {
         if !NetworkMonitor.shared.isConnected {
-            return OfflineImageHelper.thumbnailURL(for: episode.id)
+            return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(episode.id)/Images/Primary?maxWidth=400")
+        let serverURL: URL?
+        if let serverID {
+            serverURL = SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
+        } else {
+            serverURL = SessionManager.shared.serverURL
+        }
+        guard let serverURL else { return nil }
+        return serverURL
+            .appendingPathComponent("Items/\(episode.id)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "400")])
     }
 
     var body: some View {
@@ -1327,7 +1388,7 @@ struct MobileEpisodeCard: View {
                 ZStack(alignment: .bottomLeading) {
                     // Thumbnail
                     if let url = imageURL {
-                        LazyImage(url: url) { state in
+                        LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
                                     .resizable()
@@ -1416,43 +1477,58 @@ struct MobileEpisodeCard: View {
 
 struct MobileCastCard: View {
     let person: PersonInfo
+    var serverID: String?
+    let action: () -> Void
 
     private var imageURL: URL? {
         guard person.primaryImageTag != nil else { return nil }
-        return JellyfinClient.shared.personImageURL(personId: person.id, maxWidth: 150)
+        let serverURL = serverID.flatMap { id in
+            SessionManager.shared.servers.first(where: { $0.id == id })?.url
+        } ?? SessionManager.shared.serverURL
+        return JellyfinClient.shared.personImageURL(
+            personId: person.id,
+            maxWidth: 150,
+            serverURL: serverURL
+        )
     }
 
     var body: some View {
-        VStack(spacing: MobileSpacing.xs) {
-            if let url = imageURL {
-                LazyImage(url: url) { state in
-                    if let image = state.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        placeholderCircle
+        Button(action: action) {
+            VStack(spacing: MobileSpacing.xs) {
+                if let url = imageURL {
+                    LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
+                        if let image = state.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            placeholderCircle
+                        }
                     }
+                    .frame(width: 70, height: 70)
+                    .clipShape(Circle())
+                } else {
+                    placeholderCircle
                 }
-                .frame(width: 70, height: 70)
-                .clipShape(Circle())
-            } else {
-                placeholderCircle
-            }
 
-            Text(person.name ?? "Unknown")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-
-            if let role = person.role, !role.isEmpty {
-                Text(role)
-                    .font(.system(size: 10))
-                    .foregroundStyle(MobileColors.textTertiary)
+                Text(person.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
                     .lineLimit(1)
+
+                if let role = person.displayRole {
+                    Text(role)
+                        .font(.system(size: 10))
+                        .foregroundStyle(MobileColors.textTertiary)
+                        .lineLimit(1)
+                }
             }
+            .frame(width: 80)
         }
-        .frame(width: 80)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(person.displayRole.map { "\(person.name), \($0)" } ?? person.name)
+        .accessibilityHint("Show other movies and shows with this person")
     }
 
     private var placeholderCircle: some View {

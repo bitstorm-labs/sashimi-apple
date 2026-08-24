@@ -1,7 +1,4 @@
 import SwiftUI
-import os
-
-private let logger = Logger(subsystem: "com.sashimi.app", category: "Search")
 
 // MARK: - Search History Manager
 
@@ -60,7 +57,7 @@ final class SearchHistoryManager: ObservableObject {
 struct SearchResultGroup: Identifiable {
     let id: String
     let title: String
-    let items: [BaseItemDto]
+    let items: [ServerMediaResultGroup]
 }
 
 enum SearchResultGrouping {
@@ -69,19 +66,19 @@ enum SearchResultGrouping {
     /// server order. Anything the server returns that isn't a Movie or Series
     /// (defensive: today's query asks only for those two) collects into a
     /// trailing "Other" section so nothing is silently dropped.
-    static func groups(from items: [BaseItemDto]) -> [SearchResultGroup] {
+    static func groups(from items: [ServerMediaResultGroup]) -> [SearchResultGroup] {
         let ordered: [(title: String, type: ItemType)] = [
             ("Movies", .movie),
             ("TV Shows", .series)
         ]
         var groups = ordered.compactMap { entry -> SearchResultGroup? in
-            let matching = items.filter { $0.type == entry.type }
+            let matching = items.filter { $0.primary.item.type == entry.type }
             guard !matching.isEmpty else { return nil }
             return SearchResultGroup(id: entry.title, title: entry.title, items: matching)
         }
 
         let placed: Set<ItemType> = [.movie, .series]
-        let others = items.filter { !placed.contains($0.type ?? .unknown) }
+        let others = items.filter { !placed.contains($0.primary.item.type ?? .unknown) }
         if !others.isEmpty {
             groups.append(SearchResultGroup(id: "Other", title: "Other", items: others))
         }
@@ -98,13 +95,11 @@ struct SearchView: View {
     /// has no designated target and focus never enters this screen.
     var focusNamespace: Namespace.ID?
     @State private var searchText = ""
-    @State private var results: [BaseItemDto] = []
+    @State private var results: [ServerMediaResultGroup] = []
     @State private var isSearching = false
-    @State private var selectedItem: BaseItemDto?
-    @State private var selectedItemIsYouTube = false
+    @State private var selectedGroup: ServerMediaResultGroup?
+    @State private var selectedSource: ServerMediaResult?
     @State private var searchTask: Task<Void, Never>?
-    @State private var youtubeLibraryIds: Set<String> = []
-    @State private var youtubeItemIds: Set<String> = []
     @StateObject private var historyManager = SearchHistoryManager.shared
 
     init(onBackAtRoot: (() -> Void)? = nil, focusNamespace: Namespace.ID? = nil) {
@@ -116,32 +111,10 @@ struct SearchView: View {
         SearchResultGrouping.groups(from: results)
     }
 
-    // Detect YouTube content by checking if we've identified it as YouTube
+    // Detect YouTube content from Jellyfin's owning library. The item path is
+    // not a reliable library discriminator and can vary between servers.
     private func isYouTubeStyle(_ item: BaseItemDto) -> Bool {
-        if item.type == .video { return true }
-        if youtubeItemIds.contains(item.id) { return true }
-        if let parentId = item.parentId, youtubeLibraryIds.contains(parentId) { return true }
-        if let path = item.path?.lowercased(), path.contains("youtube") { return true }
-        return false
-    }
-
-    private func detectYouTubeItems(for items: [BaseItemDto]) async {
-        for item in items where item.type == .series {
-            if youtubeItemIds.contains(item.id) { continue }
-            do {
-                let ancestors = try await JellyfinClient.shared.getItemAncestors(itemId: item.id)
-                for ancestor in ancestors where ancestor.name.lowercased().contains("youtube") {
-                    youtubeItemIds.insert(item.id)
-                    youtubeLibraryIds.insert(ancestor.id)
-                    if let parentId = item.parentId {
-                        youtubeLibraryIds.insert(parentId)
-                    }
-                    break
-                }
-            } catch {
-                // Ignore - ancestors might not be accessible
-            }
-        }
+        item.libraryName?.localizedCaseInsensitiveContains("youtube") == true
     }
 
     var body: some View {
@@ -158,8 +131,15 @@ struct SearchView: View {
                     .focusSection()
             }
         }
-        .fullScreenCover(item: $selectedItem) { item in
-            MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
+        .fullScreenCover(item: $selectedSource) { source in
+            NavigationStack {
+                ServerScopedMediaDetailView(source: source)
+            }
+        }
+        .sheet(item: $selectedGroup) { group in
+            ServerMediaSourcePickerView(group: group) { source in
+                selectedSource = source
+            }
         }
         .onChange(of: searchText) { _, _ in
             searchTask?.cancel()
@@ -175,7 +155,6 @@ struct SearchView: View {
                 // Back clears the query before leaving the screen.
                 searchText = ""
                 results = []
-                youtubeItemIds = []
             } else {
                 onBackAtRoot?()
             }
@@ -267,10 +246,7 @@ struct SearchView: View {
                         SearchResultRow(
                             group: group,
                             isYouTube: isYouTubeStyle,
-                            onSelect: { item in
-                                selectedItemIsYouTube = isYouTubeStyle(item)
-                                selectedItem = item
-                            }
+                            onSelect: select
                         )
                     }
                 }
@@ -298,28 +274,29 @@ struct SearchView: View {
         }
 
         isSearching = true
+        defer { isSearching = false }
 
-        do {
-            let searchResults = try await JellyfinClient.shared.search(query: searchText)
-            await detectYouTubeItems(for: searchResults)
-            // A search cancelled by the next keystroke must not publish its
-            // results or clear the spinner — otherwise a slow older query that
-            // finishes late overwrites the newer one's results.
-            guard !Task.isCancelled else { return }
-            results = searchResults
-            if !results.isEmpty {
-                historyManager.addSearch(searchText)
-            }
-        } catch is CancellationError {
-            return
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            return
-        } catch {
-            logger.error("Search failed: \(error.localizedDescription)")
-            ToastManager.shared.show("Search failed. Try again.")
+        let serverResults = await MultiServerSearchService.search(query: searchText)
+        let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
+        // A search cancelled by the next keystroke must not publish its
+        // results or clear the spinner — otherwise a slow older query that
+        // finishes late overwrites the newer one's results.
+        guard !Task.isCancelled else { return }
+        results = ServerMediaResultGrouping.groups(
+            from: serverResults,
+            preferredServerID: activeServerID
+        )
+        if !results.isEmpty {
+            historyManager.addSearch(searchText)
         }
+    }
 
-        isSearching = false
+    private func select(_ group: ServerMediaResultGroup) {
+        if group.sources.count == 1, let source = group.sources.first {
+            selectedSource = source
+        } else {
+            selectedGroup = group
+        }
     }
 }
 
@@ -447,7 +424,7 @@ private struct TVKeyButton: View {
 private struct SearchResultRow: View {
     let group: SearchResultGroup
     let isYouTube: (BaseItemDto) -> Bool
-    let onSelect: (BaseItemDto) -> Void
+    let onSelect: (ServerMediaResultGroup) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -463,14 +440,21 @@ private struct SearchResultRow: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 32) {
-                    ForEach(group.items) { item in
-                        MediaPosterButton(
-                            item: item,
-                            isCircular: isYouTube(item)
-                        ) {
-                            onSelect(item)
+                    ForEach(group.items) { result in
+                        VStack(spacing: 8) {
+                            MediaPosterButton(
+                                item: result.primary.item,
+                                isCircular: isYouTube(result.primary.item),
+                                serverURL: result.primary.serverURL,
+                                serverID: result.primary.serverID
+                            ) {
+                                onSelect(result)
+                            }
+                            .frame(width: 200)
+
+                            ServerSourcePillsView(sources: result.sources)
+                                .frame(width: 200)
                         }
-                        .frame(width: 200)
                     }
                 }
                 // Padding lives inside the scroll content (not on the

@@ -189,6 +189,13 @@ final class JellyfinClientTests: XCTestCase {
         XCTAssertEqual(JellyfinError.sessionExpired.errorDescription, "Session expired. Please sign in again.")
     }
 
+    func testForbiddenErrorDoesNotLookLikeSessionExpiry() {
+        XCTAssertEqual(
+            JellyfinError.httpError(statusCode: 403).errorDescription,
+            "The server denied access to this request."
+        )
+    }
+
     // MARK: - PlaybackInfo Non-Playable Type Guard (#345)
 
     /// PlaybackInfo POSTed with a Series id is a guaranteed Jellyfin 500

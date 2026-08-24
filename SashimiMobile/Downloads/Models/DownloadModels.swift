@@ -77,8 +77,12 @@ enum DownloadStatus: String, Codable {
 
 @Model
 final class DownloadedItem {
-    // Jellyfin item ID
-    @Attribute(.unique) var itemId: String
+    // Jellyfin item ID. IDs are only unique within a Jellyfin server, so
+    // DownloadManager enforces uniqueness using (itemId, serverID).
+    var itemId: String
+    /// Saved server identity so retries and background assets never fall back
+    /// to whichever server happens to be mirrored globally at the time.
+    var serverID: String?
 
     // Item metadata (stored for offline display)
     var name: String
@@ -98,7 +102,7 @@ final class DownloadedItem {
     var downloadedBytes: Int64
     var errorMessage: String?
 
-    // File paths (relative to Documents/Downloads/{itemId}/)
+    // File paths (relative to a server-qualified Downloads directory).
     var videoFileName: String?
     var posterFileName: String?
     var backdropFileName: String?
@@ -117,6 +121,12 @@ final class DownloadedItem {
 
     // Subtitles
     @Relationship(deleteRule: .cascade) var subtitles: [DownloadedSubtitle]
+
+    /// Stable identity for SwiftUI lists when the same item exists on multiple
+    /// saved servers. Legacy records keep the "legacy" namespace.
+    var recordID: String {
+        "\(serverID ?? "legacy"):\(itemId)"
+    }
 
     var status: DownloadStatus {
         get { DownloadStatus(rawValue: statusRaw) ?? .queued }
@@ -149,7 +159,8 @@ final class DownloadedItem {
 
     var videoFileURL: URL? {
         guard let videoFileName else { return nil }
-        return DownloadFileManager.itemDirectory(for: itemId).appendingPathComponent(videoFileName)
+        return DownloadFileManager.itemDirectory(for: itemId, serverID: serverID)
+            .appendingPathComponent(videoFileName)
     }
 
     init(
@@ -157,6 +168,7 @@ final class DownloadedItem {
         name: String,
         itemType: ItemType,
         quality: DownloadQuality,
+        serverID: String? = nil,
         seriesName: String? = nil,
         seasonNumber: Int? = nil,
         episodeNumber: Int? = nil,
@@ -167,6 +179,7 @@ final class DownloadedItem {
         seasonId: String? = nil
     ) {
         self.itemId = itemId
+        self.serverID = serverID
         self.name = name
         self.itemTypeRaw = itemType.rawValue
         self.quality = quality.rawValue
