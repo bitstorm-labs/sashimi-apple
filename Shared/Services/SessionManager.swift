@@ -16,6 +16,14 @@ enum SessionError: LocalizedError {
     case credentialStorageFailed
     /// Same server URL + user already saved.
     case duplicateServer
+    /// A connection identity change cannot be verified without a password.
+    case passwordRequiredForConnectionChange
+    /// The server record being edited no longer exists.
+    case serverNotFound
+    /// The edit form supplied an invalid server address.
+    case invalidServerURL
+    /// The edit form supplied an empty username.
+    case invalidUsername
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +31,14 @@ enum SessionError: LocalizedError {
             return "Could not save credentials securely. Please try signing in again."
         case .duplicateServer:
             return "That server and user are already added."
+        case .passwordRequiredForConnectionChange:
+            return "Enter the password to verify the updated server connection."
+        case .serverNotFound:
+            return "That saved server is no longer available."
+        case .invalidServerURL:
+            return "Enter a valid http:// or https:// server address."
+        case .invalidUsername:
+            return "Enter a username."
         }
     }
 }
@@ -32,9 +48,34 @@ enum SessionError: LocalizedError {
 struct ServerConfig: Codable, Identifiable, Equatable {
     let id: String
     var name: String
-    let url: URL
-    let username: String
-    let userId: String
+    /// A local-only name chosen by the user. `name` remains Jellyfin's name
+    /// (or the host fallback) so clearing an alias restores the server's
+    /// natural display name without another network request.
+    var nameOverride: String?
+    var url: URL
+    var username: String
+    var userId: String
+
+    init(
+        id: String,
+        name: String,
+        url: URL,
+        username: String,
+        userId: String,
+        nameOverride: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.nameOverride = nameOverride
+        self.url = url
+        self.username = username
+        self.userId = userId
+    }
+
+    var displayName: String {
+        let trimmedOverride = nameOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedOverride.isEmpty ? name : trimmedOverride
+    }
 }
 
 /// A small async mutex used to serialize changes to JellyfinClient.shared.
@@ -136,8 +177,11 @@ final class SessionManager: ObservableObject {
     @Published private(set) var isAuthenticated = false
     @Published private(set) var currentUser: UserDto?
     @Published private(set) var serverURL: URL?
-    @Published private(set) var servers: [ServerConfig] = []
-    @Published private(set) var activeServerId: String?
+    @Published var servers: [ServerConfig] = []
+    @Published var activeServerId: String?
+    /// Changes only when the active server's connection identity changes, so
+    /// the app can rebuild content view models without refreshing for aliases.
+    @Published private(set) var serverConnectionRevision = 0
     @Published var logoutReason: LogoutReason?
     /// Set when the user picks a saved server whose token was dropped by a past
     /// session expiry — the UI presents a prefilled re-auth for it. Cleared on
@@ -169,7 +213,14 @@ final class SessionManager: ObservableObject {
         servers.first(where: { $0.id == activeServerId })
     }
 
-    private init() {
+    /// The root content identity. Switching servers already changes the first
+    /// component; editing an active URL or credential changes the revision.
+    var activeSessionIdentity: String {
+        "\(activeServerId ?? "none"):\(serverConnectionRevision)"
+    }
+
+    init(restoreOnLaunch: Bool = true) {
+        guard restoreOnLaunch else { return }
         Task {
             await restoreSession()
         }
@@ -185,14 +236,24 @@ final class SessionManager: ObservableObject {
         activeServerId = UserDefaults.standard.string(forKey: activeServerIdKey)
     }
 
-    private func saveServers() {
-        if let data = try? JSONEncoder().encode(servers) {
-            UserDefaults.standard.set(data, forKey: serversKey)
+    @discardableResult
+    func saveServers() -> Bool {
+        guard let data = try? JSONEncoder().encode(servers) else {
+            logger.error("Could not encode saved server metadata")
+            return false
         }
+        UserDefaults.standard.set(data, forKey: serversKey)
         UserDefaults.standard.set(activeServerId, forKey: activeServerIdKey)
+        return true
     }
 
-    private func tokenKey(_ id: String) -> String { "accessToken.\(id)" }
+    func tokenKey(_ id: String) -> String { "accessToken.\(id)" }
+
+    /// Rebuild active content after a successful URL or credential change.
+    /// Alias-only edits intentionally leave this untouched.
+    func markActiveConnectionChanged() {
+        serverConnectionRevision += 1
+    }
 
     /// Returns a server-scoped token and repairs installs created before the
     /// per-server token migration when the active server still has a legacy
@@ -329,7 +390,7 @@ final class SessionManager: ObservableObject {
         logger.info("Migrated legacy single-server session to multi-server store")
     }
 
-    private func activate(_ server: ServerConfig, token: String) async {
+    func activate(_ server: ServerConfig, token: String) async {
         // Keep the legacy single-server keys in sync for unscoped legacy routes
         // that still read them directly. Multi-server downloads, subtitles, and
         // scoped artwork resolve their own server URL and token explicitly, so

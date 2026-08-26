@@ -17,6 +17,9 @@ private enum ServerSourceOrdering {
         let savedOrder = Dictionary(
             uniqueKeysWithValues: servers.enumerated().map { ($0.element.id, $0.offset) }
         )
+        let displayNames = Dictionary(
+            uniqueKeysWithValues: servers.map { ($0.id, $0.displayName) }
+        )
 
         return sources.sorted {
             let leftIndex = savedOrder[$0.serverID] ?? Int.max
@@ -24,9 +27,20 @@ private enum ServerSourceOrdering {
             if leftIndex != rightIndex {
                 return leftIndex < rightIndex
             }
-            return $0.serverName.localizedCaseInsensitiveCompare($1.serverName) == .orderedAscending
+            let leftName = displayNames[$0.serverID] ?? $0.serverName
+            let rightName = displayNames[$1.serverID] ?? $1.serverName
+            return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
         }
     }
+}
+
+@MainActor
+private func currentServerName(
+    for source: ServerMediaResult,
+    using sessionManager: SessionManager
+) -> String {
+    sessionManager.servers.first(where: { $0.id == source.serverID })?.displayName
+        ?? source.serverName
 }
 
 /// Compact server labels used under a title wherever the same media exists on
@@ -42,7 +56,7 @@ struct ServerSourcePillsView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(orderedSources) { source in
-                            ServerSourcePill(label: source.serverName)
+                            ServerSourcePill(label: currentServerName(for: source, using: sessionManager))
                         }
                     }
                     .padding(.vertical, 2)
@@ -146,7 +160,10 @@ struct ServerMediaSourcePickerView: View {
 
                     VStack(spacing: 12) {
                         ForEach(orderedSources) { source in
-                            ServerSourceOptionRow(source: source) {
+                            ServerSourceOptionRow(
+                                source: source,
+                                serverName: currentServerName(for: source, using: sessionManager)
+                            ) {
                                 onSelect(source)
                                 dismiss()
                             }
@@ -186,6 +203,7 @@ struct ServerMediaSourcePickerView: View {
 
 private struct ServerSourceOptionRow: View {
     let source: ServerMediaResult
+    let serverName: String
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -194,7 +212,7 @@ private struct ServerSourceOptionRow: View {
         Button(action: onSelect) {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(source.serverName)
+                    Text(serverName)
                         .font(.headline)
                         .foregroundStyle(.white)
 
@@ -227,7 +245,7 @@ private struct ServerSourceOptionRow: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Open \(source.item.displayTitle) on \(source.serverName)")
+        .accessibilityLabel("Open \(source.item.displayTitle) on \(serverName)")
     }
 }
 
@@ -350,6 +368,7 @@ struct ServerScopedMediaDetailView: View {
     @State private var isReady = false
     @State private var scopeError: String?
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var sessionManager = SessionManager.shared
 
 #if os(tvOS)
     private let backToolbarPlacement: ToolbarItemPlacement = .navigationBarLeading
@@ -359,6 +378,10 @@ struct ServerScopedMediaDetailView: View {
 
     private var isYouTubeStyle: Bool {
         source.item.libraryName?.localizedCaseInsensitiveContains("youtube") == true
+    }
+
+    private var serverName: String {
+        currentServerName(for: source, using: sessionManager)
     }
 
     var body: some View {
@@ -389,7 +412,7 @@ struct ServerScopedMediaDetailView: View {
                 )
 #endif
             } else {
-                ProgressView("Connecting to \(source.serverName)...")
+                ProgressView("Connecting to \(serverName)...")
             }
         }
         .task(id: source.id) {
@@ -411,7 +434,7 @@ struct ServerScopedMediaDetailView: View {
     private func manageServerScope() async {
         guard let scope = await SessionManager.shared.beginServerScope(for: source.serverID) else {
             guard !Task.isCancelled else { return }
-            scopeError = "The saved session for \(source.serverName) is unavailable. Reconnect this server in Settings, then try again."
+            scopeError = "The saved session for \(serverName) is unavailable. Reconnect this server in Settings, then try again."
             return
         }
 
