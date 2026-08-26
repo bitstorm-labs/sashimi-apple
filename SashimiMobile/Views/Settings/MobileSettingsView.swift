@@ -16,28 +16,41 @@ struct MobileSettingsView: View {
     ]
     @State private var showingDeleteAllDownloads = false
     @State private var showAddServer = false
+    @State private var serverBeingEdited: ServerConfig?
 
     var body: some View {
         List {
             // Servers (multi-server switcher; swipe to remove)
             Section("Servers") {
                 ForEach(sessionManager.servers) { server in
-                    Button {
-                        Task { await sessionManager.switchServer(to: server.id) }
-                    } label: {
-                        HStack {
+                    HStack {
+                        Button {
+                            Task { await sessionManager.switchServer(to: server.id) }
+                        } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(server.name)
+                                Text(server.displayName)
                                     .foregroundStyle(.primary)
                                 Text("\(server.username) • \(server.url.absoluteString)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            if server.id == sessionManager.activeServerId {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.tint)
-                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            serverBeingEdited = server
+                        } label: {
+                            Image(systemName: "pencil")
+                                .foregroundStyle(.tint)
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Edit \(server.displayName)")
+
+                        if server.id == sessionManager.activeServerId {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.tint)
                         }
                     }
                 }
@@ -141,6 +154,10 @@ struct MobileSettingsView: View {
         }
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
+        }
+        .fullScreenCover(item: $serverBeingEdited) { server in
+            ServerEditView(server: server)
+                .environmentObject(sessionManager)
         }
         .navigationTitle("Settings")
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {

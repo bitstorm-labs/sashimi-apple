@@ -1671,7 +1671,7 @@ enum MultiServerSearchService {
                             ServerMediaResult(
                                 item: $0,
                                 serverID: server.id,
-                                serverName: server.name,
+                                serverName: server.displayName,
                                 serverURL: server.url
                             )
                         }
@@ -1862,7 +1862,7 @@ enum MultiServerPeopleService {
             ServerMediaResult(
                 item: $0,
                 serverID: request.server.id,
-                serverName: request.server.name,
+                serverName: request.server.displayName,
                 serverURL: request.server.url
             )
         }

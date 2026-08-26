@@ -67,9 +67,10 @@ struct ContentView: View {
         Group {
             if sessionManager.isAuthenticated {
                 // Rebuild the entire tab hierarchy when the active server
-                // changes — every view model reloads against the new server.
+                // changes or its connection credentials are edited — every
+                // view model reloads against the current server.
                 MainTabView()
-                    .id(sessionManager.activeServerId)
+                    .id(sessionManager.activeSessionIdentity)
             } else {
                 ServerConnectionView(
                     prefillServerURL: sessionManager.reauthServer?.url,
@@ -531,7 +532,7 @@ struct MainTabView: View {
         .focused($focusedNav, equals: .avatar)
         .confirmationDialog("Switch Server", isPresented: $showServerSwitcher, titleVisibility: .visible) {
             ForEach(sessionManager.servers) { server in
-                Button(server.id == sessionManager.activeServerId ? "✓ \(server.name)" : server.name) {
+                Button(server.id == sessionManager.activeServerId ? "✓ \(server.displayName)" : server.displayName) {
                     Task { await sessionManager.switchServer(to: server.id) }
                 }
             }
