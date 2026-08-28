@@ -116,7 +116,7 @@ struct ServerEditView: View {
                 .serverEditFieldStyle()
 
             SecureField("New Password (Optional)", text: $password)
-                .textContentType(.newPassword)
+                .textContentType(.password)
                 .serverEditFieldStyle()
 
             Text("Leave the password blank to keep the current credential. A new password is required when changing the URL or username.")
@@ -151,9 +151,16 @@ struct ServerEditView: View {
                 dismiss()
             } catch {
                 isSaving = false
-                errorMessage = error.localizedDescription
+                errorMessage = userFacingErrorMessage(for: error)
             }
         }
+    }
+
+    private func userFacingErrorMessage(for error: Error) -> String {
+        if let sessionError = error as? SessionError {
+            return sessionError.localizedDescription
+        }
+        return "Couldn’t connect to the server. Check the server details and try again."
     }
 }
 
