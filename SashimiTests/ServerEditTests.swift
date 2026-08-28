@@ -178,7 +178,7 @@ final class ServerEditTests: XCTestCase {
         XCTAssertEqual(harness.manager.serverURL, newURL)
         XCTAssertEqual(harness.manager.servers.first?.url, newURL)
         XCTAssertEqual(harness.manager.servers.first?.userId, "new-user-id")
-        XCTAssertEqual(KeychainHelper.get(forKey: harness.manager.tokenKey(harness.server.id)), "fresh-token")
+        XCTAssertEqual(KeychainHelper.get(forKey: Self.tokenKey(harness.server.id)), "fresh-token")
         XCTAssertEqual(harness.persistedServer()?.url, newURL)
         await harness.clearClient()
     }
@@ -209,7 +209,7 @@ final class ServerEditTests: XCTestCase {
         XCTAssertEqual(harness.manager.activeSessionIdentity, initialIdentity)
         XCTAssertEqual(harness.manager.servers, [harness.server])
         XCTAssertEqual(harness.persistedServer(), harness.server)
-        XCTAssertEqual(KeychainHelper.get(forKey: harness.manager.tokenKey(harness.server.id)), "old-token")
+        XCTAssertEqual(KeychainHelper.get(forKey: Self.tokenKey(harness.server.id)), "old-token")
         await harness.clearClient()
     }
 
@@ -277,6 +277,10 @@ final class ServerEditTests: XCTestCase {
             nameOverride: nameOverride
         )
     }
+
+    private static func tokenKey(_ id: String) -> String {
+        "accessToken.\(id)"
+    }
 }
 
 private actor AuthenticationCallCounter {
@@ -316,7 +320,6 @@ private final class SessionManagerTestHarness {
             }
         }
 
-        let manager = SessionManager(restoreOnLaunch: false)
         let server = ServerConfig(
             id: "server-edit-harness-\(UUID().uuidString)",
             name: "Finney",
@@ -324,7 +327,12 @@ private final class SessionManagerTestHarness {
             username: "tester",
             userId: "user-1"
         )
-        let keychainKeys = [manager.tokenKey(server.id), "accessToken"]
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [server],
+            initialActiveServerId: server.id
+        )
+        let keychainKeys = [Self.tokenKey(server.id), "accessToken"]
         var keychainValues: [String: String] = [:]
         for key in keychainKeys {
             if let value = KeychainHelper.get(forKey: key) {
@@ -337,13 +345,13 @@ private final class SessionManagerTestHarness {
         self.defaultValues = defaultValues
         self.keychainValues = keychainValues
 
-        manager.servers = [server]
-        manager.activeServerId = server.id
-        _ = manager.saveServers()
+        let persistedData = try! JSONEncoder().encode([server])
+        UserDefaults.standard.set(persistedData, forKey: "servers")
+        UserDefaults.standard.set(server.id, forKey: "activeServerId")
     }
 
     func installToken(_ token: String) {
-        _ = KeychainHelper.save(token, forKey: manager.tokenKey(server.id))
+        _ = KeychainHelper.save(token, forKey: Self.tokenKey(server.id))
     }
 
     func persistedServer() -> ServerConfig? {
@@ -353,6 +361,10 @@ private final class SessionManagerTestHarness {
 
     func clearClient() async {
         await JellyfinClient.shared.clearCredentials()
+    }
+
+    private static func tokenKey(_ id: String) -> String {
+        "accessToken.\(id)"
     }
 
     func restore() {
@@ -365,7 +377,7 @@ private final class SessionManagerTestHarness {
             }
         }
 
-        let tokenKeys = [manager.tokenKey(server.id), "accessToken"]
+        let tokenKeys = [Self.tokenKey(server.id), "accessToken"]
         for key in tokenKeys {
             if let value = keychainValues[key] {
                 _ = KeychainHelper.save(value, forKey: key)
