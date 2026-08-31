@@ -1126,6 +1126,7 @@ struct AppIconButton: View {
 struct ServersSettingsView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showAddServer = false
+    @State private var serverBeingEdited: ServerConfig?
     @State private var serverPendingRemoval: ServerConfig?
 
     var body: some View {
@@ -1135,36 +1136,51 @@ struct ServersSettingsView: View {
                     .font(.largeTitle.bold())
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("Select a server to switch. Hold to remove.")
+                Text("Select a server to switch, or edit its details. Hold to remove.")
                     .font(.callout)
                     .foregroundStyle(SashimiTheme.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 ForEach(sessionManager.servers) { server in
-                    Button {
-                        Task { await sessionManager.switchServer(to: server.id) }
-                    } label: {
-                        HStack {
-                            Image(systemName: "server.rack")
-                                .foregroundStyle(SashimiTheme.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(server.name)
-                                    .foregroundStyle(SashimiTheme.textPrimary)
-                                Text("\(server.username) • \(server.url.absoluteString)")
-                                    .font(.caption)
-                                    .foregroundStyle(SashimiTheme.textTertiary)
-                            }
-                            Spacer()
-                            if server.id == sessionManager.activeServerId {
-                                Image(systemName: "checkmark.circle.fill")
+                    HStack(spacing: 18) {
+                        Button {
+                            Task { await sessionManager.switchServer(to: server.id) }
+                        } label: {
+                            HStack {
+                                Image(systemName: "server.rack")
                                     .foregroundStyle(SashimiTheme.accent)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(server.displayName)
+                                        .foregroundStyle(SashimiTheme.textPrimary)
+                                    Text("\(server.username) • \(server.url.absoluteString)")
+                                        .font(.caption)
+                                        .foregroundStyle(SashimiTheme.textTertiary)
+                                }
+                                Spacer()
+                                if server.id == sessionManager.activeServerId {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(SashimiTheme.accent)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding()
-                        .background(SashimiTheme.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .buttonStyle(.plain)
+
+                        Button {
+                            serverBeingEdited = server
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.title3)
+                                .foregroundStyle(SashimiTheme.textSecondary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit \(server.displayName)")
                     }
-                    .buttonStyle(.plain)
+                    .padding()
+                    .background(SashimiTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .contextMenu {
                         Button(role: .destructive) {
                             serverPendingRemoval = server
@@ -1191,8 +1207,12 @@ struct ServersSettingsView: View {
         .fullScreenCover(isPresented: $showAddServer) {
             AddServerSheet()
         }
+        .fullScreenCover(item: $serverBeingEdited) { server in
+            ServerEditView(server: server)
+                .environmentObject(sessionManager)
+        }
         .alert(
-            "Remove \(serverPendingRemoval?.name ?? "server")?",
+            "Remove \(serverPendingRemoval?.displayName ?? "server")?",
             isPresented: Binding(
                 get: { serverPendingRemoval != nil },
                 set: { if !$0 { serverPendingRemoval = nil } }

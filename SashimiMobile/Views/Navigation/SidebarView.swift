@@ -259,9 +259,9 @@ struct MainNavigationView: View {
                         Task { await sessionManager.switchServer(to: server.id) }
                     } label: {
                         if server.id == sessionManager.activeServerId {
-                            Label(server.name, systemImage: "checkmark")
+                            Label(server.displayName, systemImage: "checkmark")
                         } else {
-                            Text(server.name)
+                            Text(server.displayName)
                         }
                     }
                 }
