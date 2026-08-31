@@ -16,6 +16,14 @@ enum SessionError: LocalizedError {
     case credentialStorageFailed
     /// Same server URL + user already saved.
     case duplicateServer
+    /// A connection identity change cannot be verified without a password.
+    case passwordRequiredForConnectionChange
+    /// The server record being edited no longer exists.
+    case serverNotFound
+    /// The edit form supplied an invalid server address.
+    case invalidServerURL
+    /// The edit form supplied an empty username.
+    case invalidUsername
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +31,14 @@ enum SessionError: LocalizedError {
             return "Could not save credentials securely. Please try signing in again."
         case .duplicateServer:
             return "That server and user are already added."
+        case .passwordRequiredForConnectionChange:
+            return "Enter the password to verify the updated server connection."
+        case .serverNotFound:
+            return "That saved server is no longer available."
+        case .invalidServerURL:
+            return "Enter a valid http:// or https:// server address."
+        case .invalidUsername:
+            return "Enter a username."
         }
     }
 }
@@ -32,9 +48,34 @@ enum SessionError: LocalizedError {
 struct ServerConfig: Codable, Identifiable, Equatable {
     let id: String
     var name: String
-    let url: URL
-    let username: String
-    let userId: String
+    /// A local-only name chosen by the user. `name` remains Jellyfin's name
+    /// (or the host fallback) so clearing an alias restores the server's
+    /// natural display name without another network request.
+    var nameOverride: String?
+    var url: URL
+    var username: String
+    var userId: String
+
+    init(
+        id: String,
+        name: String,
+        url: URL,
+        username: String,
+        userId: String,
+        nameOverride: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.nameOverride = nameOverride
+        self.url = url
+        self.username = username
+        self.userId = userId
+    }
+
+    var displayName: String {
+        let trimmedOverride = nameOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedOverride.isEmpty ? name : trimmedOverride
+    }
 }
 
 /// A small async mutex used to serialize changes to JellyfinClient.shared.
@@ -129,6 +170,9 @@ struct ServerClientScopeStack {
 // scopes; keeping those transitions together is safer than splitting the
 // state machine across unrelated services.
 @MainActor
+// Session state and its edit transaction stay together so the transaction can
+// retain private access to the client configuration and credential lifecycle.
+// swiftlint:disable file_length
 // swiftlint:disable:next type_body_length
 final class SessionManager: ObservableObject {
     static let shared = SessionManager()
@@ -138,6 +182,9 @@ final class SessionManager: ObservableObject {
     @Published private(set) var serverURL: URL?
     @Published private(set) var servers: [ServerConfig] = []
     @Published private(set) var activeServerId: String?
+    /// Changes only when the active server's connection identity changes, so
+    /// the app can rebuild content view models without refreshing for aliases.
+    @Published private(set) var serverConnectionRevision = 0
     @Published var logoutReason: LogoutReason?
     /// Set when the user picks a saved server whose token was dropped by a past
     /// session expiry — the UI presents a prefilled re-auth for it. Cleared on
@@ -169,11 +216,35 @@ final class SessionManager: ObservableObject {
         servers.first(where: { $0.id == activeServerId })
     }
 
+    /// The root content identity. Switching servers already changes the first
+    /// component; editing an active URL or credential changes the revision.
+    var activeSessionIdentity: String {
+        "\(activeServerId ?? "none"):\(serverConnectionRevision)"
+    }
+
+#if DEBUG
+    /// The production singleton uses the private initializer below. This
+    /// debug-only initializer lets the hosted unit-test target create an
+    /// isolated manager without competing with the app's singleton session.
+    init(
+        restoreOnLaunch: Bool = true,
+        initialServers: [ServerConfig] = [],
+        initialActiveServerId: String? = nil
+    ) {
+        servers = initialServers
+        activeServerId = initialActiveServerId
+        guard restoreOnLaunch else { return }
+        Task {
+            await restoreSession()
+        }
+    }
+#else
     private init() {
         Task {
             await restoreSession()
         }
     }
+#endif
 
     // MARK: - Persistence
 
@@ -185,14 +256,24 @@ final class SessionManager: ObservableObject {
         activeServerId = UserDefaults.standard.string(forKey: activeServerIdKey)
     }
 
-    private func saveServers() {
-        if let data = try? JSONEncoder().encode(servers) {
-            UserDefaults.standard.set(data, forKey: serversKey)
+    @discardableResult
+    private func saveServers() -> Bool {
+        guard let data = try? JSONEncoder().encode(servers) else {
+            logger.error("Could not encode saved server metadata")
+            return false
         }
+        UserDefaults.standard.set(data, forKey: serversKey)
         UserDefaults.standard.set(activeServerId, forKey: activeServerIdKey)
+        return true
     }
 
     private func tokenKey(_ id: String) -> String { "accessToken.\(id)" }
+
+    /// Rebuild active content after a successful URL or credential change.
+    /// Alias-only edits intentionally leave this untouched.
+    func markActiveConnectionChanged() {
+        serverConnectionRevision += 1
+    }
 
     /// Returns a server-scoped token and repairs installs created before the
     /// per-server token migration when the active server still has a legacy
@@ -591,5 +672,86 @@ final class SessionManager: ObservableObject {
         await JellyfinClient.shared.clearCredentials()
         configuredServerID = nil
         await clientConfigurationMutex.unlock()
+    }
+}
+
+extension SessionManager {
+    /// Edits a saved server without disturbing the active shared client until
+    /// any changed connection credentials have been verified. Alias-only
+    /// changes remain local and do not contact Jellyfin.
+    func updateServer(
+        id: String,
+        nameOverride: String?,
+        serverURL: URL,
+        username: String,
+        password: String?,
+        authenticate: ServerEditCoordinator.Authenticator? = nil
+    ) async throws {
+        guard let index = servers.firstIndex(where: { $0.id == id }) else {
+            throw SessionError.serverNotFound
+        }
+
+        let current = servers[index]
+        let request = ServerEditRequest(
+            nameOverride: nameOverride,
+            serverURL: serverURL,
+            username: username,
+            password: password
+        )
+        let connectionChanged = request.changesConnection(from: current)
+
+        let authenticator: ServerEditCoordinator.Authenticator = authenticate ?? { url, loginUsername, loginPassword in
+            let client = JellyfinClient()
+            await client.configure(serverURL: url)
+            let result = try await client.authenticate(username: loginUsername, password: loginPassword)
+            let serverName = try? await client.getPublicSystemInfo().serverName
+            return ServerEditAuthentication(
+                accessToken: result.accessToken,
+                username: result.user.name,
+                userId: result.user.id,
+                serverName: serverName
+            )
+        }
+        let prepared = try await ServerEditCoordinator.prepare(
+            current: current,
+            request: request,
+            authenticate: authenticator
+        )
+
+        let previousToken = token(for: current, allowLegacyFallback: true)
+        if let newToken = prepared.accessToken {
+            guard KeychainHelper.save(newToken, forKey: tokenKey(id)) else {
+                throw SessionError.credentialStorageFailed
+            }
+        }
+
+        servers[index] = prepared.server
+        guard saveServers() else {
+            // Roll back both pieces of the record if metadata cannot be
+            // persisted after a successful credential write.
+            servers[index] = current
+            if let previousToken {
+                if !KeychainHelper.save(previousToken, forKey: tokenKey(id)) {
+                    logger.error("Could not restore the previous credential after server edit rollback")
+                }
+            } else if !KeychainHelper.delete(forKey: tokenKey(id)) {
+                logger.error("Could not remove the replacement credential after server edit rollback")
+            }
+            throw SessionError.credentialStorageFailed
+        }
+
+        guard activeServerId == id else { return }
+
+        // Alias-only edits are local presentation changes. Do not reactivate
+        // the shared client or start another bandwidth probe for them.
+        guard connectionChanged else { return }
+
+        if let token = token(for: prepared.server, allowLegacyFallback: true) {
+            reauthServer = nil
+            await activate(prepared.server, token: token)
+            markActiveConnectionChanged()
+        } else {
+            reauthServer = prepared.server
+        }
     }
 }

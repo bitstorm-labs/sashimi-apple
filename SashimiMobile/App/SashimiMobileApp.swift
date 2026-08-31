@@ -81,7 +81,7 @@ struct ContentView: View {
                         PhoneTabView()
                     }
                 }
-                .id(sessionManager.activeServerId)
+                .id(sessionManager.activeSessionIdentity)
                 .task {
                     await DownloadManager.shared.syncPendingProgress()
                 }
