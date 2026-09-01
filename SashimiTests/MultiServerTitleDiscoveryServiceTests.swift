@@ -1,13 +1,80 @@
 import XCTest
 @testable import Sashimi
 
+private struct TitleDiscoverySearchRequest: Equatable, Sendable {
+    let query: String
+    let limit: Int
+}
+
+private struct TitleDiscoveryLatestRequest: Equatable, Sendable {
+    let parentId: String?
+    let limit: Int
+    let includeWatched: Bool
+    let collectionType: String?
+    let groupItems: Bool
+}
+
+private struct TitleDiscoveryRequestSnapshot: Equatable, Sendable {
+    let searchRequests: [TitleDiscoverySearchRequest]
+    let latestRequests: [TitleDiscoveryLatestRequest]
+}
+
+private actor TitleDiscoveryRequestRecorder {
+    private var searchRequests: [TitleDiscoverySearchRequest] = []
+    private var latestRequests: [TitleDiscoveryLatestRequest] = []
+
+    func recordSearch(query: String, limit: Int) {
+        searchRequests.append(TitleDiscoverySearchRequest(query: query, limit: limit))
+    }
+
+    func recordLatest(
+        parentId: String?,
+        limit: Int,
+        includeWatched: Bool,
+        collectionType: String?,
+        groupItems: Bool
+    ) {
+        latestRequests.append(
+            TitleDiscoveryLatestRequest(
+                parentId: parentId,
+                limit: limit,
+                includeWatched: includeWatched,
+                collectionType: collectionType,
+                groupItems: groupItems
+            )
+        )
+    }
+
+    func snapshot() -> TitleDiscoveryRequestSnapshot {
+        TitleDiscoveryRequestSnapshot(
+            searchRequests: searchRequests,
+            latestRequests: latestRequests
+        )
+    }
+}
+
 private struct TitleDiscoveryClientStub: SashimiTitleDiscoveryClient {
     let searchItems: [BaseItemDto]
     let latestItems: [BaseItemDto]
-    let shouldFail: Bool
+    let failure: StubFailure?
+    let recorder: TitleDiscoveryRequestRecorder?
+
+    init(
+        searchItems: [BaseItemDto],
+        latestItems: [BaseItemDto],
+        shouldFail: Bool,
+        failure: StubFailure? = nil,
+        recorder: TitleDiscoveryRequestRecorder? = nil
+    ) {
+        self.searchItems = searchItems
+        self.latestItems = latestItems
+        self.failure = failure ?? (shouldFail ? .unavailable : nil)
+        self.recorder = recorder
+    }
 
     func search(query: String, limit: Int) async throws -> [BaseItemDto] {
-        if shouldFail { throw StubError.unavailable }
+        await recorder?.recordSearch(query: query, limit: limit)
+        try throwIfNeeded()
         return Array(searchItems.prefix(limit))
     }
 
@@ -18,8 +85,30 @@ private struct TitleDiscoveryClientStub: SashimiTitleDiscoveryClient {
         collectionType: String?,
         groupItems: Bool
     ) async throws -> [BaseItemDto] {
-        if shouldFail { throw StubError.unavailable }
+        await recorder?.recordLatest(
+            parentId: parentId,
+            limit: limit,
+            includeWatched: includeWatched,
+            collectionType: collectionType,
+            groupItems: groupItems
+        )
+        try throwIfNeeded()
         return Array(latestItems.prefix(limit))
+    }
+
+    private func throwIfNeeded() throws {
+        guard let failure else { return }
+        switch failure {
+        case .unavailable:
+            throw StubError.unavailable
+        case .sessionExpired:
+            throw JellyfinError.sessionExpired
+        }
+    }
+
+    enum StubFailure: Error, Sendable {
+        case unavailable
+        case sessionExpired
     }
 
     private enum StubError: Error {
@@ -76,6 +165,113 @@ final class MultiServerTitleDiscoveryServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(results.map(\.item.id), ["online-title"])
+    }
+
+    func testSearchReturnsPartialSuccessWhenOneServerSessionExpires() async throws {
+        let servers = [Self.makeServer(id: "expired"), Self.makeServer(id: "online")]
+        let clientFactory: MultiServerTitleDiscoveryService.ClientFactory = { server, _ in
+            TitleDiscoveryClientStub(
+                searchItems: server.id == "online"
+                    ? [Self.makeItem(id: "online-title", name: "Available title")]
+                    : [],
+                latestItems: [],
+                shouldFail: false,
+                failure: server.id == "expired" ? .sessionExpired : nil
+            )
+        }
+
+        let results = try await MultiServerTitleDiscoveryService.search(
+            query: "title",
+            limit: 10,
+            servers: servers,
+            tokenProvider: { _ in "token" },
+            clientFactory: clientFactory
+        )
+
+        XCTAssertEqual(results.map(\.item.id), ["online-title"])
+    }
+
+    func testSearchTreatsExpiredExplicitServerAsAuthenticationFailure() async {
+        let server = Self.makeServer(id: "expired")
+        let clientFactory: MultiServerTitleDiscoveryService.ClientFactory = { _, _ in
+            TitleDiscoveryClientStub(
+                searchItems: [],
+                latestItems: [],
+                shouldFail: false,
+                failure: .sessionExpired
+            )
+        }
+
+        do {
+            _ = try await MultiServerTitleDiscoveryService.search(
+                query: "title",
+                limit: 10,
+                serverID: server.id,
+                servers: [server],
+                tokenProvider: { _ in "expired-token" },
+                clientFactory: clientFactory
+            )
+            XCTFail("Expected the expired session to require authentication")
+        } catch let error as MultiServerTitleDiscoveryError {
+            XCTAssertEqual(error, .serverAuthenticationRequired)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testSearchTreatsAllExpiredServerSessionsAsAuthenticationFailure() async {
+        let servers = [Self.makeServer(id: "expired-1"), Self.makeServer(id: "expired-2")]
+        let clientFactory: MultiServerTitleDiscoveryService.ClientFactory = { _, _ in
+            TitleDiscoveryClientStub(
+                searchItems: [],
+                latestItems: [],
+                shouldFail: false,
+                failure: .sessionExpired
+            )
+        }
+
+        do {
+            _ = try await MultiServerTitleDiscoveryService.search(
+                query: "title",
+                limit: 10,
+                servers: servers,
+                tokenProvider: { _ in "expired-token" },
+                clientFactory: clientFactory
+            )
+            XCTFail("Expected expired sessions to require authentication")
+        } catch let error as MultiServerTitleDiscoveryError {
+            XCTAssertEqual(error, .serverAuthenticationRequired)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testSearchForwardsQueryAndLimitToJellyfinAndKeepsServerIdentity() async throws {
+        let server = Self.makeServer(id: "server-1")
+        let recorder = TitleDiscoveryRequestRecorder()
+        let clientFactory: MultiServerTitleDiscoveryService.ClientFactory = { _, _ in
+            TitleDiscoveryClientStub(
+                searchItems: [Self.makeItem(id: "title-1", name: "Title")],
+                latestItems: [],
+                shouldFail: false,
+                recorder: recorder
+            )
+        }
+
+        let results = try await MultiServerTitleDiscoveryService.search(
+            query: "The Title",
+            limit: 4,
+            servers: [server],
+            tokenProvider: { _ in "token" },
+            clientFactory: clientFactory
+        )
+
+        let snapshot = await recorder.snapshot()
+        XCTAssertEqual(
+            snapshot.searchRequests,
+            [TitleDiscoverySearchRequest(query: "The Title", limit: 4)]
+        )
+        XCTAssertEqual(results.map(\.id), ["server-1:title-1"])
     }
 
     func testSearchWithoutAuthenticatedSessionsThrows() async {
@@ -162,6 +358,41 @@ final class MultiServerTitleDiscoveryServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(results.map(\.serverID), ["other"])
+    }
+
+    func testRecentlyAddedForwardsExpectedJellyfinRequestParameters() async throws {
+        let server = Self.makeServer(id: "default")
+        let recorder = TitleDiscoveryRequestRecorder()
+        let clientFactory: MultiServerTitleDiscoveryService.ClientFactory = { _, _ in
+            TitleDiscoveryClientStub(
+                searchItems: [],
+                latestItems: [Self.makeItem(id: "new-title", name: "New title")],
+                shouldFail: false,
+                recorder: recorder
+            )
+        }
+
+        _ = try await MultiServerTitleDiscoveryService.recentlyAdded(
+            limit: 3,
+            servers: [server],
+            defaultServerID: server.id,
+            tokenProvider: { _ in "token" },
+            clientFactory: clientFactory
+        )
+
+        let snapshot = await recorder.snapshot()
+        XCTAssertEqual(
+            snapshot.latestRequests,
+            [
+                TitleDiscoveryLatestRequest(
+                    parentId: nil,
+                    limit: 3,
+                    includeWatched: true,
+                    collectionType: nil,
+                    groupItems: true
+                )
+            ]
+        )
     }
 
     func testRecentlyAddedWithoutDefaultServerThrows() async {

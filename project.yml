@@ -24,8 +24,12 @@ schemes:
     build:
       targets:
         SashimiMobile: all
+        SashimiMobileTests: [test]
     run:
       config: Release
+    test:
+      targets:
+        - SashimiMobileTests
 
 targets:
   Sashimi:
@@ -226,6 +230,30 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: Sashimi
+
+  SashimiMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    # App Intents and mobile navigation are iOS-only. Keep these tests hosted
+    # by the mobile app so the production intent module is exercised rather
+    # than compiling a second copy of Shared/ into a standalone test bundle.
+    sources:
+      - path: SashimiMobileTests
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.mobile-tests
+        SWIFT_VERSION: 5.9
+        SDKROOT: iphoneos
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        DEVELOPMENT_TEAM: S6WU9SVVDW
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SashimiMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SashimiMobile"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: SashimiMobile
 
 packages:
   Nuke:
