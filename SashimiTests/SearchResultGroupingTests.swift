@@ -119,4 +119,11 @@ final class SearchResultGroupingTests: XCTestCase {
         XCTAssertEqual(groups[0].sources.count, 7)
         XCTAssertEqual(Set(groups[0].sources.map(\.serverID)), Set((1...7).map { "server-\($0)" }))
     }
+
+    func testServerAvailabilityBadgeOnlyAppearsForMultipleSources() {
+        XCTAssertNil(ServerAvailabilityBadge.title(for: 0))
+        XCTAssertNil(ServerAvailabilityBadge.title(for: 1))
+        XCTAssertEqual(ServerAvailabilityBadge.title(for: 2), "2 servers")
+        XCTAssertEqual(ServerAvailabilityBadge.title(for: 7), "7 servers")
+    }
 }
