@@ -64,19 +64,32 @@ final class SashimiMediaEntityQueryTests: XCTestCase {
         }
     }
 
-    func testEntitiesForPreservesItemUnavailableError() async {
-        let query = SashimiMediaEntityQuery { _ in
-            throw SashimiMediaEntityQueryError.itemUnavailable
+    func testEntitiesForSkipsItemUnavailableAndContinues() async throws {
+        let itemUnavailable = SashimiMediaEntityIdentifier(
+            serverID: "server-available",
+            itemID: "item-deleted"
+        )
+        let available = SashimiMediaEntityIdentifier(
+            serverID: "server-available",
+            itemID: "item-available"
+        )
+        let expectedEntity = makeEntity(
+            serverID: available.serverID,
+            itemID: available.itemID
+        )
+        let resolvingQuery = SashimiMediaEntityQuery { identifier in
+            if identifier == itemUnavailable {
+                throw SashimiMediaEntityQueryError.itemUnavailable
+            }
+            return expectedEntity
         }
 
-        do {
-            _ = try await query.entities(for: ["6:serveritem"])
-            XCTFail("Expected an item-unavailable error")
-        } catch let error as SashimiMediaEntityQueryError {
-            XCTAssertEqual(error, .itemUnavailable)
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
+        let entities = try await resolvingQuery.entities(for: [
+            itemUnavailable.rawValue,
+            available.rawValue
+        ])
+
+        XCTAssertEqual(entities, [expectedEntity])
     }
 
     func testEntitiesForHonorsCancellationBeforeResolution() async {

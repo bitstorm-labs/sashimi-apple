@@ -113,8 +113,13 @@ struct SashimiMediaEntityQuery: EntityStringQuery {
         var entities: [SashimiMediaEntity] = []
         for identifier in parsedIdentifiers {
             try Task.checkCancellation()
-            if let entity = try await entityResolver(identifier) {
-                entities.append(entity)
+            do {
+                if let entity = try await entityResolver(identifier) {
+                    entities.append(entity)
+                }
+            } catch SashimiMediaEntityQueryError.itemUnavailable {
+                // A deleted or otherwise unavailable item should not discard
+                // entities that resolve successfully later in the batch.
             }
             try Task.checkCancellation()
         }
