@@ -94,6 +94,40 @@ struct ServerSourcePill: View {
     }
 }
 
+/// The compact search-result indicator for titles available on multiple
+/// saved servers. Search cards use one count badge instead of a row of server
+/// names, while the source picker below still exposes the individual choices.
+enum ServerAvailabilityBadge {
+    static func title(for serverCount: Int) -> String? {
+        guard serverCount > 1 else { return nil }
+        return "\(serverCount) servers"
+    }
+}
+
+struct ServerAvailabilityBadgeView: View {
+    let sources: [ServerMediaResult]
+
+    var body: some View {
+        if let title = ServerAvailabilityBadge.title(for: sources.count) {
+            Label(title, systemImage: "server.rack")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .allowsTightening(true)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(ServerMediaStyle.accent)
+                .overlay {
+                    Capsule()
+                        .stroke(ServerMediaStyle.border, lineWidth: 1)
+                }
+                .clipShape(Capsule())
+                .accessibilityLabel("Available on \(sources.count) servers")
+        }
+    }
+}
+
 /// Reusable modal used whenever a title has more than one server source.
 /// Choosing a source closes the picker and hands the complete server-scoped
 /// result to the caller, which then opens the platform-specific detail view.
