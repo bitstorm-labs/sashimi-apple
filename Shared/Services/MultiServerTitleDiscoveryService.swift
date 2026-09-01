@@ -41,10 +41,41 @@ enum MultiServerTitleDiscoveryError: LocalizedError, Equatable, Sendable {
     }
 }
 
-struct MultiServerTitleDiscoveryServerResult {
+private func multiServerTitleDiscoveryFailure(
+    for error: JellyfinError
+) -> MultiServerTitleDiscoveryFailure {
+    switch error {
+    case .invalidCredentials, .sessionExpired:
+        return .authenticationRequired
+    case .httpError(let statusCode) where statusCode == 401:
+        return .authenticationRequired
+    default:
+        return .unavailable
+    }
+}
+
+enum MultiServerTitleDiscoveryFailure: Sendable, Equatable {
+    case unavailable
+    case authenticationRequired
+}
+
+struct MultiServerTitleDiscoveryServerResult: Sendable {
     let serverIndex: Int
     let items: [ServerMediaResult]
     let succeeded: Bool
+    let failure: MultiServerTitleDiscoveryFailure?
+
+    init(
+        serverIndex: Int,
+        items: [ServerMediaResult],
+        succeeded: Bool,
+        failure: MultiServerTitleDiscoveryFailure? = nil
+    ) {
+        self.serverIndex = serverIndex
+        self.items = items
+        self.succeeded = succeeded
+        self.failure = failure
+    }
 }
 
 enum MultiServerTitleDiscoveryService {
@@ -127,7 +158,7 @@ enum MultiServerTitleDiscoveryService {
             operation: .recentlyAdded(limit: requestLimit),
             tokenProvider: suppliedTokenProvider,
             clientFactory: suppliedClientFactory,
-            missingTokenError: suppliedServerID == nil ? nil : .serverAuthenticationRequired
+            missingTokenError: .serverAuthenticationRequired
         )
         try ensureUsableResponses(load.responses, attemptedServerCount: load.attemptedServerCount)
 
@@ -304,11 +335,19 @@ enum MultiServerTitleDiscoveryService {
                 items: [],
                 succeeded: false
             )
+        } catch let error as JellyfinError {
+            return MultiServerTitleDiscoveryServerResult(
+                serverIndex: serverIndex,
+                items: [],
+                succeeded: false,
+                failure: multiServerTitleDiscoveryFailure(for: error)
+            )
         } catch {
             return MultiServerTitleDiscoveryServerResult(
                 serverIndex: serverIndex,
                 items: [],
-                succeeded: false
+                succeeded: false,
+                failure: .unavailable
             )
         }
     }
@@ -341,6 +380,9 @@ enum MultiServerTitleDiscoveryService {
             throw MultiServerTitleDiscoveryError.noAvailableServerSessions
         }
         guard responses.contains(where: \.succeeded) else {
+            if responses.contains(where: { $0.failure == .authenticationRequired }) {
+                throw MultiServerTitleDiscoveryError.serverAuthenticationRequired
+            }
             throw MultiServerTitleDiscoveryError.allServersUnavailable
         }
     }
