@@ -197,7 +197,7 @@ struct MobileSearchView: View {
                         }
                         .buttonStyle(.plain)
 
-                        ServerSourcePillsView(sources: result.sources)
+                        ServerAvailabilityBadgeView(sources: result.sources)
                             .frame(width: metrics.cardWidth, alignment: .leading)
                     }
                 }
