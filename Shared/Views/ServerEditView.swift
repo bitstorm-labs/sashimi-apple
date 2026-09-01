@@ -32,6 +32,7 @@ struct ServerEditView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         displayNameSection
                         connectionSection
+                        defaultServerSection
 
                         Button {
                             save()
@@ -122,6 +123,29 @@ struct ServerEditView: View {
             Text("Leave the password blank to keep the current credential. A new password is required when changing the URL or username.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var defaultServerSection: some View {
+        if sessionManager.shouldShowSetAsDefault(for: server.id) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Default Server")
+                    .font(.headline)
+
+                Button {
+                    sessionManager.setDefaultServer(to: server.id)
+                } label: {
+                    Label("Set as Default", systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isSaving)
+
+                Text("Siri, Shortcuts, and actions without a server selection will use this server.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -28,8 +28,14 @@ struct MobileSettingsView: View {
                             Task { await sessionManager.switchServer(to: server.id) }
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(server.displayName)
-                                    .foregroundStyle(.primary)
+                                HStack(alignment: .center, spacing: 6) {
+                                    Text(server.displayName)
+                                        .foregroundStyle(.primary)
+                                    if sessionManager.shouldShowDefaultServerBadge,
+                                       sessionManager.isDefaultServer(server.id) {
+                                        DefaultServerBadge(tint: MobileColors.accent)
+                                    }
+                                }
                                 Text("\(server.username) • \(server.url.absoluteString)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

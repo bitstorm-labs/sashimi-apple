@@ -11,7 +11,7 @@ final class ServerEditTests: XCTestCase {
     }
 
     func testLegacyServerConfigDecodesWithoutAnAlias() throws {
-        let data = """
+        let data = Data("""
         {
             "id": "server-1",
             "name": "Finney",
@@ -19,7 +19,7 @@ final class ServerEditTests: XCTestCase {
             "username": "tester",
             "userId": "user-1"
         }
-        """.data(using: .utf8)!
+        """.utf8)
 
         let server = try JSONDecoder().decode(ServerConfig.self, from: data)
         XCTAssertNil(server.nameOverride)
@@ -300,6 +300,7 @@ private final class SessionManagerTestHarness {
     private static let defaultKeys = [
         "servers",
         "activeServerId",
+        "defaultServerId",
         "serverURL",
         "userId",
         "userName",
@@ -330,7 +331,8 @@ private final class SessionManagerTestHarness {
         let manager = SessionManager(
             restoreOnLaunch: false,
             initialServers: [server],
-            initialActiveServerId: server.id
+            initialActiveServerId: server.id,
+            initialDefaultServerId: server.id
         )
         let keychainKeys = [Self.tokenKey(server.id), "accessToken"]
         var keychainValues: [String: String] = [:]
@@ -345,9 +347,13 @@ private final class SessionManagerTestHarness {
         self.defaultValues = defaultValues
         self.keychainValues = keychainValues
 
-        let persistedData = try! JSONEncoder().encode([server])
+        guard let persistedData = try? JSONEncoder().encode([server]) else {
+            assertionFailure("Could not encode the test server")
+            return
+        }
         UserDefaults.standard.set(persistedData, forKey: "servers")
         UserDefaults.standard.set(server.id, forKey: "activeServerId")
+        UserDefaults.standard.set(server.id, forKey: "defaultServerId")
     }
 
     func installToken(_ token: String) {

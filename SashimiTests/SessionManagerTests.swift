@@ -2,7 +2,6 @@ import XCTest
 @testable import Sashimi
 
 final class SessionManagerTests: XCTestCase {
-
     // MARK: - Temporary Client Scope Tests
 
     func testScopeStackRelinksOutOfOrderTeardownToOriginalParent() {
@@ -42,6 +41,142 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertTrue(removedParent?.wasTop ?? false)
         XCTAssertEqual(removedParent?.entry.previousServerID, "server0")
         XCTAssertTrue(stack.isEmpty)
+    }
+
+    // MARK: - Default Server Tests
+
+    @MainActor
+    func testSingleServerHidesDefaultBadgeAndSetDefaultControl() {
+        let server = makeServer(id: "server-one")
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [server],
+            initialActiveServerId: server.id,
+            initialDefaultServerId: server.id
+        )
+
+        XCTAssertFalse(manager.shouldShowDefaultServerBadge)
+        XCTAssertFalse(manager.shouldShowSetAsDefault(for: server.id))
+    }
+
+    @MainActor
+    func testMultipleServersShowBadgeOnlyForDefaultAndOfferReassignmentForOtherServers() {
+        let defaultServer = makeServer(id: "server-default")
+        let otherServer = makeServer(id: "server-other")
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [defaultServer, otherServer],
+            initialActiveServerId: defaultServer.id,
+            initialDefaultServerId: defaultServer.id
+        )
+
+        XCTAssertTrue(manager.shouldShowDefaultServerBadge)
+        XCTAssertTrue(manager.isDefaultServer(defaultServer.id))
+        XCTAssertFalse(manager.shouldShowSetAsDefault(for: defaultServer.id))
+        XCTAssertTrue(manager.shouldShowSetAsDefault(for: otherServer.id))
+    }
+
+    @MainActor
+    func testSetDefaultServerReassignsAndPersistsWithoutChangingActiveServer() {
+        let defaults = UserDefaults.standard
+        let keys = ["servers", "activeServerId", "defaultServerId"]
+        let previousValues = snapshotDefaults(for: keys)
+        defer { restoreDefaults(previousValues, for: keys) }
+
+        let currentServer = makeServer(id: "server-current")
+        let newDefault = makeServer(id: "server-new-default")
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [currentServer, newDefault],
+            initialActiveServerId: currentServer.id,
+            initialDefaultServerId: currentServer.id
+        )
+        guard let persistedData = try? JSONEncoder().encode([currentServer, newDefault]) else {
+            XCTFail("Could not encode test servers")
+            return
+        }
+        defaults.set(persistedData, forKey: "servers")
+        defaults.set(currentServer.id, forKey: "activeServerId")
+        defaults.set(currentServer.id, forKey: "defaultServerId")
+
+        XCTAssertTrue(manager.setDefaultServer(to: newDefault.id))
+        XCTAssertEqual(manager.defaultServerId, newDefault.id)
+        XCTAssertEqual(manager.activeServerId, currentServer.id)
+        XCTAssertEqual(defaults.string(forKey: "defaultServerId"), newDefault.id)
+        XCTAssertFalse(manager.setDefaultServer(to: "missing-server"))
+    }
+
+    @MainActor
+    func testRestoreSessionUsesDefaultServerInsteadOfPreviouslyActiveServer() async {
+        let defaults = UserDefaults.standard
+        let keys = ["servers", "activeServerId", "defaultServerId"]
+        let previousValues = snapshotDefaults(for: keys)
+        defer { restoreDefaults(previousValues, for: keys) }
+
+        let defaultServer = makeServer(id: "server-default-at-launch")
+        let previouslyActiveServer = makeServer(id: "server-previous-active")
+        guard let persistedData = try? JSONEncoder().encode([defaultServer, previouslyActiveServer]) else {
+            XCTFail("Could not encode test servers")
+            return
+        }
+        defaults.set(persistedData, forKey: "servers")
+        defaults.set(previouslyActiveServer.id, forKey: "activeServerId")
+        defaults.set(defaultServer.id, forKey: "defaultServerId")
+
+        let manager = SessionManager(restoreOnLaunch: false)
+        await manager.restoreSession()
+
+        XCTAssertEqual(manager.defaultServerId, defaultServer.id)
+        XCTAssertEqual(manager.activeServerId, defaultServer.id)
+        XCTAssertEqual(manager.reauthServer, defaultServer)
+    }
+
+    @MainActor
+    func testRestoreSessionCreatesDefaultFromFirstSavedServerWhenMissing() async {
+        let defaults = UserDefaults.standard
+        let keys = ["servers", "activeServerId", "defaultServerId"]
+        let previousValues = snapshotDefaults(for: keys)
+        defer { restoreDefaults(previousValues, for: keys) }
+
+        let firstServer = makeServer(id: "server-first")
+        let secondServer = makeServer(id: "server-second")
+        guard let persistedData = try? JSONEncoder().encode([firstServer, secondServer]) else {
+            XCTFail("Could not encode test servers")
+            return
+        }
+        defaults.set(persistedData, forKey: "servers")
+        defaults.removeObject(forKey: "activeServerId")
+        defaults.removeObject(forKey: "defaultServerId")
+
+        let manager = SessionManager(restoreOnLaunch: false)
+        await manager.restoreSession()
+
+        XCTAssertEqual(manager.defaultServerId, firstServer.id)
+        XCTAssertEqual(manager.activeServerId, firstServer.id)
+        XCTAssertEqual(manager.reauthServer, firstServer)
+    }
+
+    @MainActor
+    func testRemovingDefaultPromotesFirstRemainingServerWithoutChangingActiveServer() async {
+        let keys = ["servers", "activeServerId", "defaultServerId"]
+        let previousValues = snapshotDefaults(for: keys)
+        defer { restoreDefaults(previousValues, for: keys) }
+
+        let removedDefault = makeServer(id: "server-removed-default")
+        let promotedServer = makeServer(id: "server-promoted")
+        let activeServer = makeServer(id: "server-active")
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [removedDefault, promotedServer, activeServer],
+            initialActiveServerId: activeServer.id,
+            initialDefaultServerId: removedDefault.id
+        )
+
+        await manager.removeServer(id: removedDefault.id)
+
+        XCTAssertEqual(manager.defaultServerId, promotedServer.id)
+        XCTAssertEqual(manager.activeServerId, activeServer.id)
+        XCTAssertEqual(manager.servers, [promotedServer, activeServer])
     }
 
     // MARK: - LogoutReason Tests
@@ -121,14 +256,14 @@ final class SessionManagerTests: XCTestCase {
     // MARK: - UserDto Tests
 
     func testUserDtoDecoding() throws {
-        let json = """
+        let json = Data("""
         {
             "Id": "user-123",
             "Name": "TestUser",
             "ServerId": "server-456",
             "PrimaryImageTag": "image-tag-789"
         }
-        """.data(using: .utf8)!
+        """.utf8)
 
         let decoder = JSONDecoder()
         let user = try decoder.decode(UserDto.self, from: json)
@@ -140,12 +275,12 @@ final class SessionManagerTests: XCTestCase {
     }
 
     func testUserDtoMinimalDecoding() throws {
-        let json = """
+        let json = Data("""
         {
             "Id": "user-minimal",
             "Name": "MinimalUser"
         }
-        """.data(using: .utf8)!
+        """.utf8)
 
         let decoder = JSONDecoder()
         let user = try decoder.decode(UserDto.self, from: json)
@@ -181,5 +316,33 @@ final class SessionManagerTests: XCTestCase {
         // Clean up
         UserDefaults.standard.removeObject(forKey: "serverURL")
         UserDefaults.standard.removeObject(forKey: "userId")
+    }
+
+    private func makeServer(id: String) -> ServerConfig {
+        ServerConfig(
+            id: id,
+            name: id,
+            url: URL(string: "https://\(id).example") ?? URL(fileURLWithPath: "/"),
+            username: "tester",
+            userId: "user-\(id)"
+        )
+    }
+
+    private func snapshotDefaults(for keys: [String]) -> [String: Any] {
+        keys.reduce(into: [String: Any]()) { snapshot, key in
+            if let value = UserDefaults.standard.object(forKey: key) {
+                snapshot[key] = value
+            }
+        }
+    }
+
+    private func restoreDefaults(_ values: [String: Any], for keys: [String]) {
+        for key in keys {
+            if let value = values[key] {
+                UserDefaults.standard.set(value, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
     }
 }

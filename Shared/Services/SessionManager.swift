@@ -182,6 +182,7 @@ final class SessionManager: ObservableObject {
     @Published private(set) var serverURL: URL?
     @Published private(set) var servers: [ServerConfig] = []
     @Published private(set) var activeServerId: String?
+    @Published private(set) var defaultServerId: String?
     /// Changes only when the active server's connection identity changes, so
     /// the app can rebuild content view models without refreshing for aliases.
     @Published private(set) var serverConnectionRevision = 0
@@ -193,6 +194,7 @@ final class SessionManager: ObservableObject {
 
     private let serversKey = "servers"
     private let activeServerIdKey = "activeServerId"
+    private let defaultServerIdKey = "defaultServerId"
 
     // Legacy single-server keys (pre multi-server)
     private let userDefaultsServerURLKey = "serverURL"
@@ -216,6 +218,22 @@ final class SessionManager: ObservableObject {
         servers.first(where: { $0.id == activeServerId })
     }
 
+    var defaultServer: ServerConfig? {
+        servers.first(where: { $0.id == defaultServerId })
+    }
+
+    var shouldShowDefaultServerBadge: Bool {
+        servers.count > 1
+    }
+
+    func isDefaultServer(_ id: String) -> Bool {
+        defaultServerId == id
+    }
+
+    func shouldShowSetAsDefault(for id: String) -> Bool {
+        servers.count > 1 && !isDefaultServer(id)
+    }
+
     /// The root content identity. Switching servers already changes the first
     /// component; editing an active URL or credential changes the revision.
     var activeSessionIdentity: String {
@@ -229,10 +247,12 @@ final class SessionManager: ObservableObject {
     init(
         restoreOnLaunch: Bool = true,
         initialServers: [ServerConfig] = [],
-        initialActiveServerId: String? = nil
+        initialActiveServerId: String? = nil,
+        initialDefaultServerId: String? = nil
     ) {
         servers = initialServers
         activeServerId = initialActiveServerId
+        defaultServerId = initialDefaultServerId
         guard restoreOnLaunch else { return }
         Task {
             await restoreSession()
@@ -254,6 +274,7 @@ final class SessionManager: ObservableObject {
             servers = list
         }
         activeServerId = UserDefaults.standard.string(forKey: activeServerIdKey)
+        defaultServerId = UserDefaults.standard.string(forKey: defaultServerIdKey)
     }
 
     @discardableResult
@@ -264,7 +285,29 @@ final class SessionManager: ObservableObject {
         }
         UserDefaults.standard.set(data, forKey: serversKey)
         UserDefaults.standard.set(activeServerId, forKey: activeServerIdKey)
+        UserDefaults.standard.set(defaultServerId, forKey: defaultServerIdKey)
         return true
+    }
+
+    /// Repairs installs that predate the persisted default-server setting or
+    /// contain a default ID for a server that is no longer saved. Existing
+    /// active-server state is the least surprising migration choice; new
+    /// installs fall back to the first saved server.
+    @discardableResult
+    private func ensureDefaultServer(preferFirstSavedServer: Bool = false) -> Bool {
+        guard let currentDefaultID = defaultServerId else {
+            let candidate = preferFirstSavedServer ? servers.first : (activeServer ?? servers.first)
+            guard let candidate else { return false }
+            defaultServerId = candidate.id
+            return true
+        }
+
+        guard servers.contains(where: { $0.id == currentDefaultID }) else {
+            defaultServerId = (preferFirstSavedServer ? servers.first : (activeServer ?? servers.first))?.id
+            return true
+        }
+
+        return false
     }
 
     private func tokenKey(_ id: String) -> String { "accessToken.\(id)" }
@@ -341,12 +384,24 @@ final class SessionManager: ObservableObject {
             migrateLegacySession()
         }
 
-        guard let server = activeServer ?? servers.first else {
+        var persistenceChanged = ensureDefaultServer()
+
+        guard let server = defaultServer else {
+            if activeServerId != nil {
+                activeServerId = nil
+                persistenceChanged = true
+            }
+            if persistenceChanged {
+                saveServers()
+            }
             reauthServer = nil
             return
         }
         if activeServerId != server.id {
             activeServerId = server.id
+            persistenceChanged = true
+        }
+        if persistenceChanged {
             saveServers()
         }
 
@@ -400,6 +455,7 @@ final class SessionManager: ObservableObject {
         }
         servers = [config]
         activeServerId = config.id
+        defaultServerId = config.id
         saveServers()
 
         // Scrub every legacy copy only after the new entry is durable.
@@ -436,6 +492,10 @@ final class SessionManager: ObservableObject {
         await JellyfinClient.shared.configure(serverURL: serverURL)
 
         let result = try await JellyfinClient.shared.authenticate(username: username, password: password)
+
+        if ensureDefaultServer() {
+            saveServers()
+        }
 
         if let existing = servers.first(where: { $0.url == serverURL && $0.userId == result.user.id }) {
             // Server is already saved. If there's a live session for it, this is
@@ -485,6 +545,9 @@ final class SessionManager: ObservableObject {
         }
 
         servers.append(config)
+        if defaultServerId == nil {
+            defaultServerId = config.id
+        }
         activeServerId = config.id
         saveServers()
 
@@ -565,6 +628,19 @@ final class SessionManager: ObservableObject {
         await activate(server, token: token)
     }
 
+    @discardableResult
+    func setDefaultServer(to id: String) -> Bool {
+        guard servers.contains(where: { $0.id == id }), defaultServerId != id else { return false }
+
+        let previousDefaultID = defaultServerId
+        defaultServerId = id
+        guard saveServers() else {
+            defaultServerId = previousDefaultID
+            return false
+        }
+        return true
+    }
+
     private func mirrorServerDefaults(_ server: ServerConfig, token: String) {
         UserDefaults.standard.set(server.url.absoluteString, forKey: "serverURL")
         UserDefaults.standard.set(server.userId, forKey: "userId")
@@ -596,8 +672,10 @@ final class SessionManager: ObservableObject {
     /// removing the last returns to the signed-out state.
     func removeServer(id: String) async {
         guard let idx = servers.firstIndex(where: { $0.id == id }) else { return }
+        let removedDefault = defaultServerId == id
         KeychainHelper.delete(forKey: tokenKey(id))
         servers.remove(at: idx)
+        _ = ensureDefaultServer(preferFirstSavedServer: removedDefault)
 
         if activeServerId == id {
             if let next = servers.first, let token = KeychainHelper.get(forKey: tokenKey(next.id)) {
@@ -661,6 +739,7 @@ final class SessionManager: ObservableObject {
                     KeychainHelper.delete(forKey: tokenKey(active))
                     servers.remove(at: idx)
                 }
+                _ = ensureDefaultServer()
                 activeServerId = nil
                 saveServers()
             }
