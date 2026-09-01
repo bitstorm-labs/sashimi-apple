@@ -452,8 +452,8 @@ private struct SearchResultRow: View {
                             }
                             .frame(width: 200)
 
-                            ServerSourcePillsView(sources: result.sources)
-                                .frame(width: 200)
+                            ServerAvailabilityBadgeView(sources: result.sources)
+                                .frame(width: 200, alignment: .leading)
                         }
                     }
                 }
