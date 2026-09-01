@@ -1150,8 +1150,14 @@ struct ServersSettingsView: View {
                                 Image(systemName: "server.rack")
                                     .foregroundStyle(SashimiTheme.accent)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(server.displayName)
-                                        .foregroundStyle(SashimiTheme.textPrimary)
+                                    HStack(alignment: .center, spacing: 8) {
+                                        Text(server.displayName)
+                                            .foregroundStyle(SashimiTheme.textPrimary)
+                                        if sessionManager.shouldShowDefaultServerBadge,
+                                           sessionManager.isDefaultServer(server.id) {
+                                            DefaultServerBadge(tint: SashimiTheme.accent)
+                                        }
+                                    }
                                     Text("\(server.username) • \(server.url.absoluteString)")
                                         .font(.caption)
                                         .foregroundStyle(SashimiTheme.textTertiary)
