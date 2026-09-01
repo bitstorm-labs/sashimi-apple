@@ -25,7 +25,7 @@ echo "Linting staged Swift files..."
 # Run SwiftLint on staged files
 echo "$STAGED_SWIFT_FILES" | while read -r file; do
     if [ -f "$file" ]; then
-        swiftlint lint --quiet --path "$file"
+        swiftlint lint --quiet "$file"
         RESULT=$?
         if [ $RESULT -ne 0 ]; then
             echo "SwiftLint found issues in: $file"
