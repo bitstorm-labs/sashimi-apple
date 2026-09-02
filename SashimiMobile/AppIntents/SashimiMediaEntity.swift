@@ -88,6 +88,20 @@ enum SashimiMediaEntityQueryError: LocalizedError, Equatable, Sendable {
 }
 
 struct SashimiMediaEntityQuery: EntityStringQuery {
+    private let entityResolver: @Sendable (SashimiMediaEntityIdentifier) async throws -> SashimiMediaEntity?
+
+    init() {
+        entityResolver = { identifier in
+            try await Self.resolveEntity(for: identifier)
+        }
+    }
+
+    init(
+        entityResolver: @escaping @Sendable (SashimiMediaEntityIdentifier) async throws -> SashimiMediaEntity?
+    ) {
+        self.entityResolver = entityResolver
+    }
+
     func entities(for identifiers: [SashimiMediaEntity.ID]) async throws -> [SashimiMediaEntity] {
         let parsedIdentifiers = try identifiers.map { rawIdentifier in
             guard let identifier = SashimiMediaEntityIdentifier(rawValue: rawIdentifier) else {
@@ -98,37 +112,16 @@ struct SashimiMediaEntityQuery: EntityStringQuery {
 
         var entities: [SashimiMediaEntity] = []
         for identifier in parsedIdentifiers {
-            let connection: SashimiMediaServerConnection
-            switch await serverConnection(for: identifier.serverID) {
-            case .unavailable:
-                throw SashimiMediaEntityQueryError.unavailableServer
-            case .authenticationRequired:
-                throw SashimiMediaEntityQueryError.authenticationRequired
-            case .connected(let value):
-                connection = value
-            }
-
-            let client = JellyfinClient()
-            await client.configure(
-                serverURL: connection.url,
-                accessToken: connection.accessToken,
-                userId: connection.userID
-            )
-
+            try Task.checkCancellation()
             do {
-                let item = try await client.getItem(itemId: identifier.itemID)
-                entities.append(
-                    SashimiMediaEntity(
-                        item: item,
-                        serverID: connection.id,
-                        serverName: connection.name
-                    )
-                )
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                throw SashimiMediaEntityQueryError.itemUnavailable
+                if let entity = try await entityResolver(identifier) {
+                    entities.append(entity)
+                }
+            } catch SashimiMediaEntityQueryError.itemUnavailable {
+                // A deleted or otherwise unavailable item should not discard
+                // entities that resolve successfully later in the batch.
             }
+            try Task.checkCancellation()
         }
         return entities
     }
@@ -148,7 +141,39 @@ struct SashimiMediaEntityQuery: EntityStringQuery {
         return results.map(SashimiMediaEntity.init(result:))
     }
 
-    private func serverConnection(for serverID: String) async -> SashimiMediaServerConnectionResult {
+    private static func resolveEntity(for identifier: SashimiMediaEntityIdentifier) async throws -> SashimiMediaEntity? {
+        let connection: SashimiMediaServerConnection
+        switch await serverConnection(for: identifier.serverID) {
+        case .unavailable:
+            return nil
+        case .authenticationRequired:
+            throw SashimiMediaEntityQueryError.authenticationRequired
+        case .connected(let value):
+            connection = value
+        }
+
+        let client = JellyfinClient()
+        await client.configure(
+            serverURL: connection.url,
+            accessToken: connection.accessToken,
+            userId: connection.userID
+        )
+
+        do {
+            let item = try await client.getItem(itemId: identifier.itemID)
+            return SashimiMediaEntity(
+                item: item,
+                serverID: connection.id,
+                serverName: connection.name
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw SashimiMediaEntityQueryError.itemUnavailable
+        }
+    }
+
+    private static func serverConnection(for serverID: String) async -> SashimiMediaServerConnectionResult {
         await MainActor.run {
             guard let server = SessionManager.shared.servers.first(where: { $0.id == serverID }) else {
                 return .unavailable
