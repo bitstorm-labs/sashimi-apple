@@ -1,6 +1,36 @@
 import AppIntents
 import Foundation
 
+enum SashimiTitleDiscoveryIntentDependencies {
+    typealias SearchProvider = @Sendable (
+        _ query: String,
+        _ limit: Int,
+        _ serverID: String?
+    ) async throws -> [ServerMediaResult]
+
+    typealias RecentlyAddedProvider = @Sendable (
+        _ limit: Int,
+        _ serverID: String?
+    ) async throws -> [ServerMediaResult]
+
+    @TaskLocal
+    static var searchProvider: SearchProvider = { query, limit, serverID in
+        try await MultiServerTitleDiscoveryService.search(
+            query: query,
+            limit: limit,
+            serverID: serverID
+        )
+    }
+
+    @TaskLocal
+    static var recentlyAddedProvider: RecentlyAddedProvider = { limit, serverID in
+        try await MultiServerTitleDiscoveryService.recentlyAdded(
+            limit: limit,
+            serverID: serverID
+        )
+    }
+}
+
 enum SashimiTitleDiscoveryIntentError: LocalizedError, Equatable, Sendable {
     case emptySearchQuery
     case noSearchResults(query: String)
@@ -98,10 +128,10 @@ struct FindSashimiTitlesIntent: AppIntent {
 
         let results: [ServerMediaResult]
         do {
-            results = try await MultiServerTitleDiscoveryService.search(
-                query: normalizedQuery,
-                limit: limit,
-                serverID: server?.id
+            results = try await SashimiTitleDiscoveryIntentDependencies.searchProvider(
+                normalizedQuery,
+                limit,
+                server?.id
             )
         } catch let error as MultiServerTitleDiscoveryError {
             throw SashimiTitleDiscoveryIntentError.from(error)
@@ -157,9 +187,9 @@ struct RecentlyAddedSashimiTitlesIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<[SashimiMediaEntity]> {
         let results: [ServerMediaResult]
         do {
-            results = try await MultiServerTitleDiscoveryService.recentlyAdded(
-                limit: limit,
-                serverID: server?.id
+            results = try await SashimiTitleDiscoveryIntentDependencies.recentlyAddedProvider(
+                limit,
+                server?.id
             )
         } catch let error as MultiServerTitleDiscoveryError {
             throw SashimiTitleDiscoveryIntentError.from(error)
