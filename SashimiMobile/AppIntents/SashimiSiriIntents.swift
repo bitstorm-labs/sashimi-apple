@@ -42,7 +42,7 @@ typealias SashimiInAppSearchResult = ReturnsValue<[SashimiMediaEntity]>
     & ShowsSnippetIntent
     & ProvidesDialog
 #else
-private typealias SashimiInAppSearchResult = IntentResult
+typealias SashimiInAppSearchResult = IntentResult
 #endif
 
 // Xcode 27 introduces the system.searchInApp schema. Keep the iOS 26 SDK
