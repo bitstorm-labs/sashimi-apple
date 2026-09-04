@@ -72,7 +72,7 @@ struct PlayerView: View {
             Task { await viewModel.stop(reason: .viewDisappeared) }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended {
+            if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
                 PlayerDiagnostics.event(.viewDismiss, [
                     PlayerDiagnostics.field("view", viewTag),
                     PlayerDiagnostics.field("trigger", "playback-ended")

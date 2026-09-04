@@ -51,6 +51,13 @@ struct MobilePlayerView: View {
         DownloadManager.shared.localVideoURL(for: item.id, serverID: serverID)
     }
 
+    /// The view model's resolved item is the source of truth after a
+    /// transition. The initializer item is only the entry point (and may be a
+    /// Series/Season container that resolves to an episode).
+    private var displayedItem: BaseItemDto {
+        viewModel.currentItem ?? item
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -62,9 +69,33 @@ struct MobilePlayerView: View {
                 // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
                 SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
-                customOverlay
+                if viewModel.transitionState.endCard != nil {
+                    MobilePlayerEndCard(
+                        state: viewModel.transitionState,
+                        item: displayedItem,
+                        streamInfo: viewModel.streamInfo,
+                        onPlayNext: { Task { await viewModel.playNextEpisode() } },
+                        onReplay: { Task { await viewModel.replayCurrentItem() } },
+                        onDone: {
+                            Task {
+                                await viewModel.stop(reason: .userStop)
+                                dismiss()
+                            }
+                        }
+                    )
+                } else {
+                    customOverlay
+                }
             } else {
-                loadingOrErrorView
+                MobilePlayerLoadingView(
+                    viewModel: viewModel,
+                    onClose: {
+                        viewModel.player?.pause()
+                        saveOfflinePositionIfNeeded()
+                        Task { await viewModel.stop(reason: .userStop) }
+                        dismiss()
+                    }
+                )
             }
         }
         .navigationBarHidden(true)
@@ -125,7 +156,7 @@ struct MobilePlayerView: View {
             viewModel.loadAllTracks()
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended {
+            if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
                 dismiss()
             }
         }
@@ -198,7 +229,7 @@ struct MobilePlayerView: View {
 
             // Title
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
+                Text(displayedItem.name)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -209,9 +240,24 @@ struct MobilePlayerView: View {
                         .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(1)
                 }
+
+                if let metadataText {
+                    Text(metadataText)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
+
+            if viewModel.transitionState.isEpisodeNavigationAvailable {
+                MobileEpisodeNavigationControls(
+                    state: viewModel.transitionState,
+                    onPrevious: { Task { await viewModel.playPreviousEpisode() } },
+                    onNext: { Task { await viewModel.playNextEpisode() } }
+                )
+            }
 
             // Stream-info chip (Direct Play / Transcode + bitrate)
             if let info = viewModel.streamInfo {
@@ -248,17 +294,34 @@ struct MobilePlayerView: View {
     }
 
     private var controlBarSubtitle: String? {
-        if let seriesName = item.seriesName {
+        if let seriesName = displayedItem.seriesName {
             var parts = [seriesName]
-            if let season = item.parentIndexNumber, let episode = item.indexNumber {
+            if let season = displayedItem.parentIndexNumber, let episode = displayedItem.indexNumber {
                 parts.append("S\(season):E\(episode)")
             }
             return parts.joined(separator: " \u{2022} ")
         }
-        if let year = item.productionYear {
+        if let year = displayedItem.displayYear {
             return String(year)
         }
         return nil
+    }
+
+    private var metadataText: String? {
+        var parts: [String] = []
+        if let year = displayedItem.displayYear {
+            parts.append(String(year))
+        }
+        if let ticks = displayedItem.runTimeTicks {
+            let minutes = Int(Double(ticks) / 10_000_000.0 / 60.0)
+            if minutes > 0 {
+                parts.append("\(minutes) min")
+            }
+        }
+        if let info = viewModel.streamInfo {
+            parts.append(info.label)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Settings Menu
@@ -324,65 +387,13 @@ struct MobilePlayerView: View {
         }
     }
 
-    // MARK: - Loading/Error
-
-    private var loadingOrErrorView: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-
-            // Always show a close button
-            Button {
-                viewModel.player?.pause()
-                // Capture BEFORE stop(): stop() nils the player, and for
-                // offline playback it hits no await first, so it completes long
-                // before the dismiss animation lets onDisappear run -- which is
-                // where the offline save lives. The position was silently lost
-                // every time the X was used.
-                saveOfflinePositionIfNeeded()
-                Task { await viewModel.stop(reason: .userStop) }
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.white.opacity(0.15))
-                    .clipShape(Circle())
-            }
-            .padding(20)
-
-            VStack(spacing: 16) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text("Loading...")
-                        .foregroundStyle(.white)
-                } else if let errorMessage = viewModel.errorMessage {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundStyle(.yellow)
-                    Text(errorMessage)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .padding()
-                    Button("Dismiss") {
-                        dismiss()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .ignoresSafeArea()
-    }
-
     /// Persists the offline resume point. Safe to call more than once: the
     /// last call before the player is torn down wins, and it no-ops once the
     /// player is gone.
     private func saveOfflinePositionIfNeeded() {
         guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
         let ticks = Int64(currentTime.seconds * 10_000_000)
-        DownloadManager.shared.savePlaybackPosition(itemId: item.id, serverID: serverID, positionTicks: ticks)
+        DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
     }
 }
 

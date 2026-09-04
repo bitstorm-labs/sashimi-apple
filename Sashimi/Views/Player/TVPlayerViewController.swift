@@ -62,6 +62,17 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.currentItem = displayItem
         context.coordinator.updateOverlay()
 
+        if let navigationVC = context.coordinator.navigationVC {
+            let shouldShow = viewModel.transitionState.isEpisodeNavigationAvailable
+            let wasHidden = navigationVC.view.isHidden
+            navigationVC.update(state: viewModel.transitionState)
+            navigationVC.view.isHidden = !shouldShow
+            if wasHidden != navigationVC.view.isHidden {
+                container.setNeedsFocusUpdate()
+                container.updateFocusIfNeeded()
+            }
+        }
+
         // Update skip button visibility. Whenever the visibility changes we
         // also kick the focus engine via setNeedsFocusUpdate so the container's
         // preferredFocusEnvironments override is re-evaluated — without this
@@ -148,6 +159,32 @@ struct TVPlayerView: UIViewControllerRepresentable {
         container.skipVC = skipVC
         container.playerVC = playerVC
         context.coordinator.skipVC = skipVC
+
+        let navigationVC = EpisodeNavigationViewController()
+        navigationVC.onPrevious = {
+            Task { @MainActor in await viewModel.playPreviousEpisode() }
+        }
+        navigationVC.onNext = {
+            Task { @MainActor in await viewModel.playNextEpisode() }
+        }
+        navigationVC.onReplay = {
+            Task { @MainActor in await viewModel.replayCurrentItem() }
+        }
+        navigationVC.onDone = onDismiss
+        navigationVC.view.translatesAutoresizingMaskIntoConstraints = false
+        navigationVC.view.isHidden = true
+        container.addChild(navigationVC)
+        container.view.addSubview(navigationVC.view)
+        navigationVC.didMove(toParent: container)
+        NSLayoutConstraint.activate([
+            navigationVC.view.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            navigationVC.view.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            navigationVC.view.topAnchor.constraint(equalTo: container.view.topAnchor),
+            navigationVC.view.bottomAnchor.constraint(equalTo: container.view.bottomAnchor)
+        ])
+        container.navigationVC = navigationVC
+        context.coordinator.navigationVC = navigationVC
+        navigationVC.update(state: viewModel.transitionState)
     }
 
     // MARK: - Transport Bar Menus
@@ -220,6 +257,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         var playerVC: AVPlayerViewController?
         var hostingController: UIHostingController<PlayerContentOverlay>?
         var skipVC: SkipButtonViewController?
+        var navigationVC: EpisodeNavigationViewController?
         var controlsVisible = false
         weak var currentViewModel: PlayerViewModel?
         var currentItem: BaseItemDto?
@@ -266,6 +304,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
 class PlayerContainerVC: UIViewController {
     var skipVC: SkipButtonViewController?
+    var navigationVC: EpisodeNavigationViewController?
     weak var playerVC: AVPlayerViewController?
 
     /// When the skip button is visible, route the focus engine to it. Otherwise
@@ -274,6 +313,11 @@ class PlayerContainerVC: UIViewController {
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         if let skipVC, !skipVC.view.isHidden {
             return [skipVC.view]
+        }
+        if let navigationVC,
+           !navigationVC.view.isHidden,
+           !navigationVC.preferredFocusEnvironments.isEmpty {
+            return [navigationVC]
         }
         if let playerVC {
             return [playerVC]
@@ -379,7 +423,7 @@ class SkipButtonViewController: UIViewController {
 /// where one of its visible subviews (e.g. the skip button) is hit. This
 /// keeps the AVPlayerViewController fully usable when the skip button is
 /// hidden — without this, the full-bounds wrapper would swallow remote input.
-private class PassthroughView: UIView {
+class PassthroughView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         for subview in subviews where !subview.isHidden && subview.alpha > 0 {
             let converted = convert(point, to: subview)
