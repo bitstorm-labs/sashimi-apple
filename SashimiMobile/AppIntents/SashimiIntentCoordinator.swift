@@ -122,6 +122,29 @@ final class SashimiIntentCoordinator: ObservableObject {
         clearPersistedRoute()
     }
 
+    /// Playback routes remain persisted until the destination has created a
+    /// player. This avoids losing a cold-launch request while the player is
+    /// still resolving the server-local item or while SwiftUI is presenting
+    /// the full-screen destination.
+    func acknowledgePlaybackReady(for entity: SashimiMediaEntity) {
+        guard case .play(let request) = route, request.entity == entity else { return }
+        consume(.play(request))
+    }
+
+    /// A failed handoff is visible in the destination, but it must not be
+    /// replayed forever on every scene activation. Clear only the matching
+    /// request so a newer intent cannot be discarded by an older destination.
+    func acknowledgePlaybackFailure(for entity: SashimiMediaEntity) {
+        guard case .play(let request) = route, request.entity == entity else { return }
+        consume(.play(request))
+    }
+
+    /// Closing a destination before the player becomes ready is a deliberate
+    /// cancellation, not a successful handoff.
+    func cancelPlayback(for entity: SashimiMediaEntity) {
+        acknowledgePlaybackFailure(for: entity)
+    }
+
     /// A search route stays pending until the search surface acknowledges its
     /// handoff. This lets cancellation/disappearance consume the request too,
     /// while an older request can never clear a newer one.

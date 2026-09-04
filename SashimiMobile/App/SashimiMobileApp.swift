@@ -52,6 +52,7 @@ struct SashimiMobileApp: App {
                 ThemeSongPlayer.shared.appDidBackground()
             }
             if newPhase == .active {
+                Task { await PlaybackReportDelivery.shared.flush() }
                 if #available(iOS 18.0, *) {
                     SashimiMediaSpotlightIndexer.shared.refresh()
                 }
@@ -74,6 +75,7 @@ struct ContentView: View {
     @State private var intentSearchRequest: SashimiIntentCoordinator.SearchRequest?
     @State private var intentMediaEntity: SashimiMediaEntity?
     @State private var intentPlaybackEntity: SashimiMediaEntity?
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     // Pick the layout by DEVICE TYPE (stable), not horizontalSizeClass (transient).
     // The size class flips .compact -> .regular when an iPhone Plus/Pro Max rotates
@@ -170,11 +172,23 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            Task { await PlaybackReportDelivery.shared.flush() }
             // Siri or Shortcuts may have written a route while Sashimi was
             // inactive in another process. Refresh before handling the active
             // scene so card taps work without requiring a cold launch.
             intentCoordinator.reloadPersistedRoute()
             handleIntentRoute(intentCoordinator.route)
+        }
+        .onChange(of: networkMonitor.isConnected) { _, isConnected in
+            guard isConnected else { return }
+            Task { await PlaybackReportDelivery.shared.flush() }
+        }
+        .onChange(of: intentPlaybackEntity) { oldEntity, newEntity in
+            guard newEntity == nil, let oldEntity else { return }
+            // SwiftUI may clear the binding before invoking fullScreenCover's
+            // onDismiss closure. Consume a still-pending handoff in either
+            // ordering so a user-cancelled cold launch is not re-presented.
+            intentCoordinator.cancelPlayback(for: oldEntity)
         }
         .onAppear {
             // An App Intent may finish while the app scene is still mounting;
@@ -210,7 +224,12 @@ struct ContentView: View {
         )
         .fullScreenCover(
             item: $intentPlaybackEntity,
-            onDismiss: { intentPlaybackEntity = nil },
+            onDismiss: {
+                if let entity = intentPlaybackEntity {
+                    intentCoordinator.cancelPlayback(for: entity)
+                }
+                intentPlaybackEntity = nil
+            },
             content: { entity in
                 NavigationStack {
                     SashimiIntentPlaybackDestinationView(entity: entity)
@@ -231,7 +250,6 @@ struct ContentView: View {
             intentCoordinator.consume(route)
         case .play(let request):
             intentPlaybackEntity = request.entity
-            intentCoordinator.consume(route)
         }
     }
 
