@@ -334,7 +334,7 @@ struct PhoneDetailView: View {
                 ZStack(alignment: .bottom) {
                     LazyImage(request: imageRequest(for: backdropImageURL)) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } else {
                             Rectangle().fill(MobileColors.cardBackground)
                         }
@@ -353,7 +353,7 @@ struct PhoneDetailView: View {
                 // Channel avatar overlapping banner
                 LazyImage(request: imageRequest(for: channelAvatarURL)) { state in
                     if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
+                        image.resizable().scaledToFill()
                     } else {
                         Circle().fill(MobileColors.cardBackground)
                     }
@@ -382,7 +382,7 @@ struct PhoneDetailView: View {
                                 // No real backdrop → the URL falls back to the
                                 // portrait poster; blur + darken it so it reads
                                 // as an ambient backdrop, not a sliced strip.
-                                image.resizable().aspectRatio(contentMode: .fill)
+                                image.resizable().scaledToFill()
                                     .blur(radius: hasRealBackdrop ? 0 : 32)
                                     .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
                             } else {
@@ -440,7 +440,7 @@ struct PhoneDetailView: View {
             if !isYouTubeChannelEpisode, let seriesId = item.seriesId, let logoURL = logoImageURL(for: seriesId) {
                 LazyImage(request: imageRequest(for: logoURL)) { state in
                     if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 56)
+                        image.resizable().scaledToFit().frame(maxHeight: 56)
                     } else if state.error != nil, let seriesName = item.seriesName {
                         Text(seriesName)
                             .font(MobileTypography.caption)
@@ -454,7 +454,7 @@ struct PhoneDetailView: View {
                 HStack(spacing: 8) {
                     LazyImage(request: imageRequest(for: seriesAvatarURL(for: seriesId))) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } else {
                             Circle().fill(MobileColors.cardBackground)
                         }
@@ -488,7 +488,7 @@ struct PhoneDetailView: View {
                 .overlay(alignment: .leading) {
                     LazyImage(request: imageRequest(for: logoURL)) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fit)
+                            image.resizable().scaledToFit()
                         } else if state.error != nil {
                             seriesTitleText
                         }
@@ -644,8 +644,7 @@ struct PhoneDetailView: View {
                 if let rating = communityRating, rating > 0 {
                     HStack(spacing: 4) {
                         Image("TMDBLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                             .frame(height: 16)
                         Text(String(format: "%.1f", rating))
                             .font(.system(size: 14, weight: .bold))
@@ -690,8 +689,7 @@ struct PhoneDetailView: View {
         if let logoName = audioCodecLogoName(codec) {
             HStack(spacing: 4) {
                 Image(logoName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(height: 10)
                 Text(formatChannels(channels))
                     .font(.system(size: 11, weight: .bold))
@@ -1093,8 +1091,7 @@ struct PhoneDetailView: View {
                             LazyImage(request: imageRequest(for: episodeThumbnailURL(episode))) { state in
                                 if let image = state.image {
                                     image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
+                                        .resizable().scaledToFill()
                                 } else {
                                     Rectangle().fill(MobileColors.cardBackground)
                                 }

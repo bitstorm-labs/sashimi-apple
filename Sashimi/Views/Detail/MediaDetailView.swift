@@ -648,8 +648,7 @@ struct MediaDetailView: View {
                             .foregroundStyle(SashimiTheme.textTertiary)
                         HStack(spacing: 8) {
                             Image("TMDBLogo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
+                                .resizable().scaledToFit()
                                 .frame(height: 24)
                             Text(String(format: "%.1f", rating))
                                 .font(.system(size: 18, weight: .bold))
@@ -856,8 +855,7 @@ struct MediaDetailView: View {
                 if let rating = communityRating, rating > 0 {
                     HStack(spacing: 8) {
                         Image("TMDBLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                             .frame(height: 24)
                         Text(String(format: "%.1f", rating))
                             .font(.system(size: 18, weight: .bold))
@@ -1500,7 +1498,7 @@ struct CastCard: View {
                 if let imageURL {
                     LazyImage(request: SashimiImagePipeline.request(url: imageURL, serverID: serverID)) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } else {
                             Circle().fill(SashimiTheme.cardBackground)
                         }

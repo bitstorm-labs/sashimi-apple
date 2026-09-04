@@ -421,8 +421,7 @@ struct HeroSection: View {
                             if let rating = currentItem.communityRating {
                                 HStack(spacing: 8) {
                                     Image("TMDBLogo")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
+                                        .resizable().scaledToFit()
                                         .frame(height: 24)
                                     Text(String(format: "%.1f", rating))
                                         .fontWeight(.semibold)
