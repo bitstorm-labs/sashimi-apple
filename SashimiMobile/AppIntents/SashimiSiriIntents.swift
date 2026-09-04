@@ -116,6 +116,7 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
             throw SashimiSiriIntentError.emptySearchQuery
         }
 
+#if compiler(>=6.4)
         try await ensureIntentReady()
 
         if SashimiMediaSearchQuery.isLatestAdditionsRequest(criteria.term) {
@@ -129,6 +130,7 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
                 snippetIntent: SashimiLatestAdditionsSnippetIntent(results: resolution.entities)
             )
         }
+#endif
 
 #if compiler(>=6.4)
         // Apple can choose the system search schema for a phrase that contains
