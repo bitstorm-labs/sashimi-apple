@@ -344,6 +344,22 @@ final class SessionManager: ObservableObject {
         return legacyToken
     }
 
+    /// Builds a client whose URL, token, and user ID are permanently tied to
+    /// one saved server. Playback and retry code uses this instead of
+    /// temporarily repointing `JellyfinClient.shared`, which could otherwise
+    /// send a delayed report to whichever server a different route selected.
+    func makeClient(for serverID: String) -> JellyfinClient? {
+        guard let server = servers.first(where: { $0.id == serverID }),
+              let token = token(for: server, allowLegacyFallback: true) else {
+            return nil
+        }
+        return JellyfinClient(
+            serverURL: server.url,
+            accessToken: token,
+            userId: server.userId
+        )
+    }
+
     /// Older installs have no marker and are safe to migrate only for the
     /// active server. New activations record the source server whenever they
     /// update the legacy slot.
