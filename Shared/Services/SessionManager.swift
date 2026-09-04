@@ -208,6 +208,12 @@ final class SessionManager: ObservableObject {
     private let legacyUserDefaultsTokenKey = "accessToken"
 
     private let clientConfigurationMutex = AsyncMutex()
+    /// Coalesces app-start restoration with App Intent readiness. An intent
+    /// can arrive before the root view's task has finished restoring the
+    /// persisted server and credentials, so both entry points must await the
+    /// same operation instead of inspecting partially loaded state.
+    private var sessionRestoreTask: Task<Void, Never>?
+    private var hasCompletedInitialRestore = false
     /// The server currently configured in JellyfinClient.shared. This is
     /// deliberately separate from activeServerId because a detail route can
     /// temporarily use another saved server without changing app chrome.
@@ -253,16 +259,13 @@ final class SessionManager: ObservableObject {
         servers = initialServers
         activeServerId = initialActiveServerId
         defaultServerId = initialDefaultServerId
+        hasCompletedInitialRestore = !restoreOnLaunch && !initialServers.isEmpty
         guard restoreOnLaunch else { return }
-        Task {
-            await restoreSession()
-        }
+        beginSessionRestore()
     }
 #else
     private init() {
-        Task {
-            await restoreSession()
-        }
+        beginSessionRestore()
     }
 #endif
 
@@ -376,7 +379,45 @@ final class SessionManager: ObservableObject {
 
     // MARK: - Session lifecycle
 
+    /// Restores the persisted launch session once and coalesces callers that
+    /// arrive while that restore is in flight. Later view/window lifecycles
+    /// must not repeat the default-server selection over a warm session.
     func restoreSession() async {
+        if let sessionRestoreTask {
+            await sessionRestoreTask.value
+            return
+        }
+        guard !hasCompletedInitialRestore else { return }
+
+        beginSessionRestore()
+        await sessionRestoreTask?.value
+    }
+
+    /// App Intents may run before SwiftUI's root view exists. Wait for the
+    /// in-flight launch restore when necessary, while leaving an already warm
+    /// session alone so a Siri request cannot switch the user back to default.
+    func restoreSessionForIntent() async {
+        if let sessionRestoreTask {
+            await sessionRestoreTask.value
+            return
+        }
+        guard !hasCompletedInitialRestore else { return }
+
+        beginSessionRestore()
+        await sessionRestoreTask?.value
+    }
+
+    private func beginSessionRestore() {
+        guard sessionRestoreTask == nil else { return }
+
+        sessionRestoreTask = Task { @MainActor [weak self] in
+            await self?.performRestoreSession()
+            self?.hasCompletedInitialRestore = true
+            self?.sessionRestoreTask = nil
+        }
+    }
+
+    private func performRestoreSession() async {
         loadServers()
 
         // Migrate the legacy single-server session into the list once.

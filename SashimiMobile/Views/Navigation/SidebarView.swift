@@ -43,6 +43,8 @@ enum SidebarSelection: Hashable {
 // would change view identity/state ownership, which is too risky for a lint-only pass.
 // swiftlint:disable:next type_body_length
 struct MainNavigationView: View {
+    var searchRequest: SashimiIntentCoordinator.SearchRequest?
+    var onSearchRequestConsumed: (UUID) -> Void = { _ in }
     @State private var selection: SidebarSelection = .home
     @State private var sidebarVisible = false
     @State private var libraries: [JellyfinLibrary] = []
@@ -131,6 +133,12 @@ struct MainNavigationView: View {
             }
         }
         .animation(.easeInOut, value: downloadManager.toastMessage)
+        .onAppear {
+            applySearchRequest()
+        }
+        .onChange(of: searchRequest?.id) { _, _ in
+            applySearchRequest()
+        }
     }
 
     private var sidebarContent: some View {
@@ -336,7 +344,14 @@ struct MainNavigationView: View {
             case .home:
                 MobileHomeView()
             case .search:
-                MobileSearchView()
+                MobileSearchView(
+                    initialQuery: searchRequest?.query,
+                    onInitialQueryConsumed: {
+                        if let id = searchRequest?.id {
+                            onSearchRequestConsumed(id)
+                        }
+                    }
+                )
             case .downloads:
                 DownloadsListView()
             case .settings:
@@ -349,6 +364,14 @@ struct MainNavigationView: View {
                 )
             }
         }
+    }
+
+    private func applySearchRequest() {
+        guard searchRequest != nil else { return }
+        if selection != .search {
+            selection = .search
+        }
+        navigationResetId += 1
     }
 
     @ViewBuilder
