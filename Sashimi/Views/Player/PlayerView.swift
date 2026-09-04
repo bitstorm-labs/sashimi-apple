@@ -8,6 +8,7 @@ struct PlayerView: View {
 
     @StateObject private var viewModel: PlayerViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     init(item: BaseItemDto, serverID: String? = nil, startFromBeginning: Bool = false) {
         self.item = item
@@ -43,7 +44,10 @@ struct PlayerView: View {
                             PlayerDiagnostics.field("view", viewTag),
                             PlayerDiagnostics.field("trigger", "menu-button")
                         ])
-                        Task { await viewModel.stop(reason: .userStop); dismiss() }
+                        Task {
+                            await viewModel.stop(reason: .userStop)
+                            dismiss()
+                        }
                     }
                 )
                 .ignoresSafeArea()
@@ -70,6 +74,13 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("item", item.id)
             ])
             Task { await viewModel.stop(reason: .viewDisappeared) }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            Task {
+                await viewModel.stop(reason: .sceneBackground)
+                dismiss()
+            }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             if ended {
@@ -100,7 +111,10 @@ struct PlayerView: View {
                     PlayerDiagnostics.field("view", viewTag),
                     PlayerDiagnostics.field("trigger", "error-dismiss")
                 ])
-                Task { await viewModel.stop(reason: .userStop); dismiss() }
+                Task {
+                    await viewModel.stop(reason: .userStop)
+                    dismiss()
+                }
             }
         }
     }

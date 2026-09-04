@@ -85,6 +85,58 @@ final class SashimiSiriIntentTests: XCTestCase {
         XCTAssertNil(coordinator.route)
     }
 
+    @MainActor
+    func testPlaybackRouteStaysPendingUntilPlayerHandoffIsReady() {
+        let coordinator = SashimiIntentCoordinator()
+        let entity = SashimiMediaEntity(
+            id: "server-ready:item-ready",
+            title: "Ready Episode",
+            serverID: "server-ready",
+            serverName: "Ready Server",
+            itemID: "item-ready",
+            mediaType: "Episode",
+            year: nil
+        )
+
+        coordinator.requestPlay(entity: entity)
+        XCTAssertNotNil(coordinator.route)
+
+        coordinator.acknowledgePlaybackReady(for: entity)
+        XCTAssertNil(coordinator.route)
+    }
+
+    @MainActor
+    func testFailedPlaybackHandoffOnlyConsumesTheMatchingRoute() {
+        let coordinator = SashimiIntentCoordinator()
+        let failedEntity = SashimiMediaEntity(
+            id: "server-failed:item-failed",
+            title: "Unavailable Episode",
+            serverID: "server-failed",
+            serverName: "Failed Server",
+            itemID: "item-failed",
+            mediaType: "Episode",
+            year: nil
+        )
+        let replacementEntity = SashimiMediaEntity(
+            id: "server-replacement:item-replacement",
+            title: "Replacement Episode",
+            serverID: "server-replacement",
+            serverName: "Replacement Server",
+            itemID: "item-replacement",
+            mediaType: "Episode",
+            year: nil
+        )
+
+        coordinator.requestPlay(entity: failedEntity)
+        coordinator.requestPlay(entity: replacementEntity)
+        coordinator.acknowledgePlaybackFailure(for: failedEntity)
+
+        guard case .play(let request) = coordinator.route else {
+            return XCTFail("The replacement route should remain pending")
+        }
+        XCTAssertEqual(request.entity, replacementEntity)
+    }
+
     func testPlaybackTitleMatchingUsesExactNormalizedNames() {
         XCTAssertTrue(
             SashimiMediaPlaybackResolver.titleMatches(

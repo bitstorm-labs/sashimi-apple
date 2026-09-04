@@ -130,6 +130,8 @@ enum PlayerDiagnostics {
         case recovery = "recovery"
         /// Playback reached the end of the item.
         case playbackEnded = "playback-ended"
+        /// The app moved to the background while a player was presented.
+        case sceneBackground = "scene-background"
         /// The view model was deallocated.
         case deallocated = "deallocated"
         /// Caller did not say. Should not appear; if it does, a call site is
