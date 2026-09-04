@@ -22,7 +22,7 @@ final class SashimiMediaEntityQueryTests: XCTestCase {
         }
 
         let identifiers = [unavailable] + available
-        let entities = try await query.entities(for: identifiers.map { $0.rawValue })
+        let entities = try await query.entities(for: identifiers.map(\.rawValue))
 
         XCTAssertEqual(entities, expectedEntities)
     }

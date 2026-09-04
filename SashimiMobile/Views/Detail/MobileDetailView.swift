@@ -15,6 +15,10 @@ struct MobileDetailView: View {
     // Keep existing detail navigation compatible with unscoped media items.
     // swiftlint:disable:next implicit_optional_initialization
     var serverID: String? = nil
+    // Optional season selected by a Siri deep-link. The route opens the
+    // parent series, then loads this season instead of defaulting to Next Up.
+    // swiftlint:disable:next implicit_optional_initialization
+    var initialSeasonID: String? = nil
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
     @State private var overviewExpanded = false
@@ -50,11 +54,17 @@ struct MobileDetailView: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var isSeries: Bool { item.type == .series }
+    private var isSeason: Bool { item.type == .season }
     private var isEpisode: Bool { item.type == .episode }
     private var isMovie: Bool { item.type == .movie }
     /// The series whose seasons/episodes this page lists (self for a series,
     /// the parent for an episode) — drives the shared episode machinery.
-    private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
+    private var contentSeriesId: String {
+        if isSeries {
+            return item.id
+        }
+        return item.seriesId ?? item.parentId ?? item.id
+    }
     /// The episode this page treats as "current": the open episode itself,
     /// or the series page's next-up.
     private var currentEpisodeId: String? {
@@ -134,6 +144,8 @@ struct MobileDetailView: View {
                 VStack(alignment: .leading, spacing: MobileSpacing.md) {
                     if isSeries {
                         seriesHeaderSection
+                    } else if isSeason {
+                        seasonHeaderSection
                     } else if isEpisode {
                         episodeHeaderSection
                     } else {
@@ -149,7 +161,7 @@ struct MobileDetailView: View {
                 // Seasons & Episodes — series AND episode detail both get the
                 // season-tab selector (phone parity); episodes title the list
                 // "More Episodes".
-                if isSeries || isEpisode {
+                if isSeries || isSeason || isEpisode {
                     seasonsSection
                 }
 
@@ -429,6 +441,33 @@ struct MobileDetailView: View {
             .foregroundStyle(MobileColors.textSecondary)
 
             // Action buttons
+            seriesActionButtons
+        }
+    }
+
+    /// A season can be opened directly by Siri. Keep it in the same detail
+    /// surface as a series so the user sees the season's episodes and the
+    /// normal play controls instead of an empty movie-style page.
+    private var seasonHeaderSection: some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text(item.name)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(MobileColors.textPrimary)
+
+            HStack(spacing: MobileSpacing.sm) {
+                if let seriesName = item.seriesName {
+                    Text(seriesName)
+                }
+                if let year = item.productionYear {
+                    if item.seriesName != nil {
+                        Text("•")
+                    }
+                    Text(String(year))
+                }
+            }
+            .font(MobileTypography.caption)
+            .foregroundStyle(MobileColors.textSecondary)
+
             seriesActionButtons
         }
     }
@@ -1103,13 +1142,15 @@ struct MobileDetailView: View {
     private func loadContent() async {
         if isSeries {
             await loadSeriesContent()
+        } else if isSeason {
+            await loadSeasonContent()
         } else if isEpisode {
             await loadEpisodeContent()
         }
 
         guard NetworkMonitor.shared.isConnected else { return }
 
-        if !isSeries {
+        if !isSeries && !isSeason {
             await loadMediaInfo()
         }
 
@@ -1134,9 +1175,15 @@ struct MobileDetailView: View {
         }
         do {
             seasons = try await JellyfinClient.shared.getSeasons(seriesId: item.id)
-            await findNextEpisodeToPlay()
+            let requestedSeason = initialSeasonID.flatMap { seasonID in
+                seasons.first { $0.id == seasonID }
+            }
+            await findNextEpisodeToPlay(preferredSeasonID: requestedSeason?.id)
 
-            if let nextEp = nextEpisodeToPlay, let seasonId = nextEp.seasonId {
+            if let requestedSeason {
+                selectedSeason = requestedSeason
+                await loadEpisodesForSeason(seriesId: item.id, season: requestedSeason)
+            } else if let nextEp = nextEpisodeToPlay, let seasonId = nextEp.seasonId {
                 selectedSeason = seasons.first { $0.id == seasonId }
                 if let season = selectedSeason {
                     await loadEpisodesForSeason(seriesId: item.id, season: season)
@@ -1148,6 +1195,20 @@ struct MobileDetailView: View {
         } catch {
             await loadOfflineSeriesContent()
         }
+    }
+
+    private func loadSeasonContent() async {
+        guard let seriesID = item.seriesId ?? item.parentId else { return }
+
+        let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
+        seriesCommunityRating = series?.communityRating
+        seriesCriticRating = series?.criticRating
+        seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
+
+        let selected = seasons.first { $0.id == item.id } ?? item
+        selectedSeason = selected
+        await loadEpisodesForSeason(seriesId: seriesID, season: selected)
+        await findNextEpisodeToPlay(preferredSeasonID: selected.id)
     }
 
     private func loadOfflineSeriesContent() async {
@@ -1231,15 +1292,25 @@ struct MobileDetailView: View {
         isLoadingEpisodes = false
     }
 
-    private func findNextEpisodeToPlay() async {
+    private func findNextEpisodeToPlay(preferredSeasonID: String? = nil) async {
+        nextEpisodeToPlay = nil
         do {
             let nextUpItems = try await JellyfinClient.shared.getNextUp(limit: 50)
-            if let next = nextUpItems.first(where: { $0.seriesId == item.id }) {
+            if let next = nextUpItems.first(where: {
+                $0.seriesId == contentSeriesId
+                    && (preferredSeasonID == nil || $0.seasonId == preferredSeasonID)
+            }) {
                 nextEpisodeToPlay = next
                 return
             }
-            for season in seasons {
-                let eps = try await JellyfinClient.shared.getEpisodes(seriesId: item.id, seasonId: season.id)
+            let seasonsToCheck = preferredSeasonID
+                .flatMap { seasonID in seasons.filter { $0.id == seasonID } }
+                ?? seasons
+            for season in seasonsToCheck {
+                let eps = try await JellyfinClient.shared.getEpisodes(
+                    seriesId: contentSeriesId,
+                    seasonId: season.id
+                )
                 if let firstUnwatched = eps.first(where: { !($0.userData?.played ?? false) }) {
                     nextEpisodeToPlay = firstUnwatched
                     return
@@ -1255,7 +1326,7 @@ struct MobileDetailView: View {
         isWatched = freshItem.userData?.played ?? false
         hasProgress = freshItem.progressPercent > 0
         // For series, also refresh next-up episode
-        if isSeries {
+        if isSeries || isSeason {
             await findNextEpisodeToPlay()
         }
     }
