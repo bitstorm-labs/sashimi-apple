@@ -189,8 +189,7 @@ struct MobileDetailView: View {
                             LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
                                 if let image = state.image {
                                     image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
+                                        .resizable().scaledToFit()
                                 } else {
                                     Color.clear
                                 }
@@ -393,8 +392,7 @@ struct MobileDetailView: View {
                         LazyImage(request: SashimiImagePipeline.request(url: channelArtURL, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
+                                    .resizable().scaledToFill()
                             } else {
                                 Circle().fill(MobileColors.cardBackground)
                             }
@@ -410,8 +408,7 @@ struct MobileDetailView: View {
                     LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                     } else if state.error != nil {
                         // No logo on the server: fall back to the title
                         Text(item.name ?? "Unknown")
@@ -484,8 +481,7 @@ struct MobileDetailView: View {
                         LazyImage(request: SashimiImagePipeline.request(url: channelArtURL, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
+                                    .resizable().scaledToFill()
                             } else {
                                 Circle().fill(MobileColors.cardBackground)
                             }
@@ -501,8 +497,7 @@ struct MobileDetailView: View {
                         LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                     }
                 }
                 .frame(maxHeight: 70)
@@ -571,8 +566,7 @@ struct MobileDetailView: View {
                 LazyImage(request: SashimiImagePipeline.request(url: logoURL, serverID: serverID)) { state in
                     if let image = state.image {
                         image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                     }
                 }
                 .frame(maxHeight: 100)
@@ -667,8 +661,7 @@ struct MobileDetailView: View {
                 if let rating = communityRating, rating > 0 {
                     HStack(spacing: 4) {
                         Image("TMDBLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                             .frame(height: 16)
                         Text(String(format: "%.1f", rating))
                             .font(.system(size: 14, weight: .bold))
@@ -713,8 +706,7 @@ struct MobileDetailView: View {
         if let logoName = audioCodecLogoName(codec) {
             HStack(spacing: 4) {
                 Image(logoName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(height: 10)
                 Text(formatChannels(channels))
                     .font(.system(size: 11, weight: .bold))
@@ -1462,8 +1454,7 @@ struct MobileEpisodeCard: View {
                         LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
                             if let image = state.image {
                                 image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
+                                    .resizable().scaledToFill()
                             } else {
                                 Rectangle()
                                     .fill(MobileColors.cardBackground)
@@ -1570,8 +1561,7 @@ struct MobileCastCard: View {
                     LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
                         if let image = state.image {
                             image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
+                                .resizable().scaledToFill()
                         } else {
                             placeholderCircle
                         }

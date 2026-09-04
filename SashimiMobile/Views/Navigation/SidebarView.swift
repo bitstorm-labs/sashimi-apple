@@ -146,8 +146,7 @@ struct MainNavigationView: View {
             // Logo at very top
             HStack {
                 Image("SidebarLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(width: 52, height: 52)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 Text("Sashimi")
@@ -298,8 +297,7 @@ struct MainNavigationView: View {
             LazyImage(url: avatarURL) { state in
                 if let image = state.image {
                     image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .resizable().scaledToFill()
                 } else if state.error != nil {
                     defaultAvatarView(for: user)
                 } else {

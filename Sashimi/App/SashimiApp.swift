@@ -351,8 +351,7 @@ struct MainTabView: View {
             // beside it only when the rail is pulled out.
             HStack(spacing: 14) {
                 Image("SidebarLogoMark")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(width: expanded ? 76 : 56, height: expanded ? 76 : 56)
                 if expanded {
                     Text("Sashimi")
@@ -498,7 +497,7 @@ struct MainTabView: View {
                        let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
                         LazyImage(url: imageURL) { state in
                             if let image = state.image {
-                                image.resizable().aspectRatio(contentMode: .fill)
+                                image.resizable().scaledToFill()
                             } else {
                                 Image(systemName: "person.fill").foregroundStyle(.white)
                             }
