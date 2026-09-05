@@ -73,10 +73,14 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("view", viewTag),
                 PlayerDiagnostics.field("item", item.id)
             ])
+            viewModel.player?.pause()
+            viewModel.preparePendingStoppedReportIfNeeded()
             Task { await viewModel.stop(reason: .viewDisappeared) }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }
+            viewModel.player?.pause()
+            viewModel.preparePendingStoppedReportIfNeeded()
             Task {
                 await viewModel.stop(reason: .sceneBackground)
                 dismiss()
