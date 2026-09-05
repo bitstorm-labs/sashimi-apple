@@ -124,9 +124,9 @@ struct MobilePlayerView: View {
         .onDisappear {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
-            viewModel.preparePendingStoppedReportIfNeeded()
+            let stopTask = viewModel.beginStop(reason: .viewDisappeared)
             Task {
-                await viewModel.stop(reason: .viewDisappeared)
+                await stopTask.value
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
@@ -134,9 +134,9 @@ struct MobilePlayerView: View {
             guard newPhase == .background else { return }
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
-            viewModel.preparePendingStoppedReportIfNeeded()
+            let stopTask = viewModel.beginStop(reason: .sceneBackground)
             Task {
-                await viewModel.stop(reason: .sceneBackground)
+                await stopTask.value
                 dismiss()
             }
         }
