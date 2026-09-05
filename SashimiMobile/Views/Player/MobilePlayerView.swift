@@ -1,6 +1,10 @@
 import SwiftUI
 import AVKit
 
+// The mobile player keeps presentation, controls, and teardown together so a
+// dismissal can await the same view-model session.
+// swiftlint:disable file_length
+
 extension Notification.Name {
     static let playbackDidStop = Notification.Name("playbackDidStop")
 }
