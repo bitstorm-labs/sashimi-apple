@@ -92,7 +92,8 @@ final class PlayerViewModel: ObservableObject {
     init(
         serverID: String? = nil,
         client: JellyfinClient? = nil,
-        reportDelivery: PlaybackReportDelivery? = nil
+        reportDelivery: PlaybackReportDelivery? = nil,
+        navigationClient: (any PlayerEpisodeNavigationClient)? = nil
     ) {
         self.serverID = serverID
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
@@ -105,6 +106,7 @@ final class PlayerViewModel: ObservableObject {
             delivery: reportDelivery
         )
         self.client = resolvedClient
+        self.navigationClient = navigationClient ?? resolvedClient
     }
 
     @Published var player: AVPlayer?
@@ -267,6 +269,7 @@ final class PlayerViewModel: ObservableObject {
     /// per new stall instead of on every access-log entry.
     private var lastReportedStallCount = 0
     private let client: JellyfinClient
+    private let navigationClient: any PlayerEpisodeNavigationClient
     private let playbackSettings = PlaybackSettings.shared
 
     private func setCurrentItem(_ item: BaseItemDto?) {
@@ -746,15 +749,11 @@ final class PlayerViewModel: ObservableObject {
         } else {
             positionTicks = Int64(currentTime.seconds * 10_000_000)
         }
-        do {
-            try await client.reportPlaybackStopped(
-                itemId: item.id,
-                positionTicks: positionTicks,
-                playSessionId: playSessionId
-            )
-        } catch {
-            logger.error("reportPlaybackStopped for transition failed: \(error.localizedDescription, privacy: .public)")
-        }
+        await playbackReporter.stopped(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId
+        )
     }
 
     private func handlePlaybackEnded() async {
@@ -828,6 +827,7 @@ final class PlayerViewModel: ObservableObject {
     /// never acquire episode controls by accident.
     func refreshEpisodeNavigation() async {
         guard let item = currentItem else { return }
+        transitionState.currentItem = item
         await refreshEpisodeNavigation(for: item)
     }
 
@@ -857,7 +857,7 @@ final class PlayerViewModel: ObservableObject {
         }
 
         do {
-            let response = try await client.getItems(
+            let response = try await navigationClient.getPlayerItems(
                 parentId: seasonId,
                 includeTypes: [.episode],
                 sortBy: "IndexNumber",
@@ -865,22 +865,23 @@ final class PlayerViewModel: ObservableObject {
             )
             guard currentItem?.id == item.id else { return }
 
-            let episodes = response.items.sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
-            let previous = episodes.last {
+            let episodes = response.items.sorted(by: episodeComesBefore)
+            var previous = episodes.last {
                 guard let index = $0.indexNumber else { return false }
                 return index < currentIndex
             }
             var next = episodes.first {
                 guard let index = $0.indexNumber else { return false }
-                return index == currentIndex + 1
-            }
-            // Pinchflat/YouTube episode indexes are date-based and can have
-            // gaps; the next higher item is the correct successor there.
-            next = next ?? episodes.first {
-                guard let index = $0.indexNumber else { return false }
                 return index > currentIndex
             }
 
+            // A season boundary is part of the same ordered series as an
+            // in-season transition. Resolve both directions from the server's
+            // season order so season numbers may contain gaps and the first
+            // episode of season 2 still exposes the final episode of season 1.
+            if previous == nil {
+                previous = try await fetchLastEpisodeOfPreviousSeason(for: item)
+            }
             if next == nil {
                 next = try await fetchFirstEpisodeOfNextSeason(for: item)
             }
@@ -916,27 +917,90 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
-    /// After a season finale, find the first episode of the next season so
-    /// autoplay and manual Next roll over across seasons.
-    private func fetchFirstEpisodeOfNextSeason(for item: BaseItemDto) async throws -> BaseItemDto? {
-        guard let seriesId = item.seriesId,
-              let currentSeason = item.parentIndexNumber else { return nil }
-        let seasons = try await client.getItems(
+    private func episodeComesBefore(_ lhs: BaseItemDto, _ rhs: BaseItemDto) -> Bool {
+        let lhsIndex = lhs.indexNumber ?? Int.max
+        let rhsIndex = rhs.indexNumber ?? Int.max
+        return lhsIndex == rhsIndex ? lhs.id < rhs.id : lhsIndex < rhsIndex
+    }
+
+    private func seasonComesBefore(_ lhs: BaseItemDto, _ rhs: BaseItemDto) -> Bool {
+        let lhsIndex = lhs.indexNumber ?? Int.max
+        let rhsIndex = rhs.indexNumber ?? Int.max
+        return lhsIndex == rhsIndex ? lhs.id < rhs.id : lhsIndex < rhsIndex
+    }
+
+    private func orderedSeasons(for seriesId: String) async throws -> [BaseItemDto] {
+        let response = try await navigationClient.getPlayerItems(
             parentId: seriesId,
             includeTypes: [.season],
             sortBy: "IndexNumber",
             limit: 100
         )
-        guard let nextSeason = seasons.items.first(where: { ($0.indexNumber ?? 0) == currentSeason + 1 }) else {
-            return nil
-        }
-        let episodes = try await client.getItems(
-            parentId: nextSeason.id,
+        return response.items.sorted(by: seasonComesBefore)
+    }
+
+    private func episodes(in seasonId: String) async throws -> [BaseItemDto] {
+        let response = try await navigationClient.getPlayerItems(
+            parentId: seasonId,
             includeTypes: [.episode],
             sortBy: "IndexNumber",
             limit: 100
         )
-        return episodes.items.first { ($0.indexNumber ?? 0) >= 1 } ?? episodes.items.first
+        return response.items.sorted(by: episodeComesBefore)
+    }
+
+    /// After a season finale, find the first episode in the next non-empty
+    /// season so autoplay and manual Next roll over across season gaps.
+    private func fetchFirstEpisodeOfNextSeason(for item: BaseItemDto) async throws -> BaseItemDto? {
+        guard let seriesId = item.seriesId,
+              let seasonId = item.seasonId else { return nil }
+        let seasons = try await orderedSeasons(for: seriesId)
+        guard let currentPosition = seasonPosition(
+            seasonId: seasonId,
+            seasonNumber: item.parentIndexNumber,
+            in: seasons
+        ) else {
+            return nil
+        }
+        for season in seasons.dropFirst(currentPosition + 1) {
+            if let first = try await episodes(in: season.id).first {
+                return first
+            }
+        }
+        return nil
+    }
+
+    /// Before a season premiere, find the last episode in the previous
+    /// non-empty season so Previous remains a complete series-order action.
+    private func fetchLastEpisodeOfPreviousSeason(for item: BaseItemDto) async throws -> BaseItemDto? {
+        guard let seriesId = item.seriesId,
+              let seasonId = item.seasonId else { return nil }
+        let seasons = try await orderedSeasons(for: seriesId)
+        guard let currentPosition = seasonPosition(
+            seasonId: seasonId,
+            seasonNumber: item.parentIndexNumber,
+            in: seasons
+        ) else {
+            return nil
+        }
+        for season in seasons.prefix(currentPosition).reversed() {
+            if let last = try await episodes(in: season.id).last {
+                return last
+            }
+        }
+        return nil
+    }
+
+    private func seasonPosition(
+        seasonId: String,
+        seasonNumber: Int?,
+        in seasons: [BaseItemDto]
+    ) -> Int? {
+        if let position = seasons.firstIndex(where: { $0.id == seasonId }) {
+            return position
+        }
+        guard let seasonNumber else { return nil }
+        return seasons.firstIndex { $0.indexNumber == seasonNumber }
     }
 
     /// Standalone videos historically auto-advanced using their parent folder

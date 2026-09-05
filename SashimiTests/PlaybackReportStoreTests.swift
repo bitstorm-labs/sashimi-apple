@@ -3,8 +3,15 @@ import XCTest
 
 @MainActor
 final class PlaybackReportStoreTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private var suiteName: String!
+    private var defaults: UserDefaults?
+    private var suiteName: String?
+
+    private var testDefaults: UserDefaults {
+        guard let defaults else {
+            preconditionFailure("Test defaults were not configured")
+        }
+        return defaults
+    }
 
     override func setUp() {
         super.setUp()
@@ -13,14 +20,16 @@ final class PlaybackReportStoreTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        if let suiteName {
+            defaults?.removePersistentDomain(forName: suiteName)
+        }
         defaults = nil
         suiteName = nil
         super.tearDown()
     }
 
     func testProgressReportsCoalesceWithoutMixingServersOrItems() {
-        let store = PlaybackReportStore(defaults: defaults)
+        let store = PlaybackReportStore(defaults: testDefaults)
         let first = PendingPlaybackReport(
             serverID: "server-a",
             itemID: "item-a",
@@ -53,7 +62,7 @@ final class PlaybackReportStoreTests: XCTestCase {
     }
 
     func testCompletionRetryDoesNotRepeatSuccessfulStoppedPhase() async throws {
-        let store = PlaybackReportStore(defaults: defaults)
+        let store = PlaybackReportStore(defaults: testDefaults)
         let delivery = PlaybackReportDelivery(store: store)
         let client = FakePlaybackReportingClient(failMarkPlayed: true)
 
@@ -89,7 +98,7 @@ final class PlaybackReportStoreTests: XCTestCase {
     }
 
     func testFailedProgressRemainsPersistedUntilTheSameClientSucceeds() async throws {
-        let store = PlaybackReportStore(defaults: defaults)
+        let store = PlaybackReportStore(defaults: testDefaults)
         let delivery = PlaybackReportDelivery(store: store)
         let client = FakePlaybackReportingClient(failAll: true)
 
@@ -113,7 +122,7 @@ final class PlaybackReportStoreTests: XCTestCase {
     }
 
     func testTwoServerSessionsUseTheirOwnInjectedClients() async {
-        let store = PlaybackReportStore(defaults: defaults)
+        let store = PlaybackReportStore(defaults: testDefaults)
         let delivery = PlaybackReportDelivery(store: store)
         let firstClient = FakePlaybackReportingClient()
         let secondClient = FakePlaybackReportingClient()
@@ -146,6 +155,74 @@ final class PlaybackReportStoreTests: XCTestCase {
         XCTAssertEqual(firstEvents, [.start(itemID: "item-a")])
         XCTAssertEqual(secondEvents, [.start(itemID: "item-b")])
         XCTAssertTrue(store.reports.isEmpty)
+    }
+
+    func testManualTransitionReportsStoppedWithoutMarkingPlayed() async {
+        let store = PlaybackReportStore(defaults: testDefaults)
+        let delivery = PlaybackReportDelivery(store: store)
+        let client = FakePlaybackReportingClient()
+        let reporter = PlaybackSessionReporter(
+            serverID: "server-a",
+            client: client,
+            delivery: delivery
+        )
+
+        await reporter.start(
+            itemID: "episode-1",
+            positionTicks: 100,
+            playSessionID: "session-a",
+            playMethod: "DirectStream"
+        )
+        await reporter.stopped(
+            itemID: "episode-1",
+            positionTicks: 500,
+            playSessionID: "session-a"
+        )
+        await reporter.stopped(
+            itemID: "episode-1",
+            positionTicks: 600,
+            playSessionID: "session-a"
+        )
+
+        let events = await client.events
+        XCTAssertEqual(
+            events,
+            [.start(itemID: "episode-1"), .stopped(itemID: "episode-1")]
+        )
+        XCTAssertFalse(events.contains(where: { if case .markPlayed = $0 { return true }; return false }))
+    }
+
+    func testNaturalCompletionDeliversStoppedBeforeMarkPlayed() async {
+        let store = PlaybackReportStore(defaults: testDefaults)
+        let delivery = PlaybackReportDelivery(store: store)
+        let client = FakePlaybackReportingClient()
+        let reporter = PlaybackSessionReporter(
+            serverID: "server-a",
+            client: client,
+            delivery: delivery
+        )
+
+        await reporter.start(
+            itemID: "episode-1",
+            positionTicks: 0,
+            playSessionID: "session-a",
+            playMethod: "DirectStream"
+        )
+        await reporter.completed(
+            itemID: "episode-1",
+            positionTicks: 2_000,
+            playSessionID: "session-a"
+        )
+
+        let events = await client.events
+        XCTAssertEqual(
+            events,
+            [
+                .start(itemID: "episode-1"),
+                .stopped(itemID: "episode-1"),
+                .markPlayed(itemID: "episode-1"),
+            ]
+        )
     }
 }
 
