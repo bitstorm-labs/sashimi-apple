@@ -8,6 +8,9 @@ import XCTest
 #else
 @available(iOS 17.2, *)
 #endif
+// This file keeps the App Intent contract tests together so each route and
+// readiness transition is covered beside the shared request parser tests.
+// swiftlint:disable:next type_body_length
 final class SashimiSiriIntentTests: XCTestCase {
     func testInAppSearchIntentRejectsBlankQueryBeforeSessionAccess() async {
         let intent = SashimiInAppSearchIntent()
@@ -81,7 +84,7 @@ final class SashimiSiriIntentTests: XCTestCase {
         }
         XCTAssertEqual(request.entity, entity)
 
-        coordinator.consume(coordinator.route!)
+        coordinator.consume(.play(request))
         XCTAssertNil(coordinator.route)
     }
 
@@ -201,35 +204,35 @@ final class SashimiSiriIntentTests: XCTestCase {
     }
 
     func testPlaybackRequestParsesTitleAndRequestedDestination() {
-        let cases: [(String, String, SashimiPlaybackSelection)] = [
-            ("Resume Ghosts in Sashimi", "Ghosts", .resume),
-            ("Play the Up Next episode of Ghosts in Sashimi", "Ghosts", .upNext),
-            ("Play Up Next for Ghosts in Sashimi", "Ghosts", .upNext),
-            ("Play the newest episode of Ghosts in Sashimi", "Ghosts", .newestEpisode),
-            ("Go to season two of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
-            ("Open the season 2 of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
-            ("Season 2 of Ghosts", "Ghosts", .season(number: 2)),
-            ("Season two Ghosts", "Ghosts", .season(number: 2)),
-            ("Is season two of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
-            ("Where can I watch season 2 of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
-            ("Ghosts season 2", "Ghosts", .season(number: 2)),
-            ("Open Ghosts season 2 in Sashimi", "Ghosts", .season(number: 2)),
-            ("Play Ghosts in Sashimi", "Ghosts", .automatic),
-            ("Ghosts", "Ghosts", .automatic)
+        let cases = [
+            PlaybackRequestCase("Resume Ghosts in Sashimi", "Ghosts", .resume),
+            PlaybackRequestCase("Play the Up Next episode of Ghosts in Sashimi", "Ghosts", .upNext),
+            PlaybackRequestCase("Play Up Next for Ghosts in Sashimi", "Ghosts", .upNext),
+            PlaybackRequestCase("Play the newest episode of Ghosts in Sashimi", "Ghosts", .newestEpisode),
+            PlaybackRequestCase("Go to season two of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Open the season 2 of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Season 2 of Ghosts", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Season two Ghosts", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Is season two of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Where can I watch season 2 of Ghosts in Sashimi", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Ghosts season 2", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Open Ghosts season 2 in Sashimi", "Ghosts", .season(number: 2)),
+            PlaybackRequestCase("Play Ghosts in Sashimi", "Ghosts", .automatic),
+            PlaybackRequestCase("Ghosts", "Ghosts", .automatic)
         ]
 
-        for (spokenPhrase, expectedTitle, expectedSelection) in cases {
-            let request = SashimiPlaybackRequest(rawTerm: spokenPhrase)
-            XCTAssertEqual(request.title, expectedTitle, "Unexpected title for: \(spokenPhrase)")
+        for testCase in cases {
+            let request = SashimiPlaybackRequest(rawTerm: testCase.spokenPhrase)
+            XCTAssertEqual(request.title, testCase.expectedTitle, "Unexpected title for: \(testCase.spokenPhrase)")
             XCTAssertEqual(
                 request.selection,
-                expectedSelection,
-                "Unexpected selection for: \(spokenPhrase)"
+                testCase.expectedSelection,
+                "Unexpected selection for: \(testCase.spokenPhrase)"
             )
             XCTAssertEqual(
                 request.hasExplicitPlaybackDirective,
-                spokenPhrase != "Ghosts",
-                "Unexpected directive flag for: \(spokenPhrase)"
+                testCase.spokenPhrase != "Ghosts",
+                "Unexpected directive flag for: \(testCase.spokenPhrase)"
             )
         }
     }
@@ -363,7 +366,7 @@ final class SashimiSiriIntentTests: XCTestCase {
         ServerConfig(
             id: id,
             name: id,
-            url: URL(string: "https://\(id).invalid")!,
+            url: URL(string: "https://\(id).invalid") ?? URL(fileURLWithPath: "/invalid"),
             username: "Intent Test User",
             userId: "user-\(id)"
         )
@@ -410,5 +413,18 @@ final class SashimiSiriIntentTests: XCTestCase {
             localTrailerCount: nil,
             mediaStreams: nil
         )
+    }
+}
+
+@available(iOS 17.2, *)
+private struct PlaybackRequestCase {
+    let spokenPhrase: String
+    let expectedTitle: String
+    let expectedSelection: SashimiPlaybackSelection
+
+    init(_ spokenPhrase: String, _ expectedTitle: String, _ expectedSelection: SashimiPlaybackSelection) {
+        self.spokenPhrase = spokenPhrase
+        self.expectedTitle = expectedTitle
+        self.expectedSelection = expectedSelection
     }
 }
