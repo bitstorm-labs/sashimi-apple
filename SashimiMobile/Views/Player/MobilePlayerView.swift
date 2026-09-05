@@ -255,72 +255,75 @@ struct MobilePlayerView: View {
     // MARK: - Top Bar
 
     private var topBar: some View {
-        HStack(spacing: 16) {
-            // Close button
-            Button {
-                viewModel.player?.pause()
-                // Capture BEFORE stop(): stop() nils the player, and for
-                // offline playback it hits no await first, so it completes long
-                // before the dismiss animation lets onDisappear run -- which is
-                // where the offline save lives. The position was silently lost
-                // every time the X was used.
-                saveOfflinePositionIfNeeded()
-                Task {
-                    await viewModel.stop(reason: .userStop)
-                    dismiss()
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.white.opacity(0.15))
-                    .clipShape(Circle())
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                closeButton
 
-            // Title
-            VStack(alignment: .leading, spacing: 2) {
-                Text(displayedItem.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                // Keep the title in its own flexible column. Putting it in the
+                // same row as stream and episode actions made narrow phones
+                // render real titles as "Wh..." and wrap the bitrate chip one
+                // character per line.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayedItem.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
 
-                if let subtitle = controlBarSubtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
+                    if let subtitle = controlBarSubtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                    }
                 }
 
-                if let metadataText {
-                    Text(metadataText)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
+                Spacer(minLength: 0)
+                settingsMenu
+            }
+
+            HStack(spacing: 10) {
+                if viewModel.transitionState.isEpisodeNavigationAvailable {
+                    MobileEpisodeNavigationControls(
+                        state: viewModel.transitionState,
+                        onPrevious: { Task { await viewModel.playPreviousEpisode() } },
+                        onNext: { Task { await viewModel.playNextEpisode() } }
+                    )
                 }
+
+                // Stream-info chip (Direct Play / Transcode + bitrate)
+                if let info = viewModel.streamInfo {
+                    streamInfoChip(info)
+                }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer()
-
-            if viewModel.transitionState.isEpisodeNavigationAvailable {
-                MobileEpisodeNavigationControls(
-                    state: viewModel.transitionState,
-                    onPrevious: { Task { await viewModel.playPreviousEpisode() } },
-                    onNext: { Task { await viewModel.playNextEpisode() } }
-                )
-            }
-
-            // Stream-info chip (Direct Play / Transcode + bitrate)
-            if let info = viewModel.streamInfo {
-                streamInfoChip(info)
-            }
-
-            // Settings menu
-            settingsMenu
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var closeButton: some View {
+        Button {
+            viewModel.player?.pause()
+            // Capture BEFORE stop(): stop() nils the player, and for
+            // offline playback it hits no await first, so it completes long
+            // before the dismiss animation lets onDisappear run -- which is
+            // where the offline save lives. The position was silently lost
+            // every time the X was used.
+            saveOfflinePositionIfNeeded()
+            Task {
+                await viewModel.stop(reason: .userStop)
+                dismiss()
+            }
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.15))
+                .clipShape(Circle())
+        }
     }
 
     private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
