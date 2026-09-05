@@ -27,17 +27,29 @@ private enum RecentSearches {
 }
 
 struct MobileSearchView: View {
+    private let initialQuery: String?
+    private let onInitialQueryConsumed: (() -> Void)?
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var searchText = ""
     @State private var searchResults: [ServerMediaResultGroup] = []
     @State private var isSearching = false
     @State private var selectedGroup: ServerMediaResultGroup?
     @State private var selectedSource: ServerMediaResult?
+    @State private var searchServerWarning: String?
     @State private var recentSearches: [String] = RecentSearches.load()
     @State private var searchTask: Task<Void, Never>?
+    @State private var isApplyingInitialQuery = false
     // Only commit a query to history after the user pauses typing on a query
     // that returned results (avoids logging every keystroke prefix).
     @State private var historyTask: Task<Void, Never>?
+
+    init(initialQuery: String? = nil, onInitialQueryConsumed: (() -> Void)? = nil) {
+        self.initialQuery = initialQuery
+        self.onInitialQueryConsumed = onInitialQueryConsumed
+        _searchText = State(
+            initialValue: SashimiMediaSearchQuery.normalizedTerm(initialQuery ?? "")
+        )
+    }
 
     // Same column math as MobileLibraryBrowseView so search results read as
     // the same surface as library browsing.
@@ -69,11 +81,21 @@ struct MobileSearchView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, minHeight: 300)
                 } else if searchResults.isEmpty {
-                    ContentUnavailableView(
-                        "No Results",
-                        systemImage: "magnifyingglass",
-                        description: Text("No results found for \"\(searchText)\"")
-                    )
+                    Group {
+                        if let searchServerWarning {
+                            ContentUnavailableView(
+                                "Servers Unavailable",
+                                systemImage: "server.rack",
+                                description: Text(searchServerWarning)
+                            )
+                        } else {
+                            ContentUnavailableView(
+                                "No Results",
+                                systemImage: "magnifyingglass",
+                                description: Text("No results found for \"\(searchText)\"")
+                            )
+                        }
+                    }
                     .frame(minHeight: 300)
                 } else {
                     resultsGrid(metrics: gridMetrics(availableWidth: geo.size.width))
@@ -94,6 +116,7 @@ struct MobileSearchView: View {
             }
         }
         .onChange(of: searchText) { _, newValue in
+            guard !isApplyingInitialQuery else { return }
             searchTask?.cancel()
             let query = newValue
             searchTask = Task {
@@ -113,9 +136,32 @@ struct MobileSearchView: View {
                 recentSearches = RecentSearches.add(query)
             }
         }
+        .task(id: initialQuery) {
+            guard let initialQuery, !initialQuery.isEmpty else { return }
+            let normalizedQuery = SashimiMediaSearchQuery.normalizedTerm(initialQuery)
+            guard !normalizedQuery.isEmpty else {
+                onInitialQueryConsumed?()
+                return
+            }
+
+            isApplyingInitialQuery = searchText != normalizedQuery
+            if isApplyingInitialQuery {
+                searchText = normalizedQuery
+            }
+            defer {
+                isApplyingInitialQuery = false
+                // A canceled task must still acknowledge the one-shot route;
+                // otherwise a recreated search view replays the same request.
+                onInitialQueryConsumed?()
+            }
+            await performSearch(query: normalizedQuery)
+            guard !Task.isCancelled else { return }
+        }
         .onDisappear {
             searchTask?.cancel()
             historyTask?.cancel()
+            // Covers a view that disappears before its .task is scheduled.
+            onInitialQueryConsumed?()
         }
     }
 
@@ -169,6 +215,13 @@ struct MobileSearchView: View {
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textTertiary)
                 .padding(.horizontal, MobileSpacing.md)
+
+            if let searchServerWarning {
+                Label(searchServerWarning, systemImage: "exclamationmark.triangle")
+                    .font(MobileTypography.captionSmall)
+                    .foregroundStyle(MobileColors.textSecondary)
+                    .padding(.horizontal, MobileSpacing.md)
+            }
 
             LazyVGrid(columns: metrics.columns, alignment: .leading, spacing: MobileSpacing.md) {
                 ForEach(searchResults) { result in
@@ -227,6 +280,7 @@ struct MobileSearchView: View {
         guard !query.isEmpty else {
             if searchText == query {
                 searchResults = []
+                searchServerWarning = nil
                 isSearching = false
             }
             return
@@ -235,19 +289,23 @@ struct MobileSearchView: View {
         guard searchText == query else { return }
 
         isSearching = true
+        searchServerWarning = nil
         defer {
             if searchText == query {
                 isSearching = false
             }
         }
 
-        let serverResults = await MultiServerSearchService.search(query: query, limit: 50)
+        let search = await MultiServerSearchService.searchWithStatus(query: query, limit: 50)
         guard !Task.isCancelled, searchText == query else { return }
         let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
         searchResults = ServerMediaResultGrouping.groups(
-            from: serverResults,
+            from: search.results,
             preferredServerID: activeServerID
         )
+        searchServerWarning = search.hasServerFailures
+            ? "Some saved servers could not be reached. Results may be incomplete."
+            : nil
     }
 
     private func select(_ group: ServerMediaResultGroup) {

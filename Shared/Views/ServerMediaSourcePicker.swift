@@ -398,6 +398,10 @@ private struct AudioQualityBadge: View {
 /// the exact parent client scope.
 struct ServerScopedMediaDetailView: View {
     let source: ServerMediaResult
+    // When Siri resolves a season entity, the detail route opens the parent
+    // series and selects this season so the user lands on its episode list.
+    // swiftlint:disable:next implicit_optional_initialization
+    var initialSeasonID: String? = nil
 
     @State private var isReady = false
     @State private var scopeError: String?
@@ -442,7 +446,8 @@ struct ServerScopedMediaDetailView: View {
                 AdaptiveDetailView(
                     item: source.item,
                     libraryName: source.item.libraryName,
-                    serverID: source.serverID
+                    serverID: source.serverID,
+                    initialSeasonID: initialSeasonID
                 )
 #endif
             } else {

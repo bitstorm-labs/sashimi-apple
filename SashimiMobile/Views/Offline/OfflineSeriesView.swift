@@ -111,8 +111,7 @@ struct OfflineSeriesView: View {
                    fileNames: ["backdrop.jpg", "poster.jpg"]
                ) {
                 Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .resizable().scaledToFill()
                     .frame(height: sizeClass == .compact ? 180 : 220)
                     .frame(maxWidth: .infinity)
                     .clipped()
@@ -141,8 +140,7 @@ struct OfflineSeriesView: View {
                 fileNames: ["poster.jpg"]
             ) {
                 Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .resizable().scaledToFill()
                     .frame(width: 120, height: 68)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
                     .overlay {
