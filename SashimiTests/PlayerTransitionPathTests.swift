@@ -70,6 +70,152 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertNil(viewModel.transitionState.endCard)
     }
 
+    func testManualNextUsesProductionTransitionPathWithoutMarkingOutgoingItem() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.playNextEpisode()
+
+        XCTAssertEqual(loader.loadedItemIDs, [next.id])
+        XCTAssertEqual(reporter.events, [.stopped(itemID: current.id)])
+        XCTAssertFalse(reporter.events.contains { if case .completed = $0 { return true }; return false })
+    }
+
+    func testNaturalCompletionWithAutoplayDisabledShowsNextEndCard() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        settings.autoPlayNextEpisode = false
+        defer { settings.autoPlayNextEpisode = previousAutoPlay }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
+    }
+
+    func testNaturalCompletionAutoplaysSuccessorThroughProductionTransitionPath() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        settings.autoPlayNextEpisode = true
+        defer { settings.autoPlayNextEpisode = previousAutoPlay }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertEqual(loader.loadedItemIDs, [next.id])
+        XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
+        XCTAssertNil(viewModel.transitionState.endCard)
+        XCTAssertFalse(viewModel.playbackEnded)
+    }
+
+    func testNaturalCompletionOfFinalEpisodeShowsFinalEndCard() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        settings.autoPlayNextEpisode = true
+        defer { settings.autoPlayNextEpisode = previousAutoPlay }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertEqual(viewModel.transitionState.endCard, .finalEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
+    }
+
     private func makeItem(
         id: String,
         type: ItemType,
@@ -140,4 +286,52 @@ private actor FakePlayerEpisodeNavigationClient: PlayerEpisodeNavigationClient {
 
 private enum FakeNavigationError: Error {
     case failed
+}
+
+@MainActor
+private final class RecordingPlayerPlaybackReporter: PlayerPlaybackReporting {
+    enum Event: Equatable {
+        case start(itemID: String)
+        case progress(itemID: String)
+        case stopped(itemID: String)
+        case completed(itemID: String)
+    }
+
+    private(set) var events: [Event] = []
+    private var hasStarted = true
+
+    func reset() {
+        hasStarted = true
+    }
+
+    func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async {
+        hasStarted = true
+        events.append(.start(itemID: itemID))
+    }
+
+    func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async {
+        guard hasStarted else { return }
+        events.append(.progress(itemID: itemID))
+    }
+
+    func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async {
+        guard hasStarted else { return }
+        hasStarted = false
+        events.append(.stopped(itemID: itemID))
+    }
+
+    func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async {
+        guard hasStarted else { return }
+        hasStarted = false
+        events.append(.completed(itemID: itemID))
+    }
+}
+
+@MainActor
+private final class RecordingPlayerTransitionLoader: PlayerTransitionLoader {
+    private(set) var loadedItemIDs: [String] = []
+
+    func load(item: BaseItemDto) async {
+        loadedItemIDs.append(item.id)
+    }
 }

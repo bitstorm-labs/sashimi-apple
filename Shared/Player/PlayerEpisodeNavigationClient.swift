@@ -12,6 +12,13 @@ protocol PlayerEpisodeNavigationClient: Sendable {
     ) async throws -> ItemsResponse
 }
 
+/// Keeps the transition decision testable without replacing the production
+/// AVPlayer setup. The app leaves this nil and uses `PlayerViewModel.loadMedia`.
+@MainActor
+protocol PlayerTransitionLoader: AnyObject {
+    func load(item: BaseItemDto) async
+}
+
 extension JellyfinClient: PlayerEpisodeNavigationClient {
     func getPlayerItems(
         parentId: String,
