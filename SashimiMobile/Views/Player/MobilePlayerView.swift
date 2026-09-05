@@ -124,6 +124,7 @@ struct MobilePlayerView: View {
         .onDisappear {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
+            viewModel.preparePendingStoppedReportIfNeeded()
             Task {
                 await viewModel.stop(reason: .viewDisappeared)
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
@@ -133,6 +134,7 @@ struct MobilePlayerView: View {
             guard newPhase == .background else { return }
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
+            viewModel.preparePendingStoppedReportIfNeeded()
             Task {
                 await viewModel.stop(reason: .sceneBackground)
                 dismiss()
@@ -154,11 +156,18 @@ struct MobilePlayerView: View {
                 dismiss()
             }
         }
+        .onChange(of: viewModel.isPlayerReady) { _, _ in
+            acknowledgePlaybackHandoff()
+        }
+        .onChange(of: viewModel.errorMessage) { _, message in
+            guard message != nil else { return }
+            acknowledgePlaybackHandoff()
+        }
     }
 
     private func acknowledgePlaybackHandoff() {
         guard !handoffAcknowledged else { return }
-        if viewModel.player != nil {
+        if viewModel.isPlayerReady {
             handoffAcknowledged = true
             onPlaybackReady?()
         } else if viewModel.errorMessage != nil {

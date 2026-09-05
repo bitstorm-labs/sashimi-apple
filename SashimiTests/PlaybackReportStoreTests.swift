@@ -147,6 +147,45 @@ final class PlaybackReportStoreTests: XCTestCase {
         XCTAssertEqual(secondEvents, [.start(itemID: "item-b")])
         XCTAssertTrue(store.reports.isEmpty)
     }
+
+    func testPreparedStoppedReportIsPersistedBeforeDeliveryAwaits() async throws {
+        let store = PlaybackReportStore(defaults: defaults)
+        let delivery = PlaybackReportDelivery(store: store)
+        let client = FakePlaybackReportingClient()
+        let reporter = PlaybackSessionReporter(
+            serverID: "server-a",
+            client: client,
+            delivery: delivery
+        )
+
+        await reporter.start(
+            itemID: "item-a",
+            positionTicks: 0,
+            playSessionID: "session-a",
+            playMethod: "DirectStream"
+        )
+        await client.setFailAll(true)
+        reporter.prepareStopped(
+            itemID: "item-a",
+            positionTicks: 2_000,
+            playSessionID: "session-a"
+        )
+
+        XCTAssertEqual(store.reports.count, 1)
+        XCTAssertEqual(store.reports.first?.kind, .stopped)
+        await reporter.stopped(
+            itemID: "item-a",
+            positionTicks: 2_000,
+            playSessionID: "session-a"
+        )
+        XCTAssertEqual(store.reports.count, 1)
+
+        await client.setFailAll(false)
+        let pending = try XCTUnwrap(store.reports.first)
+        let delivered = await delivery.deliver(pending, using: client)
+        XCTAssertTrue(delivered)
+        XCTAssertTrue(store.reports.isEmpty)
+    }
 }
 
 private actor FakePlaybackReportingClient: PlaybackReportingClient {
