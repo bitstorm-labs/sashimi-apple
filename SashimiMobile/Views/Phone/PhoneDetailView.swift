@@ -1548,6 +1548,27 @@ struct AdaptiveDetailView: View {
         detailContent
     }
 }
+
+enum AdaptiveDetailContent: View {
+    case phone(PhoneDetailView)
+    case pad(MobileDetailView)
+
+    var layout: AdaptiveDetailLayout {
+        switch self {
+        case .phone:
+            return .phone
+        case .pad:
+            return .pad
+        }
+    }
+
+    @ViewBuilder
+    var body: some View {
+        switch self {
+        case .phone(let view):
+            view
+        case .pad(let view):
+            view
         }
     }
 }
