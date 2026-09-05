@@ -30,20 +30,35 @@ private struct PlayerViewController: UIViewControllerRepresentable {
 
 // MARK: - Mobile Player View
 
+// Player controls, handoff callbacks, and teardown stay together at this
+// presentation boundary so a dismissal can await the same view-model session.
+// swiftlint:disable:next type_body_length
 struct MobilePlayerView: View {
     let item: BaseItemDto
     var serverID: String?
     var startFromBeginning: Bool = false
+    var onPlaybackReady: (() -> Void)?
+    var onPlaybackFailed: (() -> Void)?
     @StateObject private var viewModel: PlayerViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
     @State private var playbackSpeed: Float = 1.0
+    @State private var handoffAcknowledged = false
 
-    init(item: BaseItemDto, serverID: String? = nil, startFromBeginning: Bool = false) {
+    init(
+        item: BaseItemDto,
+        serverID: String? = nil,
+        startFromBeginning: Bool = false,
+        onPlaybackReady: (() -> Void)? = nil,
+        onPlaybackFailed: (() -> Void)? = nil
+    ) {
         self.item = item
         self.serverID = serverID
         self.startFromBeginning = startFromBeginning
+        self.onPlaybackReady = onPlaybackReady
+        self.onPlaybackFailed = onPlaybackFailed
         _viewModel = StateObject(wrappedValue: PlayerViewModel(serverID: serverID))
     }
 
@@ -130,6 +145,7 @@ struct MobilePlayerView: View {
                     }
                 }
             }
+            acknowledgePlaybackHandoff()
             // Populate the audio/subtitle menus (tvOS does this on player appear;
             // without it both lists stay empty and subtitles can never be enabled)
             viewModel.loadAllTracks()
@@ -142,6 +158,15 @@ struct MobilePlayerView: View {
             Task {
                 await viewModel.stop(reason: .viewDisappeared)
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            viewModel.player?.pause()
+            saveOfflinePositionIfNeeded()
+            Task {
+                await viewModel.stop(reason: .sceneBackground)
+                dismiss()
             }
         }
         // The .task above runs once. It does not re-run when changeQuality
@@ -159,6 +184,17 @@ struct MobilePlayerView: View {
             if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
                 dismiss()
             }
+        }
+    }
+
+    private func acknowledgePlaybackHandoff() {
+        guard !handoffAcknowledged else { return }
+        if viewModel.player != nil {
+            handoffAcknowledged = true
+            onPlaybackReady?()
+        } else if viewModel.errorMessage != nil {
+            handoffAcknowledged = true
+            onPlaybackFailed?()
         }
     }
 
@@ -216,8 +252,10 @@ struct MobilePlayerView: View {
                 // where the offline save lives. The position was silently lost
                 // every time the X was used.
                 saveOfflinePositionIfNeeded()
-                Task { await viewModel.stop(reason: .userStop) }
-                dismiss()
+                Task {
+                    await viewModel.stop(reason: .userStop)
+                    dismiss()
+                }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
@@ -385,6 +423,63 @@ struct MobilePlayerView: View {
         case .preview: return "Skip Preview"
         default: return "Skip"
         }
+    }
+
+    // MARK: - Loading/Error
+
+    private var loadingOrErrorView: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black
+
+            // Always show a close button
+            Button {
+                viewModel.player?.pause()
+                // Capture BEFORE stop(): stop() nils the player, and for
+                // offline playback it hits no await first, so it completes long
+                // before the dismiss animation lets onDisappear run -- which is
+                // where the offline save lives. The position was silently lost
+                // every time the X was used.
+                saveOfflinePositionIfNeeded()
+                Task {
+                    await viewModel.stop(reason: .userStop)
+                    dismiss()
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.white.opacity(0.15))
+                    .clipShape(Circle())
+            }
+            .padding(20)
+
+            VStack(spacing: 16) {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("Loading...")
+                        .foregroundStyle(.white)
+                } else if let errorMessage = viewModel.errorMessage {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.yellow)
+                    Text(errorMessage)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    Button("Dismiss") {
+                        Task {
+                            await viewModel.stop(reason: .userStop)
+                            dismiss()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .ignoresSafeArea()
     }
 
     /// Persists the offline resume point. Safe to call more than once: the
