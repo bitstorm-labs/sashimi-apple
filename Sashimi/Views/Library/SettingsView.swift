@@ -1097,8 +1097,7 @@ struct AppIconButton: View {
         Button(action: action) {
             ZStack(alignment: .bottomTrailing) {
                 Image(previewImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(width: 170, height: 102)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay(

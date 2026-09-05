@@ -19,8 +19,7 @@ struct ReviewRatingBadge: View {
     var body: some View {
         HStack(spacing: spacing) {
             Image("TMDBLogo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+                .resizable().scaledToFit()
                 .frame(height: logoHeight)
             Text(String(format: "%.1f", rating))
                 .font(.system(size: fontSize, weight: .bold))

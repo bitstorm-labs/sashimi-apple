@@ -45,8 +45,7 @@ struct PhoneHomeView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image("SidebarLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                             .frame(width: 40, height: 40)
                             .clipShape(RoundedRectangle(cornerRadius: 9))
                         Text("Sashimi")

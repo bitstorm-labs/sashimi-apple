@@ -320,7 +320,7 @@ struct DownloadsListView: View {
         if let serverURL = serverPosterURL(for: item) {
             LazyImage(request: SashimiImagePipeline.request(url: serverURL, serverID: item.serverID)) { state in
                 if let image = state.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
+                    image.resizable().scaledToFill()
                 } else {
                     posterPlaceholder
                 }

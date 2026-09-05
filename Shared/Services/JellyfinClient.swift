@@ -1646,10 +1646,23 @@ private let multiServerMediaLogger = Logger(
 /// Searches every saved server concurrently. Each server owns its own Jellyfin
 /// client because item IDs and access tokens are server-scoped.
 enum MultiServerSearchService {
+    struct SearchResult: Sendable {
+        let results: [ServerMediaResult]
+        let failedServerCount: Int
+
+        var hasServerFailures: Bool {
+            failedServerCount > 0
+        }
+    }
+
     static func search(query: String, limit: Int = 50) async -> [ServerMediaResult] {
+        await searchWithStatus(query: query, limit: limit).results
+    }
+
+    static func searchWithStatus(query: String, limit: Int = 50) async -> SearchResult {
         let servers = await MainActor.run { SessionManager.shared.servers }
 
-        return await withTaskGroup(of: [ServerMediaResult].self, returning: [ServerMediaResult].self) { group in
+        let responses = await withTaskGroup(of: ServerSearchResponse.self, returning: [ServerSearchResponse].self) { group in
             for server in servers {
                 let token = await MainActor.run {
                     SessionManager.shared.token(for: server, allowLegacyFallback: true)
@@ -1667,31 +1680,44 @@ enum MultiServerSearchService {
 
                     do {
                         let items = try await client.search(query: query, limit: limit)
-                        return items.map {
-                            ServerMediaResult(
-                                item: $0,
-                                serverID: server.id,
-                                serverName: server.displayName,
-                                serverURL: server.url
-                            )
-                        }
+                        return ServerSearchResponse(
+                            results: items.map {
+                                ServerMediaResult(
+                                    item: $0,
+                                    serverID: server.id,
+                                    serverName: server.displayName,
+                                    serverURL: server.url
+                                )
+                            },
+                            succeeded: true
+                        )
                     } catch is CancellationError {
-                        return []
+                        return ServerSearchResponse(results: [], succeeded: false)
                     } catch {
                         multiServerMediaLogger.error(
                             "Search failed on \(server.url.host ?? "unknown", privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private)"
                         )
-                        return []
+                        return ServerSearchResponse(results: [], succeeded: false)
                     }
                 }
             }
 
-            var results: [ServerMediaResult] = []
-            for await serverResults in group {
-                results.append(contentsOf: serverResults)
+            var responses: [ServerSearchResponse] = []
+            for await response in group {
+                responses.append(response)
             }
-            return results
+            return responses
         }
+
+        return SearchResult(
+            results: responses.flatMap(\.results),
+            failedServerCount: responses.count(where: { !$0.succeeded })
+        )
+    }
+
+    private struct ServerSearchResponse: Sendable {
+        let results: [ServerMediaResult]
+        let succeeded: Bool
     }
 }
 
