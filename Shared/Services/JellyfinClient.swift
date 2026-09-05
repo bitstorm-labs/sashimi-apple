@@ -933,7 +933,7 @@ actor JellyfinClient {
         guard let userId else { throw JellyfinError.notConfigured }
 
         let fields = personId == nil
-            ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,MediaStreams"
+            ? "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,LibraryName,MediaStreams"
             : "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,UserData,ImageTags,Path,LibraryName,MediaStreams"
         var queryItems = [
             URLQueryItem(name: "SortBy", value: sortBy),
@@ -1605,7 +1605,7 @@ actor JellyfinClient {
         let data = try await request(
             path: "/Users/\(userId)/Items/\(itemId)",
             queryItems: [
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags,RemoteTrailers,LocalTrailerCount"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags,RemoteTrailers,LocalTrailerCount,SeriesName,SeriesId,SeasonId,ParentId,IndexNumber,ParentIndexNumber,RunTimeTicks,ProductionYear,PremiereDate,LibraryName,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
             ]
         )
