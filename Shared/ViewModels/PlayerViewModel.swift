@@ -87,26 +87,29 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 @MainActor
 final class PlayerViewModel: ObservableObject {
     let serverID: String?
-    private let playbackReporter: PlaybackSessionReporter
+    private let playbackReporter: any PlayerPlaybackReporting
 
     init(
         serverID: String? = nil,
         client: JellyfinClient? = nil,
         reportDelivery: PlaybackReportDelivery? = nil,
-        navigationClient: (any PlayerEpisodeNavigationClient)? = nil
+        navigationClient: (any PlayerEpisodeNavigationClient)? = nil,
+        reporter: (any PlayerPlaybackReporting)? = nil,
+        transitionLoader: (any PlayerTransitionLoader)? = nil
     ) {
         self.serverID = serverID
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
         let resolvedClient = client
             ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
             ?? JellyfinClient.shared
-        self.playbackReporter = PlaybackSessionReporter(
+        self.playbackReporter = reporter ?? PlaybackSessionReporter(
             serverID: resolvedServerID,
             client: resolvedClient,
             delivery: reportDelivery
         )
         self.client = resolvedClient
         self.navigationClient = navigationClient ?? resolvedClient
+        self.transitionLoader = transitionLoader
     }
 
     @Published var player: AVPlayer?
@@ -270,6 +273,7 @@ final class PlayerViewModel: ObservableObject {
     private var lastReportedStallCount = 0
     private let client: JellyfinClient
     private let navigationClient: any PlayerEpisodeNavigationClient
+    private let transitionLoader: (any PlayerTransitionLoader)?
     private let playbackSettings = PlaybackSettings.shared
 
     private func setCurrentItem(_ item: BaseItemDto?) {
@@ -737,17 +741,15 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func reportCurrentPlaybackStoppedForTransition() async {
-        guard let item = currentItem,
-              let player,
-              let currentTime = player.currentItem?.currentTime(),
-              !isOfflinePlayback else { return }
+        guard let item = currentItem, !isOfflinePlayback else { return }
 
         let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
         let positionTicks: Int64
         if elapsedSeconds < 10 && resumePositionTicks > 0 {
             positionTicks = resumePositionTicks
         } else {
-            positionTicks = Int64(currentTime.seconds * 10_000_000)
+            let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+            positionTicks = Int64(currentSeconds * 10_000_000)
         }
         await playbackReporter.stopped(
             itemID: item.id,
@@ -756,7 +758,7 @@ final class PlayerViewModel: ObservableObject {
         )
     }
 
-    private func handlePlaybackEnded() async {
+    func handlePlaybackEnded() async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
         if isHandlingEnd {
@@ -1061,7 +1063,11 @@ final class PlayerViewModel: ObservableObject {
             await reportCurrentPlaybackStoppedForTransition()
         }
         playbackEnded = false
-        await loadMedia(item: item)
+        if let transitionLoader {
+            await transitionLoader.load(item: item)
+        } else {
+            await loadMedia(item: item)
+        }
     }
 
     func changeQuality(_ quality: QualityOption) async {
