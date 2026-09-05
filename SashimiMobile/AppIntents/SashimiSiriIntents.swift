@@ -37,8 +37,23 @@ enum SashimiSiriIntentError: LocalizedError, Equatable, Sendable {
 }
 
 #if compiler(>=6.4)
+@available(iOS 27.0, *)
+enum SashimiSiriIntentDependencies {
+    /// Lets integration tests execute the exact OpenIntent returned by a
+    /// navigation branch without replacing the production handoff contract.
+    typealias OpenIntentFactory = @Sendable (SashimiMediaEntity) -> SashimiOpenMediaIntent
+
+    @TaskLocal
+    static var openIntentFactory: OpenIntentFactory = { entity in
+        SashimiOpenMediaIntent(target: entity)
+    }
+}
+#endif
+
+#if compiler(>=6.4)
 @available(iOS 26.0, *)
 typealias SashimiInAppSearchResult = ReturnsValue<[SashimiMediaEntity]>
+    & OpensIntent
     & ShowsSnippetIntent
     & ProvidesDialog
 #else
@@ -87,9 +102,9 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
     static let allowedExecutionTargets: IntentExecutionTargets = [.main]
     // ShowInAppSearchResultsIntent does not support the explicit `.background`
     // mode. Its dynamic foreground mode lets the system keep a rich search
-    // response in Siri when possible, while explicit playback can still opt
-    // into the foreground below. Ordinary searches must not navigate to
-    // Sashimi just to display results.
+    // response in Siri when possible. Explicit playback can still opt into
+    // the foreground below, while explicit title opens return an OpenIntent
+    // for the system to run through its normal scene handoff.
     static let supportedModes: IntentModes = [.foreground(.dynamic)]
 #else
     @available(iOS 26.0, *)
@@ -142,17 +157,16 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
             let entity = try await resolvePlaybackEntity(for: playbackRequest)
             let dialog = SashimiPlaybackDialog.make(for: playbackRequest, entity: entity)
 
-            try await continueInForegroundForPlayback(dialog: dialog)
-
             if case .season = playbackRequest.selection {
-                await routePlayback(playbackRequest, entity: entity)
                 return .result(
                     value: [],
+                    opensIntent: SashimiSiriIntentDependencies.openIntentFactory(entity),
                     dialog: dialog,
                     snippetIntent: EmptySnippetIntent()
                 )
             }
 
+            try await continueInForegroundForPlayback(dialog: dialog)
             await routePlayback(playbackRequest, entity: entity)
 
             let playbackEntities = [entity]
@@ -174,13 +188,9 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
                 for: seasonRoute.request,
                 entity: seasonRoute.entity
             )
-            try await continueInForegroundForPlayback(dialog: dialog)
-
-            await MainActor.run {
-                SashimiIntentCoordinator.shared.requestOpen(entity: seasonRoute.entity)
-            }
             return .result(
                 value: [],
+                opensIntent: SashimiSiriIntentDependencies.openIntentFactory(seasonRoute.entity),
                 dialog: dialog,
                 snippetIntent: EmptySnippetIntent()
             )
@@ -194,12 +204,9 @@ struct SashimiInAppSearchIntent: ShowInAppSearchResultsIntent {
                 full: "Opening \(entity.title) in Sashimi.",
                 supporting: "Opening the title page."
             )
-            try await continueInForegroundForPlayback(dialog: dialog)
-            await MainActor.run {
-                SashimiIntentCoordinator.shared.requestOpen(entity: entity)
-            }
             return .result(
                 value: [],
+                opensIntent: SashimiSiriIntentDependencies.openIntentFactory(entity),
                 dialog: dialog,
                 snippetIntent: EmptySnippetIntent()
             )
