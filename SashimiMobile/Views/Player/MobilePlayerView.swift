@@ -184,6 +184,15 @@ struct MobilePlayerView: View {
         .onChange(of: viewModel.tracksVersion) { _, _ in
             viewModel.loadAllTracks()
         }
+        .onChange(of: viewModel.transitionState) { _, state in
+            // Episode navigation is an action bar, not transient transport
+            // chrome. Keep it available once the server resolves the current
+            // episode so a tap that reveals native AVPlayer controls cannot
+            // strand the user without Previous/Next.
+            guard state.endCard == nil, state.isEpisodeNavigationAvailable else { return }
+            showCustomOverlay = true
+            scheduleAutoHide()
+        }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
                 dismiss()
@@ -410,7 +419,7 @@ struct MobilePlayerView: View {
 
     private func scheduleAutoHide() {
         hideTask?.cancel()
-        guard showCustomOverlay else { return }
+        guard showCustomOverlay, !viewModel.transitionState.isEpisodeNavigationAvailable else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
             if !Task.isCancelled {
