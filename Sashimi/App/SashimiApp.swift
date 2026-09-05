@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.sashimi.app", category: "App")
 @main
 struct SashimiApp: App {
     @StateObject private var sessionManager = SessionManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -48,6 +49,16 @@ struct SashimiApp: App {
             if newPhase != .active {
                 ThemeSongPlayer.shared.appDidBackground()
             }
+            if newPhase == .active {
+                Task { await PlaybackReportDelivery.shared.flush() }
+            }
+            // A player can remain presented while the network comes back. The
+            // scene does not re-enter `.active` in that case, so the path
+            // transition is the retry trigger.
+        }
+        .onChange(of: networkMonitor.isConnected) { _, isConnected in
+            guard isConnected else { return }
+            Task { await PlaybackReportDelivery.shared.flush() }
         }
     }
 }
@@ -351,8 +362,7 @@ struct MainTabView: View {
             // beside it only when the rail is pulled out.
             HStack(spacing: 14) {
                 Image("SidebarLogoMark")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(width: expanded ? 76 : 56, height: expanded ? 76 : 56)
                 if expanded {
                     Text("Sashimi")
@@ -498,7 +508,7 @@ struct MainTabView: View {
                        let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
                         LazyImage(url: imageURL) { state in
                             if let image = state.image {
-                                image.resizable().aspectRatio(contentMode: .fill)
+                                image.resizable().scaledToFill()
                             } else {
                                 Image(systemName: "person.fill").foregroundStyle(.white)
                             }

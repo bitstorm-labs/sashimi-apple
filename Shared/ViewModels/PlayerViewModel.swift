@@ -87,9 +87,24 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 @MainActor
 final class PlayerViewModel: ObservableObject {
     let serverID: String?
+    private let playbackReporter: PlaybackSessionReporter
 
-    init(serverID: String? = nil) {
+    init(
+        serverID: String? = nil,
+        client: JellyfinClient? = nil,
+        reportDelivery: PlaybackReportDelivery? = nil
+    ) {
         self.serverID = serverID
+        let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
+        let resolvedClient = client
+            ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
+            ?? JellyfinClient.shared
+        self.playbackReporter = PlaybackSessionReporter(
+            serverID: resolvedServerID,
+            client: resolvedClient,
+            delivery: reportDelivery
+        )
+        self.client = resolvedClient
     }
 
     @Published var player: AVPlayer?
@@ -237,6 +252,7 @@ final class PlayerViewModel: ObservableObject {
     private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
     private var subtitleLoadTask: Task<Void, Never>?
+    private var teardownTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -250,7 +266,7 @@ final class PlayerViewModel: ObservableObject {
     /// Last stall count already reported, so a climbing counter is logged once
     /// per new stall instead of on every access-log entry.
     private var lastReportedStallCount = 0
-    private let client = JellyfinClient.shared
+    private let client: JellyfinClient
     private let playbackSettings = PlaybackSettings.shared
 
     private func setCurrentItem(_ item: BaseItemDto?) {
@@ -426,6 +442,7 @@ final class PlayerViewModel: ObservableObject {
         navigationTask = nil
         playbackEnded = false
         isOfflinePlayback = false
+        playbackReporter.reset()
         // Fresh item, fresh recovery budget; a watchdog armed for the old
         // player must not fire into the new one.
         recoveryAttempts = 0
@@ -566,11 +583,7 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: 0)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -611,11 +624,7 @@ final class PlayerViewModel: ObservableObject {
                     PlayerDiagnostics.field("startTimeTicksSentToServer", false)
                 ])
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: startTicks)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -626,11 +635,7 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: 0)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -696,6 +701,15 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    private func reportPlaybackStart(item: BaseItemDto, positionTicks: Int64) async {
+        await playbackReporter.start(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId,
+            playMethod: currentPlayMethod
+        )
+    }
+
     private func reportProgress() async {
         guard !isOfflinePlayback,
               let item = currentItem,
@@ -704,12 +718,19 @@ final class PlayerViewModel: ObservableObject {
 
         let positionTicks = Int64(currentTime.seconds * 10_000_000)
         let isPaused = player.timeControlStatus == .paused
+        await playbackReporter.progress(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            isPaused: isPaused,
+            playSessionID: playSessionId
+        )
+    }
 
-        do {
-            try await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
-        } catch {
-            logger.error("reportPlaybackProgress failed: \(error.localizedDescription, privacy: .public)")
-        }
+    /// Flushes the current in-memory position when the scene is about to be
+    /// backgrounded. The reporter persists the event before attempting the
+    /// request, so suspension or a transient network failure cannot discard it.
+    func reportCurrentProgress() async {
+        await reportProgress()
     }
 
     private func reportCurrentPlaybackStoppedForTransition() async {
@@ -754,21 +775,17 @@ final class PlayerViewModel: ObservableObject {
 
         if let item = currentItem {
             if !isOfflinePlayback {
-                // Mark as watched by reporting position at the end
-                if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
-                    let endTicks = Int64(duration * 10_000_000)
-                    do {
-                        try await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
-                    } catch {
-                        logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
-                    }
-                }
-                // Mark item as played
-                do {
-                    try await client.markPlayed(itemId: item.id)
-                } catch {
-                    logger.error("markPlayed failed: \(error.localizedDescription, privacy: .public)")
-                }
+                // Stopped + mark-played form one durable completion event. The
+                // delivery layer persists the phase between the two requests so a
+                // retry never loses completion or repeats a successful first phase.
+                let duration = player?.currentItem?.duration.seconds ?? 0
+                let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+                let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
+                await playbackReporter.completed(
+                    itemID: item.id,
+                    positionTicks: Int64(max(0.0, endSeconds) * 10_000_000),
+                    playSessionID: playSessionId
+                )
             }
 
             // Lookup happens after completion is recorded. This ordering keeps
@@ -1757,6 +1774,21 @@ final class PlayerViewModel: ObservableObject {
     }
 
     func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+        if let teardownTask {
+            await teardownTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performStop(reason: reason)
+        }
+        teardownTask = task
+        await task.value
+        teardownTask = nil
+    }
+
+    private func performStop(reason: PlayerDiagnostics.TeardownReason) async {
         diag(.teardown, [
             PlayerDiagnostics.field("reason", reason.rawValue),
             PlayerDiagnostics.field("item", currentItem?.id),
@@ -1795,11 +1827,11 @@ final class PlayerViewModel: ObservableObject {
             }
 
             if !isOfflinePlayback {
-                do {
-                    try await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
-                } catch {
-                    logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
-                }
+                await playbackReporter.stopped(
+                    itemID: item.id,
+                    positionTicks: positionTicks,
+                    playSessionID: playSessionId
+                )
             }
         }
 

@@ -15,6 +15,10 @@ struct PhoneDetailView: View {
     // Keep the existing call sites server-agnostic when no scoped source is selected.
     // swiftlint:disable:next implicit_optional_initialization
     var serverID: String? = nil
+    // Optional season selected by a Siri deep-link. The route opens the
+    // parent series, then loads this season instead of defaulting to Next Up.
+    // swiftlint:disable:next implicit_optional_initialization
+    var initialSeasonID: String? = nil
 
     // MARK: - State (mirrored from MobileDetailView)
 
@@ -56,10 +60,16 @@ struct PhoneDetailView: View {
     // MARK: - Computed Properties
 
     private var isSeries: Bool { item.type == .series }
+    private var isSeason: Bool { item.type == .season }
     private var isEpisode: Bool { item.type == .episode }
     /// The series whose seasons/episodes this page lists (self for a series,
     /// the parent for an episode) — drives the shared episode machinery.
-    private var contentSeriesId: String { isSeries ? item.id : (item.seriesId ?? item.id) }
+    private var contentSeriesId: String {
+        if isSeries {
+            return item.id
+        }
+        return item.seriesId ?? item.parentId ?? item.id
+    }
     private var isMovie: Bool { item.type == .movie }
 
     private var currentTitleKey: String {
@@ -123,7 +133,7 @@ struct PhoneDetailView: View {
                     actionButtons
                     overviewSection
 
-                    if isSeries || isEpisode {
+                    if isSeries || isSeason || isEpisode {
                         seasonsSection
                     }
 
@@ -324,7 +334,7 @@ struct PhoneDetailView: View {
                 ZStack(alignment: .bottom) {
                     LazyImage(request: imageRequest(for: backdropImageURL)) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } else {
                             Rectangle().fill(MobileColors.cardBackground)
                         }
@@ -343,7 +353,7 @@ struct PhoneDetailView: View {
                 // Channel avatar overlapping banner
                 LazyImage(request: imageRequest(for: channelAvatarURL)) { state in
                     if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
+                        image.resizable().scaledToFill()
                     } else {
                         Circle().fill(MobileColors.cardBackground)
                     }
@@ -372,7 +382,7 @@ struct PhoneDetailView: View {
                                 // No real backdrop → the URL falls back to the
                                 // portrait poster; blur + darken it so it reads
                                 // as an ambient backdrop, not a sliced strip.
-                                image.resizable().aspectRatio(contentMode: .fill)
+                                image.resizable().scaledToFill()
                                     .blur(radius: hasRealBackdrop ? 0 : 32)
                                     .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
                             } else {
@@ -430,7 +440,7 @@ struct PhoneDetailView: View {
             if !isYouTubeChannelEpisode, let seriesId = item.seriesId, let logoURL = logoImageURL(for: seriesId) {
                 LazyImage(request: imageRequest(for: logoURL)) { state in
                     if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 56)
+                        image.resizable().scaledToFit().frame(maxHeight: 56)
                     } else if state.error != nil, let seriesName = item.seriesName {
                         Text(seriesName)
                             .font(MobileTypography.caption)
@@ -444,7 +454,7 @@ struct PhoneDetailView: View {
                 HStack(spacing: 8) {
                     LazyImage(request: imageRequest(for: seriesAvatarURL(for: seriesId))) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } else {
                             Circle().fill(MobileColors.cardBackground)
                         }
@@ -478,7 +488,7 @@ struct PhoneDetailView: View {
                 .overlay(alignment: .leading) {
                     LazyImage(request: imageRequest(for: logoURL)) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fit)
+                            image.resizable().scaledToFit()
                         } else if state.error != nil {
                             seriesTitleText
                         }
@@ -634,8 +644,7 @@ struct PhoneDetailView: View {
                 if let rating = communityRating, rating > 0 {
                     HStack(spacing: 4) {
                         Image("TMDBLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .resizable().scaledToFit()
                             .frame(height: 16)
                         Text(String(format: "%.1f", rating))
                             .font(.system(size: 14, weight: .bold))
@@ -680,8 +689,7 @@ struct PhoneDetailView: View {
         if let logoName = audioCodecLogoName(codec) {
             HStack(spacing: 4) {
                 Image(logoName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .resizable().scaledToFit()
                     .frame(height: 10)
                 Text(formatChannels(channels))
                     .font(.system(size: 11, weight: .bold))
@@ -756,7 +764,7 @@ struct PhoneDetailView: View {
         // when tight and looks identical when it fits.
         ScrollView(.horizontal, showsIndicators: false) {
             Group {
-                if isSeries {
+                if isSeries || isSeason {
                     seriesActionButtons
                 } else if isEpisode {
                     episodeActionButtons
@@ -1083,8 +1091,7 @@ struct PhoneDetailView: View {
                             LazyImage(request: imageRequest(for: episodeThumbnailURL(episode))) { state in
                                 if let image = state.image {
                                     image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
+                                        .resizable().scaledToFill()
                                 } else {
                                     Rectangle().fill(MobileColors.cardBackground)
                                 }
@@ -1177,13 +1184,15 @@ struct PhoneDetailView: View {
     private func loadContent() async {
         if isSeries {
             await loadSeriesContent()
+        } else if isSeason {
+            await loadSeasonContent()
         } else if isEpisode {
             await loadEpisodeContent()
         }
 
         guard NetworkMonitor.shared.isConnected else { return }
 
-        if !isSeries {
+        if !isSeries && !isSeason {
             await loadMediaInfo()
         }
 
@@ -1208,9 +1217,15 @@ struct PhoneDetailView: View {
         }
         do {
             seasons = try await JellyfinClient.shared.getSeasons(seriesId: item.id)
-            await findNextEpisodeToPlay()
+            let requestedSeason = initialSeasonID.flatMap { seasonID in
+                seasons.first { $0.id == seasonID }
+            }
+            await findNextEpisodeToPlay(preferredSeasonID: requestedSeason?.id)
 
-            if let nextEp = nextEpisodeToPlay, let seasonId = nextEp.seasonId {
+            if let requestedSeason {
+                selectedSeason = requestedSeason
+                await loadEpisodesForSeason(seriesId: item.id, season: requestedSeason)
+            } else if let nextEp = nextEpisodeToPlay, let seasonId = nextEp.seasonId {
                 selectedSeason = seasons.first { $0.id == seasonId }
                 if let season = selectedSeason {
                     await loadEpisodesForSeason(seriesId: item.id, season: season)
@@ -1222,6 +1237,20 @@ struct PhoneDetailView: View {
         } catch {
             await loadOfflineSeriesContent()
         }
+    }
+
+    private func loadSeasonContent() async {
+        guard let seriesID = item.seriesId ?? item.parentId else { return }
+
+        let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
+        seriesCommunityRating = series?.communityRating
+        seriesCriticRating = series?.criticRating
+        seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
+
+        let selected = seasons.first { $0.id == item.id } ?? item
+        selectedSeason = selected
+        await loadEpisodesForSeason(seriesId: seriesID, season: selected)
+        await findNextEpisodeToPlay(preferredSeasonID: selected.id)
     }
 
     private func loadOfflineSeriesContent() async {
@@ -1299,15 +1328,25 @@ struct PhoneDetailView: View {
         isLoadingEpisodes = false
     }
 
-    private func findNextEpisodeToPlay() async {
+    private func findNextEpisodeToPlay(preferredSeasonID: String? = nil) async {
+        nextEpisodeToPlay = nil
         do {
             let nextUpItems = try await JellyfinClient.shared.getNextUp(limit: 50)
-            if let next = nextUpItems.first(where: { $0.seriesId == item.id }) {
+            if let next = nextUpItems.first(where: {
+                $0.seriesId == contentSeriesId
+                    && (preferredSeasonID == nil || $0.seasonId == preferredSeasonID)
+            }) {
                 nextEpisodeToPlay = next
                 return
             }
-            for season in seasons {
-                let eps = try await JellyfinClient.shared.getEpisodes(seriesId: item.id, seasonId: season.id)
+            let seasonsToCheck = preferredSeasonID
+                .flatMap { seasonID in seasons.filter { $0.id == seasonID } }
+                ?? seasons
+            for season in seasonsToCheck {
+                let eps = try await JellyfinClient.shared.getEpisodes(
+                    seriesId: contentSeriesId,
+                    seasonId: season.id
+                )
                 if let firstUnwatched = eps.first(where: { !($0.userData?.played ?? false) }) {
                     nextEpisodeToPlay = firstUnwatched
                     return
@@ -1322,7 +1361,7 @@ struct PhoneDetailView: View {
         guard let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) else { return }
         isWatched = freshItem.userData?.played ?? false
         hasProgress = freshItem.progressPercent > 0
-        if isSeries {
+        if isSeries || isSeason {
             await findNextEpisodeToPlay()
         }
     }
@@ -1447,13 +1486,25 @@ struct AdaptiveDetailView: View {
     // Keep the existing adaptive entry point compatible with unscoped detail views.
     // swiftlint:disable:next implicit_optional_initialization
     var serverID: String? = nil
+    // swiftlint:disable:next implicit_optional_initialization
+    var initialSeasonID: String? = nil
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         if sizeClass == .compact {
-            PhoneDetailView(item: item, libraryName: libraryName, serverID: serverID)
+            PhoneDetailView(
+                item: item,
+                libraryName: libraryName,
+                serverID: serverID,
+                initialSeasonID: initialSeasonID
+            )
         } else {
-            MobileDetailView(item: item, libraryName: libraryName, serverID: serverID)
+            MobileDetailView(
+                item: item,
+                libraryName: libraryName,
+                serverID: serverID,
+                initialSeasonID: initialSeasonID
+            )
         }
     }
 }

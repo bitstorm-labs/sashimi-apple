@@ -77,8 +77,7 @@ struct PersonDetailView: View {
             LazyImage(request: SashimiImagePipeline.request(url: imageURL, serverID: originatingServerID)) { state in
                 if let image = state.image {
                     image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .resizable().scaledToFill()
                 } else {
                     personPlaceholder
                 }

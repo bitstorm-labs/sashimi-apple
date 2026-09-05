@@ -281,8 +281,7 @@ struct OfflineHomeView: View {
     private func localImage(itemId: String, serverID: String?, fileNames: [String]) -> some View {
         if let uiImage = loadLocalImage(itemId: itemId, serverID: serverID, fileNames: fileNames) {
             Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+                .resizable().scaledToFill()
         } else {
             Rectangle()
                 .fill(MobileColors.cardBackground)

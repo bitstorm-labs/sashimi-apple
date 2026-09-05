@@ -190,8 +190,7 @@ struct MobileContinueWatchingCard: View {
                 LazyImage(url: url) { state in
                     if let image = state.image {
                         image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .resizable().scaledToFill()
                     } else if state.error != nil {
                         placeholderImage
                     } else {
