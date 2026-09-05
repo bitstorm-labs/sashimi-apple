@@ -1597,11 +1597,11 @@ final class PlayerViewModel: ObservableObject {
         stallWatchdogTask = nil
     }
 
-    func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+    @discardableResult
+    func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
         preparePendingStoppedReportIfNeeded()
         if let teardownTask {
-            await teardownTask.value
-            return
+            return teardownTask
         }
 
         let task = Task { @MainActor [weak self] in
@@ -1609,6 +1609,11 @@ final class PlayerViewModel: ObservableObject {
             await self.performStop(reason: reason)
         }
         teardownTask = task
+        return task
+    }
+
+    func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+        let task = beginStop(reason: reason)
         await task.value
         teardownTask = nil
     }
