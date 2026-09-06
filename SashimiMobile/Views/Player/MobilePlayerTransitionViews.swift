@@ -87,7 +87,7 @@ struct MobileEpisodeTransportControls: View {
                     action: onNext
                 )
             }
-            .padding(.horizontal, 18)
+            .frame(width: min(proxy.size.width - 36, 360), alignment: .center)
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
         }
         .ignoresSafeArea()

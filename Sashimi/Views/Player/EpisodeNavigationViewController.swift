@@ -33,7 +33,9 @@ final class EpisodeNavigationViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         controls.axis = .horizontal
-        controls.spacing = 18
+        // Leave the native tvOS skip/pause/skip cluster between the opt-in
+        // episode controls so every player uses the same transport-row shape.
+        controls.spacing = 150
         controls.alignment = .center
         controls.addArrangedSubview(previousButton)
         controls.addArrangedSubview(nextButton)
