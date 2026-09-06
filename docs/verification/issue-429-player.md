@@ -4,7 +4,9 @@ The player was exercised against the authenticated Jellyfin library on the
 three Apple-platform simulators created for this issue. The captures were
 taken before the review-gated PR step and are revisioned by the
 simulator-screenshots workflow. Revision 11 is the authoritative exact-HEAD
-capture set for this worktree.
+capture set for this worktree. It was captured from the earlier
+implementation commit `2b15913`; later commits only tightened the transport
+spacing and refreshed the tvOS layout after visual review.
 
 The live-series scenario used Silo, season 3 episode 4, “Whatever You Do,
 Don't Go Home” (47 min). Its player rendered actual video frames, episode
@@ -24,7 +26,7 @@ episode 4.
 The complete revision-11 manifest and checksums are in
 `/Users/pratik/Desktop/Sashimi-429-Screenshots/11/manifest.json` and
 `/Users/pratik/Desktop/Sashimi-429-Screenshots/11/checksums.sha256`. The
-manifest records the exact worktree `HEAD` used for the capture.
+manifest records the source commit used for the capture.
 
 The episode was opened with `sashimi://play/<live-episode-id>` after
 installing the updated Debug iOS and tvOS builds. Playback was muted at the
