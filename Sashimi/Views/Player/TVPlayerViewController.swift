@@ -63,10 +63,14 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.updateOverlay()
 
         if let navigationVC = context.coordinator.navigationVC {
-            let shouldShow = viewModel.transitionState.isEpisodeNavigationAvailable
+            let hasEpisodeNavigation = viewModel.transitionState.isEpisodeNavigationAvailable
+            let shouldShow = hasEpisodeNavigation && PlaybackSettings.shared.showEpisodeNavigationControls
             let wasHidden = navigationVC.view.isHidden
-            navigationVC.update(state: viewModel.transitionState)
-            navigationVC.view.isHidden = !shouldShow
+            navigationVC.update(
+                state: viewModel.transitionState,
+                showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls
+            )
+            navigationVC.view.isHidden = viewModel.transitionState.endCard == nil && !shouldShow
             if wasHidden != navigationVC.view.isHidden {
                 container.setNeedsFocusUpdate()
                 container.updateFocusIfNeeded()
@@ -184,7 +188,10 @@ struct TVPlayerView: UIViewControllerRepresentable {
         ])
         container.navigationVC = navigationVC
         context.coordinator.navigationVC = navigationVC
-        navigationVC.update(state: viewModel.transitionState)
+        navigationVC.update(
+            state: viewModel.transitionState,
+            showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls
+        )
     }
 
     // MARK: - Transport Bar Menus

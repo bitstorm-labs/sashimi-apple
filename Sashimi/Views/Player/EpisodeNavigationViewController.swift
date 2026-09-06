@@ -8,8 +8,8 @@ final class EpisodeNavigationViewController: UIViewController {
     var onReplay: (() -> Void)?
     var onDone: (() -> Void)?
 
-    private let previousButton = EpisodeNavigationViewController.makeButton(title: "Previous", imageName: "backward.fill")
-    private let nextButton = EpisodeNavigationViewController.makeButton(title: "Next", imageName: "forward.fill")
+    private let previousButton = EpisodeNavigationViewController.makeTransportButton(title: "Previous Episode", imageName: "backward.fill")
+    private let nextButton = EpisodeNavigationViewController.makeTransportButton(title: "Next Episode", imageName: "forward.fill")
     private let playNextButton = EpisodeNavigationViewController.makeButton(title: "Play Next", imageName: "forward.fill")
     private let replayButton = EpisodeNavigationViewController.makeButton(title: "Replay", imageName: "gobackward")
     private let doneButton = EpisodeNavigationViewController.makeButton(title: "Done", imageName: "checkmark")
@@ -53,7 +53,7 @@ final class EpisodeNavigationViewController: UIViewController {
         controls.translatesAutoresizingMaskIntoConstraints = false
         endCard.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            controls.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 80),
+            controls.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             controls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -70),
             endCard.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             endCard.centerYAnchor.constraint(equalTo: view.centerYAnchor)
@@ -66,14 +66,14 @@ final class EpisodeNavigationViewController: UIViewController {
         doneButton.addTarget(self, action: #selector(doneTapped), for: .primaryActionTriggered)
     }
 
-    func update(state: PlayerTransitionState) {
+    func update(state: PlayerTransitionState, showEpisodeNavigationControls: Bool) {
         guard isViewLoaded else { return }
         previousButton.isEnabled = state.canPlayPrevious
         nextButton.isEnabled = state.canPlayNext
         playNextButton.isEnabled = state.canPlayNext
         playNextButton.isHidden = !state.canPlayNext
         endCard.isHidden = state.endCard == nil
-        controls.isHidden = state.endCard != nil
+        controls.isHidden = state.endCard != nil || !showEpisodeNavigationControls
         switch state.endCard {
         case .nextEpisode:
             messageLabel.text = "Episode complete\nReady for the next episode"
@@ -104,6 +104,18 @@ final class EpisodeNavigationViewController: UIViewController {
         configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.7)
         configuration.baseForegroundColor = .white
         return UIButton(configuration: configuration)
+    }
+
+    private static func makeTransportButton(title: String, imageName: String) -> UIButton {
+        var configuration = UIButton.Configuration.filled()
+        configuration.image = UIImage(systemName: imageName)
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+        configuration.cornerStyle = .capsule
+        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.7)
+        configuration.baseForegroundColor = .white
+        let button = UIButton(configuration: configuration)
+        button.accessibilityLabel = title
+        return button
     }
 
     @objc private func previousTapped() { onPrevious?() }

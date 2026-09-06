@@ -44,6 +44,7 @@ struct MobilePlayerView: View {
     var onPlaybackReady: (() -> Void)?
     var onPlaybackFailed: (() -> Void)?
     @StateObject private var viewModel: PlayerViewModel
+    @ObservedObject private var playbackSettings = PlaybackSettings.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var showCustomOverlay = true
@@ -186,12 +187,21 @@ struct MobilePlayerView: View {
         }
         .onChange(of: viewModel.transitionState) { _, state in
             // Episode navigation is an action bar, not transient transport
-            // chrome. Keep it available once the server resolves the current
-            // episode so a tap that reveals native AVPlayer controls cannot
-            // strand the user without Previous/Next.
-            guard state.endCard == nil, state.isEpisodeNavigationAvailable else { return }
+            // chrome when the user opts into persistent controls. Otherwise
+            // preserve the original transient overlay behavior.
+            guard playbackSettings.showEpisodeNavigationControls,
+                  state.endCard == nil,
+                  state.isEpisodeNavigationAvailable else { return }
             showCustomOverlay = true
             scheduleAutoHide()
+        }
+        .onChange(of: playbackSettings.showEpisodeNavigationControls) { _, enabled in
+            if enabled, viewModel.transitionState.isEpisodeNavigationAvailable {
+                showCustomOverlay = true
+                scheduleAutoHide()
+            } else {
+                scheduleAutoHide()
+            }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
@@ -215,13 +225,21 @@ struct MobilePlayerView: View {
 
     private var customOverlay: some View {
         ZStack {
-            // Tap area to toggle our overlay (passes through to AVPlayerViewController when not hit)
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    toggleOverlay()
-                }
-                .allowsHitTesting(showCustomOverlay)
+                // Tap area to toggle our overlay (passes through to AVPlayerViewController when not hit)
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        toggleOverlay()
+                    }
+                    // Episode navigation is persistent chrome. Let taps in the
+                    // video area reach AVPlayerViewController so its native
+                    // transport controls can appear without hiding the
+                    // Previous/Next action bar.
+                    .allowsHitTesting(
+                        showCustomOverlay &&
+                        !(playbackSettings.showEpisodeNavigationControls &&
+                          viewModel.transitionState.isEpisodeNavigationAvailable)
+                    )
 
             if showCustomOverlay {
                 // Top gradient scrim
@@ -241,6 +259,15 @@ struct MobilePlayerView: View {
                     Spacer()
                 }
                 .transition(.opacity)
+            }
+
+            if playbackSettings.showEpisodeNavigationControls,
+               viewModel.transitionState.isEpisodeNavigationAvailable {
+                MobileEpisodeTransportControls(
+                    state: viewModel.transitionState,
+                    onPrevious: { Task { await viewModel.playPreviousEpisode() } },
+                    onNext: { Task { await viewModel.playNextEpisode() } }
+                )
             }
 
             // Skip button (always visible when active)
@@ -282,7 +309,8 @@ struct MobilePlayerView: View {
             }
 
             HStack(spacing: 10) {
-                if viewModel.transitionState.isEpisodeNavigationAvailable {
+                if !playbackSettings.showEpisodeNavigationControls,
+                   viewModel.transitionState.isEpisodeNavigationAvailable {
                     MobileEpisodeNavigationControls(
                         state: viewModel.transitionState,
                         onPrevious: { Task { await viewModel.playPreviousEpisode() } },
@@ -422,7 +450,7 @@ struct MobilePlayerView: View {
 
     private func scheduleAutoHide() {
         hideTask?.cancel()
-        guard showCustomOverlay, !viewModel.transitionState.isEpisodeNavigationAvailable else { return }
+        guard showCustomOverlay else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
             if !Task.isCancelled {
