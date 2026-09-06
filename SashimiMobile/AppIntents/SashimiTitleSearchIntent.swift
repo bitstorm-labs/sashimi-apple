@@ -50,8 +50,8 @@ struct SashimiTitleSearchIntent: AppIntent {
     // result assembly together so every Siri path returns the same cards.
     // Explicit open and playback branches must remain ordered before the
     // ordinary result path so Siri never receives both actions accidentally.
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
-    func perform() async throws -> some ReturnsValue<[SashimiMediaEntity]> & ShowsSnippetIntent & ProvidesDialog {
+    // swiftlint:disable:next function_body_length
+    func perform() async throws -> some ReturnsValue<[SashimiMediaEntity]> & OpensIntent & ShowsSnippetIntent & ProvidesDialog {
         let query = SashimiMediaSearchQuery.normalizedTerm(searchTerm)
         guard !query.isEmpty else {
             throw SashimiSiriIntentError.emptySearchQuery
@@ -105,26 +105,19 @@ struct SashimiTitleSearchIntent: AppIntent {
             }
 
             let dialog = SashimiPlaybackDialog.make(for: playbackRequest, entity: entity)
-            try await continueInForegroundForPlayback(dialog: dialog)
 
             if case .season = playbackRequest.selection {
-                await MainActor.run {
-                    SashimiIntentCoordinator.shared.requestOpen(entity: entity)
-                }
                 return .result(
                     value: [],
+                    opensIntent: SashimiSiriIntentDependencies.openIntentFactory(entity),
                     dialog: dialog,
                     snippetIntent: EmptySnippetIntent()
                 )
             }
 
+            try await continueInForegroundForPlayback(dialog: dialog)
             await MainActor.run {
-                switch playbackRequest.selection {
-                case .season:
-                    SashimiIntentCoordinator.shared.requestOpen(entity: entity)
-                default:
-                    SashimiIntentCoordinator.shared.requestPlay(entity: entity)
-                }
+                SashimiIntentCoordinator.shared.requestPlay(entity: entity)
             }
             return .result(
                 value: [entity],
@@ -146,13 +139,9 @@ struct SashimiTitleSearchIntent: AppIntent {
             let resolution = await SashimiMediaPlaybackResolver.resolve(request: shorthandRequest)
             if let entity = resolution.matches.first {
                 let dialog = SashimiPlaybackDialog.make(for: shorthandRequest, entity: entity)
-                try await continueInForegroundForPlayback(dialog: dialog)
-
-                await MainActor.run {
-                    SashimiIntentCoordinator.shared.requestOpen(entity: entity)
-                }
                 return .result(
                     value: [],
+                    opensIntent: SashimiSiriIntentDependencies.openIntentFactory(entity),
                     dialog: dialog,
                     snippetIntent: EmptySnippetIntent()
                 )
@@ -174,12 +163,9 @@ struct SashimiTitleSearchIntent: AppIntent {
                 full: "Opening \(entity.title) in Sashimi.",
                 supporting: "Opening the title page."
             )
-            try await continueInForegroundForPlayback(dialog: dialog)
-            await MainActor.run {
-                SashimiIntentCoordinator.shared.requestOpen(entity: entity)
-            }
             return .result(
                 value: [],
+                opensIntent: SashimiSiriIntentDependencies.openIntentFactory(entity),
                 dialog: dialog,
                 snippetIntent: EmptySnippetIntent()
             )

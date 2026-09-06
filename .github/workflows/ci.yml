@@ -153,6 +153,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run SwiftLint
+        env:
+          # Pinned deliberately. `brew install swiftlint` installs whatever is
+          # current, so an upstream release can fail CI with no code change --
+          # which is exactly what happened when 0.65.x reached Homebrew and its
+          # new legacy_swiftui_aspect_ratio rule flagged 18 pre-existing files
+          # under --strict. Bump this on purpose, with the fixes, not by accident.
+          SWIFTLINT_VERSION: "0.63.0"
         run: |
-          brew install swiftlint
-          swiftlint lint --strict --reporter github-actions-logging
+          curl -fsSL -o /tmp/swiftlint.zip \
+            "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip"
+          unzip -qo /tmp/swiftlint.zip -d /tmp/swiftlint
+          /tmp/swiftlint/swiftlint version
+          /tmp/swiftlint/swiftlint lint --strict --reporter github-actions-logging
