@@ -99,6 +99,95 @@ final class SashimiSiriIntentIntegrationTests: XCTestCase {
         SashimiIntentCoordinator.shared.consume(.open(request))
     }
 
+    @MainActor
+    func testTypedOpenPhraseLeavesNavigationToOpenIntent() async throws {
+        try await requireLiveSession()
+        let openIntent = try await performOpenPhrase("Open Ghosts in Sashimi")
+
+        XCTAssertNil(
+            SashimiIntentCoordinator.shared.route,
+            "The search intent should return an OpenIntent instead of routing directly"
+        )
+        XCTAssertTrue(openIntent.target.title.localizedCaseInsensitiveContains("Ghosts"))
+
+        _ = try await openIntent.perform()
+        consumeOpenRoute(for: openIntent.target)
+    }
+
+    @MainActor
+    func testTypedSeasonPhraseLeavesNavigationToOpenIntent() async throws {
+        try await requireLiveSession()
+        let openIntent = try await performOpenPhrase("Open season 3 of Ghosts in Sashimi")
+
+        XCTAssertNil(
+            SashimiIntentCoordinator.shared.route,
+            "The season search intent should return an OpenIntent instead of routing directly"
+        )
+        XCTAssertTrue(openIntent.target.title.localizedCaseInsensitiveContains("Season 3"))
+
+        _ = try await openIntent.perform()
+        consumeOpenRoute(for: openIntent.target)
+    }
+
+    @MainActor
+    func testCardOpenIntentRoutesTheResolvedTitle() async throws {
+        try await requireLiveSession()
+        clearPendingRoute()
+
+        var searchIntent = SashimiTitleSearchIntent()
+        searchIntent.searchTerm = "Ghosts"
+        let searchResult = try await searchIntent.perform()
+        let entity = try XCTUnwrap(
+            searchResult.value?.first(where: { $0.title.localizedCaseInsensitiveContains("Ghosts") })
+        )
+
+        _ = try await SashimiOpenMediaIntent(target: entity).perform()
+
+        guard case .open(let request) = SashimiIntentCoordinator.shared.route else {
+            return XCTFail("The card's OpenIntent did not create an open route")
+        }
+        XCTAssertEqual(request.entity, entity)
+        SashimiIntentCoordinator.shared.consume(.open(request))
+    }
+
+    @MainActor
+    private func performOpenPhrase(_ phrase: String) async throws -> SashimiOpenMediaIntent {
+        clearPendingRoute()
+        let recorder = OpenIntentRecorder()
+
+        let result = try await SashimiSiriIntentDependencies.$openIntentFactory.withValue(
+            { entity in recorder.makeIntent(for: entity) },
+            operation: {
+                var intent = SashimiInAppSearchIntent()
+                intent.criteria = StringSearchCriteria(term: phrase)
+                try await intent.perform()
+            }
+        )
+        assertOpenHandoff(result)
+        return try XCTUnwrap(recorder.intent)
+    }
+
+    @MainActor
+    private func consumeOpenRoute(for entity: SashimiMediaEntity) {
+        guard case .open(let request) = SashimiIntentCoordinator.shared.route else {
+            XCTFail("The returned OpenIntent did not create an open route")
+            return
+        }
+        XCTAssertEqual(request.entity, entity)
+        SashimiIntentCoordinator.shared.consume(.open(request))
+    }
+
+    private func assertOpenHandoff<Result: OpensIntent>(_ result: Result) {
+        XCTAssertTrue(result is any OpensIntent)
+    }
+
+    @MainActor
+    private func clearPendingRoute() {
+        if let route = SashimiIntentCoordinator.shared.route {
+            SashimiIntentCoordinator.shared.consume(route)
+        }
+    }
+
     private func requireLiveSession() async throws {
         #if !SASHIMI_LIVE_INT_TESTS
         let processInfo = ProcessInfo.processInfo
@@ -149,6 +238,16 @@ final class SashimiSiriIntentIntegrationTests: XCTestCase {
         }
 
         throw XCTSkip("No live Continue Watching item is available on Duoro")
+    }
+}
+
+private final class OpenIntentRecorder: @unchecked Sendable {
+    private(set) var intent: SashimiOpenMediaIntent?
+
+    func makeIntent(for entity: SashimiMediaEntity) -> SashimiOpenMediaIntent {
+        let intent = SashimiOpenMediaIntent(target: entity)
+        self.intent = intent
+        return intent
     }
 }
 #endif

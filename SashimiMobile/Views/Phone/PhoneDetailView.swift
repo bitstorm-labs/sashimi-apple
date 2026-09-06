@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import NukeUI
 
 // swiftlint:disable file_length type_body_length
@@ -1480,6 +1481,15 @@ struct PhoneDetailView: View {
 
 // MARK: - Adaptive Detail View (routes iPhone vs iPad)
 
+enum AdaptiveDetailLayout: Equatable {
+    case phone
+    case pad
+
+    static func forDevice(idiom: UIUserInterfaceIdiom) -> Self {
+        idiom == .pad ? .pad : .phone
+    }
+}
+
 struct AdaptiveDetailView: View {
     let item: BaseItemDto
     var libraryName: String?
@@ -1488,23 +1498,77 @@ struct AdaptiveDetailView: View {
     var serverID: String? = nil
     // swiftlint:disable:next implicit_optional_initialization
     var initialSeasonID: String? = nil
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    private let deviceIdiom: UIUserInterfaceIdiom?
+
+    init(
+        item: BaseItemDto,
+        libraryName: String? = nil,
+        serverID: String? = nil,
+        initialSeasonID: String? = nil,
+        deviceIdiom: UIUserInterfaceIdiom? = nil
+    ) {
+        self.item = item
+        self.libraryName = libraryName
+        self.serverID = serverID
+        self.initialSeasonID = initialSeasonID
+        self.deviceIdiom = deviceIdiom
+    }
+
+    // A phone's horizontal size class changes when it rotates, but its device
+    // idiom does not. Keep the detail view type stable so a presented player's
+    // fullScreenCover state survives portrait/landscape changes.
+    private var layout: AdaptiveDetailLayout {
+        AdaptiveDetailLayout.forDevice(idiom: deviceIdiom ?? UIDevice.current.userInterfaceIdiom)
+    }
+
+    private var detailContent: AdaptiveDetailContent {
+        switch layout {
+        case .phone:
+            return .phone(
+                PhoneDetailView(
+                    item: item,
+                    libraryName: libraryName,
+                    serverID: serverID,
+                    initialSeasonID: initialSeasonID
+                )
+            )
+        case .pad:
+            return .pad(
+                MobileDetailView(
+                    item: item,
+                    libraryName: libraryName,
+                    serverID: serverID,
+                    initialSeasonID: initialSeasonID
+                )
+            )
+        }
+    }
 
     var body: some View {
-        if sizeClass == .compact {
-            PhoneDetailView(
-                item: item,
-                libraryName: libraryName,
-                serverID: serverID,
-                initialSeasonID: initialSeasonID
-            )
-        } else {
-            MobileDetailView(
-                item: item,
-                libraryName: libraryName,
-                serverID: serverID,
-                initialSeasonID: initialSeasonID
-            )
+        detailContent
+    }
+}
+
+enum AdaptiveDetailContent: View {
+    case phone(PhoneDetailView)
+    case pad(MobileDetailView)
+
+    var layout: AdaptiveDetailLayout {
+        switch self {
+        case .phone:
+            return .phone
+        case .pad:
+            return .pad
+        }
+    }
+
+    @ViewBuilder
+    var body: some View {
+        switch self {
+        case .phone(let view):
+            view
+        case .pad(let view):
+            view
         }
     }
 }
