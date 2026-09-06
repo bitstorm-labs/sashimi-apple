@@ -46,20 +46,67 @@ struct MobileEpisodeNavigationControls: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: onPrevious) {
-                Label("Previous Episode", systemImage: "backward.fill")
-                    .labelStyle(.iconOnly)
-            }
-            .disabled(!state.canPlayPrevious)
-            .accessibilityLabel("Previous Episode")
-
-            Button(action: onNext) {
-                Label("Next Episode", systemImage: "forward.fill")
-                    .labelStyle(.iconOnly)
-            }
-            .disabled(!state.canPlayNext)
-            .accessibilityLabel("Next Episode")
+            MobileEpisodeNavigationButton(
+                title: "Previous Episode",
+                systemImage: "backward.fill",
+                isEnabled: state.canPlayPrevious,
+                action: onPrevious
+            )
+            MobileEpisodeNavigationButton(
+                title: "Next Episode",
+                systemImage: "forward.fill",
+                isEnabled: state.canPlayNext,
+                action: onNext
+            )
         }
+    }
+}
+
+/// Places episode navigation beside AVPlayer's native skip/pause/skip cluster.
+/// The native controls have no public insertion point on iOS, so the opt-in
+/// controls mirror their transport-row placement at the edges of that cluster.
+struct MobileEpisodeTransportControls: View {
+    let state: PlayerTransitionState
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            HStack {
+                MobileEpisodeNavigationButton(
+                    title: "Previous Episode",
+                    systemImage: "backward.fill",
+                    isEnabled: state.canPlayPrevious,
+                    action: onPrevious
+                )
+                Spacer(minLength: 0)
+                MobileEpisodeNavigationButton(
+                    title: "Next Episode",
+                    systemImage: "forward.fill",
+                    isEnabled: state.canPlayNext,
+                    action: onNext
+                )
+            }
+            .padding(.horizontal, 18)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct MobileEpisodeNavigationButton: View {
+    let title: String
+    let systemImage: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+        }
+        .disabled(!isEnabled)
+        .accessibilityLabel(title)
         .font(.system(size: 16, weight: .semibold))
         .foregroundStyle(.white)
         .buttonStyle(.bordered)
