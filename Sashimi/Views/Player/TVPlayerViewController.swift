@@ -15,7 +15,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         let playerVC = AVPlayerViewController()
         playerVC.player = player
-        playerVC.showsPlaybackControls = true
+        playerVC.showsPlaybackControls = !PlaybackSettings.shared.showEpisodeNavigationControls
         playerVC.delegate = context.coordinator
 
         // Subtitles are rendered by our own overlay and selected through the
@@ -65,10 +65,12 @@ struct TVPlayerView: UIViewControllerRepresentable {
         if let navigationVC = context.coordinator.navigationVC {
             let hasEpisodeNavigation = viewModel.transitionState.isEpisodeNavigationAvailable
             let shouldShow = hasEpisodeNavigation && PlaybackSettings.shared.showEpisodeNavigationControls
+            playerVC.showsPlaybackControls = !PlaybackSettings.shared.showEpisodeNavigationControls
             let wasHidden = navigationVC.view.isHidden
             navigationVC.update(
                 state: viewModel.transitionState,
-                showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls
+                showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls,
+                player: player
             )
             navigationVC.view.isHidden = viewModel.transitionState.endCard == nil && !shouldShow
             if wasHidden != navigationVC.view.isHidden {
@@ -188,10 +190,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         ])
         container.navigationVC = navigationVC
         context.coordinator.navigationVC = navigationVC
-        navigationVC.update(
-            state: viewModel.transitionState,
-            showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls
-        )
+        navigationVC.update(state: viewModel.transitionState, showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls, player: player)
     }
 
     // MARK: - Transport Bar Menus
