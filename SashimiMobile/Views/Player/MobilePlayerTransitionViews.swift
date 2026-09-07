@@ -107,10 +107,17 @@ private struct MobileEpisodeNavigationButton: View {
         }
         .disabled(!isEnabled)
         .accessibilityLabel(title)
-        .font(.system(size: 16, weight: .semibold))
+        .font(.system(size: 22, weight: .semibold))
         .foregroundStyle(.white)
-        .buttonStyle(.bordered)
-        .tint(.white.opacity(0.8))
+        .frame(width: 64, height: 64)
+        .background(Color.black.opacity(0.58), in: Circle())
+        .overlay {
+            Circle()
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .contentShape(Circle())
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
     }
 }
 

@@ -111,11 +111,14 @@ final class EpisodeNavigationViewController: UIViewController {
     private static func makeTransportButton(title: String, imageName: String) -> UIButton {
         var configuration = UIButton.Configuration.filled()
         configuration.image = UIImage(systemName: imageName)
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+        configuration.contentInsets = .zero
         configuration.cornerStyle = .capsule
-        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.7)
+        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.58)
         configuration.baseForegroundColor = .white
         let button = UIButton(configuration: configuration)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 64).isActive = true
         button.accessibilityLabel = title
         return button
     }
