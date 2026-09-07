@@ -1633,8 +1633,15 @@ final class PlayerViewModel: ObservableObject {
 
         player = AVPlayer(playerItem: playerItem)
         player?.appliesMediaSelectionCriteriaAutomatically = false
+#if targetEnvironment(simulator)
+        // Simulator playback must never leak audio to the host. Apply this
+        // before any ready-to-play callback can reach logAndPlay().
+        player?.volume = 0
+        player?.isMuted = true
+#else
         player?.volume = 1.0
         player?.isMuted = false
+#endif
         diag(.playerCreated, [
             PlayerDiagnostics.field("tracksVersion", tracksVersion)
         ])

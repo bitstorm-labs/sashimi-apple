@@ -13,11 +13,12 @@ extension Notification.Name {
 
 private struct PlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
+    let showsPlaybackControls: Bool
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = showsPlaybackControls
         controller.allowsPictureInPicturePlayback = true
         controller.entersFullScreenWhenPlaybackBegins = false
         // Tint the native transport controls with the brand accent (purple)
@@ -29,6 +30,7 @@ private struct PlayerViewController: UIViewControllerRepresentable {
         if controller.player !== player {
             controller.player = player
         }
+        controller.showsPlaybackControls = showsPlaybackControls
     }
 }
 
@@ -83,7 +85,10 @@ struct MobilePlayerView: View {
             Color.black.ignoresSafeArea()
 
             if let player = viewModel.player {
-                PlayerViewController(player: player)
+                PlayerViewController(
+                    player: player,
+                    showsPlaybackControls: !playbackSettings.showEpisodeNavigationControls
+                )
                     .ignoresSafeArea()
 
                 // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
@@ -231,14 +236,12 @@ struct MobilePlayerView: View {
                     .onTapGesture {
                         toggleOverlay()
                     }
-                    // Episode navigation is persistent chrome. Let taps in the
-                    // video area reach AVPlayerViewController so its native
-                    // transport controls can appear without hiding the
-                    // Previous/Next action bar.
+                    // In opt-in mode the app owns the complete transport row;
+                    // otherwise taps reach AVPlayerViewController's native
+                    // controls unchanged.
                     .allowsHitTesting(
                         showCustomOverlay &&
-                        !(playbackSettings.showEpisodeNavigationControls &&
-                          viewModel.transitionState.isEpisodeNavigationAvailable)
+                        !playbackSettings.showEpisodeNavigationControls
                     )
 
             if showCustomOverlay {
@@ -265,8 +268,15 @@ struct MobilePlayerView: View {
                viewModel.transitionState.isEpisodeNavigationAvailable {
                 MobileEpisodeTransportControls(
                     state: viewModel.transitionState,
+                    player: viewModel.player,
                     onPrevious: { Task { await viewModel.playPreviousEpisode() } },
-                    onNext: { Task { await viewModel.playNextEpisode() } }
+                    onNext: { Task { await viewModel.playNextEpisode() } },
+                    onSkipBackward: { seek(by: -10) },
+                    onPlayPause: {
+                        guard let player = viewModel.player else { return }
+                        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+                    },
+                    onSkipForward: { seek(by: 10) }
                 )
             }
 
@@ -437,6 +447,18 @@ struct MobilePlayerView: View {
             Task { await viewModel.refreshStreamInfo() }
         }
         scheduleAutoHide()
+    }
+
+    private func seek(by seconds: Double) {
+        guard let player = viewModel.player else { return }
+        let current = player.currentTime().seconds
+        guard current.isFinite else { return }
+        let target = max(0, current + seconds)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
     }
 
     private func scheduleAutoHide() {
