@@ -79,6 +79,7 @@ struct MobileEpisodeTransportControls: View {
                     isEnabled: state.canPlayPrevious,
                     action: onPrevious
                 )
+                .offset(x: -12)
                 Spacer(minLength: 0)
                 MobileEpisodeNavigationButton(
                     title: "Next Episode",
@@ -86,6 +87,7 @@ struct MobileEpisodeTransportControls: View {
                     isEnabled: state.canPlayNext,
                     action: onNext
                 )
+                .offset(x: 12)
             }
             .frame(width: min(proxy.size.width, 520), alignment: .center)
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
