@@ -309,15 +309,6 @@ struct MobilePlayerView: View {
             }
 
             HStack(spacing: 10) {
-                if !playbackSettings.showEpisodeNavigationControls,
-                   viewModel.transitionState.isEpisodeNavigationAvailable {
-                    MobileEpisodeNavigationControls(
-                        state: viewModel.transitionState,
-                        onPrevious: { Task { await viewModel.playPreviousEpisode() } },
-                        onNext: { Task { await viewModel.playNextEpisode() } }
-                    )
-                }
-
                 // Stream-info chip (Direct Play / Transcode + bitrate)
                 if let info = viewModel.streamInfo {
                     streamInfoChip(info)

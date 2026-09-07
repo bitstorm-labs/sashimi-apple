@@ -39,32 +39,10 @@ struct MobilePlayerLoadingView: View {
     }
 }
 
-struct MobileEpisodeNavigationControls: View {
-    let state: PlayerTransitionState
-    let onPrevious: () -> Void
-    let onNext: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            MobileEpisodeNavigationButton(
-                title: "Previous Episode",
-                systemImage: "backward.fill",
-                isEnabled: state.canPlayPrevious,
-                action: onPrevious
-            )
-            MobileEpisodeNavigationButton(
-                title: "Next Episode",
-                systemImage: "forward.fill",
-                isEnabled: state.canPlayNext,
-                action: onNext
-            )
-        }
-    }
-}
-
 /// Places episode navigation beside AVPlayer's native skip/pause/skip cluster.
 /// The native controls have no public insertion point on iOS, so the opt-in
-/// controls mirror their transport-row placement at the edges of that cluster.
+/// controls use the same centered transport-row geometry, with enough space
+/// to sit just outside the native skip buttons on both iPhone and iPad.
 struct MobileEpisodeTransportControls: View {
     let state: PlayerTransitionState
     let onPrevious: () -> Void
@@ -72,25 +50,24 @@ struct MobileEpisodeTransportControls: View {
 
     var body: some View {
         GeometryReader { proxy in
-            HStack {
+            let sideOffset = min(max(proxy.size.width * 0.34, 144), 176)
+            ZStack {
                 MobileEpisodeNavigationButton(
                     title: "Previous Episode",
                     systemImage: "backward.fill",
                     isEnabled: state.canPlayPrevious,
                     action: onPrevious
                 )
-                .offset(x: -12)
-                Spacer(minLength: 0)
+                .position(x: proxy.size.width / 2 - sideOffset, y: proxy.size.height / 2)
+
                 MobileEpisodeNavigationButton(
                     title: "Next Episode",
                     systemImage: "forward.fill",
                     isEnabled: state.canPlayNext,
                     action: onNext
                 )
-                .offset(x: 12)
+                .position(x: proxy.size.width / 2 + sideOffset, y: proxy.size.height / 2)
             }
-            .frame(width: min(proxy.size.width, 520), alignment: .center)
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
         }
         .ignoresSafeArea()
     }
