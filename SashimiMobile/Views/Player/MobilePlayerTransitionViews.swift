@@ -87,7 +87,7 @@ struct MobileEpisodeTransportControls: View {
                     action: onNext
                 )
             }
-            .frame(width: min(proxy.size.width - 36, 440), alignment: .center)
+            .frame(width: min(proxy.size.width, 520), alignment: .center)
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
         }
         .ignoresSafeArea()
@@ -110,11 +110,7 @@ private struct MobileEpisodeNavigationButton: View {
         .font(.system(size: 22, weight: .semibold))
         .foregroundStyle(.white)
         .frame(width: 64, height: 64)
-        .background(Color.black.opacity(0.58), in: Circle())
-        .overlay {
-            Circle()
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
+        .background(Color.white.opacity(0.18), in: Circle())
         .contentShape(Circle())
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.45)

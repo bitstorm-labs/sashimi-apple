@@ -113,7 +113,7 @@ final class EpisodeNavigationViewController: UIViewController {
         configuration.image = UIImage(systemName: imageName)
         configuration.contentInsets = .zero
         configuration.cornerStyle = .capsule
-        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.58)
+        configuration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
         configuration.baseForegroundColor = .white
         let button = UIButton(configuration: configuration)
         button.translatesAutoresizingMaskIntoConstraints = false
