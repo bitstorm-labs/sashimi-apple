@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "com.sashimi.app", category: "App")
 @main
 struct SashimiApp: App {
     @StateObject private var sessionManager = SessionManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -48,6 +49,16 @@ struct SashimiApp: App {
             if newPhase != .active {
                 ThemeSongPlayer.shared.appDidBackground()
             }
+            if newPhase == .active {
+                Task { await PlaybackReportDelivery.shared.flush() }
+            }
+            // A player can remain presented while the network comes back. The
+            // scene does not re-enter `.active` in that case, so the path
+            // transition is the retry trigger.
+        }
+        .onChange(of: networkMonitor.isConnected) { _, isConnected in
+            guard isConnected else { return }
+            Task { await PlaybackReportDelivery.shared.flush() }
         }
     }
 }

@@ -106,7 +106,16 @@ struct SashimiIntentPlaybackDestinationView: View {
     var body: some View {
         Group {
             if let item {
-                MobilePlayerView(item: item, serverID: entity.serverID)
+                MobilePlayerView(
+                    item: item,
+                    serverID: entity.serverID,
+                    onPlaybackReady: {
+                        SashimiIntentCoordinator.shared.acknowledgePlaybackReady(for: entity)
+                    },
+                    onPlaybackFailed: {
+                        SashimiIntentCoordinator.shared.acknowledgePlaybackFailure(for: entity)
+                    }
+                )
             } else if let errorMessage {
                 ContentUnavailableView {
                     Label("Unable to Play Title", systemImage: "exclamationmark.triangle")
@@ -129,38 +138,35 @@ struct SashimiIntentPlaybackDestinationView: View {
 
     @MainActor
     private func resolvePlaybackItem() async {
+        await SessionManager.shared.restoreSessionForIntent()
         guard let server = SessionManager.shared.servers.first(where: { $0.id == entity.serverID }) else {
-            errorMessage = "The saved server for this title is no longer available."
+            failHandoff("The saved server for this title is no longer available.")
             return
         }
 
-        guard let scope = await SessionManager.shared.beginServerScope(for: entity.serverID) else {
-            errorMessage = "Reconnect \(server.displayName) in Sashimi, then try again."
+        guard let client = SessionManager.shared.makeClient(for: entity.serverID) else {
+            failHandoff("Reconnect \(server.displayName) in Sashimi, then try again.")
             return
         }
 
         do {
-            let resolvedItem = try await JellyfinClient.shared.getItem(itemId: entity.itemID)
+            let resolvedItem = try await client.getItem(itemId: entity.itemID)
             guard !Task.isCancelled else {
-                await SessionManager.shared.endServerScope(scope)
                 return
             }
             item = resolvedItem
-
-            // Keep the temporary client scope alive for the entire player
-            // presentation. The player is dismissed by its own close control,
-            // which cancels this task and then releases the scope below.
-            try await Task.sleep(for: .seconds(365 * 24 * 60 * 60))
         } catch is CancellationError {
-            // Dismissal cancels the task; the scope is still released below.
+            // Dismissal cancels the resolution task.
         } catch {
             guard !Task.isCancelled else {
-                await SessionManager.shared.endServerScope(scope)
                 return
             }
-            errorMessage = "\(entity.title) is no longer available on \(server.displayName)."
+            failHandoff("\(entity.title) is no longer available on \(server.displayName).")
         }
+    }
 
-        await SessionManager.shared.endServerScope(scope)
+    private func failHandoff(_ message: String) {
+        errorMessage = message
+        SashimiIntentCoordinator.shared.acknowledgePlaybackFailure(for: entity)
     }
 }

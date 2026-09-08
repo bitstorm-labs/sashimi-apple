@@ -442,19 +442,19 @@ actor JellyfinClient {
 
     static let shared = JellyfinClient()
 
-    init() {
+    private static func deviceIdentifier() -> String {
         if let stored = UserDefaults.standard.string(forKey: "deviceId") {
-            self.deviceId = stored
-        } else {
-            let newId = UUID().uuidString
-            UserDefaults.standard.set(newId, forKey: "deviceId")
-            self.deviceId = newId
+            return stored
         }
+        let newId = UUID().uuidString
+        UserDefaults.standard.set(newId, forKey: "deviceId")
+        return newId
+    }
 
-        // Create certificate validation delegate. Closures read UserDefaults
-        // directly (thread-safe) because challenges arrive on the session's
-        // delegate queue, not the main actor.
-        self.certificateDelegate = CertificateValidationDelegate(
+    private static func makeCertificateDelegate() -> CertificateValidationDelegate {
+        // Closures read UserDefaults directly (thread-safe) because challenges
+        // arrive on the session's delegate queue, not the main actor.
+        CertificateValidationDelegate(
             allowSelfSigned: { host in
                 CertificateValidationDelegate.hostAllowance(
                     host: host,
@@ -481,18 +481,42 @@ actor JellyfinClient {
                 UserDefaults.standard.set(pins, forKey: CertificateTrustKeys.fingerprints)
             }
         )
+    }
 
-        // Configure URLSession with certificate validation delegate
+    private static func makeURLSession(
+        delegate: CertificateValidationDelegate
+    ) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = true
         config.urlCache = nil  // Disable caching to ensure fresh API responses
-        self.urlSession = URLSession(
+        return URLSession(
             configuration: config,
-            delegate: certificateDelegate,
+            delegate: delegate,
             delegateQueue: nil
         )
+    }
+
+    private init(scopedServerURL: URL?, accessToken: String?, userId: String?) {
+        self.deviceId = Self.deviceIdentifier()
+        self.serverURL = scopedServerURL
+        self.accessToken = accessToken
+        self.userId = userId
+        let delegate = Self.makeCertificateDelegate()
+        self.certificateDelegate = delegate
+        self.urlSession = Self.makeURLSession(delegate: delegate)
+    }
+
+    init() {
+        self.init(scopedServerURL: nil, accessToken: nil, userId: nil)
+    }
+
+    /// Creates an immutable-in-practice client for one saved server. Unlike
+    /// `shared.configure`, this instance can never be repointed by another
+    /// route while a playback session is awaiting a report.
+    init(serverURL: URL, accessToken: String, userId: String) {
+        self.init(scopedServerURL: serverURL, accessToken: accessToken, userId: userId)
     }
 
     func clearCredentials() {
