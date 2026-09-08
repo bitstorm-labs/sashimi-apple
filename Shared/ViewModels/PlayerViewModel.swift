@@ -87,12 +87,32 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 @MainActor
 final class PlayerViewModel: ObservableObject {
     let serverID: String?
+    private let playbackReporter: PlaybackSessionReporter
 
-    init(serverID: String? = nil) {
+    init(
+        serverID: String? = nil,
+        client: JellyfinClient? = nil,
+        reportDelivery: PlaybackReportDelivery? = nil
+    ) {
         self.serverID = serverID
+        let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
+        let resolvedClient = client
+            ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
+            // A known server must never fall back to the mutable shared client:
+            // that client may currently point at a different saved server.
+            // An unconfigured client fails visibly and lets the durable report
+            // queue retry once the selected server can be restored.
+            ?? (resolvedServerID == nil ? JellyfinClient.shared : JellyfinClient())
+        self.playbackReporter = PlaybackSessionReporter(
+            serverID: resolvedServerID,
+            client: resolvedClient,
+            delivery: reportDelivery
+        )
+        self.client = resolvedClient
     }
 
     @Published var player: AVPlayer?
+    @Published private(set) var isPlayerReady = false
     @Published var isLoading = true
     @Published var error: Error?
     @Published var currentItem: BaseItemDto?
@@ -223,6 +243,7 @@ final class PlayerViewModel: ObservableObject {
     private var segmentObserver: Any?
     private var progressReportTask: Task<Void, Never>?
     private var subtitleLoadTask: Task<Void, Never>?
+    private var teardownTask: Task<Void, Never>?
     private var statusObserver: NSKeyValueObservation?
     private var errorObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -236,7 +257,7 @@ final class PlayerViewModel: ObservableObject {
     /// Last stall count already reported, so a climbing counter is logged once
     /// per new stall instead of on every access-log entry.
     private var lastReportedStallCount = 0
-    private let client = JellyfinClient.shared
+    private let client: JellyfinClient
     private let playbackSettings = PlaybackSettings.shared
 
     // MARK: - Diagnostics
@@ -393,6 +414,8 @@ final class PlayerViewModel: ObservableObject {
         offlineSubtitles: [OfflineSubtitle] = []
     ) async {
         playbackAttempt += 1
+        isPlayerReady = false
+        playbackReporter.reset()
         // Fresh item, fresh recovery budget; a watchdog armed for the old
         // player must not fire into the new one.
         recoveryAttempts = 0
@@ -529,11 +552,7 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: 0)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -574,11 +593,7 @@ final class PlayerViewModel: ObservableObject {
                     PlayerDiagnostics.field("startTimeTicksSentToServer", false)
                 ])
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: startTicks, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: startTicks)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -589,11 +604,7 @@ final class PlayerViewModel: ObservableObject {
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
                 if !isOffline {
-                    do {
-                        try await client.reportPlaybackStart(itemId: freshItem.id, positionTicks: 0, playSessionId: playSessionId, playMethod: currentPlayMethod)
-                    } catch {
-                        logger.error("reportPlaybackStart failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    await reportPlaybackStart(item: freshItem, positionTicks: 0)
                     startProgressReporting()
                 }
                 setupSegmentTracking()
@@ -659,6 +670,15 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    private func reportPlaybackStart(item: BaseItemDto, positionTicks: Int64) async {
+        await playbackReporter.start(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId,
+            playMethod: currentPlayMethod
+        )
+    }
+
     private func reportProgress() async {
         guard !isOfflinePlayback,
               let item = currentItem,
@@ -667,12 +687,19 @@ final class PlayerViewModel: ObservableObject {
 
         let positionTicks = Int64(currentTime.seconds * 10_000_000)
         let isPaused = player.timeControlStatus == .paused
+        await playbackReporter.progress(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            isPaused: isPaused,
+            playSessionID: playSessionId
+        )
+    }
 
-        do {
-            try await client.reportPlaybackProgress(itemId: item.id, positionTicks: positionTicks, isPaused: isPaused, playSessionId: playSessionId)
-        } catch {
-            logger.error("reportPlaybackProgress failed: \(error.localizedDescription, privacy: .public)")
-        }
+    /// Flushes the current in-memory position when the scene is about to be
+    /// backgrounded. The reporter persists the event before attempting the
+    /// request, so suspension or a transient network failure cannot discard it.
+    func reportCurrentProgress() async {
+        await reportProgress()
     }
 
     private func handlePlaybackEnded() async {
@@ -692,21 +719,17 @@ final class PlayerViewModel: ObservableObject {
         progressReportTask?.cancel()
 
         if let item = currentItem, !isOfflinePlayback {
-            // Mark as watched by reporting position at the end
-            if let duration = player?.currentItem?.duration.seconds, duration.isFinite {
-                let endTicks = Int64(duration * 10_000_000)
-                do {
-                    try await client.reportPlaybackStopped(itemId: item.id, positionTicks: endTicks, playSessionId: playSessionId)
-                } catch {
-                    logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
-                }
-            }
-            // Mark item as played
-            do {
-                try await client.markPlayed(itemId: item.id)
-            } catch {
-                logger.error("markPlayed failed: \(error.localizedDescription, privacy: .public)")
-            }
+            // Stopped + mark-played form one durable completion event. The
+            // delivery layer persists the phase between the two requests so a
+            // retry never loses completion or repeats a successful first phase.
+            let duration = player?.currentItem?.duration.seconds ?? 0
+            let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+            let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
+            await playbackReporter.completed(
+                itemID: item.id,
+                positionTicks: Int64(max(0.0, endSeconds) * 10_000_000),
+                playSessionID: playSessionId
+            )
 
             // Check for next episode/video if this is an episode or video
             if playbackSettings.autoPlayNextEpisode, let next = await fetchNextItem(for: item) {
@@ -1325,6 +1348,7 @@ final class PlayerViewModel: ObservableObject {
     /// was dead for downloads), and a corrupt download sat on a black screen
     /// with no error because nothing observed .failed.
     private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
+        isPlayerReady = false
         tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
@@ -1338,6 +1362,7 @@ final class PlayerViewModel: ObservableObject {
                 ] + (observed.status == .failed ? PlayerDiagnostics.fields(for: observed.error) : []))
 
                 if observed.status == .failed {
+                    self.isPlayerReady = false
                     self.diagFailure(.itemStatus, [
                         PlayerDiagnostics.field("status", "failed")
                     ] + PlayerDiagnostics.fields(for: observed.error))
@@ -1351,6 +1376,7 @@ final class PlayerViewModel: ObservableObject {
                         self.error = observed.error
                     }
                 } else if observed.status == .readyToPlay {
+                    self.isPlayerReady = true
                     self.logTrackAvailability(for: observed)
                     self.applyPendingResumeSeekIfNeeded()
                 }
@@ -1571,7 +1597,28 @@ final class PlayerViewModel: ObservableObject {
         stallWatchdogTask = nil
     }
 
+    @discardableResult
+    func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
+        preparePendingStoppedReportIfNeeded()
+        if let teardownTask {
+            return teardownTask
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performStop(reason: reason)
+        }
+        teardownTask = task
+        return task
+    }
+
     func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+        let task = beginStop(reason: reason)
+        await task.value
+        teardownTask = nil
+    }
+
+    private func performStop(reason: PlayerDiagnostics.TeardownReason) async {
         diag(.teardown, [
             PlayerDiagnostics.field("reason", reason.rawValue),
             PlayerDiagnostics.field("item", currentItem?.id),
@@ -1608,11 +1655,11 @@ final class PlayerViewModel: ObservableObject {
             }
 
             if !isOfflinePlayback {
-                do {
-                    try await client.reportPlaybackStopped(itemId: item.id, positionTicks: positionTicks, playSessionId: playSessionId)
-                } catch {
-                    logger.error("reportPlaybackStopped failed: \(error.localizedDescription, privacy: .public)")
-                }
+                await playbackReporter.stopped(
+                    itemID: item.id,
+                    positionTicks: positionTicks,
+                    playSessionID: playSessionId
+                )
             }
         }
 
@@ -1623,11 +1670,36 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         invalidatePlayerObservers()
         player = nil
+        isPlayerReady = false
         currentItem = nil
         playbackStartDate = nil
 
         // Notify that playback ended so Home can refresh
         NotificationCenter.default.post(name: .playbackDidEnd, object: nil)
+    }
+
+    /// Called synchronously from disappearance/background callbacks before
+    /// SwiftUI schedules the awaited teardown task. The report is persisted by
+    /// PlaybackSessionReporter before any network await, so process suspension
+    /// cannot lose the final position merely because the view is gone.
+    func preparePendingStoppedReportIfNeeded() {
+        guard let item = currentItem,
+              let player,
+              let currentTime = player.currentItem?.currentTime(),
+              !isOfflinePlayback else { return }
+
+        let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
+        let positionTicks: Int64
+        if elapsedSeconds < 10, resumePositionTicks > 0 {
+            positionTicks = resumePositionTicks
+        } else {
+            positionTicks = Int64(currentTime.seconds * 10_000_000)
+        }
+        playbackReporter.prepareStopped(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId
+        )
     }
 
     func loadAudioTracks() {
