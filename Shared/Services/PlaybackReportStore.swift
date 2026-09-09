@@ -181,12 +181,12 @@ extension JellyfinClient: PlaybackReportingClient {}
 @MainActor
 protocol PlayerPlaybackReporting: AnyObject {
     func reset()
+    func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?)
     func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async
     func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async
     func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async
     func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async
 }
-
 private let playbackReportLogger = Logger(
     subsystem: "com.mondominator.sashimi",
     category: "PlaybackReportStore"
@@ -207,6 +207,11 @@ final class PlaybackReportDelivery {
         self.store = store ?? PlaybackReportStore.shared
     }
 
+    @discardableResult
+    func enqueue(_ report: PendingPlaybackReport) -> PendingPlaybackReport {
+        guard !report.serverID.isEmpty else { return report }
+        return store.enqueue(report)
+    }
     func sendStart(
         _ report: PendingPlaybackReport,
         playMethod: String,
@@ -392,6 +397,7 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
     private var hasStarted = false
     private var stopRequested = false
     private var completionRequested = false
+    private var pendingStoppedReport: PendingPlaybackReport?
 
     init(
         serverID: String?,
@@ -407,6 +413,19 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
         hasStarted = false
         stopRequested = false
         completionRequested = false
+        pendingStoppedReport = nil
+    }
+
+    func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?) {
+        guard hasStarted, !stopRequested, !completionRequested else { return }
+        stopRequested = true
+        let report = report(
+            itemID: itemID,
+            positionTicks: positionTicks,
+            playSessionID: playSessionID,
+            kind: .stopped
+        )
+        pendingStoppedReport = delivery.enqueue(report)
     }
 
     func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async {
@@ -434,6 +453,11 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
     }
 
     func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async {
+        if let pendingStoppedReport {
+            self.pendingStoppedReport = nil
+            await delivery.sendStopped(pendingStoppedReport, client: client)
+            return
+        }
         guard hasStarted, !stopRequested, !completionRequested else { return }
         stopRequested = true
         await delivery.sendStopped(

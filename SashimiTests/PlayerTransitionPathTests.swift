@@ -304,6 +304,8 @@ private final class RecordingPlayerPlaybackReporter: PlayerPlaybackReporting {
         hasStarted = true
     }
 
+    func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?) {}
+
     func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async {
         hasStarted = true
         events.append(.start(itemID: itemID))
