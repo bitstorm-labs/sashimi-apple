@@ -31,6 +31,7 @@ final class EpisodeNavigationViewController: UIViewController {
         return label
     }()
     private let controls = UIStackView()
+    private let settingsFocusGuide = UIFocusGuide()
     private let endCard = UIStackView()
     private weak var player: AVPlayer?
     private weak var observedPlayer: AVPlayer?
@@ -68,6 +69,8 @@ final class EpisodeNavigationViewController: UIViewController {
         endCard.isHidden = true
 
         settingsButton.showsMenuAsPrimaryAction = true
+        view.addLayoutGuide(settingsFocusGuide)
+        settingsFocusGuide.preferredFocusEnvironments = [settingsButton]
         view.addSubview(settingsButton)
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controls)
@@ -77,6 +80,10 @@ final class EpisodeNavigationViewController: UIViewController {
         NSLayoutConstraint.activate([
             settingsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
             settingsButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
+            settingsFocusGuide.leadingAnchor.constraint(equalTo: controls.leadingAnchor),
+            settingsFocusGuide.trailingAnchor.constraint(equalTo: settingsButton.trailingAnchor),
+            settingsFocusGuide.topAnchor.constraint(equalTo: settingsButton.bottomAnchor),
+            settingsFocusGuide.bottomAnchor.constraint(equalTo: controls.topAnchor),
             controls.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             controls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -70),
             endCard.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -108,6 +115,7 @@ final class EpisodeNavigationViewController: UIViewController {
         endCard.isHidden = state.endCard == nil
         controls.isHidden = state.endCard != nil || !showEpisodeNavigationControls
         settingsButton.isHidden = controls.isHidden
+        settingsFocusGuide.isEnabled = !controls.isHidden && !state.isTransitioning
         settingsButton.isEnabled = !state.isTransitioning
         replayButton.isEnabled = !state.isTransitioning
         switch state.endCard {
@@ -130,6 +138,15 @@ final class EpisodeNavigationViewController: UIViewController {
             return [first]
         }
         return []
+    }
+
+    override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        // The settings button sits outside the transport row's horizontal
+        // bounds. Bridge that gap in both directions for the Siri Remote.
+        settingsFocusGuide.preferredFocusEnvironments = context.nextFocusedView === settingsButton
+            ? [playPauseButton]
+            : [settingsButton]
     }
 
     private func observe(player: AVPlayer?) {
