@@ -26,17 +26,22 @@ struct PlayerTransitionState: Equatable {
     var nextEpisode: BaseItemDto?
     var lookupStatus: LookupStatus = .idle
     var endCard: EndCard?
+    var isTransitioning = false
 
     var isEpisodeNavigationAvailable: Bool {
         currentItem?.type == .episode && lookupStatus != .notApplicable
     }
 
     var canPlayPrevious: Bool {
-        isEpisodeNavigationAvailable && previousEpisode != nil
+        !isTransitioning && isEpisodeNavigationAvailable && previousEpisode != nil
     }
 
     var canPlayNext: Bool {
-        isEpisodeNavigationAvailable && nextEpisode != nil
+        !isTransitioning && isEpisodeNavigationAvailable && nextEpisode != nil
+    }
+
+    func usesEpisodeTransportControls(isEnabled: Bool) -> Bool {
+        isEnabled && isEpisodeNavigationAvailable
     }
 
     static let empty = PlayerTransitionState(

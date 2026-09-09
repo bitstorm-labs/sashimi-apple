@@ -8,6 +8,11 @@ final class EpisodeNavigationViewController: UIViewController {
     var onNext: (() -> Void)?
     var onReplay: (() -> Void)?
     var onDone: (() -> Void)?
+    var settingsMenu: UIMenu? {
+        didSet { settingsButton.menu = settingsMenu }
+    }
+
+    private let settingsButton = EpisodeNavigationViewController.makeButton(title: "Settings", imageName: "gearshape")
 
     private let previousButton = EpisodeNavigationViewController.makeTransportButton(title: "Previous Episode", imageName: "backward.fill")
     private let skipBackwardButton = EpisodeNavigationViewController.makeTransportButton(title: "Skip Backward", imageName: "gobackward.10")
@@ -62,11 +67,16 @@ final class EpisodeNavigationViewController: UIViewController {
         endCard.addArrangedSubview(actions)
         endCard.isHidden = true
 
+        settingsButton.showsMenuAsPrimaryAction = true
+        view.addSubview(settingsButton)
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controls)
         view.addSubview(endCard)
         controls.translatesAutoresizingMaskIntoConstraints = false
         endCard.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
+            settingsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
+            settingsButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
             controls.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             controls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -70),
             endCard.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -97,6 +107,9 @@ final class EpisodeNavigationViewController: UIViewController {
         playNextButton.isHidden = !state.canPlayNext
         endCard.isHidden = state.endCard == nil
         controls.isHidden = state.endCard != nil || !showEpisodeNavigationControls
+        settingsButton.isHidden = controls.isHidden
+        settingsButton.isEnabled = !state.isTransitioning
+        replayButton.isEnabled = !state.isTransitioning
         switch state.endCard {
         case .nextEpisode:
             messageLabel.text = "Episode complete\nReady for the next episode"
@@ -110,8 +123,10 @@ final class EpisodeNavigationViewController: UIViewController {
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        if let first = [playNextButton, replayButton, doneButton, playPauseButton, previousButton, nextButton]
-            .first(where: { !$0.isHidden && $0.isEnabled }) {
+        let candidates = endCard.isHidden
+            ? (controls.isHidden ? [] : [playPauseButton, previousButton, nextButton, settingsButton])
+            : [playNextButton, replayButton, doneButton]
+        if let first = candidates.first(where: { !$0.isHidden && $0.isEnabled }) {
             return [first]
         }
         return []

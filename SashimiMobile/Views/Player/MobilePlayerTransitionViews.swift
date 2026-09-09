@@ -149,6 +149,7 @@ struct MobilePlayerEndCard: View {
                             .accessibilityLabel("Play Next Episode")
                     }
                     Button("Replay", action: onReplay)
+                        .disabled(state.isTransitioning)
                     Button("Done", action: onDone)
                 }
                 .buttonStyle(.borderedProminent)

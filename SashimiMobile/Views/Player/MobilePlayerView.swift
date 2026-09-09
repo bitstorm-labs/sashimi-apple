@@ -80,6 +80,12 @@ struct MobilePlayerView: View {
         viewModel.currentItem ?? item
     }
 
+    private var usesEpisodeTransportControls: Bool {
+        viewModel.transitionState.usesEpisodeTransportControls(
+            isEnabled: playbackSettings.showEpisodeNavigationControls
+        )
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -87,7 +93,7 @@ struct MobilePlayerView: View {
             if let player = viewModel.player {
                 PlayerViewController(
                     player: player,
-                    showsPlaybackControls: !playbackSettings.showEpisodeNavigationControls
+                    showsPlaybackControls: !usesEpisodeTransportControls
                 )
                     .ignoresSafeArea()
 
@@ -245,13 +251,11 @@ struct MobilePlayerView: View {
                     .onTapGesture {
                         toggleOverlay()
                     }
-                    // In opt-in mode the app owns the complete transport row;
-                    // otherwise taps reach AVPlayerViewController's native
-                    // controls unchanged.
-                    .allowsHitTesting(
-                        showCustomOverlay &&
-                        !playbackSettings.showEpisodeNavigationControls
-                    )
+                    // In opt-in mode this gesture is also the reveal action
+                    // for the Close and Settings controls. The transport
+                    // buttons are later in the ZStack, so they keep their own
+                    // hit targets.
+                    .allowsHitTesting(usesEpisodeTransportControls || showCustomOverlay)
 
             if showCustomOverlay {
                 // Top gradient scrim
@@ -273,8 +277,7 @@ struct MobilePlayerView: View {
                 .transition(.opacity)
             }
 
-            if playbackSettings.showEpisodeNavigationControls,
-               viewModel.transitionState.isEpisodeNavigationAvailable {
+            if usesEpisodeTransportControls {
                 MobileEpisodeTransportControls(
                     state: viewModel.transitionState,
                     player: viewModel.player,
@@ -420,6 +423,7 @@ struct MobilePlayerView: View {
 
     private var settingsMenu: some View {
         PlayerSettingsMenu(viewModel: viewModel, playbackSpeed: $playbackSpeed)
+            .disabled(viewModel.transitionState.isTransitioning)
     }
 
     // MARK: - Skip Button

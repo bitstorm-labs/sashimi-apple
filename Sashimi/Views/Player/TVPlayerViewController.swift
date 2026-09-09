@@ -8,6 +8,13 @@ struct TVPlayerView: UIViewControllerRepresentable {
     @ObservedObject var viewModel: PlayerViewModel
     let item: BaseItemDto
     let onDismiss: () -> Void
+    @ObservedObject var playbackSettings = PlaybackSettings.shared
+
+    private var usesEpisodeTransportControls: Bool {
+        viewModel.transitionState.usesEpisodeTransportControls(
+            isEnabled: playbackSettings.showEpisodeNavigationControls
+        )
+    }
 
     func makeUIViewController(context: Context) -> PlayerContainerVC {
         let container = PlayerContainerVC()
@@ -15,7 +22,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         let playerVC = AVPlayerViewController()
         playerVC.player = player
-        playerVC.showsPlaybackControls = !PlaybackSettings.shared.showEpisodeNavigationControls
+        playerVC.showsPlaybackControls = !usesEpisodeTransportControls
         playerVC.delegate = context.coordinator
 
         // Subtitles are rendered by our own overlay and selected through the
@@ -63,15 +70,15 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.updateOverlay()
 
         if let navigationVC = context.coordinator.navigationVC {
-            let hasEpisodeNavigation = viewModel.transitionState.isEpisodeNavigationAvailable
-            let shouldShow = hasEpisodeNavigation && PlaybackSettings.shared.showEpisodeNavigationControls
-            playerVC.showsPlaybackControls = !PlaybackSettings.shared.showEpisodeNavigationControls
+            let shouldShow = usesEpisodeTransportControls
+            playerVC.showsPlaybackControls = !usesEpisodeTransportControls
             let wasHidden = navigationVC.view.isHidden
             navigationVC.update(
                 state: viewModel.transitionState,
-                showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls,
+                showEpisodeNavigationControls: usesEpisodeTransportControls,
                 player: player
             )
+            navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
             navigationVC.view.isHidden = viewModel.transitionState.endCard == nil && !shouldShow
             if wasHidden != navigationVC.view.isHidden {
                 container.setNeedsFocusUpdate()
@@ -177,6 +184,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
             Task { @MainActor in await viewModel.replayCurrentItem() }
         }
         navigationVC.onDone = onDismiss
+        navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
         navigationVC.view.translatesAutoresizingMaskIntoConstraints = false
         navigationVC.view.isHidden = true
         container.addChild(navigationVC)
@@ -190,70 +198,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         ])
         container.navigationVC = navigationVC
         context.coordinator.navigationVC = navigationVC
-        navigationVC.update(state: viewModel.transitionState, showEpisodeNavigationControls: PlaybackSettings.shared.showEpisodeNavigationControls, player: player)
-    }
-
-    // MARK: - Transport Bar Menus
-
-    private func buildMenus() -> [UIMenuElement] {
-        var menus: [UIMenuElement] = []
-
-        // Speed menu
-        let speeds: [(String, Float)] = [
-            ("0.5×", 0.5), ("0.75×", 0.75), ("1× Normal", 1.0),
-            ("1.25×", 1.25), ("1.5×", 1.5), ("2×", 2.0)
-        ]
-        let currentRate = player.rate != 0 ? player.rate : 1.0
-        let speedActions = speeds.map { title, rate in
-            UIAction(
-                title: title,
-                state: currentRate == rate ? .on : .off
-            ) { _ in
-                player.rate = rate
-            }
-        }
-        let speedMenu = UIMenu(
-            title: "Speed",
-            image: UIImage(systemName: "speedometer"),
-            children: speedActions
-        )
-        menus.append(speedMenu)
-
-        // Subtitles menu
-        let subtitleActions = viewModel.subtitleTracks.map { track in
-            UIAction(
-                title: track.displayName,
-                state: track.id == viewModel.selectedSubtitleTrackId ? .on : .off
-            ) { _ in
-                viewModel.selectSubtitleTrack(track)
-            }
-        }
-        if !subtitleActions.isEmpty {
-            let subtitleMenu = UIMenu(
-                title: "Subtitles",
-                image: UIImage(systemName: "captions.bubble"),
-                children: subtitleActions
-            )
-            menus.append(subtitleMenu)
-        }
-
-        // Quality menu
-        let qualityActions = QualityOption.allCases.map { quality in
-            UIAction(
-                title: quality.displayName,
-                state: viewModel.selectedQuality == quality ? .on : .off
-            ) { _ in
-                Task { await viewModel.changeQuality(quality) }
-            }
-        }
-        let qualityMenu = UIMenu(
-            title: "Quality",
-            image: UIImage(systemName: "gearshape"),
-            children: qualityActions
-        )
-        menus.append(qualityMenu)
-
-        return menus
+        navigationVC.update(state: viewModel.transitionState, showEpisodeNavigationControls: usesEpisodeTransportControls, player: player)
     }
 
     // MARK: - Coordinator
