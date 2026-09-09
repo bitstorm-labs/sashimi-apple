@@ -168,27 +168,24 @@ final class PlaybackReportStoreTests: XCTestCase {
         )
 
         await reporter.start(
-            itemID: "episode-1",
+            itemID: "item-a",
             positionTicks: 100,
             playSessionID: "session-a",
             playMethod: "DirectStream"
         )
         await reporter.stopped(
-            itemID: "episode-1",
+            itemID: "item-a",
             positionTicks: 500,
             playSessionID: "session-a"
         )
         await reporter.stopped(
-            itemID: "episode-1",
+            itemID: "item-a",
             positionTicks: 600,
             playSessionID: "session-a"
         )
 
         let events = await client.events
-        XCTAssertEqual(
-            events,
-            [.start(itemID: "episode-1"), .stopped(itemID: "episode-1")]
-        )
+        XCTAssertEqual(events, [.start(itemID: "item-a"), .stopped(itemID: "item-a")])
         XCTAssertFalse(events.contains(where: { if case .markPlayed = $0 { return true }; return false }))
     }
 
@@ -196,33 +193,35 @@ final class PlaybackReportStoreTests: XCTestCase {
         let store = PlaybackReportStore(defaults: testDefaults)
         let delivery = PlaybackReportDelivery(store: store)
         let client = FakePlaybackReportingClient()
-        let reporter = PlaybackSessionReporter(
-            serverID: "server-a",
-            client: client,
-            delivery: delivery
-        )
+        let reporter = PlaybackSessionReporter(serverID: "server-a", client: client, delivery: delivery)
 
-        await reporter.start(
-            itemID: "episode-1",
-            positionTicks: 0,
-            playSessionID: "session-a",
-            playMethod: "DirectStream"
-        )
-        await reporter.completed(
-            itemID: "episode-1",
-            positionTicks: 2_000,
-            playSessionID: "session-a"
-        )
+        await reporter.start(itemID: "episode-1", positionTicks: 0, playSessionID: "session-a", playMethod: "DirectStream")
+        await reporter.completed(itemID: "episode-1", positionTicks: 2_000, playSessionID: "session-a")
 
         let events = await client.events
-        XCTAssertEqual(
-            events,
-            [
-                .start(itemID: "episode-1"),
-                .stopped(itemID: "episode-1"),
-                .markPlayed(itemID: "episode-1"),
-            ]
-        )
+        XCTAssertEqual(events, [.start(itemID: "episode-1"), .stopped(itemID: "episode-1"), .markPlayed(itemID: "episode-1")])
+    }
+
+    func testPreparedStoppedReportIsPersistedBeforeDeliveryAwaits() async throws {
+        let store = PlaybackReportStore(defaults: testDefaults)
+        let delivery = PlaybackReportDelivery(store: store)
+        let client = FakePlaybackReportingClient()
+        let reporter = PlaybackSessionReporter(serverID: "server-a", client: client, delivery: delivery)
+
+        await reporter.start(itemID: "item-a", positionTicks: 0, playSessionID: "session-a", playMethod: "DirectStream")
+        await client.setFailAll(true)
+        reporter.prepareStopped(itemID: "item-a", positionTicks: 2_000, playSessionID: "session-a")
+
+        XCTAssertEqual(store.reports.count, 1)
+        XCTAssertEqual(store.reports.first?.kind, .stopped)
+        await reporter.stopped(itemID: "item-a", positionTicks: 2_000, playSessionID: "session-a")
+        XCTAssertEqual(store.reports.count, 1)
+
+        await client.setFailAll(false)
+        let pending = try XCTUnwrap(store.reports.first)
+        let delivered = await delivery.deliver(pending, using: client)
+        XCTAssertTrue(delivered)
+        XCTAssertTrue(store.reports.isEmpty)
     }
 }
 

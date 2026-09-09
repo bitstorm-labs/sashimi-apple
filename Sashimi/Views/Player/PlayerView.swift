@@ -73,7 +73,17 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("view", viewTag),
                 PlayerDiagnostics.field("item", item.id)
             ])
-            Task { await viewModel.stop(reason: .viewDisappeared) }
+            viewModel.player?.pause()
+            viewModel.beginStop(reason: .viewDisappeared)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            viewModel.player?.pause()
+            let stopTask = viewModel.beginStop(reason: .sceneBackground)
+            Task {
+                await stopTask.value
+                dismiss()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }

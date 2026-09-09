@@ -101,7 +101,11 @@ final class PlayerViewModel: ObservableObject {
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
         let resolvedClient = client
             ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
-            ?? JellyfinClient.shared
+            // A known server must never fall back to the mutable shared client:
+            // that client may currently point at a different saved server.
+            // An unconfigured client fails visibly and lets the durable report
+            // queue retry once the selected server can be restored.
+            ?? (resolvedServerID == nil ? JellyfinClient.shared : JellyfinClient())
         self.playbackReporter = reporter ?? PlaybackSessionReporter(
             serverID: resolvedServerID,
             client: resolvedClient,
@@ -113,6 +117,7 @@ final class PlayerViewModel: ObservableObject {
     }
 
     @Published var player: AVPlayer?
+    @Published private(set) var isPlayerReady = false
     @Published var isLoading = true
     @Published var error: Error?
     @Published var currentItem: BaseItemDto?
@@ -449,6 +454,7 @@ final class PlayerViewModel: ObservableObject {
         navigationTask = nil
         playbackEnded = false
         isOfflinePlayback = false
+        isPlayerReady = false
         playbackReporter.reset()
         // Fresh item, fresh recovery budget; a watchdog armed for the old
         // player must not fire into the new one.
@@ -1597,6 +1603,7 @@ final class PlayerViewModel: ObservableObject {
     /// was dead for downloads), and a corrupt download sat on a black screen
     /// with no error because nothing observed .failed.
     private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
+        isPlayerReady = false
         tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
@@ -1610,6 +1617,7 @@ final class PlayerViewModel: ObservableObject {
                 ] + (observed.status == .failed ? PlayerDiagnostics.fields(for: observed.error) : []))
 
                 if observed.status == .failed {
+                    self.isPlayerReady = false
                     self.diagFailure(.itemStatus, [
                         PlayerDiagnostics.field("status", "failed")
                     ] + PlayerDiagnostics.fields(for: observed.error))
@@ -1623,6 +1631,7 @@ final class PlayerViewModel: ObservableObject {
                         self.error = observed.error
                     }
                 } else if observed.status == .readyToPlay {
+                    self.isPlayerReady = true
                     self.logTrackAvailability(for: observed)
                     self.applyPendingResumeSeekIfNeeded()
                 }
@@ -1850,10 +1859,11 @@ final class PlayerViewModel: ObservableObject {
         stallWatchdogTask = nil
     }
 
-    func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+    @discardableResult
+    func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
+        preparePendingStoppedReportIfNeeded()
         if let teardownTask {
-            await teardownTask.value
-            return
+            return teardownTask
         }
 
         let task = Task { @MainActor [weak self] in
@@ -1861,6 +1871,11 @@ final class PlayerViewModel: ObservableObject {
             await self.performStop(reason: reason)
         }
         teardownTask = task
+        return task
+    }
+
+    func stop(reason: PlayerDiagnostics.TeardownReason = .unspecified) async {
+        let task = beginStop(reason: reason)
         await task.value
         teardownTask = nil
     }
@@ -1919,12 +1934,37 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         invalidatePlayerObservers()
         player = nil
+        isPlayerReady = false
         setCurrentItem(nil)
         transitionState = .empty
         playbackStartDate = nil
 
         // Notify that playback ended so Home can refresh
         NotificationCenter.default.post(name: .playbackDidEnd, object: nil)
+    }
+
+    /// Called synchronously from disappearance/background callbacks before
+    /// SwiftUI schedules the awaited teardown task. The report is persisted by
+    /// PlaybackSessionReporter before any network await, so process suspension
+    /// cannot lose the final position merely because the view is gone.
+    func preparePendingStoppedReportIfNeeded() {
+        guard let item = currentItem,
+              let player,
+              let currentTime = player.currentItem?.currentTime(),
+              !isOfflinePlayback else { return }
+
+        let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
+        let positionTicks: Int64
+        if elapsedSeconds < 10, resumePositionTicks > 0 {
+            positionTicks = resumePositionTicks
+        } else {
+            positionTicks = Int64(currentTime.seconds * 10_000_000)
+        }
+        playbackReporter.prepareStopped(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId
+        )
     }
 
     func loadAudioTracks() {
