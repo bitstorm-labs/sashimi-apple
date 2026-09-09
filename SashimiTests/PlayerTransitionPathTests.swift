@@ -104,6 +104,45 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertFalse(reporter.events.contains { if case .completed = $0 { return true }; return false })
     }
 
+    func testConcurrentManualNextOnlyLoadsOneSuccessor() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let loader = BlockingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        await viewModel.refreshEpisodeNavigation()
+        let first = Task { await viewModel.playNextEpisode() }
+        await Task.yield()
+        XCTAssertTrue(viewModel.transitionState.isTransitioning)
+
+        let second = Task { await viewModel.playNextEpisode() }
+        await Task.yield()
+        loader.finish()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(loader.loadedItemIDs, [next.id])
+        XCTAssertFalse(viewModel.transitionState.isTransitioning)
+    }
+
     func testNaturalCompletionWithAutoplayDisabledShowsNextEndCard() async {
         let current = makeItem(
             id: "episode-1",
@@ -333,7 +372,25 @@ private final class RecordingPlayerPlaybackReporter: PlayerPlaybackReporting {
 private final class RecordingPlayerTransitionLoader: PlayerTransitionLoader {
     private(set) var loadedItemIDs: [String] = []
 
-    func load(item: BaseItemDto) async {
+    func load(item: BaseItemDto, startFromBeginning: Bool) async {
         loadedItemIDs.append(item.id)
+    }
+}
+
+@MainActor
+private final class BlockingPlayerTransitionLoader: PlayerTransitionLoader {
+    private(set) var loadedItemIDs: [String] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func load(item: BaseItemDto, startFromBeginning: Bool) async {
+        loadedItemIDs.append(item.id)
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }

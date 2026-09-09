@@ -51,7 +51,8 @@ struct PlayerView: View {
                     }
                 )
                 .ignoresSafeArea()
-                .onAppear { viewModel.loadSubtitleTracks() }
+                .onAppear { viewModel.loadAllTracks() }
+                .onChange(of: viewModel.tracksVersion) { _, _ in viewModel.loadAllTracks() }
             }
         }
         .task {
@@ -82,13 +83,6 @@ struct PlayerView: View {
             let stopTask = viewModel.beginStop(reason: .sceneBackground)
             Task {
                 await stopTask.value
-                dismiss()
-            }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .background else { return }
-            Task {
-                await viewModel.stop(reason: .sceneBackground)
                 dismiss()
             }
         }

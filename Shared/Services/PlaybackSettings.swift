@@ -12,8 +12,8 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("autoPlayNextEpisode") var autoPlayNextEpisode = true
     @AppStorage("autoSkipIntro") var autoSkipIntro = false
     @AppStorage("autoSkipCredits") var autoSkipCredits = false
-    // Episode navigation remains transient unless the user opts into keeping
-    // Previous/Next visible while AVPlayer's native controls are shown.
+    // Episode navigation controls are opt-in so the native player experience
+    // remains unchanged unless the user enables the replacement transport row.
     @AppStorage("showEpisodeNavigationControls") var showEpisodeNavigationControls = false
     // On by default everywhere except iPhone: a phone theme plays under
     // whatever's in someone's pocket or on a table nearby, which reads as

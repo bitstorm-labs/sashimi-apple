@@ -292,7 +292,8 @@ final class PlayerViewModel: ObservableObject {
             previousEpisode: nil,
             nextEpisode: nil,
             lookupStatus: item?.type == .episode ? .loading : .notApplicable,
-            endCard: nil
+            endCard: nil,
+            isTransitioning: transitionState.isTransitioning
         )
     }
 
@@ -767,11 +768,12 @@ final class PlayerViewModel: ObservableObject {
     func handlePlaybackEnded() async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
-        if isHandlingEnd {
+        if isHandlingEnd || transitionState.isTransitioning {
             diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
             return
         }
         isHandlingEnd = true
+        let attempt = playbackAttempt
         diag(.playbackEnded, [
             PlayerDiagnostics.field("item", currentItem?.id),
             PlayerDiagnostics.field("positionSeconds", player?.currentItem?.currentTime().seconds),
@@ -795,11 +797,14 @@ final class PlayerViewModel: ObservableObject {
                 )
             }
 
+            guard playbackAttempt == attempt, !Task.isCancelled else { return }
+
             // Lookup happens after completion is recorded. This ordering keeps
             // autoplay from starting a new server session before Jellyfin has
             // received the completed position and played marker.
             if item.type == .episode, !isOfflinePlayback {
                 await waitForEpisodeNavigation(for: item)
+                guard playbackAttempt == attempt, !Task.isCancelled else { return }
                 switch transitionState.lookupStatus {
                 case .available where transitionState.nextEpisode != nil:
                     if playbackSettings.autoPlayNextEpisode {
@@ -815,6 +820,7 @@ final class PlayerViewModel: ObservableObject {
             } else if item.type == .video,
                       playbackSettings.autoPlayNextEpisode,
                       let next = await fetchNextVideo(for: item) {
+                guard playbackAttempt == attempt, !Task.isCancelled else { return }
                 // Preserve the existing automatic sequence for standalone
                 // videos without exposing episode controls for them.
                 diag(.nextEpisode, [
@@ -839,7 +845,7 @@ final class PlayerViewModel: ObservableObject {
         await refreshEpisodeNavigation(for: item)
     }
 
-    private func startNavigationLookup(for item: BaseItemDto) {
+    func startNavigationLookup(for item: BaseItemDto) {
         navigationTask?.cancel()
         transitionState.previousEpisode = nil
         transitionState.nextEpisode = nil
@@ -1048,8 +1054,7 @@ final class PlayerViewModel: ObservableObject {
     func replayCurrentItem() async {
         guard let item = currentItem else { return }
         guard item.type?.isPlayableMediaType == true else { return }
-        playbackEnded = false
-        await loadMedia(item: item, startFromBeginning: true)
+        await transition(to: item, automatic: playbackEnded, startFromBeginning: true)
     }
 
     private func autoplayNextEpisode() async {
@@ -1057,8 +1062,17 @@ final class PlayerViewModel: ObservableObject {
         await transition(to: next, automatic: true)
     }
 
-    private func transition(to item: BaseItemDto, automatic: Bool) async {
-        guard item.type == .episode else { return }
+    private func transition(to item: BaseItemDto, automatic: Bool, startFromBeginning: Bool = false) async {
+        guard item.type == .episode || startFromBeginning,
+              !transitionState.isTransitioning,
+              automatic || !isHandlingEnd else { return }
+        // Claim the transition before reporting can suspend. Repeated actions
+        // must never reset the reporter or rebuild the same player concurrently.
+        transitionState.isTransitioning = true
+        defer { transitionState.isTransitioning = false }
+        let attempt = playbackAttempt
+        player?.pause()
+        progressReportTask?.cancel()
         diag(.nextEpisode, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("automatic", automatic)
@@ -1068,16 +1082,17 @@ final class PlayerViewModel: ObservableObject {
             // outgoing position through #428's lifecycle without markPlayed.
             await reportCurrentPlaybackStoppedForTransition()
         }
+        guard playbackAttempt == attempt, !Task.isCancelled else { return }
         playbackEnded = false
         if let transitionLoader {
-            await transitionLoader.load(item: item)
+            await transitionLoader.load(item: item, startFromBeginning: startFromBeginning)
         } else {
-            await loadMedia(item: item)
+            await loadMedia(item: item, startFromBeginning: startFromBeginning)
         }
     }
 
     func changeQuality(_ quality: QualityOption) async {
-        guard let item = currentItem else { return }
+        guard !transitionState.isTransitioning, let item = currentItem else { return }
 
         // Save current position
         let currentPosition = player?.currentItem?.currentTime()
@@ -1102,8 +1117,8 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
-        navigationTask?.cancel()
-        navigationTask = nil
+        // Episode ordering belongs to the item, not the stream. Leave its
+        // in-flight lookup alive when replacing the player for this same item.
         cleanupSegmentTracking()
         subtitleManager.clear()
         // Reset the menu selection alongside the overlay — the re-apply
@@ -1861,6 +1876,9 @@ final class PlayerViewModel: ObservableObject {
 
     @discardableResult
     func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
+        // Invalidate a transition waiting on report delivery synchronously,
+        // before the asynchronous teardown can yield to that transition.
+        playbackAttempt += 1
         preparePendingStoppedReportIfNeeded()
         if let teardownTask {
             return teardownTask

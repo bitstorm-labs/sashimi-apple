@@ -16,7 +16,7 @@ protocol PlayerEpisodeNavigationClient: Sendable {
 /// AVPlayer setup. The app leaves this nil and uses `PlayerViewModel.loadMedia`.
 @MainActor
 protocol PlayerTransitionLoader: AnyObject {
-    func load(item: BaseItemDto) async
+    func load(item: BaseItemDto, startFromBeginning: Bool) async
 }
 
 extension JellyfinClient: PlayerEpisodeNavigationClient {

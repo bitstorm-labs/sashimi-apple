@@ -13,6 +13,8 @@ final class PlayerTransitionStateTests: XCTestCase {
             lookupStatus: .available
         )
 
+        XCTAssertTrue(state.usesEpisodeTransportControls(isEnabled: true))
+        XCTAssertFalse(state.usesEpisodeTransportControls(isEnabled: false))
         XCTAssertTrue(state.isEpisodeNavigationAvailable)
         XCTAssertTrue(state.canPlayPrevious)
         XCTAssertTrue(state.canPlayNext)
@@ -41,6 +43,8 @@ final class PlayerTransitionStateTests: XCTestCase {
                 lookupStatus: .available
             )
 
+            XCTAssertFalse(state.usesEpisodeTransportControls(isEnabled: true))
+            XCTAssertFalse(state.usesEpisodeTransportControls(isEnabled: false))
             XCTAssertFalse(state.isEpisodeNavigationAvailable)
             XCTAssertFalse(state.canPlayPrevious)
             XCTAssertFalse(state.canPlayNext)
@@ -55,6 +59,7 @@ final class PlayerTransitionStateTests: XCTestCase {
             lookupStatus: .notApplicable
         )
 
+        XCTAssertFalse(state.usesEpisodeTransportControls(isEnabled: true))
         XCTAssertFalse(state.isEpisodeNavigationAvailable)
         XCTAssertFalse(state.canPlayNext)
     }
