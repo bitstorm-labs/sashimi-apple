@@ -245,17 +245,14 @@ struct MobilePlayerView: View {
 
     private var customOverlay: some View {
         ZStack {
-                // Tap area to toggle our overlay (passes through to AVPlayerViewController when not hit)
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        toggleOverlay()
-                    }
-                    // In opt-in mode this gesture is also the reveal action
-                    // for the Close and Settings controls. The transport
-                    // buttons are later in the ZStack, so they keep their own
-                    // hit targets.
-                    .allowsHitTesting(usesEpisodeTransportControls || showCustomOverlay)
+            // Keep the reveal action accessible after the toolbar auto-hides.
+            // Transport buttons later in this stack retain their own hit targets.
+            Button(action: toggleOverlay) {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showCustomOverlay ? "Hide Playback Controls" : "Show Playback Controls")
+            .allowsHitTesting(usesEpisodeTransportControls || showCustomOverlay)
 
             if showCustomOverlay {
                 // Top gradient scrim
