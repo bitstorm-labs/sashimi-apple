@@ -223,6 +223,56 @@ final class PlaybackReportStoreTests: XCTestCase {
         XCTAssertTrue(delivered)
         XCTAssertTrue(store.reports.isEmpty)
     }
+
+    func testExpiredReportsArePrunedOnLoadAndPersisted() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let expired = PendingPlaybackReport(
+            serverID: "server-a",
+            itemID: "expired",
+            playSessionID: "session-a",
+            kind: .progress,
+            positionTicks: 100,
+            createdAt: now.addingTimeInterval(-PlaybackReportStore.staleReportInterval - 1)
+        )
+        let retained = PendingPlaybackReport(
+            serverID: "server-a",
+            itemID: "retained",
+            playSessionID: "session-a",
+            kind: .progress,
+            positionTicks: 200,
+            createdAt: now.addingTimeInterval(-PlaybackReportStore.staleReportInterval + 1)
+        )
+
+        let initialStore = PlaybackReportStore(defaults: defaults, now: now)
+        initialStore.enqueue(expired)
+        initialStore.enqueue(retained)
+
+        let prunedStore = PlaybackReportStore(defaults: defaults, now: now)
+        XCTAssertEqual(prunedStore.reports.map(\.itemID), ["retained"])
+
+        // A second load proves the removal was written back rather than only
+        // applied to the first in-memory instance.
+        let reloadedStore = PlaybackReportStore(defaults: defaults, now: now)
+        XCTAssertEqual(reloadedStore.reports.map(\.itemID), ["retained"])
+    }
+
+    func testReportAtRetentionBoundaryRemainsEligible() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let boundary = PendingPlaybackReport(
+            serverID: "server-a",
+            itemID: "boundary",
+            playSessionID: "session-a",
+            kind: .progress,
+            positionTicks: 300,
+            createdAt: now.addingTimeInterval(-PlaybackReportStore.staleReportInterval)
+        )
+
+        let store = PlaybackReportStore(defaults: defaults, now: now)
+        store.enqueue(boundary)
+
+        let reloadedStore = PlaybackReportStore(defaults: defaults, now: now)
+        XCTAssertEqual(reloadedStore.reports.map(\.itemID), ["boundary"])
+    }
 }
 
 private actor FakePlaybackReportingClient: PlaybackReportingClient {
