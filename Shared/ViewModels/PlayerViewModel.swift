@@ -1093,6 +1093,12 @@ final class PlayerViewModel: ObservableObject {
 
     func changeQuality(_ quality: QualityOption) async {
         guard !transitionState.isTransitioning, let item = currentItem else { return }
+        // Quality changes rebuild the same mutable player as episode
+        // transitions. Claim the shared lock before the first await so two
+        // rapid menu selections cannot tear down and recreate the player out
+        // of order.
+        transitionState.isTransitioning = true
+        defer { transitionState.isTransitioning = false }
 
         // Save current position
         let currentPosition = player?.currentItem?.currentTime()
@@ -1108,6 +1114,7 @@ final class PlayerViewModel: ObservableObject {
 
         // Update quality setting
         selectedQuality = quality
+        let attempt = playbackAttempt
 
         // Stop current playback
         diag(.teardown, [
@@ -1139,12 +1146,14 @@ final class PlayerViewModel: ObservableObject {
         // Kill the old transcode session before requesting a new one, so the
         // server isn't left encoding a stream nobody is watching.
         await stopActiveEncodingIfNeeded(reason: .qualityChange)
+        guard playbackAttempt == attempt, !Task.isCancelled else { return }
 
         do {
             // An explicit non-Auto pick forces a transcode so the selection
             // visibly takes effect: the tiers are caps, and a direct-played
             // source under the cap would otherwise make the pick a no-op.
             try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, maxWidth: quality.maxWidth, forceTranscode: quality != .auto)
+            guard playbackAttempt == attempt, !Task.isCancelled else { return }
             isLoading = false
             updateNowPlayingInfo(item: item)
 
