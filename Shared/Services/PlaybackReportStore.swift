@@ -67,10 +67,14 @@ final class PlaybackReportStore {
     static let shared = PlaybackReportStore()
 
     private static let storageKey = "pendingPlaybackReports.v1"
+    /// Reports that cannot be delivered after this window are no longer
+    /// useful. Keep the boundary inclusive so a report exactly this old still
+    /// gets one chance to deliver.
+    static let staleReportInterval: TimeInterval = 30 * 24 * 60 * 60
     private let defaults: UserDefaults
     private(set) var reports: [PendingPlaybackReport]
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, now: Date = Date()) {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([PendingPlaybackReport].self, from: data) {
@@ -78,6 +82,18 @@ final class PlaybackReportStore {
         } else {
             reports = []
         }
+        pruneExpiredReports(now: now)
+    }
+
+    /// Pruning on load prevents a permanently unreachable server from
+    /// accumulating report data in UserDefaults forever. The store remains
+    /// independent of SessionManager, so this is based only on report age.
+    private func pruneExpiredReports(now: Date) {
+        let cutoff = now.addingTimeInterval(-Self.staleReportInterval)
+        let retainedReports = reports.filter { $0.createdAt >= cutoff }
+        guard retainedReports.count != reports.count else { return }
+        reports = retainedReports
+        persist()
     }
 
     /// Adds a report or replaces the older sample for the same logical event.
