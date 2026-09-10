@@ -243,16 +243,16 @@ final class PlaybackReportStoreTests: XCTestCase {
             createdAt: now.addingTimeInterval(-PlaybackReportStore.staleReportInterval + 1)
         )
 
-        let initialStore = PlaybackReportStore(defaults: defaults, now: now)
+        let initialStore = PlaybackReportStore(defaults: testDefaults, now: now)
         initialStore.enqueue(expired)
         initialStore.enqueue(retained)
 
-        let prunedStore = PlaybackReportStore(defaults: defaults, now: now)
+        let prunedStore = PlaybackReportStore(defaults: testDefaults, now: now)
         XCTAssertEqual(prunedStore.reports.map(\.itemID), ["retained"])
 
         // A second load proves the removal was written back rather than only
         // applied to the first in-memory instance.
-        let reloadedStore = PlaybackReportStore(defaults: defaults, now: now)
+        let reloadedStore = PlaybackReportStore(defaults: testDefaults, now: now)
         XCTAssertEqual(reloadedStore.reports.map(\.itemID), ["retained"])
     }
 
@@ -267,10 +267,10 @@ final class PlaybackReportStoreTests: XCTestCase {
             createdAt: now.addingTimeInterval(-PlaybackReportStore.staleReportInterval)
         )
 
-        let store = PlaybackReportStore(defaults: defaults, now: now)
+        let store = PlaybackReportStore(defaults: testDefaults, now: now)
         store.enqueue(boundary)
 
-        let reloadedStore = PlaybackReportStore(defaults: defaults, now: now)
+        let reloadedStore = PlaybackReportStore(defaults: testDefaults, now: now)
         XCTAssertEqual(reloadedStore.reports.map(\.itemID), ["boundary"])
     }
 }
