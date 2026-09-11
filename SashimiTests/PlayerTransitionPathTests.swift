@@ -1,6 +1,10 @@
 import XCTest
 @testable import Sashimi
 
+// Keep the end-to-end transition scenarios together so each path remains easy
+// to compare while reviewing the state machine.
+// swiftlint:disable type_body_length
+
 @MainActor
 final class PlayerTransitionPathTests: XCTestCase {
     func testNavigationUsesOrderedNonAdjacentSeasonsForBothDirections() async {
@@ -178,6 +182,51 @@ final class PlayerTransitionPathTests: XCTestCase {
         await viewModel.handlePlaybackEnded()
 
         XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
+    }
+
+    func testNaturalCompletionWithNavigationControlsDisabledDismissesWithoutEndCard() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
+        settings.autoPlayNextEpisode = false
+        settings.showEpisodeNavigationControls = false
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertNil(viewModel.transitionState.endCard)
         XCTAssertTrue(viewModel.playbackEnded)
         XCTAssertTrue(loader.loadedItemIDs.isEmpty)
         XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
