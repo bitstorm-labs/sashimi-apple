@@ -100,7 +100,8 @@ struct MobilePlayerView: View {
                 // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
                 SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
-                if viewModel.transitionState.endCard != nil {
+                if playbackSettings.showEpisodeNavigationControls,
+                   viewModel.transitionState.endCard != nil {
                     MobilePlayerEndCard(
                         state: viewModel.transitionState,
                         item: displayedItem,
@@ -217,7 +218,8 @@ struct MobilePlayerView: View {
             }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended && !viewModel.transitionState.isEpisodeNavigationAvailable {
+            if ended && (!playbackSettings.showEpisodeNavigationControls ||
+                         !viewModel.transitionState.isEpisodeNavigationAvailable) {
                 dismiss()
             }
         }

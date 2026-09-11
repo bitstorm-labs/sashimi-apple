@@ -811,11 +811,17 @@ final class PlayerViewModel: ObservableObject {
                         await autoplayNextEpisode()
                         return
                     }
-                    transitionState.endCard = .nextEpisode
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .nextEpisode
+                    }
                 case .failed:
-                    transitionState.endCard = .lookupFailed
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .lookupFailed
+                    }
                 default:
-                    transitionState.endCard = .finalEpisode
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .finalEpisode
+                    }
                 }
             } else if item.type == .video,
                       playbackSettings.autoPlayNextEpisode,

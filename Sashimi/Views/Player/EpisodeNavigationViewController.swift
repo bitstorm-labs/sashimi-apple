@@ -112,7 +112,7 @@ final class EpisodeNavigationViewController: UIViewController {
         updatePlayPauseImage()
         playNextButton.isEnabled = state.canPlayNext
         playNextButton.isHidden = !state.canPlayNext
-        endCard.isHidden = state.endCard == nil
+        endCard.isHidden = state.endCard == nil || !showEpisodeNavigationControls
         controls.isHidden = state.endCard != nil || !showEpisodeNavigationControls
         settingsButton.isHidden = controls.isHidden
         settingsFocusGuide.isEnabled = !controls.isHidden && !state.isTransitioning
