@@ -8,6 +8,13 @@ struct TVPlayerView: UIViewControllerRepresentable {
     @ObservedObject var viewModel: PlayerViewModel
     let item: BaseItemDto
     let onDismiss: () -> Void
+    @ObservedObject var playbackSettings = PlaybackSettings.shared
+
+    private var usesEpisodeTransportControls: Bool {
+        viewModel.transitionState.usesEpisodeTransportControls(
+            isEnabled: playbackSettings.showEpisodeNavigationControls
+        )
+    }
 
     func makeUIViewController(context: Context) -> PlayerContainerVC {
         let container = PlayerContainerVC()
@@ -15,7 +22,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         let playerVC = AVPlayerViewController()
         playerVC.player = player
-        playerVC.showsPlaybackControls = true
+        playerVC.showsPlaybackControls = !usesEpisodeTransportControls
         playerVC.delegate = context.coordinator
 
         // Subtitles are rendered by our own overlay and selected through the
@@ -61,6 +68,23 @@ struct TVPlayerView: UIViewControllerRepresentable {
         context.coordinator.currentViewModel = viewModel
         context.coordinator.currentItem = displayItem
         context.coordinator.updateOverlay()
+
+        if let navigationVC = context.coordinator.navigationVC {
+            let shouldShow = usesEpisodeTransportControls
+            playerVC.showsPlaybackControls = !usesEpisodeTransportControls
+            let wasHidden = navigationVC.view.isHidden
+            navigationVC.update(
+                state: viewModel.transitionState,
+                showEpisodeNavigationControls: usesEpisodeTransportControls,
+                player: player
+            )
+            navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
+            navigationVC.view.isHidden = viewModel.transitionState.endCard == nil || !shouldShow
+            if wasHidden != navigationVC.view.isHidden {
+                container.setNeedsFocusUpdate()
+                container.updateFocusIfNeeded()
+            }
+        }
 
         // Update skip button visibility. Whenever the visibility changes we
         // also kick the focus engine via setNeedsFocusUpdate so the container's
@@ -148,69 +172,33 @@ struct TVPlayerView: UIViewControllerRepresentable {
         container.skipVC = skipVC
         container.playerVC = playerVC
         context.coordinator.skipVC = skipVC
-    }
 
-    // MARK: - Transport Bar Menus
-
-    private func buildMenus() -> [UIMenuElement] {
-        var menus: [UIMenuElement] = []
-
-        // Speed menu
-        let speeds: [(String, Float)] = [
-            ("0.5×", 0.5), ("0.75×", 0.75), ("1× Normal", 1.0),
-            ("1.25×", 1.25), ("1.5×", 1.5), ("2×", 2.0)
-        ]
-        let currentRate = player.rate != 0 ? player.rate : 1.0
-        let speedActions = speeds.map { title, rate in
-            UIAction(
-                title: title,
-                state: currentRate == rate ? .on : .off
-            ) { _ in
-                player.rate = rate
-            }
+        let navigationVC = EpisodeNavigationViewController()
+        navigationVC.onPrevious = {
+            Task { @MainActor in await viewModel.playPreviousEpisode() }
         }
-        let speedMenu = UIMenu(
-            title: "Speed",
-            image: UIImage(systemName: "speedometer"),
-            children: speedActions
-        )
-        menus.append(speedMenu)
-
-        // Subtitles menu
-        let subtitleActions = viewModel.subtitleTracks.map { track in
-            UIAction(
-                title: track.displayName,
-                state: track.id == viewModel.selectedSubtitleTrackId ? .on : .off
-            ) { _ in
-                viewModel.selectSubtitleTrack(track)
-            }
+        navigationVC.onNext = {
+            Task { @MainActor in await viewModel.playNextEpisode() }
         }
-        if !subtitleActions.isEmpty {
-            let subtitleMenu = UIMenu(
-                title: "Subtitles",
-                image: UIImage(systemName: "captions.bubble"),
-                children: subtitleActions
-            )
-            menus.append(subtitleMenu)
+        navigationVC.onReplay = {
+            Task { @MainActor in await viewModel.replayCurrentItem() }
         }
-
-        // Quality menu
-        let qualityActions = QualityOption.allCases.map { quality in
-            UIAction(
-                title: quality.displayName,
-                state: viewModel.selectedQuality == quality ? .on : .off
-            ) { _ in
-                Task { await viewModel.changeQuality(quality) }
-            }
-        }
-        let qualityMenu = UIMenu(
-            title: "Quality",
-            image: UIImage(systemName: "gearshape"),
-            children: qualityActions
-        )
-        menus.append(qualityMenu)
-
-        return menus
+        navigationVC.onDone = onDismiss
+        navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
+        navigationVC.view.translatesAutoresizingMaskIntoConstraints = false
+        navigationVC.view.isHidden = true
+        container.addChild(navigationVC)
+        container.view.addSubview(navigationVC.view)
+        navigationVC.didMove(toParent: container)
+        NSLayoutConstraint.activate([
+            navigationVC.view.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            navigationVC.view.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            navigationVC.view.topAnchor.constraint(equalTo: container.view.topAnchor),
+            navigationVC.view.bottomAnchor.constraint(equalTo: container.view.bottomAnchor)
+        ])
+        container.navigationVC = navigationVC
+        context.coordinator.navigationVC = navigationVC
+        navigationVC.update(state: viewModel.transitionState, showEpisodeNavigationControls: usesEpisodeTransportControls, player: player)
     }
 
     // MARK: - Coordinator
@@ -220,6 +208,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         var playerVC: AVPlayerViewController?
         var hostingController: UIHostingController<PlayerContentOverlay>?
         var skipVC: SkipButtonViewController?
+        var navigationVC: EpisodeNavigationViewController?
         var controlsVisible = false
         weak var currentViewModel: PlayerViewModel?
         var currentItem: BaseItemDto?
@@ -266,6 +255,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
 class PlayerContainerVC: UIViewController {
     var skipVC: SkipButtonViewController?
+    var navigationVC: EpisodeNavigationViewController?
     weak var playerVC: AVPlayerViewController?
 
     /// When the skip button is visible, route the focus engine to it. Otherwise
@@ -274,6 +264,11 @@ class PlayerContainerVC: UIViewController {
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         if let skipVC, !skipVC.view.isHidden {
             return [skipVC.view]
+        }
+        if let navigationVC,
+           !navigationVC.view.isHidden,
+           !navigationVC.preferredFocusEnvironments.isEmpty {
+            return [navigationVC]
         }
         if let playerVC {
             return [playerVC]
@@ -379,7 +374,7 @@ class SkipButtonViewController: UIViewController {
 /// where one of its visible subviews (e.g. the skip button) is hit. This
 /// keeps the AVPlayerViewController fully usable when the skip button is
 /// hidden — without this, the full-bounds wrapper would swallow remote input.
-private class PassthroughView: UIView {
+class PassthroughView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         for subview in subviews where !subview.isHidden && subview.alpha > 0 {
             let converted = convert(point, to: subview)

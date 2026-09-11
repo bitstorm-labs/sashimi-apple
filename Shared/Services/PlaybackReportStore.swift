@@ -191,6 +191,18 @@ protocol PlaybackReportingClient: Sendable {
 
 extension JellyfinClient: PlaybackReportingClient {}
 
+/// The view model only needs the lifecycle operations, not the persistence
+/// details. Keeping this small seam lets transition tests drive the real view
+/// model decisions with a deterministic reporter.
+@MainActor
+protocol PlayerPlaybackReporting: AnyObject {
+    func reset()
+    func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?)
+    func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async
+    func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async
+    func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async
+    func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async
+}
 private let playbackReportLogger = Logger(
     subsystem: "com.mondominator.sashimi",
     category: "PlaybackReportStore"
@@ -216,7 +228,6 @@ final class PlaybackReportDelivery {
         guard !report.serverID.isEmpty else { return report }
         return store.enqueue(report)
     }
-
     func sendStart(
         _ report: PendingPlaybackReport,
         playMethod: String,
@@ -395,7 +406,7 @@ final class PlaybackReportDelivery {
 }
 
 @MainActor
-final class PlaybackSessionReporter {
+final class PlaybackSessionReporter: PlayerPlaybackReporting {
     private let serverID: String?
     private let client: any PlaybackReportingClient
     private let delivery: PlaybackReportDelivery

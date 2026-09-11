@@ -198,8 +198,8 @@ struct ContentView: View {
         }
         .fullScreenCover(item: $deepLinkDestination) { destination in
             switch destination {
-            case .play(let item):
-                MobilePlayerView(item: item)
+            case .play(let item, let serverID):
+                MobilePlayerView(item: item, serverID: serverID)
             case .detail(let item):
                 NavigationStack {
                     AdaptiveDetailView(item: item)
@@ -293,11 +293,13 @@ struct ContentView: View {
         // Last link wins: cancel any in-flight resolution.
         deepLinkTask?.cancel()
         deepLinkTask = Task {
-            guard let item = try? await JellyfinClient.shared.getItem(itemId: link.itemId),
+            let serverID = sessionManager.activeServerId
+            let client = serverID.flatMap { sessionManager.makeClient(for: $0) } ?? JellyfinClient.shared
+            guard let item = try? await client.getItem(itemId: link.itemId),
                   !Task.isCancelled else { return }
             switch link.action {
             case .play:
-                deepLinkDestination = .play(item)
+                deepLinkDestination = .play(item, serverID: serverID)
             case .item:
                 deepLinkDestination = .detail(item)
             }
