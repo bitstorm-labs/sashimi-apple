@@ -331,6 +331,129 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertFalse(viewModel.playbackEnded)
     }
 
+    func testRecoveryRebuildIsAbandonedWhenPlaybackStops() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let setup = BlockingPlayerRecoverySetup()
+        let reporter = BlockingPlaybackCompletionReporter()
+        reporter.completionStarted.isInverted = true
+        defer { reporter.releaseCompletion() }
+        let viewModel = PlayerViewModel(
+            client: JellyfinClient(),
+            reporter: reporter,
+            recoverySetup: { _, _, _, _ in await setup.suspend() }
+        )
+        viewModel.currentItem = current
+
+        let recovery = Task {
+            await viewModel.attemptPlaybackRecovery(reason: "test", itemID: current.id, attempt: 0)
+        }
+        await fulfillment(of: [setup.started], timeout: 2)
+        XCTAssertTrue(viewModel.transitionState.isTransitioning)
+        await viewModel.handlePlaybackEnded(itemID: current.id, attempt: 0)
+
+        let stop = viewModel.beginStop()
+        await stop.value
+        setup.resume()
+        await recovery.value
+        await fulfillment(of: [reporter.completionStarted], timeout: 0.1)
+
+        XCTAssertTrue(reporter.completedItemIDs.isEmpty)
+        XCTAssertNil(viewModel.currentItem)
+        XCTAssertNil(viewModel.player)
+        XCTAssertFalse(viewModel.transitionState.isTransitioning)
+        XCTAssertNil(viewModel.error)
+    }
+
+    func testRecoveryRejectsFailureFromReplacedItem() async {
+        let outgoing = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let incoming = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        var recoveryItems: [String] = []
+        let viewModel = PlayerViewModel(client: JellyfinClient(), recoverySetup: { item, _, _, _ in
+            recoveryItems.append(item.id)
+        })
+        viewModel.currentItem = incoming
+
+        await viewModel.attemptPlaybackRecovery(reason: "stale-failure", itemID: outgoing.id, attempt: 0)
+
+        XCTAssertTrue(recoveryItems.isEmpty)
+        XCTAssertFalse(viewModel.transitionState.isTransitioning)
+    }
+
+    func testNaturalCompletionWaitsForRecoveryBeforeReporting() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let setup = BlockingPlayerRecoverySetup()
+        let reporter = BlockingPlaybackCompletionReporter()
+        let viewModel = PlayerViewModel(
+            client: JellyfinClient(),
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            recoverySetup: { _, _, _, _ in await setup.suspend() }
+        )
+        viewModel.currentItem = current
+        await viewModel.refreshEpisodeNavigation()
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
+        settings.autoPlayNextEpisode = false
+        settings.showEpisodeNavigationControls = true
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
+
+        let recovery = Task {
+            await viewModel.attemptPlaybackRecovery(reason: "test", itemID: current.id, attempt: 0)
+        }
+        await fulfillment(of: [setup.started], timeout: 2)
+        await viewModel.handlePlaybackEnded(itemID: current.id, attempt: 0)
+        XCTAssertTrue(reporter.completedItemIDs.isEmpty)
+
+        setup.resume()
+        await recovery.value
+        await fulfillment(of: [reporter.completionStarted], timeout: 2)
+
+        XCTAssertEqual(reporter.completedItemIDs, [current.id])
+        reporter.releaseCompletion()
+        await viewModel.stop()
+    }
+
     func testNaturalCompletionWithAutoplayDisabledShowsNextEndCard() async {
         let current = makeItem(
             id: "episode-1",
@@ -632,6 +755,24 @@ private final class BlockingPlaybackCompletionReporter: PlayerPlaybackReporting 
     }
 
     func releaseCompletion() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class BlockingPlayerRecoverySetup {
+    let started = XCTestExpectation(description: "Recovery player setup started")
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        started.fulfill()
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume() {
         continuation?.resume()
         continuation = nil
     }
