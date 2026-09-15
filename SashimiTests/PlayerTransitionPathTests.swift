@@ -147,6 +147,60 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertFalse(viewModel.transitionState.isTransitioning)
     }
 
+    func testNaturalEndDuringEpisodeTransitionIsSuppressed() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let next = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let loader = BlockingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: reporter,
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
+        settings.autoPlayNextEpisode = false
+        settings.showEpisodeNavigationControls = true
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
+
+        await viewModel.refreshEpisodeNavigation()
+        let transition = Task { await viewModel.playNextEpisode() }
+        await Task.yield()
+        XCTAssertTrue(viewModel.transitionState.isTransitioning)
+
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertEqual(reporter.events, [.stopped(itemID: current.id)])
+        XCTAssertFalse(viewModel.playbackEnded)
+
+        loader.finish()
+        await transition.value
+
+        XCTAssertNil(viewModel.transitionState.endCard)
+        XCTAssertFalse(viewModel.playbackEnded)
+        XCTAssertFalse(viewModel.transitionState.isTransitioning)
+    }
+
     func testNaturalCompletionWithAutoplayDisabledShowsNextEndCard() async {
         let current = makeItem(
             id: "episode-1",
@@ -175,8 +229,13 @@ final class PlayerTransitionPathTests: XCTestCase {
 
         let settings = PlaybackSettings.shared
         let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
         settings.autoPlayNextEpisode = false
-        defer { settings.autoPlayNextEpisode = previousAutoPlay }
+        settings.showEpisodeNavigationControls = true
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
 
         await viewModel.refreshEpisodeNavigation()
         await viewModel.handlePlaybackEnded()
@@ -292,8 +351,13 @@ final class PlayerTransitionPathTests: XCTestCase {
 
         let settings = PlaybackSettings.shared
         let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
         settings.autoPlayNextEpisode = true
-        defer { settings.autoPlayNextEpisode = previousAutoPlay }
+        settings.showEpisodeNavigationControls = true
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
 
         await viewModel.refreshEpisodeNavigation()
         await viewModel.handlePlaybackEnded()
