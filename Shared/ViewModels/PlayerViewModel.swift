@@ -148,6 +148,12 @@ final class PlayerViewModel: ObservableObject {
     @Published private(set) var tracksVersion = 0
     /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
     private var isHandlingEnd = false
+    private struct PendingPlaybackEnd {
+        let itemID: String
+        let attempt: Int
+    }
+    private var pendingPlaybackEnd: PendingPlaybackEnd?
+    private var isChangingQuality = false
     /// Resume position still waiting to be applied once the item is ready to
     /// play. A pre-ready seek is silently dropped for HLS/transcode streams
     /// (no seekable range yet), so we re-seek from the status observer.
@@ -768,10 +774,7 @@ final class PlayerViewModel: ObservableObject {
     func handlePlaybackEnded() async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
-        if isHandlingEnd || transitionState.isTransitioning {
-            diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
-            return
-        }
+        guard shouldHandlePlaybackEnd() else { return }
         isHandlingEnd = true
         let attempt = playbackAttempt
         diag(.playbackEnded, [
@@ -840,6 +843,43 @@ final class PlayerViewModel: ObservableObject {
         }
 
         playbackEnded = true
+    }
+
+    private func shouldHandlePlaybackEnd() -> Bool {
+        guard !isHandlingEnd else {
+            diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
+            return false
+        }
+        return !deferPlaybackEndIfTransitioning()
+    }
+
+    private func deferPlaybackEndIfTransitioning() -> Bool {
+        guard transitionState.isTransitioning else { return false }
+        if isChangingQuality, let item = currentItem {
+            pendingPlaybackEnd = PendingPlaybackEnd(itemID: item.id, attempt: playbackAttempt)
+        }
+        diag(.playbackEnded, [
+            PlayerDiagnostics.field("suppressed", true),
+            PlayerDiagnostics.field("deferred", pendingPlaybackEnd != nil)
+        ])
+        return true
+    }
+
+    /// Releases the shared player-transition lock and retries a queued end
+    /// notification only if it still belongs to the current item and attempt.
+    /// A new-item load or stop invalidates the notification before it can be
+    /// mistaken for completion of the replacement item.
+    @discardableResult
+    func finishTransition() -> Task<Void, Never>? {
+        transitionState.isTransitioning = false
+        guard let pendingPlaybackEnd else { return nil }
+        self.pendingPlaybackEnd = nil
+        guard pendingPlaybackEnd.attempt == playbackAttempt,
+              pendingPlaybackEnd.itemID == currentItem?.id else { return nil }
+        return Task { [weak self] in
+            guard let self else { return }
+            await self.handlePlaybackEnded()
+        }
     }
 
     /// Starts or refreshes navigation for the current episode. A non-episode
@@ -1075,7 +1115,7 @@ final class PlayerViewModel: ObservableObject {
         // Claim the transition before reporting can suspend. Repeated actions
         // must never reset the reporter or rebuild the same player concurrently.
         transitionState.isTransitioning = true
-        defer { transitionState.isTransitioning = false }
+        defer { finishTransition() }
         let attempt = playbackAttempt
         player?.pause()
         progressReportTask?.cancel()
@@ -1104,7 +1144,11 @@ final class PlayerViewModel: ObservableObject {
         // rapid menu selections cannot tear down and recreate the player out
         // of order.
         transitionState.isTransitioning = true
-        defer { transitionState.isTransitioning = false }
+        isChangingQuality = true
+        defer {
+            isChangingQuality = false
+            finishTransition()
+        }
 
         // Save current position
         let currentPosition = player?.currentItem?.currentTime()

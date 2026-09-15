@@ -7,12 +7,7 @@ final class SettingsTests: XCTestCase {
     @MainActor
     func testPlaybackSettingsDefaults() {
         let settings = PlaybackSettings.shared
-
-        // Test default values exist and are reasonable
-        XCTAssertTrue(settings.autoPlayNextEpisode)
-        XCTAssertFalse(settings.autoSkipIntro)
-        XCTAssertFalse(settings.autoSkipCredits)
-        XCTAssertEqual(settings.resumeThresholdSeconds, 30)
+        XCTAssertFalse(PlaybackSettings.defaultShowEpisodeNavigationControls)
 
         let key = "showEpisodeNavigationControls"
         let previousValue = UserDefaults.standard.object(forKey: key)
@@ -23,6 +18,13 @@ final class SettingsTests: XCTestCase {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
+
+        // Test default values exist and are reasonable
+        XCTAssertTrue(settings.autoPlayNextEpisode)
+        XCTAssertFalse(settings.autoSkipIntro)
+        XCTAssertFalse(settings.autoSkipCredits)
+        XCTAssertEqual(settings.resumeThresholdSeconds, 30)
+
         settings.showEpisodeNavigationControls = false
         XCTAssertFalse(settings.showEpisodeNavigationControls)
         settings.showEpisodeNavigationControls = true

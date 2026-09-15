@@ -7,6 +7,12 @@ simulator-screenshots workflow. Revision 14 is the authoritative visual
 capture set for this worktree. It contains the final app-owned transport row
 used when the opt-in setting is enabled.
 
+These PNGs and manifests remain in the author's Desktop capture folder; they
+are not committed to this repository or attached to the PR. The machine-local
+paths below are not reviewable evidence for other contributors. Treat them as
+the author's local visual check only, not as CI output or independently
+inspectable PR artifacts.
+
 The live-series scenario used Silo, season 3 episode 4, “Whatever You Do,
 Don't Go Home” (47 min). Its player rendered actual video frames, episode
 metadata, stream information, and the opt-in five-button transport row. When
@@ -16,7 +22,7 @@ row is absent and the native AVPlayer transport remains in use. The transition
 callbacks preserve the existing episode state flow for Previous Episode and
 Next Episode.
 
-| Surface | Simulator | Result | Capture |
+| Surface | Simulator | Result | Local capture (not included in PR) |
 | --- | --- | --- | --- |
 | iPhone | Sashimi iPhone 429, iOS 26.5, `E955E442-E4A0-41B2-9F45-3A1FBB729833` | Live Silo playback with the complete opt-in five-button transport row. | `/Users/pratik/Desktop/Sashimi-429-Screenshots/13/iphone-live-silo-transport-controls-final.png` |
 | iPad | Sashimi iPad 429, iOS 26.5, `C8721C8B-DD1C-4DEE-AD11-766BBA01E9C1` | Live Silo playback with the complete opt-in five-button transport row. | `/Users/pratik/Desktop/Sashimi-429-Screenshots/14/ipad-live-silo-transport-controls-final.png` |
