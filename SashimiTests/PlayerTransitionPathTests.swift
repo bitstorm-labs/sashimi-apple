@@ -3,7 +3,7 @@ import XCTest
 
 // Keep the end-to-end transition scenarios together so each path remains easy
 // to compare while reviewing the state machine.
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 
 @MainActor
 final class PlayerTransitionPathTests: XCTestCase {
@@ -32,6 +32,14 @@ final class PlayerTransitionPathTests: XCTestCase {
             seasonNumber: 5,
             episodeNumber: 1
         )
+        let nextSeasonSpecial = makeItem(
+            id: "season-5-special",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-5",
+            seasonNumber: 5,
+            episodeNumber: 0
+        )
         let client = FakePlayerEpisodeNavigationClient(
             itemsByParent: [
                 "season-3": [current],
@@ -41,7 +49,7 @@ final class PlayerTransitionPathTests: XCTestCase {
                     makeItem(id: "season-5", type: .season, seriesId: "series", seasonNumber: 5),
                 ],
                 "season-1": [previous],
-                "season-5": [next],
+                "season-5": [nextSeasonSpecial, next],
             ]
         )
         let viewModel = PlayerViewModel(navigationClient: client)
@@ -53,6 +61,41 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertEqual(viewModel.transitionState.nextEpisode?.id, next.id)
         XCTAssertTrue(viewModel.transitionState.canPlayPrevious)
         XCTAssertTrue(viewModel.transitionState.canPlayNext)
+    }
+
+    func testSeasonRolloverFallsBackToSpecialWhenNoRegularEpisodeExists() async {
+        let current = makeItem(
+            id: "season-1-finale",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 8
+        )
+        let special = makeItem(
+            id: "season-2-special",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-2",
+            seasonNumber: 2,
+            episodeNumber: 0
+        )
+        let client = FakePlayerEpisodeNavigationClient(
+            itemsByParent: [
+                "season-1": [current],
+                "series": [
+                    makeItem(id: "season-1", type: .season, seriesId: "series", seasonNumber: 1),
+                    makeItem(id: "season-2", type: .season, seriesId: "series", seasonNumber: 2),
+                ],
+                "season-2": [special],
+            ]
+        )
+        let viewModel = PlayerViewModel(navigationClient: client)
+        viewModel.currentItem = current
+
+        await viewModel.refreshEpisodeNavigation()
+
+        XCTAssertEqual(viewModel.transitionState.nextEpisode?.id, special.id)
     }
 
     func testNavigationFailureKeepsFailureDistinctFromFinalEpisode() async {
@@ -199,6 +242,93 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertNil(viewModel.transitionState.endCard)
         XCTAssertFalse(viewModel.playbackEnded)
         XCTAssertFalse(viewModel.transitionState.isTransitioning)
+    }
+
+    func testEndCompletionContinuesWhenQualityChangesWhileReportSuspended() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let reporter = BlockingPlaybackCompletionReporter()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current]]),
+            reporter: reporter
+        )
+        viewModel.currentItem = current
+
+        let settings = PlaybackSettings.shared
+        let previousAutoPlay = settings.autoPlayNextEpisode
+        let previousNavigationControls = settings.showEpisodeNavigationControls
+        settings.autoPlayNextEpisode = false
+        settings.showEpisodeNavigationControls = true
+        defer {
+            settings.autoPlayNextEpisode = previousAutoPlay
+            settings.showEpisodeNavigationControls = previousNavigationControls
+        }
+
+        let completion = Task { await viewModel.handlePlaybackEnded() }
+        await fulfillment(of: [reporter.completionStarted], timeout: 2)
+
+        await viewModel.changeQuality(.auto)
+        reporter.releaseCompletion()
+        await completion.value
+
+        XCTAssertEqual(reporter.completedItemIDs, [current.id])
+        XCTAssertEqual(viewModel.transitionState.endCard, .finalEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+    }
+
+    func testDelayedEndForOutgoingItemIsIgnoredAfterItemChanges() async {
+        let outgoing = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let incoming = makeItem(
+            id: "episode-2",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 2
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let viewModel = PlayerViewModel(reporter: reporter)
+        viewModel.currentItem = incoming
+
+        await viewModel.handlePlaybackEnded(itemID: outgoing.id, attempt: 0)
+
+        XCTAssertTrue(reporter.events.isEmpty)
+        XCTAssertFalse(viewModel.playbackEnded)
+    }
+
+    func testDelayedEndAfterStopIsIgnored() async {
+        let current = makeItem(
+            id: "episode-1",
+            type: .episode,
+            seriesId: "series",
+            seasonId: "season-1",
+            seasonNumber: 1,
+            episodeNumber: 1
+        )
+        let reporter = RecordingPlayerPlaybackReporter()
+        let viewModel = PlayerViewModel(reporter: reporter)
+        viewModel.currentItem = current
+        let originalAttempt = 0
+
+        await viewModel.stop()
+        await viewModel.handlePlaybackEnded(itemID: current.id, attempt: originalAttempt)
+
+        XCTAssertNil(viewModel.currentItem)
+        XCTAssertTrue(reporter.events.isEmpty)
+        XCTAssertFalse(viewModel.playbackEnded)
     }
 
     func testNaturalCompletionWithAutoplayDisabledShowsNextEndCard() async {
@@ -478,6 +608,32 @@ private final class RecordingPlayerPlaybackReporter: PlayerPlaybackReporting {
         guard hasStarted else { return }
         hasStarted = false
         events.append(.completed(itemID: itemID))
+    }
+}
+
+@MainActor
+private final class BlockingPlaybackCompletionReporter: PlayerPlaybackReporting {
+    let completionStarted = XCTestExpectation(description: "Playback completion report started")
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var completedItemIDs: [String] = []
+
+    func reset() {}
+    func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?) {}
+    func start(itemID: String, positionTicks: Int64, playSessionID: String?, playMethod: String) async {}
+    func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async {}
+    func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async {}
+
+    func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async {
+        completedItemIDs.append(itemID)
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            completionStarted.fulfill()
+        }
+    }
+
+    func releaseCompletion() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
