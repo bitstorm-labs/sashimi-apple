@@ -154,6 +154,8 @@ final class PlayerViewModel: ObservableObject {
     }
     private var pendingPlaybackEnd: PendingPlaybackEnd?
     private var isChangingQuality = false
+    private var playbackAttemptItemID: String?
+    private var sameItemPlaybackAttempts = Set<Int>()
     /// Resume position still waiting to be applied once the item is ready to
     /// play. A pre-ready seek is silently dropped for HLS/transcode streams
     /// (no seekable range yet), so we re-seek from the status observer.
@@ -457,6 +459,9 @@ final class PlayerViewModel: ObservableObject {
         offlineSubtitles: [OfflineSubtitle] = []
     ) async {
         playbackAttempt += 1
+        playbackAttemptItemID = item.id
+        sameItemPlaybackAttempts = [playbackAttempt]
+        pendingPlaybackEnd = nil
         navigationTask?.cancel()
         navigationTask = nil
         playbackEnded = false
@@ -772,13 +777,19 @@ final class PlayerViewModel: ObservableObject {
     }
 
     func handlePlaybackEnded() async {
+        guard let itemID = currentItem?.id else {
+            playbackEnded = true
+            return
+        }
+        await handlePlaybackEnded(itemID: itemID, attempt: playbackAttempt)
+    }
+
+    func handlePlaybackEnded(itemID: String, attempt: Int) async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
-        guard shouldHandlePlaybackEnd() else { return }
-        isHandlingEnd = true
-        let attempt = playbackAttempt
+        guard beginHandlingPlaybackEnd(itemID: itemID, attempt: attempt) else { return }
         diag(.playbackEnded, [
-            PlayerDiagnostics.field("item", currentItem?.id),
+            PlayerDiagnostics.field("item", itemID),
             PlayerDiagnostics.field("positionSeconds", player?.currentItem?.currentTime().seconds),
             PlayerDiagnostics.field("autoPlayNext", playbackSettings.autoPlayNextEpisode)
         ])
@@ -800,14 +811,14 @@ final class PlayerViewModel: ObservableObject {
                 )
             }
 
-            guard playbackAttempt == attempt, !Task.isCancelled else { return }
+            guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
 
             // Lookup happens after completion is recorded. This ordering keeps
             // autoplay from starting a new server session before Jellyfin has
             // received the completed position and played marker.
             if item.type == .episode, !isOfflinePlayback {
                 await waitForEpisodeNavigation(for: item)
-                guard playbackAttempt == attempt, !Task.isCancelled else { return }
+                guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
                 switch transitionState.lookupStatus {
                 case .available where transitionState.nextEpisode != nil:
                     if playbackSettings.autoPlayNextEpisode {
@@ -829,7 +840,7 @@ final class PlayerViewModel: ObservableObject {
             } else if item.type == .video,
                       playbackSettings.autoPlayNextEpisode,
                       let next = await fetchNextVideo(for: item) {
-                guard playbackAttempt == attempt, !Task.isCancelled else { return }
+                guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
                 // Preserve the existing automatic sequence for standalone
                 // videos without exposing episode controls for them.
                 diag(.nextEpisode, [
@@ -845,24 +856,51 @@ final class PlayerViewModel: ObservableObject {
         playbackEnded = true
     }
 
-    private func shouldHandlePlaybackEnd() -> Bool {
+    private func beginHandlingPlaybackEnd(itemID: String, attempt: Int) -> Bool {
+        guard isCurrentPlaybackAttempt(itemID: itemID, attempt: attempt) else {
+            diag(.playbackEnded, [
+                PlayerDiagnostics.field("item", itemID),
+                PlayerDiagnostics.field("staleAttempt", attempt),
+                PlayerDiagnostics.field("suppressed", true)
+            ])
+            return false
+        }
         guard !isHandlingEnd else {
             diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
             return false
         }
-        return !deferPlaybackEndIfTransitioning()
+        guard !deferPlaybackEndIfTransitioning(itemID: itemID, attempt: attempt) else { return false }
+        isHandlingEnd = true
+        return true
     }
 
-    private func deferPlaybackEndIfTransitioning() -> Bool {
+    private func deferPlaybackEndIfTransitioning(itemID: String, attempt: Int) -> Bool {
         guard transitionState.isTransitioning else { return false }
-        if isChangingQuality, let item = currentItem {
-            pendingPlaybackEnd = PendingPlaybackEnd(itemID: item.id, attempt: playbackAttempt)
+        if isChangingQuality {
+            pendingPlaybackEnd = PendingPlaybackEnd(itemID: itemID, attempt: attempt)
         }
         diag(.playbackEnded, [
             PlayerDiagnostics.field("suppressed", true),
             PlayerDiagnostics.field("deferred", pendingPlaybackEnd != nil)
         ])
         return true
+    }
+
+    private func isCurrentPlaybackAttempt(itemID: String, attempt: Int) -> Bool {
+        guard currentItem?.id == itemID else { return false }
+        return playbackAttempt == attempt ||
+            (playbackAttemptItemID == itemID && sameItemPlaybackAttempts.contains(attempt))
+    }
+
+    private func advancePlaybackAttemptForSameItem(itemID: String) {
+        if playbackAttemptItemID == itemID {
+            sameItemPlaybackAttempts.insert(playbackAttempt)
+        } else {
+            playbackAttemptItemID = itemID
+            sameItemPlaybackAttempts = [playbackAttempt]
+        }
+        playbackAttempt += 1
+        sameItemPlaybackAttempts.insert(playbackAttempt)
     }
 
     /// Releases the shared player-transition lock and retries a queued end
@@ -874,11 +912,12 @@ final class PlayerViewModel: ObservableObject {
         transitionState.isTransitioning = false
         guard let pendingPlaybackEnd else { return nil }
         self.pendingPlaybackEnd = nil
-        guard pendingPlaybackEnd.attempt == playbackAttempt,
-              pendingPlaybackEnd.itemID == currentItem?.id else { return nil }
+        guard isCurrentPlaybackAttempt(itemID: pendingPlaybackEnd.itemID, attempt: pendingPlaybackEnd.attempt) else {
+            return nil
+        }
         return Task { [weak self] in
             guard let self else { return }
-            await self.handlePlaybackEnded()
+            await self.handlePlaybackEnded(itemID: pendingPlaybackEnd.itemID, attempt: pendingPlaybackEnd.attempt)
         }
     }
 
@@ -1023,11 +1062,16 @@ final class PlayerViewModel: ObservableObject {
             return nil
         }
         for season in seasons.dropFirst(currentPosition + 1) {
-            if let first = try await episodes(in: season.id).first {
+            let seasonEpisodes = try await episodes(in: season.id)
+            if let first = firstRegularEpisode(in: seasonEpisodes) {
                 return first
             }
         }
         return nil
+    }
+
+    private func firstRegularEpisode(in episodes: [BaseItemDto]) -> BaseItemDto? {
+        episodes.first { ($0.indexNumber ?? 0) >= 1 } ?? episodes.first
     }
 
     /// Before a season premiere, find the last episode in the previous
@@ -1154,7 +1198,7 @@ final class PlayerViewModel: ObservableObject {
         let currentPosition = player?.currentItem?.currentTime()
         let positionTicks = currentPosition.map { Int64($0.seconds * 10_000_000) } ?? 0
 
-        playbackAttempt += 1
+        advancePlaybackAttemptForSameItem(itemID: item.id)
         diag(.qualityChange, [
             PlayerDiagnostics.field("from", selectedQuality.rawValue),
             PlayerDiagnostics.field("to", quality.rawValue),
@@ -1293,7 +1337,7 @@ final class PlayerViewModel: ObservableObject {
             ? liveTicks
             : max(liveTicks, resumePositionTicks)
 
-        playbackAttempt += 1
+        advancePlaybackAttemptForSameItem(itemID: item.id)
         diag(.loadBegin, [
             PlayerDiagnostics.field("phase", "recovery"),
             PlayerDiagnostics.field("recoveryAttempt", attempt),
@@ -1761,13 +1805,16 @@ final class PlayerViewModel: ObservableObject {
             }
         }
 
+        let observedItemID = currentItem?.id
+        let observedAttempt = playbackAttempt
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: playerItem,
             queue: .main
         ) { [weak self] _ in
+            guard let observedItemID else { return }
             Task { @MainActor in
-                await self?.handlePlaybackEnded()
+                await self?.handlePlaybackEnded(itemID: observedItemID, attempt: observedAttempt)
             }
         }
     }
@@ -1938,6 +1985,9 @@ final class PlayerViewModel: ObservableObject {
         // Invalidate a transition waiting on report delivery synchronously,
         // before the asynchronous teardown can yield to that transition.
         playbackAttempt += 1
+        playbackAttemptItemID = nil
+        sameItemPlaybackAttempts.removeAll()
+        pendingPlaybackEnd = nil
         preparePendingStoppedReportIfNeeded()
         if let teardownTask {
             return teardownTask
@@ -2398,7 +2448,9 @@ final class PlayerViewModel: ObservableObject {
         // so auto-play-next would otherwise never fire (issue #241).
         let duration = player.currentItem?.duration.seconds ?? 0
         if duration.isFinite, duration > 0, segment.endSeconds >= duration - 2.0 {
-            Task { await handlePlaybackEnded() }
+            guard let itemID = currentItem?.id else { return }
+            let attempt = playbackAttempt
+            Task { await handlePlaybackEnded(itemID: itemID, attempt: attempt) }
             return
         }
 

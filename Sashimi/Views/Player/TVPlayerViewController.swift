@@ -79,7 +79,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 player: player
             )
             navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
-            navigationVC.view.isHidden = viewModel.transitionState.endCard == nil || !shouldShow
+            navigationVC.view.isHidden = !shouldShow
             if wasHidden != navigationVC.view.isHidden {
                 container.setNeedsFocusUpdate()
                 container.updateFocusIfNeeded()
@@ -186,7 +186,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         navigationVC.onDone = onDismiss
         navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
         navigationVC.view.translatesAutoresizingMaskIntoConstraints = false
-        navigationVC.view.isHidden = true
+        navigationVC.view.isHidden = !usesEpisodeTransportControls
         container.addChild(navigationVC)
         container.view.addSubview(navigationVC.view)
         navigationVC.didMove(toParent: container)
