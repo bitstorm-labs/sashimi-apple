@@ -86,8 +86,11 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
+    typealias RecoverySetup = @MainActor (BaseItemDto, Int?, Int?, Bool) async throws -> Void
+
     let serverID: String?
     private let playbackReporter: any PlayerPlaybackReporting
+    private let recoverySetup: RecoverySetup?
 
     init(
         serverID: String? = nil,
@@ -95,7 +98,8 @@ final class PlayerViewModel: ObservableObject {
         reportDelivery: PlaybackReportDelivery? = nil,
         navigationClient: (any PlayerEpisodeNavigationClient)? = nil,
         reporter: (any PlayerPlaybackReporting)? = nil,
-        transitionLoader: (any PlayerTransitionLoader)? = nil
+        transitionLoader: (any PlayerTransitionLoader)? = nil,
+        recoverySetup: RecoverySetup? = nil
     ) {
         self.serverID = serverID
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
@@ -114,6 +118,7 @@ final class PlayerViewModel: ObservableObject {
         self.client = resolvedClient
         self.navigationClient = navigationClient ?? resolvedClient
         self.transitionLoader = transitionLoader
+        self.recoverySetup = recoverySetup
     }
 
     @Published var player: AVPlayer?
@@ -149,6 +154,10 @@ final class PlayerViewModel: ObservableObject {
     /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
     private var isHandlingEnd = false
     private struct PendingPlaybackEnd {
+        let itemID: String
+        let attempt: Int
+    }
+    private struct PlaybackGeneration {
         let itemID: String
         let attempt: Int
     }
@@ -214,7 +223,7 @@ final class PlayerViewModel: ObservableObject {
 
     /// Whether the error/stall fallback can still fire for this item.
     private var canAttemptRecovery: Bool {
-        !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
+        !transitionState.isTransitioning && !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
     }
 
     /// Subtitles that came down with a download. Injected by the iOS player,
@@ -693,7 +702,9 @@ final class PlayerViewModel: ObservableObject {
         // server-side (grid divergence) sat "waiting" forever with zero
         // notifications. Give a cold transcode start a generous window, then
         // treat a still-stuck start as recoverable.
-        armStallWatchdog(grace: 15)
+        if let item = currentItem {
+            armStallWatchdog(for: PlaybackGeneration(itemID: item.id, attempt: playbackAttempt), grace: 15)
+        }
     }
 
     /// Replaces the position the item will resume to once it is ready.
@@ -876,7 +887,7 @@ final class PlayerViewModel: ObservableObject {
 
     private func deferPlaybackEndIfTransitioning(itemID: String, attempt: Int) -> Bool {
         guard transitionState.isTransitioning else { return false }
-        if isChangingQuality {
+        if isChangingQuality || isRecovering {
             pendingPlaybackEnd = PendingPlaybackEnd(itemID: itemID, attempt: attempt)
         }
         diag(.playbackEnded, [
@@ -890,6 +901,15 @@ final class PlayerViewModel: ObservableObject {
         guard currentItem?.id == itemID else { return false }
         return playbackAttempt == attempt ||
             (playbackAttemptItemID == itemID && sameItemPlaybackAttempts.contains(attempt))
+    }
+
+    private func isCurrentPlaybackGeneration(_ generation: PlaybackGeneration) -> Bool {
+        currentItem?.id == generation.itemID && playbackAttempt == generation.attempt
+    }
+
+    private func requireCurrentPlaybackGeneration(_ generation: PlaybackGeneration?) throws {
+        guard let generation else { return }
+        guard isCurrentPlaybackGeneration(generation) else { throw CancellationError() }
     }
 
     private func advancePlaybackAttemptForSameItem(itemID: String) {
@@ -1314,15 +1334,24 @@ final class PlayerViewModel: ObservableObject {
     /// second disallows it (genuine re-encode — the last resort, and the
     /// escalation jellyfin-web uses). Two attempts per item, then the error
     /// surfaces normally.
-    private func attemptPlaybackRecovery(reason: String) async {
-        guard !isRecovering,
+    func attemptPlaybackRecovery(reason: String, itemID: String, attempt: Int) async {
+        let sourceGeneration = PlaybackGeneration(itemID: itemID, attempt: attempt)
+        guard isCurrentPlaybackGeneration(sourceGeneration),
+              !transitionState.isTransitioning,
+              !isRecovering,
               !isOfflinePlayback,
               recoveryAttempts < 2,
-              let item = currentItem else { return }
+              let item = currentItem,
+              item.id == itemID else { return }
+
+        transitionState.isTransitioning = true
         isRecovering = true
-        defer { isRecovering = false }
+        defer {
+            isRecovering = false
+            finishTransition()
+        }
         recoveryAttempts += 1
-        let attempt = recoveryAttempts
+        let recoveryNumber = recoveryAttempts
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
 
@@ -1338,11 +1367,12 @@ final class PlayerViewModel: ObservableObject {
             : max(liveTicks, resumePositionTicks)
 
         advancePlaybackAttemptForSameItem(itemID: item.id)
+        let recoveryGeneration = PlaybackGeneration(itemID: item.id, attempt: playbackAttempt)
         diag(.loadBegin, [
             PlayerDiagnostics.field("phase", "recovery"),
-            PlayerDiagnostics.field("recoveryAttempt", attempt),
+            PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
             PlayerDiagnostics.field("trigger", reason),
-            PlayerDiagnostics.field("allowVideoStreamCopy", attempt < 2),
+            PlayerDiagnostics.field("allowVideoStreamCopy", recoveryNumber < 2),
             PlayerDiagnostics.field("positionSeconds", Double(positionTicks) / 10_000_000)
         ])
 
@@ -1369,15 +1399,22 @@ final class PlayerViewModel: ObservableObject {
         player = nil
         isLoading = true
         await stopActiveEncodingIfNeeded(reason: .recovery)
+        guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
 
         do {
-            try await setupPlayer(
-                for: item,
-                maxBitrate: selectedQuality.maxBitrate,
-                maxWidth: selectedQuality.maxWidth,
-                forceTranscode: true,
-                allowVideoStreamCopy: attempt < 2
-            )
+            if let recoverySetup {
+                try await recoverySetup(item, selectedQuality.maxBitrate, selectedQuality.maxWidth, recoveryNumber < 2)
+            } else {
+                try await setupPlayer(
+                    for: item,
+                    maxBitrate: selectedQuality.maxBitrate,
+                    maxWidth: selectedQuality.maxWidth,
+                    forceTranscode: true,
+                    allowVideoStreamCopy: recoveryNumber < 2,
+                    expectedPlaybackGeneration: recoveryGeneration
+                )
+            }
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             isLoading = false
             updateNowPlayingInfo(item: item)
             if positionTicks > 0 {
@@ -1386,17 +1423,21 @@ final class PlayerViewModel: ObservableObject {
             if !applySessionSubtitlePreference() {
                 applyPreferredSubtitles()
             }
-            if await !applySessionAudioPreference() {
-                await applyPreferredAudioLanguage()
+            if await !applySessionAudioPreference(expectedGeneration: recoveryGeneration) {
+                guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
+                await applyPreferredAudioLanguage(expectedGeneration: recoveryGeneration)
+                guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             }
-            await fetchSegments(itemId: item.id)
+            await fetchSegments(itemId: item.id, expectedGeneration: recoveryGeneration)
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             startProgressReporting()
             setupSegmentTracking()
             logAndPlay(positionTicks: positionTicks)
         } catch {
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             diagFailure(.loadFailed, [
                 PlayerDiagnostics.field("phase", "recovery"),
-                PlayerDiagnostics.field("recoveryAttempt", attempt),
+                PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
                 PlayerDiagnostics.field("item", item.id)
             ] + PlayerDiagnostics.fields(for: error))
             self.error = error
@@ -1415,18 +1456,21 @@ final class PlayerViewModel: ObservableObject {
     /// cancels `stallWatchdogTask`, and when the watchdog task itself invoked
     /// recovery that cancellation propagated into the in-flight rebuild's
     /// network awaits and aborted it mid-recovery.
-    private func armStallWatchdog(grace: Double = 8) {
+    private func armStallWatchdog(for generation: PlaybackGeneration, grace: Double = 8) {
+        guard isCurrentPlaybackGeneration(generation), let watchedPlayer = player else { return }
         stallWatchdogTask?.cancel()
-        let stalledAt = player?.currentTime().seconds ?? 0
+        let stalledAt = watchedPlayer.currentTime().seconds
         stallWatchdogTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(grace))
             guard !Task.isCancelled, let self else { return }
-            guard let player = self.player,
+            guard self.isCurrentPlaybackGeneration(generation),
+                  let player = self.player,
+                  player === watchedPlayer,
                   player.timeControlStatus != .playing else { return }
             let now = player.currentTime().seconds
             guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
             self.stallWatchdogTask = nil
-            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog") }
+            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog", itemID: generation.itemID, attempt: generation.attempt) }
         }
     }
 
@@ -1438,8 +1482,8 @@ final class PlayerViewModel: ObservableObject {
     /// (HLS/transcode) or deferred, and in both cases it duplicated this one.
     /// `pendingResumeTicks` is cleared before seeking so a repeated
     /// `.readyToPlay` cannot issue a second seek.
-    private func applyPendingResumeSeekIfNeeded() {
-        guard pendingResumeTicks > 0, let player else { return }
+    private func applyPendingResumeSeekIfNeeded(generation: PlaybackGeneration) {
+        guard isCurrentPlaybackGeneration(generation), pendingResumeTicks > 0, let player else { return }
         let target = CMTime(value: pendingResumeTicks / 10000, timescale: 1000)
         pendingResumeTicks = 0
         let drift = abs(player.currentTime().seconds - target.seconds)
@@ -1454,7 +1498,7 @@ final class PlayerViewModel: ObservableObject {
             // The resume seek is the observed hang case: the segment request
             // for the target can wedge server-side (grid divergence) with no
             // notification ever posted. Watchdog it like a fresh start.
-            armStallWatchdog(grace: 15)
+            armStallWatchdog(for: generation, grace: 15)
         }
     }
 
@@ -1528,7 +1572,14 @@ final class PlayerViewModel: ObservableObject {
     /// `allowVideoStreamCopy` is only ever false on the second recovery
     /// attempt (see attemptPlaybackRecovery) — the normal path always permits
     /// the server to copy the video stream untouched.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false, allowVideoStreamCopy: Bool = true) async throws {
+    private func setupPlayer(
+        for item: BaseItemDto,
+        maxBitrate: Int? = nil,
+        maxWidth: Int? = nil,
+        forceTranscode: Bool = false,
+        allowVideoStreamCopy: Bool = true,
+        expectedPlaybackGeneration: PlaybackGeneration? = nil
+    ) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -1542,6 +1593,7 @@ final class PlayerViewModel: ObservableObject {
         // almost always this value, and it was previously only visible in the
         // JellyfinClient log, disconnected from the play attempt it belonged to.
         let bandwidth = await client.bandwidthStatus
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         diag(.playbackInfoRequest, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("itemType", item.type?.rawValue),
@@ -1576,6 +1628,7 @@ final class PlayerViewModel: ObservableObject {
             forceTranscode: forceTranscode,
             allowVideoStreamCopy: allowVideoStreamCopy
         )
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
 
         // Source-aware retry (Auto path only). The source bitrate is only known
         // from the response, so it takes a second pass: if the link cannot carry
@@ -1607,6 +1660,7 @@ final class PlayerViewModel: ObservableObject {
                 forceTranscode: forceTranscode,
                 allowVideoStreamCopy: allowVideoStreamCopy
             )
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         }
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
@@ -1635,22 +1689,20 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("transcodeReasons", mediaSource.transcodeReasons?.joined(separator: ",") ?? "none")
         ])
 
-        playSessionId = playbackInfo.playSessionId
-        currentMediaSource = mediaSource
-        videoResolution = mediaSource.videoResolution
-        streamInfo = nil   // stale for the new session; refreshed when the overlay opens
-
         let resolvedURL: URL?
         let streamKind: PlayerDiagnostics.StreamKind
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS
             resolvedURL = await client.buildURL(path: transcodingPath)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             streamKind = .directStream
             resolvedURL = await client.buildURL(path: directPath)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if mediaSource.supportsDirectPlay != false {
             streamKind = .directPlayStatic
             resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else {
             // The server offered no transcode/remux URL AND says the source
             // can't direct play (e.g. Force Direct Play against a container
@@ -1675,6 +1727,12 @@ final class PlayerViewModel: ObservableObject {
             throw PlayerError.noStreamURL
         }
 
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+        playSessionId = playbackInfo.playSessionId
+        currentMediaSource = mediaSource
+        videoResolution = mediaSource.videoResolution
+        streamInfo = nil   // stale for the new session; refreshed when the overlay opens
+
         // Which URL AVPlayer is actually being pointed at. `describe(url:)`
         // keeps the path and drops the query — the query is where api_key lives.
         // `avplayerPlayableContainer` is a pure observation (nothing branches on
@@ -1685,7 +1743,7 @@ final class PlayerViewModel: ObservableObject {
         diag(.streamSelected, [
             PlayerDiagnostics.field("kind", streamKind.rawValue),
             PlayerDiagnostics.field("mediaSource", mediaSource.id),
-            PlayerDiagnostics.field("playSession", playSessionId),
+            PlayerDiagnostics.field("playSession", playbackInfo.playSessionId),
             PlayerDiagnostics.field(
                 "avplayerPlayableContainer",
                 container.isEmpty || container == "m3u8" || DeviceMediaCompatibility.directPlayContainers.contains(container)
@@ -1721,6 +1779,7 @@ final class PlayerViewModel: ObservableObject {
     /// was dead for downloads), and a corrupt download sat on a black screen
     /// with no error because nothing observed .failed.
     private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
+        let generation = currentItem.map { PlaybackGeneration(itemID: $0.id, attempt: playbackAttempt) }
         isPlayerReady = false
         tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
@@ -1735,6 +1794,7 @@ final class PlayerViewModel: ObservableObject {
                 ] + (observed.status == .failed ? PlayerDiagnostics.fields(for: observed.error) : []))
 
                 if observed.status == .failed {
+                    guard let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                     self.isPlayerReady = false
                     self.diagFailure(.itemStatus, [
                         PlayerDiagnostics.field("status", "failed")
@@ -1743,20 +1803,25 @@ final class PlayerViewModel: ObservableObject {
                     // current position forcing a transcode. The error only
                     // surfaces once recovery is exhausted.
                     if self.canAttemptRecovery {
-                        await self.attemptPlaybackRecovery(reason: "item-failed")
+                        await self.attemptPlaybackRecovery(
+                            reason: "item-failed",
+                            itemID: generation.itemID,
+                            attempt: generation.attempt
+                        )
                     } else {
                         self.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
                         self.error = observed.error
                     }
                 } else if observed.status == .readyToPlay {
+                    guard let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                     self.isPlayerReady = true
                     self.logTrackAvailability(for: observed)
-                    self.applyPendingResumeSeekIfNeeded()
+                    self.applyPendingResumeSeekIfNeeded(generation: generation)
                 }
             }
         }
 
-        observeItemLogs(for: playerItem)
+        observeItemLogs(for: playerItem, generation: generation)
 
         player = AVPlayer(playerItem: playerItem)
         player?.appliesMediaSelectionCriteriaAutomatically = false
@@ -1775,7 +1840,7 @@ final class PlayerViewModel: ObservableObject {
 
         statusObserver = player?.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 self.diag(.playerStatus, [
                     PlayerDiagnostics.field("status", PlayerDiagnostics.name(playerStatus: observed.status))
                 ])
@@ -1791,7 +1856,7 @@ final class PlayerViewModel: ObservableObject {
 
         rateObserver = player?.observe(\.timeControlStatus) { [weak self] observed, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 // "waiting" for a long stretch after play() IS the stall the
                 // viewer describes as a freeze; the reason says whether it is
                 // buffering or waiting on a minimum stall-free duration.
@@ -1805,16 +1870,14 @@ final class PlayerViewModel: ObservableObject {
             }
         }
 
-        let observedItemID = currentItem?.id
-        let observedAttempt = playbackAttempt
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: playerItem,
             queue: .main
         ) { [weak self] _ in
-            guard let observedItemID else { return }
+            guard let generation else { return }
             Task { @MainActor in
-                await self?.handlePlaybackEnded(itemID: observedItemID, attempt: observedAttempt)
+                await self?.handlePlaybackEnded(itemID: generation.itemID, attempt: generation.attempt)
             }
         }
     }
@@ -1827,7 +1890,7 @@ final class PlayerViewModel: ObservableObject {
     /// status stays `.readyToPlay`. Until now the app observed only `status`,
     /// which is why a failed play could only be described as "it just sat
     /// there" and had to be reconstructed from the server's ffmpeg log.
-    private func observeItemLogs(for playerItem: AVPlayerItem) {
+    private func observeItemLogs(for playerItem: AVPlayerItem, generation: PlaybackGeneration?) {
         removeItemLogObservers()
         let center = NotificationCenter.default
 
@@ -1878,6 +1941,7 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             guard let item = note.object as? AVPlayerItem else { return }
             Task { @MainActor in
+                guard let generation, self?.isCurrentPlaybackGeneration(generation) == true else { return }
                 self?.logSeekLanding(on: item, cause: "time-jumped")
             }
         })
@@ -1889,10 +1953,11 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             guard let item = note.object as? AVPlayerItem else { return }
             Task { @MainActor in
+                guard let generation, self?.isCurrentPlaybackGeneration(generation) == true else { return }
                 self?.logSeekLanding(on: item, cause: "playback-stalled")
                 // A stall that never recovers is the seek-freeze; give normal
                 // buffering a grace window, then rebuild at position.
-                self?.armStallWatchdog()
+                self?.armStallWatchdog(for: generation)
             }
         })
 
@@ -1903,12 +1968,16 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 self.diagFailure(.itemStatus, [
                     PlayerDiagnostics.field("event", "failed-to-play-to-end")
                 ] + PlayerDiagnostics.fields(for: error))
                 if self.canAttemptRecovery {
-                    await self.attemptPlaybackRecovery(reason: "failed-to-play-to-end")
+                    await self.attemptPlaybackRecovery(
+                        reason: "failed-to-play-to-end",
+                        itemID: generation.itemID,
+                        attempt: generation.attempt
+                    )
                 }
             }
         })
@@ -2143,11 +2212,12 @@ final class PlayerViewModel: ObservableObject {
     /// Returns false when there is no pick or nothing matches, so the caller can
     /// fall back to the Settings preference.
     @discardableResult
-    private func applySessionAudioPreference() async -> Bool {
+    private func applySessionAudioPreference(expectedGeneration: PlaybackGeneration? = nil) async -> Bool {
         guard let preference = sessionAudioPreference,
               let playerItem = player?.currentItem,
               let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible)
         else { return false }
+        guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return false }
 
         // Prefer an exact display-name match, then fall back to language: the
         // same tiering the subtitle path uses, so "Japanese [5.1]" still
@@ -2199,13 +2269,14 @@ final class PlayerViewModel: ObservableObject {
         return true
     }
 
-    private func applyPreferredAudioLanguage() async {
+    private func applyPreferredAudioLanguage(expectedGeneration: PlaybackGeneration? = nil) async {
         let preferred = playbackSettings.preferredAudioLanguage
         guard !preferred.isEmpty, let playerItem = player?.currentItem else { return }
 
         // appliesMediaSelectionCriteriaAutomatically is false, so the default
         // track plays unless we pick one explicitly.
         guard let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible) else { return }
+        guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
 
         let codes = audioGroup.options.map { $0.locale?.language.languageCode?.identifier }
         if let index = PlaybackSelection.preferredAudioOptionIndex(languageCodes: codes, preferredLanguage: preferred) {
@@ -2378,10 +2449,13 @@ final class PlayerViewModel: ObservableObject {
 
     // MARK: - Skip Intro/Credits
 
-    private func fetchSegments(itemId: String) async {
+    private func fetchSegments(itemId: String, expectedGeneration: PlaybackGeneration? = nil) async {
         do {
-            segments = try await client.getMediaSegments(itemId: itemId)
+            let fetchedSegments = try await client.getMediaSegments(itemId: itemId)
+            guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
+            segments = fetchedSegments
         } catch {
+            guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
             // Segments not available - silently ignore (server may not have intro-skipper plugin)
             segments = []
         }
