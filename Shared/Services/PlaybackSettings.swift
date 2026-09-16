@@ -12,6 +12,10 @@ class PlaybackSettings: ObservableObject {
     @AppStorage("autoPlayNextEpisode") var autoPlayNextEpisode = true
     @AppStorage("autoSkipIntro") var autoSkipIntro = false
     @AppStorage("autoSkipCredits") var autoSkipCredits = false
+    // Episode navigation controls are opt-in so the native player experience
+    // remains unchanged unless the user enables the replacement transport row.
+    static let defaultShowEpisodeNavigationControls = false
+    @AppStorage("showEpisodeNavigationControls") var showEpisodeNavigationControls = defaultShowEpisodeNavigationControls
     // On by default everywhere except iPhone: a phone theme plays under
     // whatever's in someone's pocket or on a table nearby, which reads as
     // noisy in a way the same feature doesn't on a TV across the room or an

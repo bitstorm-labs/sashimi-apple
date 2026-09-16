@@ -86,6 +86,11 @@ struct MobileSettingsView: View {
                 Toggle("Use Episode Ratings", isOn: $playbackSettings.useEpisodeRatings)
             }
 
+            // Video Player Section
+            Section("Video Player") {
+                Toggle("Show Episode Navigation Controls", isOn: $playbackSettings.showEpisodeNavigationControls)
+            }
+
             // Playback Section
             Section("Playback") {
                 Toggle("Auto-Play Next Episode", isOn: $playbackSettings.autoPlayNextEpisode)

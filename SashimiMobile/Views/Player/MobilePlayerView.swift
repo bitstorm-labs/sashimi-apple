@@ -1,6 +1,10 @@
 import SwiftUI
 import AVKit
 
+// The mobile player keeps presentation, controls, and teardown together so a
+// dismissal can await the same view-model session.
+// swiftlint:disable file_length
+
 extension Notification.Name {
     static let playbackDidStop = Notification.Name("playbackDidStop")
 }
@@ -9,11 +13,12 @@ extension Notification.Name {
 
 private struct PlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
+    let showsPlaybackControls: Bool
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = showsPlaybackControls
         controller.allowsPictureInPicturePlayback = true
         controller.entersFullScreenWhenPlaybackBegins = false
         // Tint the native transport controls with the brand accent (purple)
@@ -25,6 +30,7 @@ private struct PlayerViewController: UIViewControllerRepresentable {
         if controller.player !== player {
             controller.player = player
         }
+        controller.showsPlaybackControls = showsPlaybackControls
     }
 }
 
@@ -40,6 +46,7 @@ struct MobilePlayerView: View {
     var onPlaybackReady: (() -> Void)?
     var onPlaybackFailed: (() -> Void)?
     @StateObject private var viewModel: PlayerViewModel
+    @ObservedObject private var playbackSettings = PlaybackSettings.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var showCustomOverlay = true
@@ -66,20 +73,61 @@ struct MobilePlayerView: View {
         DownloadManager.shared.localVideoURL(for: item.id, serverID: serverID)
     }
 
+    /// The view model's resolved item is the source of truth after a
+    /// transition. The initializer item is only the entry point (and may be a
+    /// Series/Season container that resolves to an episode).
+    private var displayedItem: BaseItemDto {
+        viewModel.currentItem ?? item
+    }
+
+    private var usesEpisodeTransportControls: Bool {
+        viewModel.transitionState.usesEpisodeTransportControls(
+            isEnabled: playbackSettings.showEpisodeNavigationControls
+        )
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             if let player = viewModel.player {
-                PlayerViewController(player: player)
+                PlayerViewController(
+                    player: player,
+                    showsPlaybackControls: !usesEpisodeTransportControls
+                )
                     .ignoresSafeArea()
 
                 // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
                 SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
-                customOverlay
+                if playbackSettings.showEpisodeNavigationControls,
+                   viewModel.transitionState.endCard != nil {
+                    MobilePlayerEndCard(
+                        state: viewModel.transitionState,
+                        item: displayedItem,
+                        streamInfo: viewModel.streamInfo,
+                        onPlayNext: { Task { await viewModel.playNextEpisode() } },
+                        onReplay: { Task { await viewModel.replayCurrentItem() } },
+                        onDone: {
+                            Task {
+                                await viewModel.stop(reason: .userStop)
+                                dismiss()
+                            }
+                        }
+                    )
+                } else {
+                    customOverlay
+                }
             } else {
-                loadingOrErrorView
+                MobilePlayerLoadingView(
+                    viewModel: viewModel,
+                    onClose: {
+                        viewModel.player?.pause()
+                        saveOfflinePositionIfNeeded()
+                        Task { await viewModel.stop(reason: .userStop) }
+                        dismiss()
+                    }
+                )
             }
         }
         .navigationBarHidden(true)
@@ -151,8 +199,27 @@ struct MobilePlayerView: View {
         .onChange(of: viewModel.tracksVersion) { _, _ in
             viewModel.loadAllTracks()
         }
+        .onChange(of: viewModel.transitionState) { _, state in
+            // Episode navigation is an action bar, not transient transport
+            // chrome when the user opts into persistent controls. Otherwise
+            // preserve the original transient overlay behavior.
+            guard playbackSettings.showEpisodeNavigationControls,
+                  state.endCard == nil,
+                  state.isEpisodeNavigationAvailable else { return }
+            showCustomOverlay = true
+            scheduleAutoHide()
+        }
+        .onChange(of: playbackSettings.showEpisodeNavigationControls) { _, enabled in
+            if enabled, viewModel.transitionState.isEpisodeNavigationAvailable {
+                showCustomOverlay = true
+                scheduleAutoHide()
+            } else {
+                scheduleAutoHide()
+            }
+        }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended {
+            if ended && (!playbackSettings.showEpisodeNavigationControls ||
+                         !viewModel.transitionState.isEpisodeNavigationAvailable) {
                 dismiss()
             }
         }
@@ -180,13 +247,14 @@ struct MobilePlayerView: View {
 
     private var customOverlay: some View {
         ZStack {
-            // Tap area to toggle our overlay (passes through to AVPlayerViewController when not hit)
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    toggleOverlay()
-                }
-                .allowsHitTesting(showCustomOverlay)
+            // Keep the reveal action accessible after the toolbar auto-hides.
+            // Transport buttons later in this stack retain their own hit targets.
+            Button(action: toggleOverlay) {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showCustomOverlay ? "Hide Playback Controls" : "Show Playback Controls")
+            .allowsHitTesting(usesEpisodeTransportControls || showCustomOverlay)
 
             if showCustomOverlay {
                 // Top gradient scrim
@@ -208,6 +276,21 @@ struct MobilePlayerView: View {
                 .transition(.opacity)
             }
 
+            if usesEpisodeTransportControls {
+                MobileEpisodeTransportControls(
+                    state: viewModel.transitionState,
+                    player: viewModel.player,
+                    onPrevious: { Task { await viewModel.playPreviousEpisode() } },
+                    onNext: { Task { await viewModel.playNextEpisode() } },
+                    onSkipBackward: { seek(by: -10) },
+                    onPlayPause: {
+                        guard let player = viewModel.player else { return }
+                        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+                    },
+                    onSkipForward: { seek(by: 10) }
+                )
+            }
+
             // Skip button (always visible when active)
             VStack {
                 Spacer()
@@ -220,57 +303,67 @@ struct MobilePlayerView: View {
     // MARK: - Top Bar
 
     private var topBar: some View {
-        HStack(spacing: 16) {
-            // Close button
-            Button {
-                viewModel.player?.pause()
-                // Capture BEFORE stop(): stop() nils the player, and for
-                // offline playback it hits no await first, so it completes long
-                // before the dismiss animation lets onDisappear run -- which is
-                // where the offline save lives. The position was silently lost
-                // every time the X was used.
-                saveOfflinePositionIfNeeded()
-                Task {
-                    await viewModel.stop(reason: .userStop)
-                    dismiss()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                closeButton
+
+                // Keep the title in its own flexible column. Putting it in the
+                // same row as stream and episode actions made narrow phones
+                // render real titles as "Wh..." and wrap the bitrate chip one
+                // character per line.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayedItem.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+
+                    if let subtitle = controlBarSubtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                    }
                 }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.white.opacity(0.15))
-                    .clipShape(Circle())
+
+                Spacer(minLength: 0)
+                settingsMenu
             }
 
-            // Title
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-
-                if let subtitle = controlBarSubtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
+            HStack(spacing: 10) {
+                // Stream-info chip (Direct Play / Transcode + bitrate)
+                if let info = viewModel.streamInfo {
+                    streamInfoChip(info)
                 }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer()
-
-            // Stream-info chip (Direct Play / Transcode + bitrate)
-            if let info = viewModel.streamInfo {
-                streamInfoChip(info)
-            }
-
-            // Settings menu
-            settingsMenu
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var closeButton: some View {
+        Button {
+            viewModel.player?.pause()
+            // Capture BEFORE stop(): stop() nils the player, and for
+            // offline playback it hits no await first, so it completes long
+            // before the dismiss animation lets onDisappear run -- which is
+            // where the offline save lives. The position was silently lost
+            // every time the X was used.
+            saveOfflinePositionIfNeeded()
+            Task {
+                await viewModel.stop(reason: .userStop)
+                dismiss()
+            }
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.15))
+                .clipShape(Circle())
+        }
     }
 
     private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
@@ -295,23 +388,41 @@ struct MobilePlayerView: View {
     }
 
     private var controlBarSubtitle: String? {
-        if let seriesName = item.seriesName {
+        if let seriesName = displayedItem.seriesName {
             var parts = [seriesName]
-            if let season = item.parentIndexNumber, let episode = item.indexNumber {
+            if let season = displayedItem.parentIndexNumber, let episode = displayedItem.indexNumber {
                 parts.append("S\(season):E\(episode)")
             }
             return parts.joined(separator: " \u{2022} ")
         }
-        if let year = item.productionYear {
+        if let year = displayedItem.displayYear {
             return String(year)
         }
         return nil
+    }
+
+    private var metadataText: String? {
+        var parts: [String] = []
+        if let year = displayedItem.displayYear {
+            parts.append(String(year))
+        }
+        if let ticks = displayedItem.runTimeTicks {
+            let minutes = Int(Double(ticks) / 10_000_000.0 / 60.0)
+            if minutes > 0 {
+                parts.append("\(minutes) min")
+            }
+        }
+        if let info = viewModel.streamInfo {
+            parts.append(info.label)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Settings Menu
 
     private var settingsMenu: some View {
         PlayerSettingsMenu(viewModel: viewModel, playbackSpeed: $playbackSpeed)
+            .disabled(viewModel.transitionState.isTransitioning)
     }
 
     // MARK: - Skip Button
@@ -348,6 +459,18 @@ struct MobilePlayerView: View {
             Task { await viewModel.refreshStreamInfo() }
         }
         scheduleAutoHide()
+    }
+
+    private func seek(by seconds: Double) {
+        guard let player = viewModel.player else { return }
+        let current = player.currentTime().seconds
+        guard current.isFinite else { return }
+        let target = max(0, current + seconds)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
     }
 
     private func scheduleAutoHide() {
@@ -434,7 +557,7 @@ struct MobilePlayerView: View {
     private func saveOfflinePositionIfNeeded() {
         guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
         let ticks = Int64(currentTime.seconds * 10_000_000)
-        DownloadManager.shared.savePlaybackPosition(itemId: item.id, serverID: serverID, positionTicks: ticks)
+        DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
     }
 }
 
