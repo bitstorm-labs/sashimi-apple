@@ -99,6 +99,16 @@ While we don't have tests yet (see [issue #4](https://github.com/bitstorm-labs/s
 - `Codable` structs matching Jellyfin API
 - Located in `Models/JellyfinModels.swift`
 
+## Releasing
+
+Maintainers only. See **[docs/RELEASING.md](docs/RELEASING.md)** for the full
+runbook.
+
+The one thing worth knowing even if you never cut a release: a plain `vX.Y.Z` tag
+does **not** ship to TestFlight, and tvOS and iOS need separate tags
+(`vX.Y.Z-beta1` and `ios-vX.Y.Z-beta1`). Using the wrong tag produces a green CI
+run that ships nothing.
+
 ## Security
 
 If you discover a security vulnerability, please:

@@ -116,7 +116,7 @@ xcodebuild -project Sashimi.xcodeproj -scheme SashimiMobile \
 
 ### Distribution
 
-Both apps ship to TestFlight via fastlane + GitHub Actions:
+Both apps ship to TestFlight via fastlane + GitHub Actions (full runbook: [docs/RELEASING.md](docs/RELEASING.md)):
 
 - tvOS: push a tag matching `v*-beta*` (e.g. `v1.0.0-beta.1`)
 - iOS: push a tag matching `ios-v*-beta*` (e.g. `ios-v1.0.1-beta.1`)
