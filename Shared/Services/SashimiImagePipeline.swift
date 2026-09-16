@@ -15,10 +15,15 @@ private final class JellyfinImageDataLoader: DataLoading, @unchecked Sendable {
         loader.delegate = delegate
     }
 
+    // Closure parameters deliberately carry no `@Sendable`: Nuke's `DataLoading`
+    // declares them without it, and marking them `@Sendable` here is *stricter*
+    // than the requirement, so the conformance doesn't match (an error under the
+    // Swift 6 language mode). They are handed straight to `DataLoader`, whose own
+    // conformance has the same signature.
     func loadData(
         with request: URLRequest,
-        didReceiveData: @escaping @Sendable (Data, URLResponse) -> Void,
-        completion: @escaping @Sendable (Error?) -> Void
+        didReceiveData: @escaping (Data, URLResponse) -> Void,
+        completion: @escaping (Error?) -> Void
     ) -> any Cancellable {
         var authorizedRequest = request
         let isExplicitlyScoped = authorizedRequest.value(forHTTPHeaderField: scopedServerRequestHeader) == "true"
