@@ -144,6 +144,47 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
+      - name: Create iOS Simulator
+        # Resolve the device type from the runtime's OWN supportedDeviceTypes list
+        # rather than from `simctl list devicetypes`. Two traps here:
+        #   1. A hardcoded display name ('iPhone 16') breaks when a runner image
+        #      renames or drops a preinstalled device -- no code change required.
+        #   2. `simctl list devicetypes` is NOT ordered newest-last, so taking the
+        #      tail picks an arbitrary device -- in practice iPhone 6s Plus, which
+        #      no current iOS runtime supports (SimError 403, "Unable to create a
+        #      device for device type").
+        # What matters is runtime COMPATIBILITY, not recency: every entry in
+        # supportedDeviceTypes can host this runtime, so any iPhone in it works.
+        run: |
+          RUNTIMES_JSON=$(xcrun simctl list runtimes --json)
+          RUNTIME=$(echo "$RUNTIMES_JSON" | jq -r \
+            '[.runtimes[] | select(.platform == "iOS" and .isAvailable)]
+             | sort_by(.version | split(".") | map(tonumber)) | last | .identifier // empty')
+          if [ -z "$RUNTIME" ]; then
+            echo "::error::No available iOS simulator runtime on this runner"
+            exit 1
+          fi
+          DEVICE_TYPE=$(echo "$RUNTIMES_JSON" | jq -r --arg r "$RUNTIME" \
+            '.runtimes[] | select(.identifier == $r) | .supportedDeviceTypes
+             | map(select(.productFamily == "iPhone")) | last | .identifier // empty')
+          if [ -z "$DEVICE_TYPE" ]; then
+            echo "::error::Runtime $RUNTIME supports no iPhone device type"
+            exit 1
+          fi
+          echo "Using runtime: $RUNTIME"
+          echo "Using device type: $DEVICE_TYPE"
+          xcrun simctl create "ci-iphone" "$DEVICE_TYPE" "$RUNTIME"
+
+      - name: Run Tests
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
+        run: |
+          xcodebuild test \
+            -project Sashimi.xcodeproj \
+            -scheme SashimiMobile \
+            -destination 'platform=iOS Simulator,name=ci-iphone' \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty --color
+
   swiftlint:
     name: SwiftLint
     runs-on: macos-15
