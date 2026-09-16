@@ -23,11 +23,15 @@ final class ServerDiscovery: ObservableObject {
 
     private var listenTask: Task<Void, Never>?
 
-    private static let discoveryPort: UInt16 = 7359
-    private static let probe = "Who is JellyfinServer?"
+    // `nonisolated` because the class is `@MainActor` -- without it these
+    // constants inherit main-actor isolation, and `blockingProbe()` (which is
+    // deliberately nonisolated, running on a global queue) can't read them.
+    // Immutable `let`s of Sendable value types, so there is nothing to race on.
+    nonisolated private static let discoveryPort: UInt16 = 7359
+    nonisolated private static let probe = "Who is JellyfinServer?"
     /// Long enough for a busy server to answer, short enough that the UI does
     /// not feel hung when nothing is there.
-    private static let listenSeconds: TimeInterval = 3
+    nonisolated private static let listenSeconds: TimeInterval = 3
 
     struct DiscoveredServer: Identifiable, Hashable {
         /// Jellyfin's own server id, so repeated probes dedupe to one entry
