@@ -262,7 +262,7 @@ struct MediaDetailView: View {
         .sheet(isPresented: $showingFullOverview) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text(item.name ?? "Overview")
+                    Text(item.name)
                         .font(Typography.headlineSmall)
                         .foregroundStyle(SashimiTheme.textPrimary)
                     Text(item.overview ?? "")
