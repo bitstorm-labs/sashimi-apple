@@ -2681,7 +2681,7 @@ final class PlayerViewModel: ObservableObject {
     private func updateNowPlayingInfo(item: BaseItemDto) {
         var nowPlayingInfo = [String: Any]()
 
-        nowPlayingInfo[MPMediaItemPropertyTitle] = item.name ?? "Unknown"
+        nowPlayingInfo[MPMediaItemPropertyTitle] = item.name
 
         if let seriesName = item.seriesName {
             nowPlayingInfo[MPMediaItemPropertyArtist] = seriesName

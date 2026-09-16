@@ -589,7 +589,7 @@ final class SessionManager: ObservableObject {
             id: UUID().uuidString,
             name: serverName,
             url: serverURL,
-            username: result.user.name ?? username,
+            username: result.user.name,
             userId: result.user.id
         )
 
