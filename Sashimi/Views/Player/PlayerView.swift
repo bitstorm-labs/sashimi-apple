@@ -7,6 +7,7 @@ struct PlayerView: View {
     var startFromBeginning: Bool = false
 
     @StateObject private var viewModel: PlayerViewModel
+    @ObservedObject private var playbackSettings = PlaybackSettings.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -51,7 +52,8 @@ struct PlayerView: View {
                     }
                 )
                 .ignoresSafeArea()
-                .onAppear { viewModel.loadSubtitleTracks() }
+                .onAppear { viewModel.loadAllTracks() }
+                .onChange(of: viewModel.tracksVersion) { _, _ in viewModel.loadAllTracks() }
             }
         }
         .task {
@@ -86,7 +88,8 @@ struct PlayerView: View {
             }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended {
+            if ended && (!playbackSettings.showEpisodeNavigationControls ||
+                         !viewModel.transitionState.isEpisodeNavigationAvailable) {
                 PlayerDiagnostics.event(.viewDismiss, [
                     PlayerDiagnostics.field("view", viewTag),
                     PlayerDiagnostics.field("trigger", "playback-ended")

@@ -86,13 +86,20 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Pl
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
+    typealias RecoverySetup = @MainActor (BaseItemDto, Int?, Int?, Bool) async throws -> Void
+
     let serverID: String?
-    private let playbackReporter: PlaybackSessionReporter
+    private let playbackReporter: any PlayerPlaybackReporting
+    private let recoverySetup: RecoverySetup?
 
     init(
         serverID: String? = nil,
         client: JellyfinClient? = nil,
-        reportDelivery: PlaybackReportDelivery? = nil
+        reportDelivery: PlaybackReportDelivery? = nil,
+        navigationClient: (any PlayerEpisodeNavigationClient)? = nil,
+        reporter: (any PlayerPlaybackReporting)? = nil,
+        transitionLoader: (any PlayerTransitionLoader)? = nil,
+        recoverySetup: RecoverySetup? = nil
     ) {
         self.serverID = serverID
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
@@ -103,12 +110,15 @@ final class PlayerViewModel: ObservableObject {
             // An unconfigured client fails visibly and lets the durable report
             // queue retry once the selected server can be restored.
             ?? (resolvedServerID == nil ? JellyfinClient.shared : JellyfinClient())
-        self.playbackReporter = PlaybackSessionReporter(
+        self.playbackReporter = reporter ?? PlaybackSessionReporter(
             serverID: resolvedServerID,
             client: resolvedClient,
             delivery: reportDelivery
         )
         self.client = resolvedClient
+        self.navigationClient = navigationClient ?? resolvedClient
+        self.transitionLoader = transitionLoader
+        self.recoverySetup = recoverySetup
     }
 
     @Published var player: AVPlayer?
@@ -124,12 +134,37 @@ final class PlayerViewModel: ObservableObject {
     @Published var subtitleManager = SubtitleManager()
     @Published var playbackEnded = false
 
+    /// Canonical current/previous/next state shared by both player surfaces.
+    /// The compatibility accessors below keep existing callers source
+    /// compatible while views observe this single published state.
+    @Published private(set) var transitionState = PlayerTransitionState.empty
+
+    var nextEpisode: BaseItemDto? { transitionState.nextEpisode }
+    var previousEpisode: BaseItemDto? { transitionState.previousEpisode }
+
+    /// A lookup error is intentionally generic at the UI boundary. The
+    /// detailed, scrubbed error is emitted through PlayerDiagnostics instead.
+    var episodeLookupFailed: Bool {
+        transitionState.lookupStatus == .failed
+    }
+
     /// Bumped whenever the player is rebuilt against a different asset, so
     /// views can refresh track menus that would otherwise describe the old one.
     @Published private(set) var tracksVersion = 0
-    @Published var nextEpisode: BaseItemDto?
     /// Re-entrancy guard for end-of-playback handling (see handlePlaybackEnded).
     private var isHandlingEnd = false
+    private struct PendingPlaybackEnd {
+        let itemID: String
+        let attempt: Int
+    }
+    private struct PlaybackGeneration {
+        let itemID: String
+        let attempt: Int
+    }
+    private var pendingPlaybackEnd: PendingPlaybackEnd?
+    private var isChangingQuality = false
+    private var playbackAttemptItemID: String?
+    private var sameItemPlaybackAttempts = Set<Int>()
     /// Resume position still waiting to be applied once the item is ready to
     /// play. A pre-ready seek is silently dropped for HLS/transcode streams
     /// (no seekable range yet), so we re-seek from the status observer.
@@ -184,10 +219,11 @@ final class PlayerViewModel: ObservableObject {
     /// Pending stall watchdog — armed on a stall notification, cancelled when
     /// playback recovers on its own or the player is torn down.
     private var stallWatchdogTask: Task<Void, Never>?
+    private var navigationTask: Task<Void, Never>?
 
     /// Whether the error/stall fallback can still fire for this item.
     private var canAttemptRecovery: Bool {
-        !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
+        !transitionState.isTransitioning && !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
     }
 
     /// Subtitles that came down with a download. Injected by the iOS player,
@@ -258,7 +294,25 @@ final class PlayerViewModel: ObservableObject {
     /// per new stall instead of on every access-log entry.
     private var lastReportedStallCount = 0
     private let client: JellyfinClient
+    private let navigationClient: any PlayerEpisodeNavigationClient
+    private let transitionLoader: (any PlayerTransitionLoader)?
     private let playbackSettings = PlaybackSettings.shared
+
+    private func setCurrentItem(_ item: BaseItemDto?) {
+        currentItem = item
+        transitionState.currentItem = item
+    }
+
+    private func resetTransitionState(for item: BaseItemDto?) {
+        transitionState = PlayerTransitionState(
+            currentItem: item,
+            previousEpisode: nil,
+            nextEpisode: nil,
+            lookupStatus: item?.type == .episode ? .loading : .notApplicable,
+            endCard: nil,
+            isTransitioning: transitionState.isTransitioning
+        )
+    }
 
     // MARK: - Diagnostics
 
@@ -414,6 +468,13 @@ final class PlayerViewModel: ObservableObject {
         offlineSubtitles: [OfflineSubtitle] = []
     ) async {
         playbackAttempt += 1
+        playbackAttemptItemID = item.id
+        sameItemPlaybackAttempts = [playbackAttempt]
+        pendingPlaybackEnd = nil
+        navigationTask?.cancel()
+        navigationTask = nil
+        playbackEnded = false
+        isOfflinePlayback = false
         isPlayerReady = false
         playbackReporter.reset()
         // Fresh item, fresh recovery budget; a watchdog armed for the old
@@ -421,6 +482,7 @@ final class PlayerViewModel: ObservableObject {
         recoveryAttempts = 0
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
+        resetTransitionState(for: item)
         diag(.loadBegin, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("type", item.type?.rawValue),
@@ -458,6 +520,8 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
+        navigationTask?.cancel()
+        navigationTask = nil
         cleanupSegmentTracking()
         subtitleManager.clear()
         selectedSubtitleTrackId = "off"
@@ -484,7 +548,7 @@ final class PlayerViewModel: ObservableObject {
             if let localFileURL {
                 // Offline playback from local file
                 freshItem = item
-                currentItem = item
+                setCurrentItem(item)
 
                 let audioSession = AVAudioSession.sharedInstance()
                 try audioSession.setCategory(.playback, mode: .moviePlayback)
@@ -512,7 +576,7 @@ final class PlayerViewModel: ObservableObject {
                 // button and Top Shelf deep links hand over whatever item the
                 // row carried, so the guarantee lives here, not in each caller.
                 freshItem = try await resolvePlayableItem(client.getItem(itemId: item.id))
-                currentItem = freshItem
+                setCurrentItem(freshItem)
 
                 let audioSession = AVAudioSession.sharedInstance()
                 try audioSession.setCategory(.playback, mode: .moviePlayback)
@@ -533,6 +597,7 @@ final class PlayerViewModel: ObservableObject {
 
             isOfflinePlayback = localFileURL != nil
             let isOffline = isOfflinePlayback
+            startNavigationLookup(for: freshItem)
 
             diag(.loadReady, [
                 PlayerDiagnostics.field("item", freshItem.id),
@@ -637,7 +702,9 @@ final class PlayerViewModel: ObservableObject {
         // server-side (grid divergence) sat "waiting" forever with zero
         // notifications. Give a cold transcode start a generous window, then
         // treat a still-stuck start as recoverable.
-        armStallWatchdog(grace: 15)
+        if let item = currentItem {
+            armStallWatchdog(for: PlaybackGeneration(itemID: item.id, attempt: playbackAttempt), grace: 15)
+        }
     }
 
     /// Replaces the position the item will resume to once it is ready.
@@ -702,39 +769,97 @@ final class PlayerViewModel: ObservableObject {
         await reportProgress()
     }
 
-    private func handlePlaybackEnded() async {
-        // Guard against firing twice (e.g. a skip-to-end and the natural end
-        // notification for the same item). Reset when the next item loads.
-        if isHandlingEnd {
-            diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
+    private func reportCurrentPlaybackStoppedForTransition() async {
+        guard let item = currentItem, !isOfflinePlayback else { return }
+
+        let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
+        let positionTicks: Int64
+        if elapsedSeconds < 10 && resumePositionTicks > 0 {
+            positionTicks = resumePositionTicks
+        } else {
+            let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+            positionTicks = Int64(currentSeconds * 10_000_000)
+        }
+        await playbackReporter.stopped(
+            itemID: item.id,
+            positionTicks: positionTicks,
+            playSessionID: playSessionId
+        )
+    }
+
+    func handlePlaybackEnded() async {
+        guard let itemID = currentItem?.id else {
+            playbackEnded = true
             return
         }
-        isHandlingEnd = true
+        await handlePlaybackEnded(itemID: itemID, attempt: playbackAttempt)
+    }
+
+    func handlePlaybackEnded(itemID: String, attempt: Int) async {
+        // Guard against firing twice (e.g. a skip-to-end and the natural end
+        // notification for the same item). Reset when the next item loads.
+        guard beginHandlingPlaybackEnd(itemID: itemID, attempt: attempt) else { return }
         diag(.playbackEnded, [
-            PlayerDiagnostics.field("item", currentItem?.id),
+            PlayerDiagnostics.field("item", itemID),
             PlayerDiagnostics.field("positionSeconds", player?.currentItem?.currentTime().seconds),
             PlayerDiagnostics.field("autoPlayNext", playbackSettings.autoPlayNextEpisode)
         ])
 
         progressReportTask?.cancel()
 
-        if let item = currentItem, !isOfflinePlayback {
-            // Stopped + mark-played form one durable completion event. The
-            // delivery layer persists the phase between the two requests so a
-            // retry never loses completion or repeats a successful first phase.
-            let duration = player?.currentItem?.duration.seconds ?? 0
-            let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
-            let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
-            await playbackReporter.completed(
-                itemID: item.id,
-                positionTicks: Int64(max(0.0, endSeconds) * 10_000_000),
-                playSessionID: playSessionId
-            )
+        if let item = currentItem {
+            if !isOfflinePlayback {
+                // Stopped + mark-played form one durable completion event. The
+                // delivery layer persists the phase between the two requests so a
+                // retry never loses completion or repeats a successful first phase.
+                let duration = player?.currentItem?.duration.seconds ?? 0
+                let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+                let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
+                await playbackReporter.completed(
+                    itemID: item.id,
+                    positionTicks: Int64(max(0.0, endSeconds) * 10_000_000),
+                    playSessionID: playSessionId
+                )
+            }
 
-            // Check for next episode/video if this is an episode or video
-            if playbackSettings.autoPlayNextEpisode, let next = await fetchNextItem(for: item) {
-                nextEpisode = next
-                await playNextEpisode()
+            guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
+
+            // Lookup happens after completion is recorded. This ordering keeps
+            // autoplay from starting a new server session before Jellyfin has
+            // received the completed position and played marker.
+            if item.type == .episode, !isOfflinePlayback {
+                await waitForEpisodeNavigation(for: item)
+                guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
+                switch transitionState.lookupStatus {
+                case .available where transitionState.nextEpisode != nil:
+                    if playbackSettings.autoPlayNextEpisode {
+                        await autoplayNextEpisode()
+                        return
+                    }
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .nextEpisode
+                    }
+                case .failed:
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .lookupFailed
+                    }
+                default:
+                    if playbackSettings.showEpisodeNavigationControls {
+                        transitionState.endCard = .finalEpisode
+                    }
+                }
+            } else if item.type == .video,
+                      playbackSettings.autoPlayNextEpisode,
+                      let next = await fetchNextVideo(for: item) {
+                guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
+                // Preserve the existing automatic sequence for standalone
+                // videos without exposing episode controls for them.
+                diag(.nextEpisode, [
+                    PlayerDiagnostics.field("item", next.id),
+                    PlayerDiagnostics.field("automatic", true),
+                    PlayerDiagnostics.field("kind", "video")
+                ])
+                await loadMedia(item: next)
                 return
             }
         }
@@ -742,95 +867,358 @@ final class PlayerViewModel: ObservableObject {
         playbackEnded = true
     }
 
-    private func fetchNextItem(for item: BaseItemDto) async -> BaseItemDto? {
-        // Handle episodes (TV shows and YouTube content)
-        if item.type == .episode, let seasonId = item.seasonId, let currentIndex = item.indexNumber {
-            // First try exact match (index + 1) for regular TV shows
-            if let next = await fetchNextByIndex(parentId: seasonId, currentIndex: currentIndex, type: .episode, exactMatch: true) {
-                return next
-            }
-            // Fall back to next higher index for YouTube (date-based indexes like 20241108)
-            if let next = await fetchNextByIndex(parentId: seasonId, currentIndex: currentIndex, type: .episode, exactMatch: false) {
-                return next
-            }
-            // Season finale: roll over to the first episode of the next season.
-            return await fetchFirstEpisodeOfNextSeason(for: item)
+    private func beginHandlingPlaybackEnd(itemID: String, attempt: Int) -> Bool {
+        guard isCurrentPlaybackAttempt(itemID: itemID, attempt: attempt) else {
+            diag(.playbackEnded, [
+                PlayerDiagnostics.field("item", itemID),
+                PlayerDiagnostics.field("staleAttempt", attempt),
+                PlayerDiagnostics.field("suppressed", true)
+            ])
+            return false
         }
-
-        // Handle videos (explicit Video type)
-        if item.type == .video {
-            let parentId = item.seasonId ?? item.seriesId ?? item.parentId
-            guard let parentId, let currentIndex = item.indexNumber else { return nil }
-            return await fetchNextByIndex(parentId: parentId, currentIndex: currentIndex, type: .video, exactMatch: false)
+        guard !isHandlingEnd else {
+            diag(.playbackEnded, [PlayerDiagnostics.field("suppressed", true)])
+            return false
         }
-
-        return nil
+        guard !deferPlaybackEndIfTransitioning(itemID: itemID, attempt: attempt) else { return false }
+        isHandlingEnd = true
+        return true
     }
 
-    /// After a season finale, find the first episode of the next season so
-    /// auto-play rolls over across seasons (matches other Jellyfin clients).
-    private func fetchFirstEpisodeOfNextSeason(for item: BaseItemDto) async -> BaseItemDto? {
-        guard let seriesId = item.seriesId,
-              let currentSeason = item.parentIndexNumber else { return nil }
+    private func deferPlaybackEndIfTransitioning(itemID: String, attempt: Int) -> Bool {
+        guard transitionState.isTransitioning else { return false }
+        if isChangingQuality || isRecovering {
+            pendingPlaybackEnd = PendingPlaybackEnd(itemID: itemID, attempt: attempt)
+        }
+        diag(.playbackEnded, [
+            PlayerDiagnostics.field("suppressed", true),
+            PlayerDiagnostics.field("deferred", pendingPlaybackEnd != nil)
+        ])
+        return true
+    }
+
+    private func isCurrentPlaybackAttempt(itemID: String, attempt: Int) -> Bool {
+        guard currentItem?.id == itemID else { return false }
+        return playbackAttempt == attempt ||
+            (playbackAttemptItemID == itemID && sameItemPlaybackAttempts.contains(attempt))
+    }
+
+    private func isCurrentPlaybackGeneration(_ generation: PlaybackGeneration) -> Bool {
+        currentItem?.id == generation.itemID && playbackAttempt == generation.attempt
+    }
+
+    private func requireCurrentPlaybackGeneration(_ generation: PlaybackGeneration?) throws {
+        guard let generation else { return }
+        guard isCurrentPlaybackGeneration(generation) else { throw CancellationError() }
+    }
+
+    private func advancePlaybackAttemptForSameItem(itemID: String) {
+        if playbackAttemptItemID == itemID {
+            sameItemPlaybackAttempts.insert(playbackAttempt)
+        } else {
+            playbackAttemptItemID = itemID
+            sameItemPlaybackAttempts = [playbackAttempt]
+        }
+        playbackAttempt += 1
+        sameItemPlaybackAttempts.insert(playbackAttempt)
+    }
+
+    /// Releases the shared player-transition lock and retries a queued end
+    /// notification only if it still belongs to the current item and attempt.
+    /// A new-item load or stop invalidates the notification before it can be
+    /// mistaken for completion of the replacement item.
+    @discardableResult
+    func finishTransition() -> Task<Void, Never>? {
+        transitionState.isTransitioning = false
+        guard let pendingPlaybackEnd else { return nil }
+        self.pendingPlaybackEnd = nil
+        guard isCurrentPlaybackAttempt(itemID: pendingPlaybackEnd.itemID, attempt: pendingPlaybackEnd.attempt) else {
+            return nil
+        }
+        return Task { [weak self] in
+            guard let self else { return }
+            await self.handlePlaybackEnded(itemID: pendingPlaybackEnd.itemID, attempt: pendingPlaybackEnd.attempt)
+        }
+    }
+
+    /// Starts or refreshes navigation for the current episode. A non-episode
+    /// deliberately becomes `.notApplicable`, so movies and standalone videos
+    /// never acquire episode controls by accident.
+    func refreshEpisodeNavigation() async {
+        guard let item = currentItem else { return }
+        transitionState.currentItem = item
+        await refreshEpisodeNavigation(for: item)
+    }
+
+    func startNavigationLookup(for item: BaseItemDto) {
+        navigationTask?.cancel()
+        transitionState.previousEpisode = nil
+        transitionState.nextEpisode = nil
+        transitionState.endCard = nil
+        guard item.type == .episode, !isOfflinePlayback else {
+            transitionState.lookupStatus = .notApplicable
+            return
+        }
+        transitionState.lookupStatus = .loading
+        navigationTask = Task { [weak self] in
+            await self?.refreshEpisodeNavigation(for: item)
+        }
+    }
+
+    private func refreshEpisodeNavigation(for item: BaseItemDto) async {
+        guard item.type == .episode else {
+            transitionState.lookupStatus = .notApplicable
+            return
+        }
+        guard let seasonId = item.seasonId, let currentIndex = item.indexNumber else {
+            transitionState.lookupStatus = .unavailable
+            return
+        }
+
         do {
-            let seasons = try await client.getItems(
-                parentId: seriesId,
-                includeTypes: [.season],
-                sortBy: "IndexNumber",
-                limit: 100
-            )
-            guard let nextSeason = seasons.items.first(where: { ($0.indexNumber ?? 0) == currentSeason + 1 }) else {
-                return nil
-            }
-            let episodes = try await client.getItems(
-                parentId: nextSeason.id,
+            let response = try await navigationClient.getPlayerItems(
+                parentId: seasonId,
                 includeTypes: [.episode],
                 sortBy: "IndexNumber",
                 limit: 100
             )
-            // First real episode (index >= 1 skips "specials"/index 0)
-            return episodes.items.first { ($0.indexNumber ?? 0) >= 1 } ?? episodes.items.first
+            guard currentItem?.id == item.id else { return }
+
+            let episodes = response.items.sorted(by: episodeComesBefore)
+            var previous = episodes.last {
+                guard let index = $0.indexNumber else { return false }
+                return index < currentIndex
+            }
+            var next = episodes.first {
+                guard let index = $0.indexNumber else { return false }
+                return index > currentIndex
+            }
+
+            // A season boundary is part of the same ordered series as an
+            // in-season transition. Resolve both directions from the server's
+            // season order so season numbers may contain gaps and the first
+            // episode of season 2 still exposes the final episode of season 1.
+            if previous == nil {
+                previous = try await fetchLastEpisodeOfPreviousSeason(for: item)
+            }
+            if next == nil {
+                next = try await fetchFirstEpisodeOfNextSeason(for: item)
+            }
+            guard currentItem?.id == item.id else { return }
+            transitionState.previousEpisode = previous
+            transitionState.nextEpisode = next
+            transitionState.lookupStatus = (previous != nil || next != nil) ? .available : .unavailable
+            diag(.navigationLookup, [
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("previous", previous?.id),
+                PlayerDiagnostics.field("next", next?.id),
+                PlayerDiagnostics.field("outcome", next == nil ? "no-successor" : "available")
+            ])
+        } catch is CancellationError {
+            return
         } catch {
-            return nil
+            guard currentItem?.id == item.id else { return }
+            transitionState.lookupStatus = .failed
+            diagFailure(.navigationLookup, [
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("outcome", "request-failed")
+            ] + PlayerDiagnostics.fields(for: error))
         }
     }
 
-    private func fetchNextByIndex(parentId: String, currentIndex: Int, type: ItemType, exactMatch: Bool = true) async -> BaseItemDto? {
+    private func waitForEpisodeNavigation(for item: BaseItemDto) async {
+        guard currentItem?.id == item.id else { return }
+        if transitionState.lookupStatus == .loading {
+            await navigationTask?.value
+        }
+        if transitionState.lookupStatus == .idle {
+            await refreshEpisodeNavigation(for: item)
+        }
+    }
+
+    private func episodeComesBefore(_ lhs: BaseItemDto, _ rhs: BaseItemDto) -> Bool {
+        let lhsIndex = lhs.indexNumber ?? Int.max
+        let rhsIndex = rhs.indexNumber ?? Int.max
+        return lhsIndex == rhsIndex ? lhs.id < rhs.id : lhsIndex < rhsIndex
+    }
+
+    private func seasonComesBefore(_ lhs: BaseItemDto, _ rhs: BaseItemDto) -> Bool {
+        let lhsIndex = lhs.indexNumber ?? Int.max
+        let rhsIndex = rhs.indexNumber ?? Int.max
+        return lhsIndex == rhsIndex ? lhs.id < rhs.id : lhsIndex < rhsIndex
+    }
+
+    private func orderedSeasons(for seriesId: String) async throws -> [BaseItemDto] {
+        let response = try await navigationClient.getPlayerItems(
+            parentId: seriesId,
+            includeTypes: [.season],
+            sortBy: "IndexNumber",
+            limit: 100
+        )
+        return response.items.sorted(by: seasonComesBefore)
+    }
+
+    private func episodes(in seasonId: String) async throws -> [BaseItemDto] {
+        let response = try await navigationClient.getPlayerItems(
+            parentId: seasonId,
+            includeTypes: [.episode],
+            sortBy: "IndexNumber",
+            limit: 100
+        )
+        return response.items.sorted(by: episodeComesBefore)
+    }
+
+    /// After a season finale, find the first episode in the next non-empty
+    /// season so autoplay and manual Next roll over across season gaps.
+    private func fetchFirstEpisodeOfNextSeason(for item: BaseItemDto) async throws -> BaseItemDto? {
+        guard let seriesId = item.seriesId,
+              let seasonId = item.seasonId else { return nil }
+        let seasons = try await orderedSeasons(for: seriesId)
+        guard let currentPosition = seasonPosition(
+            seasonId: seasonId,
+            seasonNumber: item.parentIndexNumber,
+            in: seasons
+        ) else {
+            return nil
+        }
+        for season in seasons.dropFirst(currentPosition + 1) {
+            let seasonEpisodes = try await episodes(in: season.id)
+            if let first = firstRegularEpisode(in: seasonEpisodes) {
+                return first
+            }
+        }
+        return nil
+    }
+
+    private func firstRegularEpisode(in episodes: [BaseItemDto]) -> BaseItemDto? {
+        episodes.first { ($0.indexNumber ?? 0) >= 1 } ?? episodes.first
+    }
+
+    /// Before a season premiere, find the last episode in the previous
+    /// non-empty season so Previous remains a complete series-order action.
+    private func fetchLastEpisodeOfPreviousSeason(for item: BaseItemDto) async throws -> BaseItemDto? {
+        guard let seriesId = item.seriesId,
+              let seasonId = item.seasonId else { return nil }
+        let seasons = try await orderedSeasons(for: seriesId)
+        guard let currentPosition = seasonPosition(
+            seasonId: seasonId,
+            seasonNumber: item.parentIndexNumber,
+            in: seasons
+        ) else {
+            return nil
+        }
+        for season in seasons.prefix(currentPosition).reversed() {
+            if let last = try await episodes(in: season.id).last {
+                return last
+            }
+        }
+        return nil
+    }
+
+    private func seasonPosition(
+        seasonId: String,
+        seasonNumber: Int?,
+        in seasons: [BaseItemDto]
+    ) -> Int? {
+        if let position = seasons.firstIndex(where: { $0.id == seasonId }) {
+            return position
+        }
+        guard let seasonNumber else { return nil }
+        return seasons.firstIndex { $0.indexNumber == seasonNumber }
+    }
+
+    /// Standalone videos historically auto-advanced using their parent folder
+    /// ordering. Keep that behavior private to the completion path: videos
+    /// are not episodes and must not acquire episode navigation controls.
+    private func fetchNextVideo(for item: BaseItemDto) async -> BaseItemDto? {
+        guard let parentId = item.seasonId ?? item.seriesId ?? item.parentId,
+              let currentIndex = item.indexNumber else { return nil }
         do {
             let response = try await client.getItems(
                 parentId: parentId,
-                includeTypes: [type],
+                includeTypes: [.video],
                 sortBy: "IndexNumber",
                 limit: 100
             )
-            if exactMatch {
-                // For TV episodes: look for exact next index (1, 2, 3...)
-                return response.items.first { ($0.indexNumber ?? 0) == currentIndex + 1 }
-            } else {
-                // For YouTube: find first item with higher index (sorted ascending)
-                return response.items.first { ($0.indexNumber ?? 0) > currentIndex }
-            }
+            return response.items
+                .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
+                .first { ($0.indexNumber ?? 0) > currentIndex }
         } catch {
             return nil
         }
     }
 
     func playNextEpisode() async {
-        guard let next = nextEpisode else { return }
-        diag(.nextEpisode, [PlayerDiagnostics.field("item", next.id)])
-        nextEpisode = nil
+        guard let next = transitionState.nextEpisode else { return }
+        // The end card follows the completion report, so pressing Play Next
+        // there must not send a second stopped report. During active playback
+        // this remains a manual transition and flushes the current position.
+        await transition(to: next, automatic: playbackEnded)
+    }
+
+    func playPreviousEpisode() async {
+        guard let previous = transitionState.previousEpisode else { return }
+        await transition(to: previous, automatic: false)
+    }
+
+    func replayCurrentItem() async {
+        guard let item = currentItem else { return }
+        guard item.type?.isPlayableMediaType == true else { return }
+        await transition(to: item, automatic: playbackEnded, startFromBeginning: true)
+    }
+
+    private func autoplayNextEpisode() async {
+        guard let next = transitionState.nextEpisode else { return }
+        await transition(to: next, automatic: true)
+    }
+
+    private func transition(to item: BaseItemDto, automatic: Bool, startFromBeginning: Bool = false) async {
+        guard item.type == .episode || startFromBeginning,
+              !transitionState.isTransitioning,
+              automatic || !isHandlingEnd else { return }
+        // Claim the transition before reporting can suspend. Repeated actions
+        // must never reset the reporter or rebuild the same player concurrently.
+        transitionState.isTransitioning = true
+        defer { finishTransition() }
+        let attempt = playbackAttempt
+        player?.pause()
+        progressReportTask?.cancel()
+        diag(.nextEpisode, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("automatic", automatic)
+        ])
+        if !automatic {
+            // A manual skip is a stop, not a completion. This flushes the
+            // outgoing position through #428's lifecycle without markPlayed.
+            await reportCurrentPlaybackStoppedForTransition()
+        }
+        guard playbackAttempt == attempt, !Task.isCancelled else { return }
         playbackEnded = false
-        await loadMedia(item: next)
+        if let transitionLoader {
+            await transitionLoader.load(item: item, startFromBeginning: startFromBeginning)
+        } else {
+            await loadMedia(item: item, startFromBeginning: startFromBeginning)
+        }
     }
 
     func changeQuality(_ quality: QualityOption) async {
-        guard let item = currentItem else { return }
+        guard !transitionState.isTransitioning, let item = currentItem else { return }
+        // Quality changes rebuild the same mutable player as episode
+        // transitions. Claim the shared lock before the first await so two
+        // rapid menu selections cannot tear down and recreate the player out
+        // of order.
+        transitionState.isTransitioning = true
+        isChangingQuality = true
+        defer {
+            isChangingQuality = false
+            finishTransition()
+        }
 
         // Save current position
         let currentPosition = player?.currentItem?.currentTime()
         let positionTicks = currentPosition.map { Int64($0.seconds * 10_000_000) } ?? 0
 
-        playbackAttempt += 1
+        advancePlaybackAttemptForSameItem(itemID: item.id)
         diag(.qualityChange, [
             PlayerDiagnostics.field("from", selectedQuality.rawValue),
             PlayerDiagnostics.field("to", quality.rawValue),
@@ -840,6 +1228,7 @@ final class PlayerViewModel: ObservableObject {
 
         // Update quality setting
         selectedQuality = quality
+        let attempt = playbackAttempt
 
         // Stop current playback
         diag(.teardown, [
@@ -849,6 +1238,8 @@ final class PlayerViewModel: ObservableObject {
         player?.pause()
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
+        // Episode ordering belongs to the item, not the stream. Leave its
+        // in-flight lookup alive when replacing the player for this same item.
         cleanupSegmentTracking()
         subtitleManager.clear()
         // Reset the menu selection alongside the overlay — the re-apply
@@ -869,12 +1260,14 @@ final class PlayerViewModel: ObservableObject {
         // Kill the old transcode session before requesting a new one, so the
         // server isn't left encoding a stream nobody is watching.
         await stopActiveEncodingIfNeeded(reason: .qualityChange)
+        guard playbackAttempt == attempt, !Task.isCancelled else { return }
 
         do {
             // An explicit non-Auto pick forces a transcode so the selection
             // visibly takes effect: the tiers are caps, and a direct-played
             // source under the cap would otherwise make the pick a no-op.
             try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, maxWidth: quality.maxWidth, forceTranscode: quality != .auto)
+            guard playbackAttempt == attempt, !Task.isCancelled else { return }
             isLoading = false
             updateNowPlayingInfo(item: item)
 
@@ -941,15 +1334,24 @@ final class PlayerViewModel: ObservableObject {
     /// second disallows it (genuine re-encode — the last resort, and the
     /// escalation jellyfin-web uses). Two attempts per item, then the error
     /// surfaces normally.
-    private func attemptPlaybackRecovery(reason: String) async {
-        guard !isRecovering,
+    func attemptPlaybackRecovery(reason: String, itemID: String, attempt: Int) async {
+        let sourceGeneration = PlaybackGeneration(itemID: itemID, attempt: attempt)
+        guard isCurrentPlaybackGeneration(sourceGeneration),
+              !transitionState.isTransitioning,
+              !isRecovering,
               !isOfflinePlayback,
               recoveryAttempts < 2,
-              let item = currentItem else { return }
+              let item = currentItem,
+              item.id == itemID else { return }
+
+        transitionState.isTransitioning = true
         isRecovering = true
-        defer { isRecovering = false }
+        defer {
+            isRecovering = false
+            finishTransition()
+        }
         recoveryAttempts += 1
-        let attempt = recoveryAttempts
+        let recoveryNumber = recoveryAttempts
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
 
@@ -964,12 +1366,13 @@ final class PlayerViewModel: ObservableObject {
             ? liveTicks
             : max(liveTicks, resumePositionTicks)
 
-        playbackAttempt += 1
+        advancePlaybackAttemptForSameItem(itemID: item.id)
+        let recoveryGeneration = PlaybackGeneration(itemID: item.id, attempt: playbackAttempt)
         diag(.loadBegin, [
             PlayerDiagnostics.field("phase", "recovery"),
-            PlayerDiagnostics.field("recoveryAttempt", attempt),
+            PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
             PlayerDiagnostics.field("trigger", reason),
-            PlayerDiagnostics.field("allowVideoStreamCopy", attempt < 2),
+            PlayerDiagnostics.field("allowVideoStreamCopy", recoveryNumber < 2),
             PlayerDiagnostics.field("positionSeconds", Double(positionTicks) / 10_000_000)
         ])
 
@@ -996,15 +1399,22 @@ final class PlayerViewModel: ObservableObject {
         player = nil
         isLoading = true
         await stopActiveEncodingIfNeeded(reason: .recovery)
+        guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
 
         do {
-            try await setupPlayer(
-                for: item,
-                maxBitrate: selectedQuality.maxBitrate,
-                maxWidth: selectedQuality.maxWidth,
-                forceTranscode: true,
-                allowVideoStreamCopy: attempt < 2
-            )
+            if let recoverySetup {
+                try await recoverySetup(item, selectedQuality.maxBitrate, selectedQuality.maxWidth, recoveryNumber < 2)
+            } else {
+                try await setupPlayer(
+                    for: item,
+                    maxBitrate: selectedQuality.maxBitrate,
+                    maxWidth: selectedQuality.maxWidth,
+                    forceTranscode: true,
+                    allowVideoStreamCopy: recoveryNumber < 2,
+                    expectedPlaybackGeneration: recoveryGeneration
+                )
+            }
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             isLoading = false
             updateNowPlayingInfo(item: item)
             if positionTicks > 0 {
@@ -1013,17 +1423,21 @@ final class PlayerViewModel: ObservableObject {
             if !applySessionSubtitlePreference() {
                 applyPreferredSubtitles()
             }
-            if await !applySessionAudioPreference() {
-                await applyPreferredAudioLanguage()
+            if await !applySessionAudioPreference(expectedGeneration: recoveryGeneration) {
+                guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
+                await applyPreferredAudioLanguage(expectedGeneration: recoveryGeneration)
+                guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             }
-            await fetchSegments(itemId: item.id)
+            await fetchSegments(itemId: item.id, expectedGeneration: recoveryGeneration)
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             startProgressReporting()
             setupSegmentTracking()
             logAndPlay(positionTicks: positionTicks)
         } catch {
+            guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             diagFailure(.loadFailed, [
                 PlayerDiagnostics.field("phase", "recovery"),
-                PlayerDiagnostics.field("recoveryAttempt", attempt),
+                PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
                 PlayerDiagnostics.field("item", item.id)
             ] + PlayerDiagnostics.fields(for: error))
             self.error = error
@@ -1042,18 +1456,21 @@ final class PlayerViewModel: ObservableObject {
     /// cancels `stallWatchdogTask`, and when the watchdog task itself invoked
     /// recovery that cancellation propagated into the in-flight rebuild's
     /// network awaits and aborted it mid-recovery.
-    private func armStallWatchdog(grace: Double = 8) {
+    private func armStallWatchdog(for generation: PlaybackGeneration, grace: Double = 8) {
+        guard isCurrentPlaybackGeneration(generation), let watchedPlayer = player else { return }
         stallWatchdogTask?.cancel()
-        let stalledAt = player?.currentTime().seconds ?? 0
+        let stalledAt = watchedPlayer.currentTime().seconds
         stallWatchdogTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(grace))
             guard !Task.isCancelled, let self else { return }
-            guard let player = self.player,
+            guard self.isCurrentPlaybackGeneration(generation),
+                  let player = self.player,
+                  player === watchedPlayer,
                   player.timeControlStatus != .playing else { return }
             let now = player.currentTime().seconds
             guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
             self.stallWatchdogTask = nil
-            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog") }
+            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog", itemID: generation.itemID, attempt: generation.attempt) }
         }
     }
 
@@ -1065,8 +1482,8 @@ final class PlayerViewModel: ObservableObject {
     /// (HLS/transcode) or deferred, and in both cases it duplicated this one.
     /// `pendingResumeTicks` is cleared before seeking so a repeated
     /// `.readyToPlay` cannot issue a second seek.
-    private func applyPendingResumeSeekIfNeeded() {
-        guard pendingResumeTicks > 0, let player else { return }
+    private func applyPendingResumeSeekIfNeeded(generation: PlaybackGeneration) {
+        guard isCurrentPlaybackGeneration(generation), pendingResumeTicks > 0, let player else { return }
         let target = CMTime(value: pendingResumeTicks / 10000, timescale: 1000)
         pendingResumeTicks = 0
         let drift = abs(player.currentTime().seconds - target.seconds)
@@ -1081,7 +1498,7 @@ final class PlayerViewModel: ObservableObject {
             // The resume seek is the observed hang case: the segment request
             // for the target can wedge server-side (grid divergence) with no
             // notification ever posted. Watchdog it like a fresh start.
-            armStallWatchdog(grace: 15)
+            armStallWatchdog(for: generation, grace: 15)
         }
     }
 
@@ -1155,7 +1572,14 @@ final class PlayerViewModel: ObservableObject {
     /// `allowVideoStreamCopy` is only ever false on the second recovery
     /// attempt (see attemptPlaybackRecovery) — the normal path always permits
     /// the server to copy the video stream untouched.
-    private func setupPlayer(for item: BaseItemDto, maxBitrate: Int? = nil, maxWidth: Int? = nil, forceTranscode: Bool = false, allowVideoStreamCopy: Bool = true) async throws {
+    private func setupPlayer(
+        for item: BaseItemDto,
+        maxBitrate: Int? = nil,
+        maxWidth: Int? = nil,
+        forceTranscode: Bool = false,
+        allowVideoStreamCopy: Bool = true,
+        expectedPlaybackGeneration: PlaybackGeneration? = nil
+    ) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
         // session quality selection → global Settings cap. QualityOption.auto
         // has a nil bitrate, so "Auto" defers to Settings, where 0 = no cap.
@@ -1169,6 +1593,7 @@ final class PlayerViewModel: ObservableObject {
         // almost always this value, and it was previously only visible in the
         // JellyfinClient log, disconnected from the play attempt it belonged to.
         let bandwidth = await client.bandwidthStatus
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         diag(.playbackInfoRequest, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("itemType", item.type?.rawValue),
@@ -1203,6 +1628,7 @@ final class PlayerViewModel: ObservableObject {
             forceTranscode: forceTranscode,
             allowVideoStreamCopy: allowVideoStreamCopy
         )
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
 
         // Source-aware retry (Auto path only). The source bitrate is only known
         // from the response, so it takes a second pass: if the link cannot carry
@@ -1234,6 +1660,7 @@ final class PlayerViewModel: ObservableObject {
                 forceTranscode: forceTranscode,
                 allowVideoStreamCopy: allowVideoStreamCopy
             )
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         }
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
@@ -1262,22 +1689,20 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("transcodeReasons", mediaSource.transcodeReasons?.joined(separator: ",") ?? "none")
         ])
 
-        playSessionId = playbackInfo.playSessionId
-        currentMediaSource = mediaSource
-        videoResolution = mediaSource.videoResolution
-        streamInfo = nil   // stale for the new session; refreshed when the overlay opens
-
         let resolvedURL: URL?
         let streamKind: PlayerDiagnostics.StreamKind
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS
             resolvedURL = await client.buildURL(path: transcodingPath)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             streamKind = .directStream
             resolvedURL = await client.buildURL(path: directPath)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if mediaSource.supportsDirectPlay != false {
             streamKind = .directPlayStatic
             resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else {
             // The server offered no transcode/remux URL AND says the source
             // can't direct play (e.g. Force Direct Play against a container
@@ -1302,6 +1727,12 @@ final class PlayerViewModel: ObservableObject {
             throw PlayerError.noStreamURL
         }
 
+        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+        playSessionId = playbackInfo.playSessionId
+        currentMediaSource = mediaSource
+        videoResolution = mediaSource.videoResolution
+        streamInfo = nil   // stale for the new session; refreshed when the overlay opens
+
         // Which URL AVPlayer is actually being pointed at. `describe(url:)`
         // keeps the path and drops the query — the query is where api_key lives.
         // `avplayerPlayableContainer` is a pure observation (nothing branches on
@@ -1312,7 +1743,7 @@ final class PlayerViewModel: ObservableObject {
         diag(.streamSelected, [
             PlayerDiagnostics.field("kind", streamKind.rawValue),
             PlayerDiagnostics.field("mediaSource", mediaSource.id),
-            PlayerDiagnostics.field("playSession", playSessionId),
+            PlayerDiagnostics.field("playSession", playbackInfo.playSessionId),
             PlayerDiagnostics.field(
                 "avplayerPlayableContainer",
                 container.isEmpty || container == "m3u8" || DeviceMediaCompatibility.directPlayContainers.contains(container)
@@ -1348,6 +1779,7 @@ final class PlayerViewModel: ObservableObject {
     /// was dead for downloads), and a corrupt download sat on a black screen
     /// with no error because nothing observed .failed.
     private func makePlayerAndObservers(for playerItem: AVPlayerItem) {
+        let generation = currentItem.map { PlaybackGeneration(itemID: $0.id, attempt: playbackAttempt) }
         isPlayerReady = false
         tracksVersion &+= 1
         errorObserver = playerItem.observe(\.status) { [weak self] observed, _ in
@@ -1362,6 +1794,7 @@ final class PlayerViewModel: ObservableObject {
                 ] + (observed.status == .failed ? PlayerDiagnostics.fields(for: observed.error) : []))
 
                 if observed.status == .failed {
+                    guard let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                     self.isPlayerReady = false
                     self.diagFailure(.itemStatus, [
                         PlayerDiagnostics.field("status", "failed")
@@ -1370,32 +1803,44 @@ final class PlayerViewModel: ObservableObject {
                     // current position forcing a transcode. The error only
                     // surfaces once recovery is exhausted.
                     if self.canAttemptRecovery {
-                        await self.attemptPlaybackRecovery(reason: "item-failed")
+                        await self.attemptPlaybackRecovery(
+                            reason: "item-failed",
+                            itemID: generation.itemID,
+                            attempt: generation.attempt
+                        )
                     } else {
                         self.errorMessage = observed.error?.localizedDescription ?? "Unknown playback error"
                         self.error = observed.error
                     }
                 } else if observed.status == .readyToPlay {
+                    guard let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                     self.isPlayerReady = true
                     self.logTrackAvailability(for: observed)
-                    self.applyPendingResumeSeekIfNeeded()
+                    self.applyPendingResumeSeekIfNeeded(generation: generation)
                 }
             }
         }
 
-        observeItemLogs(for: playerItem)
+        observeItemLogs(for: playerItem, generation: generation)
 
         player = AVPlayer(playerItem: playerItem)
         player?.appliesMediaSelectionCriteriaAutomatically = false
+#if targetEnvironment(simulator)
+        // Simulator playback must never leak audio to the host. Apply this
+        // before any ready-to-play callback can reach logAndPlay().
+        player?.volume = 0
+        player?.isMuted = true
+#else
         player?.volume = 1.0
         player?.isMuted = false
+#endif
         diag(.playerCreated, [
             PlayerDiagnostics.field("tracksVersion", tracksVersion)
         ])
 
         statusObserver = player?.observe(\.status) { [weak self] observed, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 self.diag(.playerStatus, [
                     PlayerDiagnostics.field("status", PlayerDiagnostics.name(playerStatus: observed.status))
                 ])
@@ -1411,7 +1856,7 @@ final class PlayerViewModel: ObservableObject {
 
         rateObserver = player?.observe(\.timeControlStatus) { [weak self] observed, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 // "waiting" for a long stretch after play() IS the stall the
                 // viewer describes as a freeze; the reason says whether it is
                 // buffering or waiting on a minimum stall-free duration.
@@ -1430,8 +1875,9 @@ final class PlayerViewModel: ObservableObject {
             object: playerItem,
             queue: .main
         ) { [weak self] _ in
+            guard let generation else { return }
             Task { @MainActor in
-                await self?.handlePlaybackEnded()
+                await self?.handlePlaybackEnded(itemID: generation.itemID, attempt: generation.attempt)
             }
         }
     }
@@ -1444,7 +1890,7 @@ final class PlayerViewModel: ObservableObject {
     /// status stays `.readyToPlay`. Until now the app observed only `status`,
     /// which is why a failed play could only be described as "it just sat
     /// there" and had to be reconstructed from the server's ffmpeg log.
-    private func observeItemLogs(for playerItem: AVPlayerItem) {
+    private func observeItemLogs(for playerItem: AVPlayerItem, generation: PlaybackGeneration?) {
         removeItemLogObservers()
         let center = NotificationCenter.default
 
@@ -1495,6 +1941,7 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             guard let item = note.object as? AVPlayerItem else { return }
             Task { @MainActor in
+                guard let generation, self?.isCurrentPlaybackGeneration(generation) == true else { return }
                 self?.logSeekLanding(on: item, cause: "time-jumped")
             }
         })
@@ -1506,10 +1953,11 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             guard let item = note.object as? AVPlayerItem else { return }
             Task { @MainActor in
+                guard let generation, self?.isCurrentPlaybackGeneration(generation) == true else { return }
                 self?.logSeekLanding(on: item, cause: "playback-stalled")
                 // A stall that never recovers is the seek-freeze; give normal
                 // buffering a grace window, then rebuild at position.
-                self?.armStallWatchdog()
+                self?.armStallWatchdog(for: generation)
             }
         })
 
@@ -1520,12 +1968,16 @@ final class PlayerViewModel: ObservableObject {
         ) { [weak self] note in
             let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let generation, self.isCurrentPlaybackGeneration(generation) else { return }
                 self.diagFailure(.itemStatus, [
                     PlayerDiagnostics.field("event", "failed-to-play-to-end")
                 ] + PlayerDiagnostics.fields(for: error))
                 if self.canAttemptRecovery {
-                    await self.attemptPlaybackRecovery(reason: "failed-to-play-to-end")
+                    await self.attemptPlaybackRecovery(
+                        reason: "failed-to-play-to-end",
+                        itemID: generation.itemID,
+                        attempt: generation.attempt
+                    )
                 }
             }
         })
@@ -1599,6 +2051,12 @@ final class PlayerViewModel: ObservableObject {
 
     @discardableResult
     func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
+        // Invalidate a transition waiting on report delivery synchronously,
+        // before the asynchronous teardown can yield to that transition.
+        playbackAttempt += 1
+        playbackAttemptItemID = nil
+        sameItemPlaybackAttempts.removeAll()
+        pendingPlaybackEnd = nil
         preparePendingStoppedReportIfNeeded()
         if let teardownTask {
             return teardownTask
@@ -1628,6 +2086,8 @@ final class PlayerViewModel: ObservableObject {
         ])
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
+        navigationTask?.cancel()
+        navigationTask = nil
         cleanupSegmentTracking()
         subtitleManager.clear()
         // The session is over — the persisted playbackSettings carry the
@@ -1671,7 +2131,8 @@ final class PlayerViewModel: ObservableObject {
         invalidatePlayerObservers()
         player = nil
         isPlayerReady = false
-        currentItem = nil
+        setCurrentItem(nil)
+        transitionState = .empty
         playbackStartDate = nil
 
         // Notify that playback ended so Home can refresh
@@ -1751,11 +2212,12 @@ final class PlayerViewModel: ObservableObject {
     /// Returns false when there is no pick or nothing matches, so the caller can
     /// fall back to the Settings preference.
     @discardableResult
-    private func applySessionAudioPreference() async -> Bool {
+    private func applySessionAudioPreference(expectedGeneration: PlaybackGeneration? = nil) async -> Bool {
         guard let preference = sessionAudioPreference,
               let playerItem = player?.currentItem,
               let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible)
         else { return false }
+        guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return false }
 
         // Prefer an exact display-name match, then fall back to language: the
         // same tiering the subtitle path uses, so "Japanese [5.1]" still
@@ -1807,13 +2269,14 @@ final class PlayerViewModel: ObservableObject {
         return true
     }
 
-    private func applyPreferredAudioLanguage() async {
+    private func applyPreferredAudioLanguage(expectedGeneration: PlaybackGeneration? = nil) async {
         let preferred = playbackSettings.preferredAudioLanguage
         guard !preferred.isEmpty, let playerItem = player?.currentItem else { return }
 
         // appliesMediaSelectionCriteriaAutomatically is false, so the default
         // track plays unless we pick one explicitly.
         guard let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible) else { return }
+        guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
 
         let codes = audioGroup.options.map { $0.locale?.language.languageCode?.identifier }
         if let index = PlaybackSelection.preferredAudioOptionIndex(languageCodes: codes, preferredLanguage: preferred) {
@@ -1986,10 +2449,13 @@ final class PlayerViewModel: ObservableObject {
 
     // MARK: - Skip Intro/Credits
 
-    private func fetchSegments(itemId: String) async {
+    private func fetchSegments(itemId: String, expectedGeneration: PlaybackGeneration? = nil) async {
         do {
-            segments = try await client.getMediaSegments(itemId: itemId)
+            let fetchedSegments = try await client.getMediaSegments(itemId: itemId)
+            guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
+            segments = fetchedSegments
         } catch {
+            guard expectedGeneration.map(isCurrentPlaybackGeneration) ?? true else { return }
             // Segments not available - silently ignore (server may not have intro-skipper plugin)
             segments = []
         }
@@ -2056,7 +2522,9 @@ final class PlayerViewModel: ObservableObject {
         // so auto-play-next would otherwise never fire (issue #241).
         let duration = player.currentItem?.duration.seconds ?? 0
         if duration.isFinite, duration > 0, segment.endSeconds >= duration - 2.0 {
-            Task { await handlePlaybackEnded() }
+            guard let itemID = currentItem?.id else { return }
+            let attempt = playbackAttempt
+            Task { await handlePlaybackEnded(itemID: itemID, attempt: attempt) }
             return
         }
 
@@ -2236,6 +2704,7 @@ final class PlayerViewModel: ObservableObject {
         ])
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
+        navigationTask?.cancel()
         cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)

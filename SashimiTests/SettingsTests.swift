@@ -2,20 +2,34 @@ import XCTest
 @testable import Sashimi
 
 final class SettingsTests: XCTestCase {
-
     // MARK: - PlaybackSettings Tests
 
     @MainActor
     func testPlaybackSettingsDefaults() {
         let settings = PlaybackSettings.shared
+        XCTAssertFalse(PlaybackSettings.defaultShowEpisodeNavigationControls)
+
+        let key = "showEpisodeNavigationControls"
+        let previousValue = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previousValue {
+                UserDefaults.standard.set(previousValue, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
 
         // Test default values exist and are reasonable
         XCTAssertTrue(settings.autoPlayNextEpisode)
         XCTAssertFalse(settings.autoSkipIntro)
         XCTAssertFalse(settings.autoSkipCredits)
         XCTAssertEqual(settings.resumeThresholdSeconds, 30)
-    }
 
+        settings.showEpisodeNavigationControls = false
+        XCTAssertFalse(settings.showEpisodeNavigationControls)
+        settings.showEpisodeNavigationControls = true
+        XCTAssertTrue(settings.showEpisodeNavigationControls)
+    }
 
     // MARK: - CertificateTrustSettings Tests
 

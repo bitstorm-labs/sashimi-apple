@@ -105,6 +105,7 @@ enum PlayerDiagnostics {
         case qualityChange = "quality.change"
         case playbackEnded = "playback.ended"
         case nextEpisode = "next.episode"
+        case navigationLookup = "navigation.lookup"
 
         // Teardown
         case teardown = "teardown"

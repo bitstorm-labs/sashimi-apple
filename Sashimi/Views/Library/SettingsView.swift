@@ -669,6 +669,11 @@ struct PlaybackSettingsView: View {
                     .foregroundStyle(SashimiTheme.textTertiary)
                     .padding(.horizontal, 8)
 
+                // Video Player Section
+                SettingsSection(title: "Video Player") {
+                    SettingsToggleRow(title: "Show Episode Navigation Controls", isOn: $settings.showEpisodeNavigationControls)
+                }
+
                 // Playback Behavior Section
                 SettingsSection(title: "Playback Behavior") {
                     SettingsToggleRow(title: "Auto-Play Next Episode", isOn: $settings.autoPlayNextEpisode)

@@ -34,14 +34,14 @@ struct DeepLink: Equatable {
 /// `fullScreenCover(item:)` — rather than sibling covers per action —
 /// guarantees a second link can always replace whatever is on screen.
 enum DeepLinkDestination: Identifiable, Equatable {
-    case play(BaseItemDto)
+    case play(BaseItemDto, serverID: String?)
     case detail(BaseItemDto)
 
     /// Includes the action so switching play <-> detail for the *same* item
     /// still changes identity and re-presents the cover.
     var id: String {
         switch self {
-        case .play(let item): return "play-\(item.id)"
+        case .play(let item, let serverID): return "play-\(item.id)-\(serverID ?? "active")"
         case .detail(let item): return "detail-\(item.id)"
         }
     }
