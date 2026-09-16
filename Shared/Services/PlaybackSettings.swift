@@ -51,7 +51,16 @@ class PlaybackSettings: ObservableObject {
     /// a real `UserDefaults` suite. `.phone` is the only idiom that defaults
     /// off; tvOS's `.tv` and iPad's `.pad` both stay on, matching the
     /// pre-existing (shipped) tvOS default of `true`.
-    nonisolated static func defaultPlayThemeSongs(idiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) -> Bool {
+    nonisolated static func defaultPlayThemeSongs(idiom: UIUserInterfaceIdiom) -> Bool {
         idiom != .phone
+    }
+
+    /// The no-argument form `@AppStorage` evaluates. Split from the pure
+    /// mapping above rather than expressed as a default argument: default
+    /// arguments are evaluated in the caller's isolation, and `UIDevice.current`
+    /// is main-actor isolated, so a `nonisolated` function cannot name it in
+    /// its own signature without an actor-isolation violation.
+    @MainActor static func defaultPlayThemeSongs() -> Bool {
+        defaultPlayThemeSongs(idiom: UIDevice.current.userInterfaceIdiom)
     }
 }

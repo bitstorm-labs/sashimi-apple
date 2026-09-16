@@ -27,6 +27,7 @@ final class PlaybackSettingsDefaultThemeSongsTests: XCTestCase {
     /// expression `@AppStorage` evaluates) exercises the production default
     /// end to end on the platform that shipped first, not just the pure
     /// function in isolation.
+    @MainActor
     func testRealDeviceIdiomOnThisTestHostDefaultsOn() {
         XCTAssertEqual(UIDevice.current.userInterfaceIdiom, .tv, "sanity: this suite runs in the tvOS host app")
         XCTAssertTrue(PlaybackSettings.defaultPlayThemeSongs())
