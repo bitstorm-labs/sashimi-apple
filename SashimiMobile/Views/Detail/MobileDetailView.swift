@@ -400,7 +400,7 @@ struct MobileDetailView: View {
                         .frame(width: 50, height: 50)
                         .clipShape(Circle())
                     }
-                    Text((item.name ?? "Unknown").cleanedYouTubeTitle)
+                    Text(item.name.cleanedYouTubeTitle)
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(MobileColors.textPrimary)
                 }
@@ -411,7 +411,7 @@ struct MobileDetailView: View {
                             .resizable().scaledToFit()
                     } else if state.error != nil {
                         // No logo on the server: fall back to the title
-                        Text(item.name ?? "Unknown")
+                        Text(item.name)
                             .font(.system(size: 28, weight: .bold))
                             .foregroundStyle(MobileColors.textPrimary)
                     }
@@ -420,7 +420,7 @@ struct MobileDetailView: View {
                 .frame(maxWidth: 300, alignment: .leading)
             } else {
                 // Fallback to title if no logo
-                Text(item.name ?? "Unknown")
+                Text(item.name)
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(MobileColors.textPrimary)
             }
@@ -517,7 +517,7 @@ struct MobileDetailView: View {
                     Text("•")
                         .foregroundStyle(MobileColors.textTertiary)
                 }
-                Text(item.name ?? "Unknown")
+                Text(item.name)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(MobileColors.textPrimary)
                     .lineLimit(2)
@@ -572,7 +572,7 @@ struct MobileDetailView: View {
                 .frame(maxHeight: 100)
                 .frame(maxWidth: 300, alignment: .leading)
             } else {
-                Text(item.name ?? "Unknown")
+                Text(item.name)
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(MobileColors.textPrimary)
             }
@@ -1059,7 +1059,7 @@ struct MobileDetailView: View {
                                     await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
                                 }
                             } label: {
-                                Text(season.name ?? "Season")
+                                Text(season.name)
                                     .font(.system(size: 14, weight: selectedSeason?.id == season.id ? .bold : .medium))
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 8)
@@ -1502,7 +1502,7 @@ struct MobileEpisodeCard: View {
 
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(episode.name ?? "Episode")
+                    Text(episode.name)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(MobileColors.textPrimary)
                         .lineLimit(1)
