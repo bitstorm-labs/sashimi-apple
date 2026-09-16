@@ -1,5 +1,12 @@
 # App Store Deployment Guide
 
+> **Shipping a release? See [RELEASING.md](RELEASING.md) instead.**
+>
+> This document covers **one-time setup** — Apple Developer enrolment, App Store
+> Connect records, certificates and CI secrets. The recurring release flow, the
+> two tag namespaces, and the plain-tag trap that produces a green run which
+> ships nothing all live in RELEASING.md.
+
 This is a complete step-by-step guide for deploying Sashimi to the tvOS App Store. If you've never deployed an app before, follow this guide from the beginning.
 
 ## Table of Contents
@@ -82,7 +89,7 @@ bundle install
 | Platform | tvOS |
 | Name | Sashimi |
 | Primary Language | English (U.S.) |
-| Bundle ID | com.sashimi.app |
+| Bundle ID | com.mondominator.sashimi |
 | SKU | sashimi-tvos-001 |
 
 5. Click **Create**
@@ -139,14 +146,14 @@ In the **App Review** section:
 4. Select **App** → **Continue**
 5. Fill in:
    - Description: `Sashimi`
-   - Bundle ID: Select **Explicit** and enter `com.sashimi.app`
+   - Bundle ID: Select **Explicit** and enter `com.mondominator.sashimi`
 6. Enable capabilities:
    - **App Groups** (for TopShelf extension)
 7. Click **Continue** → **Register**
 
 8. **Repeat for TopShelf extension:**
    - Description: `Sashimi TopShelf`
-   - Bundle ID: `com.sashimi.app.topshelf`
+   - Bundle ID: `com.mondominator.sashimi.topshelf`
    - Enable **App Groups**
 
 ### Step 4.2: Create App Group
@@ -154,7 +161,7 @@ In the **App Review** section:
 1. Go to **Identifiers** → **App Groups**
 2. Click **+**
 3. Description: `Sashimi App Group`
-4. Identifier: `group.com.sashimi.app`
+4. Identifier: `group.com.mondominator.sashimi`
 5. Click **Continue** → **Register**
 
 ### Step 4.3: Create Provisioning Profiles
@@ -164,7 +171,7 @@ In the **App Review** section:
 1. Go to [developer.apple.com/account/resources/profiles](https://developer.apple.com/account/resources/profiles/list)
 2. Click **+**
 3. Select **tvOS App Store** → **Continue**
-4. Select App ID: `com.sashimi.app` → **Continue**
+4. Select App ID: `com.mondominator.sashimi` → **Continue**
 5. Select your Distribution Certificate → **Continue**
 6. Name: `Sashimi tvOS Distribution`
 7. Click **Generate** → **Download**
@@ -172,7 +179,7 @@ In the **App Review** section:
 #### Distribution Profile for TopShelf
 
 1. Repeat steps above
-2. Select App ID: `com.sashimi.app.topshelf`
+2. Select App ID: `com.mondominator.sashimi.topshelf`
 3. Name: `Sashimi TopShelf Distribution`
 
 ### Step 4.4: Install Profiles in Xcode
@@ -284,14 +291,14 @@ bundle exec fastlane release
 
 ### TestFlight (Beta) Deployment
 
-Automatic on beta tags:
-```bash
-# Bump version and create beta tag
-./scripts/bump-version.sh patch
-git add -A && git commit -m "chore: bump version"
-git tag v1.0.1-beta.1
-git push && git push --tags
-```
+**See [RELEASING.md](RELEASING.md) — do not follow a half-remembered version of
+this flow.** Two things this section previously got wrong:
+
+- A **plain `vX.Y.Z` tag does not deploy.** Only `v*-beta*` / `v*-rc*` reach
+  TestFlight; a plain tag runs `release.yml`, which builds an artifact and ships
+  nothing while reporting success.
+- **tvOS and iOS need separate tags** (`vX.Y.Z-beta1` *and* `ios-vX.Y.Z-beta1`).
+  One tag ships one platform, silently.
 
 ### Manual Deployment via GitHub Actions
 
@@ -345,7 +352,7 @@ bundle exec fastlane match appstore --force
 
 ### "The bundle identifier does not match"
 
-- Ensure Bundle ID in App Store Connect matches `com.sashimi.app`
+- Ensure Bundle ID in App Store Connect matches `com.mondominator.sashimi`
 - Check `project.yml` has correct `PRODUCT_BUNDLE_IDENTIFIER`
 
 ### "Invalid binary"
@@ -389,9 +396,12 @@ bundle exec fastlane certificates  # Sync certificates
 ### Git Tags
 
 ```bash
-git tag v1.0.0              # Release version
-git tag v1.0.1-beta.1       # Beta version (auto-deploys)
-git tag v1.0.1-rc.1         # Release candidate
+# TestFlight (these are the ones that actually deploy) -- push BOTH:
+git tag -a v1.0.1-beta1     -m "..."   # tvOS  -> deploy.yml
+git tag -a ios-v1.0.1-beta1 -m "..."   # iOS   -> deploy-ios.yml
+
+# Plain tag: archive artifact only, does NOT ship to TestFlight
+git tag -a v1.0.0 -m "..."
 ```
 
 ---
