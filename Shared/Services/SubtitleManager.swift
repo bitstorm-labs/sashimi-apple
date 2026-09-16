@@ -104,7 +104,14 @@ class SubtitleManager: ObservableObject {
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         let token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            self?.updateCurrentCue(at: time.seconds)
+            // The observer is registered with `queue: .main`, so this callback
+            // genuinely arrives on the main actor -- assert that isolation
+            // rather than hopping through `Task { @MainActor in }`, which would
+            // defer every cue update by a runloop turn and let subtitles lag
+            // the 0.1s tick they are driven by.
+            MainActor.assumeIsolated {
+                self?.updateCurrentCue(at: time.seconds)
+            }
         }
         timeObservation = (token: token, player: player)
     }
