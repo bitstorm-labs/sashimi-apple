@@ -2163,13 +2163,29 @@ final class PlayerViewModel: ObservableObject {
         )
     }
 
+    /// Kept synchronous at the call boundary so the five view call sites stay
+    /// unchanged, but the work now spans a suspension point: the iOS 16
+    /// replacement for `mediaSelectionGroup(forMediaCharacteristic:)` is the
+    /// async `loadMediaSelectionGroup(for:)`, and there is no sync equivalent.
     func loadAudioTracks() {
-        guard let playerItem = player?.currentItem else { return }
+        Task { await loadAudioTracksIfCurrent() }
+    }
 
-        guard let audioGroup = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) else {
+    /// The generation guard is what the suspension makes necessary: the
+    /// synchronous version could not be overtaken, this one can. Without it a
+    /// load started for the previous episode could resolve after the next one
+    /// began and publish that episode's tracks -- the same staleness the other
+    /// async audio paths here already guard against.
+    private func loadAudioTracksIfCurrent() async {
+        guard let playerItem = player?.currentItem, let itemID = currentItem?.id else { return }
+        let generation = PlaybackGeneration(itemID: itemID, attempt: playbackAttempt)
+
+        guard let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible) else {
+            guard isCurrentPlaybackGeneration(generation) else { return }
             audioTracks = []
             return
         }
+        guard isCurrentPlaybackGeneration(generation) else { return }
 
         let options = audioGroup.options
         var tracks: [AudioTrackOption] = []
@@ -2194,9 +2210,23 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    /// Synchronous at the call boundary for the same reason as
+    /// `loadAudioTracks()` -- both view call sites are sync closures (a
+    /// `UIAction` handler on tvOS, a `Button` action on mobile).
     func selectAudioTrack(_ track: AudioTrackOption) {
-        guard let playerItem = player?.currentItem,
-              let audioGroup = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .audible),
+        Task { await selectAudioTrackIfCurrent(track) }
+    }
+
+    /// Ordering is deliberately identical to the previous synchronous version:
+    /// `selectedAudioTrackId` and the session preference are only written after
+    /// the selection actually succeeds, so a failed lookup still leaves the
+    /// menu checkmark on the track that is really playing.
+    private func selectAudioTrackIfCurrent(_ track: AudioTrackOption) async {
+        guard let playerItem = player?.currentItem, let itemID = currentItem?.id else { return }
+        let generation = PlaybackGeneration(itemID: itemID, attempt: playbackAttempt)
+
+        guard let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible),
+              isCurrentPlaybackGeneration(generation),
               track.index < audioGroup.options.count else { return }
 
         let option = audioGroup.options[track.index]
