@@ -20,12 +20,18 @@ on:
       - 'ios-v*-rc*'
 
 env:
-  XCODE_VERSION: 'latest-stable'  # Apple requires the current iOS SDK (Xcode 26+)
+  # 'latest' (not 'latest-stable'): the xcode-27 image only carries a beta
+  # until 27.0 GA reaches it. TestFlight accepts beta-Xcode uploads; App
+  # Store submission needs a GA iOS SDK.
+  XCODE_VERSION: 'latest'
 
 jobs:
   deploy:
     name: Deploy iOS to ${{ github.event.inputs.environment || 'testflight' }}
-    runs-on: macos-15
+    # xcode-27 is GitHub's Xcode 27 image (macOS 27, iOS/tvOS 27 SDKs), still a
+    # public preview -- see actions/runner-images#14404. macos-15 / macos-26 top
+    # out at Xcode 26.x, which cannot compile against iOS 27 APIs.
+    runs-on: xcode-27
     environment: ${{ github.event.inputs.environment || 'testflight' }}
     timeout-minutes: 40
 
