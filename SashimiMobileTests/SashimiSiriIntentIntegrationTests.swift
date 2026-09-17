@@ -160,7 +160,7 @@ final class SashimiSiriIntentIntegrationTests: XCTestCase {
             operation: {
                 var intent = SashimiInAppSearchIntent()
                 intent.criteria = StringSearchCriteria(term: phrase)
-                try await intent.perform()
+                return try await intent.perform()
             }
         )
         assertOpenHandoff(result)
@@ -241,6 +241,9 @@ final class SashimiSiriIntentIntegrationTests: XCTestCase {
     }
 }
 
+// Mirrors the test class: `SashimiOpenMediaIntent` carries the iOS 27 system
+// schema on this compiler, so anything naming it needs the same availability.
+@available(iOS 27.0, *)
 private final class OpenIntentRecorder: @unchecked Sendable {
     private(set) var intent: SashimiOpenMediaIntent?
 
