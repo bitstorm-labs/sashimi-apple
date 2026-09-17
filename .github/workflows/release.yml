@@ -11,7 +11,10 @@ on:
 jobs:
   build-release:
     name: Build Release Archive
-    runs-on: macos-15
+    # xcode-27 is GitHub's Xcode 27 image (macOS 27, iOS/tvOS 27 SDKs), still a
+    # public preview -- see actions/runner-images#14404. macos-15 / macos-26 top
+    # out at Xcode 26.x, which cannot compile against iOS 27 APIs.
+    runs-on: xcode-27
 
     steps:
       - name: Checkout
@@ -20,7 +23,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: 'latest-stable'
+          xcode-version: 'latest'
 
       - name: Install tvOS Platform
         run: |
