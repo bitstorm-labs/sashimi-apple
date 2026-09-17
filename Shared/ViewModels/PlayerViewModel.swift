@@ -1692,7 +1692,7 @@ final class PlayerViewModel: ObservableObject {
         let resolvedURL: URL?
         let streamKind: PlayerDiagnostics.StreamKind
         // Only meaningful for `.transcodeHLS`: whether AVPlayer gets one media
-        // playlist pinned out of the master (see `HLSMasterPlaylist`, #443).
+        // playlist pinned out of the master (see `HLSMultivariantPlaylist`, #443).
         var pinnedHLSVariant = false
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS

@@ -1,7 +1,8 @@
 import Foundation
 
-/// Pure reading of a Jellyfin HLS master playlist, used to decide whether
-/// AVPlayer should be pointed at one media playlist instead of the master.
+/// Pure reading of a Jellyfin HLS multivariant playlist (Apple's term; Jellyfin
+/// still serves it as `master.m3u8`), used to decide whether AVPlayer should
+/// be pointed at one media playlist instead of the whole thing.
 ///
 /// Why this exists (#443): for an HDR source that the server is going to
 /// stream-copy, Jellyfin's `DynamicHlsHelper` unconditionally appends HDR→SDR
@@ -19,7 +20,7 @@ import Foundation
 /// Handing AVPlayer the primary variant's media playlist directly leaves it
 /// one codec and one grid to work with, which is exactly what the SDR case
 /// already has.
-enum HLSMasterPlaylist {
+enum HLSMultivariantPlaylist {
     struct Variant: Equatable {
         /// The `#EXT-X-STREAM-INF` attribute list, kept for diagnostics.
         let attributes: String
@@ -38,10 +39,10 @@ enum HLSMasterPlaylist {
     /// Every `#EXT-X-STREAM-INF` entry with its URI. `#EXT-X-IMAGE-STREAM-INF`
     /// (trickplay) and `#EXT-X-MEDIA` carry their URI as an attribute and are
     /// not variants.
-    static func variants(in master: String) -> [Variant] {
+    static func variants(in playlist: String) -> [Variant] {
         var variants: [Variant] = []
         var pendingAttributes: String?
-        for rawLine in master.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+        for rawLine in playlist.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 pendingAttributes = String(line.dropFirst("#EXT-X-STREAM-INF:".count))
@@ -66,11 +67,11 @@ enum HLSMasterPlaylist {
     /// whose only variants are forced re-encodes (recovery attempt 2). When
     /// the server lists several primaries (Dolby Vision `dvh1` + `hvc1`), it
     /// puts the one it wants Apple clients to take first.
-    static func singlePrimaryVariantURL(master: String, masterURL: URL) -> URL? {
-        let variants = variants(in: master)
+    static func singlePrimaryVariantURL(playlist: String, multivariantURL: URL) -> URL? {
+        let variants = variants(in: playlist)
         guard variants.contains(where: \.isStreamCopyFallback),
               let primary = variants.first(where: { !$0.isStreamCopyFallback })
         else { return nil }
-        return URL(string: primary.uri, relativeTo: masterURL)?.absoluteURL
+        return URL(string: primary.uri, relativeTo: multivariantURL)?.absoluteURL
     }
 }
