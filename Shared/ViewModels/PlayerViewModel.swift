@@ -1691,9 +1691,14 @@ final class PlayerViewModel: ObservableObject {
 
         let resolvedURL: URL?
         let streamKind: PlayerDiagnostics.StreamKind
+        // Only meaningful for `.transcodeHLS`: whether AVPlayer gets one media
+        // playlist pinned out of the master (see `HLSMultivariantPlaylist`, #443).
+        var pinnedHLSVariant = false
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS
-            resolvedURL = await client.buildURL(path: transcodingPath)
+            let resolution = await client.resolveHLSStreamURL(transcodingPath: transcodingPath)
+            resolvedURL = resolution?.url
+            pinnedHLSVariant = resolution?.pinnedVariant ?? false
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             streamKind = .directStream
@@ -1748,6 +1753,7 @@ final class PlayerViewModel: ObservableObject {
                 "avplayerPlayableContainer",
                 container.isEmpty || container == "m3u8" || DeviceMediaCompatibility.directPlayContainers.contains(container)
             ),
+            PlayerDiagnostics.field("pinnedHLSVariant", pinnedHLSVariant),
             PlayerDiagnostics.describe(url: resolvedURL)
         ])
 
