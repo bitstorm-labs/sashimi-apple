@@ -1300,7 +1300,7 @@ actor JellyfinClient {
         let url: URL
         /// True when `url` is a single media playlist pinned out of the master
         /// because the master carried Jellyfin's HDR→SDR fallback-hack variants
-        /// (see `HLSMasterPlaylist`). False means `url` is the master itself.
+        /// (see `HLSMultivariantPlaylist`). False means `url` is the master itself.
         let pinnedVariant: Bool
     }
 
@@ -1313,30 +1313,30 @@ actor JellyfinClient {
     /// or read the master falls back to the master URL, which is what was
     /// always handed over before — never worse than the old behaviour.
     func resolveHLSStreamURL(transcodingPath: String) async -> HLSStreamResolution? {
-        guard let masterURL = buildURL(path: transcodingPath) else { return nil }
-        guard masterURL.lastPathComponent.lowercased() == "master.m3u8" else {
-            return HLSStreamResolution(url: masterURL, pinnedVariant: false)
+        guard let multivariantURL = buildURL(path: transcodingPath) else { return nil }
+        guard multivariantURL.lastPathComponent.lowercased() == "master.m3u8" else {
+            return HLSStreamResolution(url: multivariantURL, pinnedVariant: false)
         }
 
-        var request = URLRequest(url: masterURL)
+        var request = URLRequest(url: multivariantURL)
         request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.apple.mpegurl, application/x-mpegURL", forHTTPHeaderField: "Accept")
         do {
             let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-                  let master = String(data: data, encoding: .utf8) else {
+                  let playlist = String(data: data, encoding: .utf8) else {
                 logger.warning("master playlist fetch failed; using master URL")
-                return HLSStreamResolution(url: masterURL, pinnedVariant: false)
+                return HLSStreamResolution(url: multivariantURL, pinnedVariant: false)
             }
-            if let pinned = HLSMasterPlaylist.singlePrimaryVariantURL(master: master, masterURL: masterURL) {
+            if let pinned = HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: playlist, multivariantURL: multivariantURL) {
                 logger.info("master playlist carries stream-copy fallback variants; pinning the primary variant")
                 return HLSStreamResolution(url: pinned, pinnedVariant: true)
             }
-            return HLSStreamResolution(url: masterURL, pinnedVariant: false)
+            return HLSStreamResolution(url: multivariantURL, pinnedVariant: false)
         } catch {
             // No URL in the log: the query carries the api_key.
             logger.warning("master playlist fetch threw \(String(describing: type(of: error)), privacy: .public); using master URL")
-            return HLSStreamResolution(url: masterURL, pinnedVariant: false)
+            return HLSStreamResolution(url: multivariantURL, pinnedVariant: false)
         }
     }
 
