@@ -264,7 +264,58 @@ final class JellyfinClientTests: XCTestCase {
         XCTAssertEqual(MediaSegmentType.unknown.displayName, "Segment")
     }
 
-    // MARK: - Intro Skipper Segment Tests
+    // MARK: - Native Media Segments API Tests
+
+    func testNativeMediaSegmentsResponseDecoding() throws {
+        // Verbatim shape of GET /MediaSegments/{id} on Jellyfin 12.1 for an
+        // episode Intro Skipper 12 analysed (the plugin's own route 404s).
+        let json = """
+        {
+            "Items": [
+                {"Id": "01a0abf78acc7f91960b704e150e00fc", "ItemId": "ep-1", "Type": "Intro",
+                 "StartTicks": 5280000000, "EndTicks": 6346340000},
+                {"Id": "01a0abf78b6c71869c6abefdb7820007", "ItemId": "ep-1", "Type": "Outro",
+                 "StartTicks": 28090000000, "EndTicks": 28708270000}
+            ],
+            "TotalRecordCount": 2,
+            "StartIndex": 0
+        }
+        """.data(using: .utf8)!
+
+        let segments = try JSONDecoder().decode(MediaSegmentsResponse.self, from: json).items.map(\.segment)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].id, "01a0abf78acc7f91960b704e150e00fc")
+        XCTAssertEqual(segments[0].type, .intro)
+        XCTAssertEqual(segments[0].startSeconds, 528, accuracy: 0.0001)
+        XCTAssertEqual(segments[0].endSeconds, 634.634, accuracy: 0.0001)
+        XCTAssertEqual(segments[1].type, .outro)
+        XCTAssertEqual(segments[1].startSeconds, 2809, accuracy: 0.0001)
+        XCTAssertEqual(segments[1].endSeconds, 2870.827, accuracy: 0.0001)
+    }
+
+    func testNativeMediaSegmentsEmptyResponseDecodes() throws {
+        let json = #"{"Items": [], "TotalRecordCount": 0, "StartIndex": 0}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(MediaSegmentsResponse.self, from: json)
+        XCTAssertTrue(response.items.isEmpty)
+    }
+
+    func testNativeSegmentTypeMapping() {
+        XCTAssertEqual(MediaSegmentType(nativeType: "Intro"), .intro)
+        XCTAssertEqual(MediaSegmentType(nativeType: "Outro"), .outro)
+        XCTAssertEqual(MediaSegmentType(nativeType: "Recap"), .recap)
+        XCTAssertEqual(MediaSegmentType(nativeType: "Preview"), .preview)
+        // Not skippable in the player; must not be promoted to a skip type.
+        XCTAssertEqual(MediaSegmentType(nativeType: "Commercial"), .unknown)
+        XCTAssertEqual(MediaSegmentType(nativeType: "Unknown"), .unknown)
+        XCTAssertEqual(MediaSegmentType(nativeType: "SomethingNew"), .unknown)
+        // The native names are NOT the legacy raw values — a rawValue lookup
+        // would silently turn every native Intro into .unknown.
+        XCTAssertNil(MediaSegmentType(rawValue: "Intro"))
+        XCTAssertNil(MediaSegmentType(rawValue: "Outro"))
+    }
+
+    // MARK: - Intro Skipper Segment Tests (legacy plugin route)
 
     func testIntroSkipperSegmentDecoding() throws {
         let json = """
