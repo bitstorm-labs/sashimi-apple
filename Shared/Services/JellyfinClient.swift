@@ -1687,13 +1687,41 @@ actor JellyfinClient {
         return try JSONDecoder().decode([BaseItemDto].self, from: data)
     }
 
-    /// Fetch skip segments from intro-skipper plugin
-    /// Endpoint: /Episode/{itemId}/IntroSkipperSegments
-    /// Response: {"Introduction": {"Start": 0, "End": 90}, "Credits": {"Start": 1200, "End": 1300}}
+    /// Fetch skip segments (intro / credits / recap / preview) for an item.
+    ///
+    /// The server's native Media Segments API (`/MediaSegments/{itemId}`,
+    /// Jellyfin 10.10+) is the primary source: it is a server contract, and
+    /// every provider writes into it. We used to read the Intro Skipper
+    /// plugin's private `/Episode/{itemId}/IntroSkipperSegments` route
+    /// instead, and plugin 12 deleted it — the second time a private plugin
+    /// route has silently removed the skip button. That route stays only as a
+    /// fallback for servers older than 10.10 (native 404) or plugins that
+    /// never populated the native table (native empty).
     func getMediaSegments(itemId: String) async throws -> [MediaSegmentDto] {
-        let data = try await request(path: "/Episode/\(itemId)/IntroSkipperSegments")
+        do {
+            let data = try await request(path: "/MediaSegments/\(itemId)")
+            let segments = try JSONDecoder().decode(MediaSegmentsResponse.self, from: data).items.map(\.segment)
+            if !segments.isEmpty {
+                return segments
+            }
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            // Pre-10.10 server: the endpoint doesn't exist. Try the plugin.
+        }
+        return try await legacyIntroSkipperSegments(itemId: itemId)
+    }
 
-        // Parse the dictionary response from intro-skipper
+    /// Intro Skipper plugin ≤ 11: `/Episode/{itemId}/IntroSkipperSegments`
+    /// Response: {"Introduction": {"Start": 0, "End": 90}, "Credits": {"Start": 1200, "End": 1300}}
+    /// A 404 means the route is gone (plugin 12+ or not installed) — that is
+    /// "no segments", not an error.
+    private func legacyIntroSkipperSegments(itemId: String) async throws -> [MediaSegmentDto] {
+        let data: Data
+        do {
+            data = try await request(path: "/Episode/\(itemId)/IntroSkipperSegments")
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            return []
+        }
+
         let segmentsDict = try JSONDecoder().decode([String: IntroSkipperSegment].self, from: data)
 
         return segmentsDict.compactMap { key, segment in
