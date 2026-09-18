@@ -90,6 +90,10 @@ final class PlayerViewModel: ObservableObject {
 
     let serverID: String?
     private let playbackReporter: any PlayerPlaybackReporting
+
+    /// Set when this player was opened by tuning to a channel rather than by
+    /// picking an item. Its presence is what makes playback ephemeral.
+    let channelContext: ChannelPlaybackContext?
     private let recoverySetup: RecoverySetup?
 
     init(
@@ -99,9 +103,11 @@ final class PlayerViewModel: ObservableObject {
         navigationClient: (any PlayerEpisodeNavigationClient)? = nil,
         reporter: (any PlayerPlaybackReporting)? = nil,
         transitionLoader: (any PlayerTransitionLoader)? = nil,
-        recoverySetup: RecoverySetup? = nil
+        recoverySetup: RecoverySetup? = nil,
+        channelContext: ChannelPlaybackContext? = nil
     ) {
         self.serverID = serverID
+        self.channelContext = channelContext
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
         let resolvedClient = client
             ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
@@ -110,11 +116,17 @@ final class PlayerViewModel: ObservableObject {
             // An unconfigured client fails visibly and lets the durable report
             // queue retry once the selected server can be restored.
             ?? (resolvedServerID == nil ? JellyfinClient.shared : JellyfinClient())
-        self.playbackReporter = reporter ?? PlaybackSessionReporter(
-            serverID: resolvedServerID,
-            client: resolvedClient,
-            delivery: reportDelivery
-        )
+        // Channel viewing writes no watch state. Substituting the reporter is
+        // deliberate rather than guarding each call: suppression that lives in
+        // the type cannot be forgotten at a call site added later.
+        self.playbackReporter = reporter
+            ?? (channelContext != nil
+                ? ChannelPlaybackReporter()
+                : PlaybackSessionReporter(
+                    serverID: resolvedServerID,
+                    client: resolvedClient,
+                    delivery: reportDelivery
+                ))
         self.client = resolvedClient
         self.navigationClient = navigationClient ?? resolvedClient
         self.transitionLoader = transitionLoader
@@ -612,7 +624,30 @@ final class PlayerViewModel: ObservableObject {
 
             // Check if there's saved progress to resume from
             let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
-            if startFromBeginning {
+            if let channel = channelContext {
+                // A channel supplies where the broadcast already is, which is
+                // not the same question as where this viewer stopped. Taking the
+                // resume branch here would drop the viewer at their own old
+                // position while the channel carried on without them.
+                //
+                // pendingResumeTicks rather than a seek: the position is applied
+                // once, from the status observer at .readyToPlay, for the same
+                // reason the resume path does it there.
+                resumePositionTicks = channel.startPositionTicks
+                pendingResumeTicks = channel.startPositionTicks
+                diag(.seek, [
+                    PlayerDiagnostics.field("phase", "channel-join"),
+                    PlayerDiagnostics.field("channel", channel.channelID),
+                    PlayerDiagnostics.field("targetSeconds", channel.startPositionSeconds)
+                ])
+                // No reportPlaybackStart and no progress timer: the injected
+                // reporter would discard them anyway, but not starting the timer
+                // keeps a channel from waking the app every few seconds to do
+                // nothing.
+                setupSegmentTracking()
+                playbackStartDate = Date()
+                logAndPlay(positionTicks: resumePositionTicks)
+            } else if startFromBeginning {
                 // User explicitly chose to start over - play from beginning
                 resumePositionTicks = 0
                 pendingResumeTicks = 0
