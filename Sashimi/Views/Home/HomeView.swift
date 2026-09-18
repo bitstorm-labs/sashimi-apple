@@ -11,9 +11,15 @@ struct HomeView: View {
     /// the rail (which grabbed it while the hero was still loading).
     var onHeroReady: (() -> Void)?
     @StateObject private var viewModel = HomeViewModel()
+    @StateObject private var channelsViewModel = ChannelsViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedItem: BaseItemDto?
+    /// Set when a channel is tuned to. Carries the item and the context that
+    /// makes playback ephemeral, so the player opens directly — a channel has
+    /// no resume position, and a detail screen would only offer choices that do
+    /// not apply to one.
+    @State private var tunedChannel: TunedChannel?
     @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
@@ -126,6 +132,10 @@ struct HomeView: View {
             await viewModel.loadContent()
             homeSettings.updateWithLibraries(viewModel.libraries)
             if !viewModel.heroItems.isEmpty { onHeroReady?() }
+            // After the main content: a server without the Channels plugin
+            // answers 404 and yields an empty row, so this must never gate the
+            // rest of Home on it.
+            await channelsViewModel.load()
         }
         .onChange(of: viewModel.heroItems.count) { _, count in
             if count > 0 { onHeroReady?() }
@@ -156,6 +166,24 @@ struct HomeView: View {
         }
     }
 
+    /// Resolve what the channel is airing and open the player on it.
+    ///
+    /// Resolved fresh at the moment of tuning rather than reusing the card's
+    /// data: the row may have been on screen for a while, and a channel moves
+    /// on whether or not anyone is looking at it.
+    private func tuneToChannel(_ card: ChannelCard) {
+        Task {
+            guard let tuned = await channelsViewModel.tuneIn(to: card.channel) else {
+                // Went off air between rendering and pressing. Refresh so the
+                // row tells the truth rather than silently doing nothing.
+                await channelsViewModel.load()
+                return
+            }
+            guard let item = try? await JellyfinClient.shared.getItem(itemId: tuned.itemID) else { return }
+            tunedChannel = TunedChannel(item: item, context: tuned.context)
+        }
+    }
+
     @ViewBuilder
     private func rowView(for config: HomeRowConfig) -> some View {
         if let type = config.type {
@@ -164,6 +192,12 @@ struct HomeView: View {
                 // The hero is rendered as a fixed backdrop in the body (behind the
                 // scrolling rows), so it is never a scrolling row here.
                 EmptyView()
+            case .channels:
+                if !channelsViewModel.cards.isEmpty {
+                    ChannelsRow(cards: channelsViewModel.cards) { card in
+                        tuneToChannel(card)
+                    }
+                }
             case .continueWatching:
                 if !viewModel.continueWatchingItems.isEmpty {
                     ContinueWatchingRow(
