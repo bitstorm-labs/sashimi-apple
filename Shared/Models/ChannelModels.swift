@@ -39,6 +39,20 @@ struct ChannelNowPlaying: Codable, Equatable {
         case nextItemId = "NextItemId"
     }
 
+    init(
+        itemId: String,
+        startPositionSeconds: Double,
+        startUtc: Date,
+        endUtc: Date,
+        nextItemId: String?
+    ) {
+        self.itemId = itemId
+        self.startPositionSeconds = startPositionSeconds
+        self.startUtc = startUtc
+        self.endUtc = endUtc
+        self.nextItemId = nextItemId
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         itemId = try container.decode(String.self, forKey: .itemId)

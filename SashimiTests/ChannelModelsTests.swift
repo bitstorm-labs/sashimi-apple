@@ -75,3 +75,30 @@ private extension String {
     /// and a UTF-8 conversion cannot fail anyway.
     var utf8Data: Data { Data(utf8) }
 }
+
+/// Guards the scale the progress bar is fed.
+///
+/// `SashimiProgressBar` takes 0-1 and clamps, so passing a percentage pinned
+/// the bar full for anything past 1% — visible as a bar that never matched
+/// where playback actually started.
+final class ChannelProgressScaleTests: XCTestCase {
+    func testProgressIsAFractionNotAPercentage() {
+        let start = Date()
+        let now = ChannelNowPlaying(
+            itemId: "a",
+            startPositionSeconds: 300,
+            startUtc: start,
+            endUtc: start.addingTimeInterval(1200),
+            nextItemId: nil
+        )
+        let card = ChannelCard(
+            channel: VirtualChannel(id: "c", name: "Test", timeZoneId: "UTC", daypartCount: 1),
+            nowPlaying: now,
+            item: nil
+        )
+
+        // A quarter of the way in must read 0.25, not 25.
+        XCTAssertEqual(card.progress, 0.25, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(card.progress, 1.0, "values above 1 clamp the bar to full")
+    }
+}

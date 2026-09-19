@@ -178,7 +178,7 @@ struct ChannelCard_View: View {
             } else {
                 // How far into the programme a viewer joins — visible before
                 // pressing, so missing the start is never a surprise after.
-                SashimiProgressBar(progress: card.progress * 100, height: 5, useGradient: true)
+                SashimiProgressBar(progress: card.progress, height: 5, useGradient: true)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
             }
