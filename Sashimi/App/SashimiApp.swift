@@ -176,7 +176,7 @@ struct MainTabView: View {
     /// A destination in the rail. Libraries are dynamic, so this is an enum
     /// rather than a tab index.
     enum NavID: Hashable {
-        case home, search, settings, avatar
+        case home, finTV, search, settings, avatar
         case library(String)
     }
 
@@ -292,6 +292,8 @@ struct MainTabView: View {
         switch selection {
         case .home, .avatar:
             HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
+        case .finTV:
+            FinTVView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .search:
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
@@ -337,6 +339,7 @@ struct MainTabView: View {
         for lib in libraries {
             rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
         }
+        rows.append(NavRow(id: .finTV, title: "FinTV", icon: "antenna.radiowaves.left.and.right"))
         rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
         rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
         return rows
