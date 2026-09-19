@@ -117,6 +117,9 @@ struct HomeView: View {
             .fullScreenCover(item: $playingItem) { item in
                 PlayerView(item: item, startFromBeginning: false)
             }
+            .fullScreenCover(item: $tunedChannel) { tuned in
+                PlayerView(item: tuned.item, channelContext: tuned.context)
+            }
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
                     Task { await viewModel.refresh() }
