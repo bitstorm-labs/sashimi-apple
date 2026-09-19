@@ -190,7 +190,7 @@ struct MainTabView: View {
     // or when this action runs — clearing focusedNav or a directional beam that
     // misses the content does NOT trigger it on its own.
     @Environment(\.resetFocus) private var resetFocus
-    @State private var selection: NavID = .home
+    @State private var selection: NavID = .finTV
     @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
     @State private var showAddServer = false

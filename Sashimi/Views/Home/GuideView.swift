@@ -96,7 +96,10 @@ struct GuideView: View {
                 // Channel names sit outside the scrolling timeline so they stay
                 // put while the schedule moves.
                 VStack(alignment: .leading, spacing: 12) {
-                    Color.clear.frame(height: 40)   // aligns with the time ruler
+                    // Width is mandatory: Color.clear is greedy, and without it
+                    // this spacer expands to fill, taking the whole row's width
+                    // and shoving the timeline off to the right.
+                    Color.clear.frame(width: channelColumnWidth, height: 40)
                     ForEach(viewModel.rows) { row in
                         channelLabel(row)
                             .frame(width: channelColumnWidth, height: rowHeight, alignment: .leading)
@@ -104,16 +107,20 @@ struct GuideView: View {
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    ZStack(alignment: .topLeading) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            timeRuler
-                            ForEach(viewModel.rows) { row in
-                                channelRow(row)
-                            }
+                    VStack(alignment: .leading, spacing: 12) {
+                        timeRuler
+                        ForEach(viewModel.rows) { row in
+                            channelRow(row)
                         }
-                        nowLine
                     }
+                    // Overlay rather than a ZStack sibling: a bare Rectangle in
+                    // a ZStack has no intrinsic height, so it stretched the
+                    // stack and pushed the whole timeline off to the right.
+                    .overlay(alignment: .topLeading) { nowLine }
                 }
+                // Without this the scroll view takes its ideal width from the
+                // content and leaves a gap the size of the overflow.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 80)
             .padding(.bottom, 80)
@@ -170,11 +177,17 @@ struct GuideView: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             Rectangle()
                 .fill(SashimiTheme.accent)
-                .frame(width: 3)
-                .offset(x: offset(for: context.date) + channelColumnWidth * 0)
+                .frame(width: 3, height: gridHeight)
+                .offset(x: offset(for: context.date))
                 .opacity(context.date >= windowStart ? 1 : 0)
         }
         .allowsHitTesting(false)
+    }
+
+    /// Explicit because the line is an overlay: ruler, then a row and its gap
+    /// for each channel.
+    private var gridHeight: CGFloat {
+        40 + CGFloat(viewModel.rows.count) * (rowHeight + 12)
     }
 
     // MARK: - Geometry
