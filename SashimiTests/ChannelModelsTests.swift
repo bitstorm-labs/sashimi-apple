@@ -49,9 +49,10 @@ final class ChannelModelsTests: XCTestCase {
     func testProgressReflectsHowFarIntoTheProgrammeAViewerJoins() throws {
         let now = try JSONDecoder().decode(ChannelNowPlaying.self, from: payload)
         let card = ChannelCard(
-            channel: VirtualChannel(id: "c", name: "Test", timeZoneId: "UTC", daypartCount: 1),
+            channel: VirtualChannel(id: "c", name: "Test", description: nil, timeZoneId: "UTC", daypartCount: 1),
             nowPlaying: now,
-            item: nil
+            item: nil,
+            nextItem: nil
         )
 
         // 821.85s into a 1287.55s programme is ~64%. With unparseable dates the
@@ -92,9 +93,10 @@ final class ChannelProgressScaleTests: XCTestCase {
             nextItemId: nil
         )
         let card = ChannelCard(
-            channel: VirtualChannel(id: "c", name: "Test", timeZoneId: "UTC", daypartCount: 1),
+            channel: VirtualChannel(id: "c", name: "Test", description: nil, timeZoneId: "UTC", daypartCount: 1),
             nowPlaying: now,
-            item: nil
+            item: nil,
+            nextItem: nil
         )
 
         // A quarter of the way in must read 0.25, not 25.

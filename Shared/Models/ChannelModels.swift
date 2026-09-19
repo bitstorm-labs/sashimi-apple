@@ -4,12 +4,16 @@ import Foundation
 struct VirtualChannel: Codable, Identifiable, Equatable {
     let id: String
     let name: String
+    /// What the channel is, which stays true as programmes change — distinct
+    /// from the synopsis of whatever is currently airing.
+    let description: String?
     let timeZoneId: String
     let daypartCount: Int
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
         case name = "Name"
+        case description = "Description"
         case timeZoneId = "TimeZoneId"
         case daypartCount = "DaypartCount"
     }

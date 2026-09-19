@@ -47,8 +47,16 @@ struct FinTVView: View {
             // thumbnail still shows a finished programme and the countdown
             // keeps ticking past zero. Re-resolve while the screen is up.
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
+                // Wake when the soonest programme actually ends, not on a fixed
+                // tick: a 30s poll shows a finished programme for up to half a
+                // minute, which is exactly the moment a viewer is looking. The
+                // 30s ceiling remains as a safety net, because the schedule can
+                // be rebuilt underneath us when the library changes.
+                let soonest = viewModel.cards.compactMap(\.endsAt).min()
+                let wait = soonest.map { max(1, $0.timeIntervalSinceNow + 1) } ?? 30
+                try? await Task.sleep(nanoseconds: UInt64(min(wait, 30) * Double(NSEC_PER_SEC)))
                 guard !Task.isCancelled else { break }
+                withAnimation(.easeInOut(duration: 0.35)) { }
                 await viewModel.load()
             }
         }
@@ -96,121 +104,5 @@ struct FinTVView: View {
             }
             tuned = TunedChannel(item: item, context: result.context)
         }
-    }
-}
-
-/// A channel tile.
-///
-/// Sized and weighted like the other Home cards rather than inventing its own
-/// scale: a row that does not match the ones above and below it reads as broken
-/// even when every individual value is defensible.
-struct ChannelCard_View: View {
-    let card: ChannelCard
-    var isTuning: Bool = false
-    let onTune: () -> Void
-
-    @FocusState private var isFocused: Bool
-
-    private var nowText: String {
-        guard let item = card.item else { return "—" }
-        if item.type == .episode, let season = item.parentIndexNumber, let episode = item.indexNumber {
-            return "\(item.seriesName ?? "") · S\(season)E\(episode)"
-        }
-        return item.name ?? "—"
-    }
-
-    var body: some View {
-        Button(action: onTune) {
-            VStack(alignment: .leading, spacing: 0) {
-                artwork
-                caption
-            }
-            .background(SashimiTheme.cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            // The same ring every other card uses: white, not the purple
-            // accent, and a glow rather than a filled highlight. `.plain` is
-            // not enough on tvOS — it still paints the system focus box, which
-            // is what made this card look like a white slab.
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
-            )
-            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
-        }
-        .buttonStyle(PlainNoHighlightButtonStyle())
-        .focused($isFocused)
-        .opacity(card.isOffAir ? 0.5 : 1)
-        .disabled(card.isOffAir || isTuning)
-        .accessibilityLabel(card.isOffAir
-            ? "\(card.channel.name), off air"
-            : "\(card.channel.name), now airing \(nowText), \(card.minutesRemaining) minutes remaining")
-    }
-
-    private var artwork: some View {
-        ZStack(alignment: .bottom) {
-            Rectangle().fill(Color.black.opacity(0.65))
-
-            if let item = card.item {
-                LazyImage(url: JellyfinClient.shared.imageURL(
-                    itemId: item.seriesId ?? item.id, imageType: "Backdrop", maxWidth: 900
-                )) { state in
-                    if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    }
-                }
-            }
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.85)],
-                startPoint: .center, endPoint: .bottom
-            )
-
-            if card.isOffAir {
-                VStack(spacing: 10) {
-                    Image(systemName: "power").font(.system(size: 44))
-                    Text("OFF AIR").font(.system(size: 20, weight: .semibold))
-                }
-                .foregroundStyle(SashimiTheme.textSecondary)
-            } else if isTuning {
-                ProgressView().scaleEffect(1.4)
-            } else {
-                // How far into the programme a viewer joins — visible before
-                // pressing, so missing the start is never a surprise after.
-                SashimiProgressBar(progress: card.progress, height: 5, useGradient: true)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 20)
-            }
-        }
-        .frame(height: 260)
-        .clipped()
-    }
-
-    private var caption: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(card.channel.name)
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(SashimiTheme.textPrimary)
-                .lineLimit(1)
-
-            if card.isOffAir {
-                Text("Off air")
-                    .font(.system(size: 22))
-                    .foregroundStyle(SashimiTheme.textSecondary)
-                    .lineLimit(1)
-            } else {
-                Text(nowText)
-                    .font(.system(size: 22))
-                    .foregroundStyle(SashimiTheme.textSecondary)
-                    .lineLimit(1)
-                Text("\(card.minutesRemaining) min left")
-                    .font(.system(size: 20))
-                    .foregroundStyle(SashimiTheme.textSecondary.opacity(0.7))
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(24)
     }
 }
