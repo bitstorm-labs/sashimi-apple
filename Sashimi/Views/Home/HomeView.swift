@@ -139,6 +139,7 @@ struct HomeView: View {
             // answers 404 and yields an empty row, so this must never gate the
             // rest of Home on it.
             await channelsViewModel.load()
+            await keepChannelsCurrent()
         }
         .onChange(of: viewModel.heroItems.count) { _, count in
             if count > 0 { onHeroReady?() }
@@ -166,6 +167,31 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
             Task { await viewModel.refresh() }
+        }
+    }
+
+    /// Keep the FinTV row honest while Home is on screen.
+    ///
+    /// A channel moves on whether or not anyone is looking at Home, so a row
+    /// rendered once is wrong within minutes: the thumbnail still shows a
+    /// finished programme and the countdown keeps ticking past zero.
+    ///
+    /// Wake when the soonest programme actually ends rather than on a fixed
+    /// tick — a poll shows a finished programme for up to its whole interval,
+    /// and that is exactly the moment someone is looking at it. Five minutes is
+    /// only a ceiling, for when nothing ends soon and because the schedule can
+    /// be rebuilt underneath us when the library changes.
+    private func keepChannelsCurrent() async {
+        let ceiling: Double = 300
+
+        while !Task.isCancelled {
+            let soonest = channelsViewModel.cards.compactMap(\.endsAt).min()
+            // +1s so we wake just after the boundary, not exactly on it, and
+            // the server has already rolled over when we ask.
+            let wait = soonest.map { max(1, $0.timeIntervalSinceNow + 1) } ?? ceiling
+            try? await Task.sleep(nanoseconds: UInt64(min(wait, ceiling) * Double(NSEC_PER_SEC)))
+            guard !Task.isCancelled else { break }
+            await channelsViewModel.load()
         }
     }
 
