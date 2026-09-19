@@ -93,7 +93,10 @@ final class PlayerViewModel: ObservableObject {
 
     /// Set when this player was opened by tuning to a channel rather than by
     /// picking an item. Its presence is what makes playback ephemeral.
-    let channelContext: ChannelPlaybackContext?
+    ///
+    /// Mutable because it advances with the channel: when a programme ends, the
+    /// next one carries its own offset, boundary and successor.
+    private(set) var channelContext: ChannelPlaybackContext?
     private let recoverySetup: RecoverySetup?
 
     init(
@@ -830,6 +833,84 @@ final class PlayerViewModel: ObservableObject {
         await handlePlaybackEnded(itemID: itemID, attempt: playbackAttempt)
     }
 
+    /// Offer or start the next episode of the series.
+    ///
+    /// Extracted from `handlePlaybackEnded` so the end-of-playback path stays
+    /// within the complexity limit as it gains cases.
+    ///
+    /// - Returns: `true` when playback has moved on and the caller should stop.
+    private func advanceToNextEpisode(after item: BaseItemDto, attempt: Int) async -> Bool {
+        await waitForEpisodeNavigation(for: item)
+        guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return true }
+
+        switch transitionState.lookupStatus {
+        case .available where transitionState.nextEpisode != nil:
+            if playbackSettings.autoPlayNextEpisode {
+                await autoplayNextEpisode()
+                return true
+            }
+            if playbackSettings.showEpisodeNavigationControls {
+                transitionState.endCard = .nextEpisode
+            }
+        case .failed:
+            if playbackSettings.showEpisodeNavigationControls {
+                transitionState.endCard = .lookupFailed
+            }
+        default:
+            if playbackSettings.showEpisodeNavigationControls {
+                transitionState.endCard = .finalEpisode
+            }
+        }
+        return false
+    }
+
+    /// Move to whatever the channel is airing now.
+    ///
+    /// Re-queried rather than trusting the `nextItemID` carried in the context:
+    /// that was the successor *when the viewer tuned in*, and a programme lasts
+    /// long enough for the schedule underneath it to have been rebuilt — an
+    /// episode deleted by a cleanup tool shifts everything after it. The
+    /// carried id is for warming the next item, not for deciding what to play.
+    private func rollToNextChannelProgramme(attempt: Int) async {
+        guard let channel = channelContext else { return }
+
+        do {
+            guard let next = try await client.getChannelNowPlaying(channelId: channel.channelID) else {
+                // The channel went off air between programmes — a gap in the
+                // broadcast day. Stop rather than inventing something to play.
+                diag(.playbackEnded, [
+                    PlayerDiagnostics.field("phase", "channel-off-air"),
+                    PlayerDiagnostics.field("channel", channel.channelID)
+                ])
+                playbackEnded = true
+                return
+            }
+
+            let item = try await client.getItem(itemId: next.itemId)
+            guard !Task.isCancelled else { return }
+
+            channelContext = ChannelPlaybackContext(
+                channelID: channel.channelID,
+                startPositionSeconds: next.startPositionSeconds,
+                endsAt: next.endUtc,
+                nextItemID: next.nextItemId
+            )
+            diag(.nextEpisode, [
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("automatic", true),
+                PlayerDiagnostics.field("kind", "channel"),
+                PlayerDiagnostics.field("joinSeconds", next.startPositionSeconds)
+            ])
+            await loadMedia(item: item)
+        } catch {
+            // A failed roll ends the session rather than stranding the viewer on
+            // a finished programme with no way forward.
+            diagFailure(.loadFailed, [PlayerDiagnostics.field("phase", "channel-roll")]
+                        + PlayerDiagnostics.fields(for: error))
+            playbackEnded = true
+        }
+    }
+
     func handlePlaybackEnded(itemID: String, attempt: Int) async {
         // Guard against firing twice (e.g. a skip-to-end and the natural end
         // notification for the same item). Reset when the next item loads.
@@ -859,30 +940,20 @@ final class PlayerViewModel: ObservableObject {
 
             guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
 
+            // A channel decides what follows, which is rarely the next episode
+            // of this series. Intercept before the episode-navigation logic
+            // rather than after, or the viewer is offered a "next episode" card
+            // for a programme the channel is not going to play.
+            if channelContext != nil {
+                await rollToNextChannelProgramme(attempt: attempt)
+                return
+            }
+
             // Lookup happens after completion is recorded. This ordering keeps
             // autoplay from starting a new server session before Jellyfin has
             // received the completed position and played marker.
             if item.type == .episode, !isOfflinePlayback {
-                await waitForEpisodeNavigation(for: item)
-                guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
-                switch transitionState.lookupStatus {
-                case .available where transitionState.nextEpisode != nil:
-                    if playbackSettings.autoPlayNextEpisode {
-                        await autoplayNextEpisode()
-                        return
-                    }
-                    if playbackSettings.showEpisodeNavigationControls {
-                        transitionState.endCard = .nextEpisode
-                    }
-                case .failed:
-                    if playbackSettings.showEpisodeNavigationControls {
-                        transitionState.endCard = .lookupFailed
-                    }
-                default:
-                    if playbackSettings.showEpisodeNavigationControls {
-                        transitionState.endCard = .finalEpisode
-                    }
-                }
+                if await advanceToNextEpisode(after: item, attempt: attempt) { return }
             } else if item.type == .video,
                       playbackSettings.autoPlayNextEpisode,
                       let next = await fetchNextVideo(for: item) {
