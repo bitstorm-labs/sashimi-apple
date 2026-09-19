@@ -18,10 +18,15 @@ struct ChannelsRow: View {
                 .padding(.horizontal, 80)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
+                // Wider gap than the other rows on purpose. A channel card is
+                // one filled surface with its text inside it, so at the usual
+                // 40 the cards abut into a continuous band; Continue Watching
+                // gets away with 40 because its titles sit outside the card and
+                // the background shows through between them.
+                LazyHStack(spacing: 64) {
                     ForEach(cards) { card in
                         ChannelCard_View(card: card) { onTune(card) }
-                            .frame(width: 460)
+                            .frame(width: 440)
                     }
                 }
                 .padding(.horizontal, 80)

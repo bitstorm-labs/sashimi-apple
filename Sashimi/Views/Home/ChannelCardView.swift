@@ -54,7 +54,11 @@ struct ChannelCard_View: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
+                    // A faint edge when unfocused: without it the cards are
+                    // flat panels of the same colour as each other and read as
+                    // one strip rather than separate channels.
+                    .stroke(isFocused ? SashimiTheme.focus : .white.opacity(0.10),
+                            lineWidth: isFocused ? 4 : 1)
             )
             .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
             .scaleEffect(isFocused ? 1.05 : 1.0)
