@@ -2,10 +2,9 @@ import SwiftUI
 
 /// The FinTV row on Home.
 ///
-/// Metrics deliberately mirror ContinueWatchingRow — 40pt bold heading, 80pt
-/// horizontal inset, 40pt card spacing. A row that does not line up with the
-/// ones above and below it reads as broken even when each value is defensible
-/// on its own.
+/// Metrics mirror ContinueWatchingRow — 40pt bold heading, 80pt horizontal
+/// inset — so the row lines up with the ones above and below it. The card
+/// spacing is the one deliberate departure; see the comment on it below.
 struct ChannelsRow: View {
     let cards: [ChannelCard]
     let onTune: (ChannelCard) -> Void
