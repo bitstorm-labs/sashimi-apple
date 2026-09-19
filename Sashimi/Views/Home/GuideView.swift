@@ -10,17 +10,19 @@ struct GuideView: View {
     @State private var selected: GuideSelection?
     @State private var windowStart = Date()
 
-    /// Horizontal scale. At 9pt a three-hour window is ~1620pt, which fits the
-    /// safe area without horizontal scrolling — scrolling sideways on a remote
-    /// to read a schedule is miserable.
-    private let pointsPerMinute: CGFloat = 9
+    /// Horizontal scale. Three hours at 7.5pt is 1350pt, which fits beside the
+    /// rail and the channel column with nothing to scroll sideways — which is
+    /// the point: a horizontal scroll view nested inside a vertical one is
+    /// exactly the arrangement tvOS focus handles worst, and scrolling sideways
+    /// on a remote to read a schedule is miserable anyway.
+    private let pointsPerMinute: CGFloat = 7.5
 
     /// Below this a title is unreadable. Strict proportionality would render a
     /// 22-minute sitcom at a fifth the width of a film, and a guide you cannot
     /// read defeats the point; the distortion is small across three hours.
-    private let minimumBlockWidth: CGFloat = 150
+    private let minimumBlockWidth: CGFloat = 130
 
-    private let channelColumnWidth: CGFloat = 230
+    private let channelColumnWidth: CGFloat = 190
     private let rowHeight: CGFloat = 104
 
     private var windowEnd: Date { windowStart.addingTimeInterval(viewModel.hours * 3600) }
@@ -106,21 +108,15 @@ struct GuideView: View {
                     }
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        timeRuler
-                        ForEach(viewModel.rows) { row in
-                            channelRow(row)
-                        }
+                VStack(alignment: .leading, spacing: 12) {
+                    timeRuler
+                    ForEach(viewModel.rows) { row in
+                        channelRow(row)
                     }
-                    // Overlay rather than a ZStack sibling: a bare Rectangle in
-                    // a ZStack has no intrinsic height, so it stretched the
-                    // stack and pushed the whole timeline off to the right.
-                    .overlay(alignment: .topLeading) { nowLine }
                 }
-                // Without this the scroll view takes its ideal width from the
-                // content and leaves a gap the size of the overflow.
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // Overlay rather than a ZStack sibling: a bare Rectangle in a
+                // ZStack has no intrinsic height and stretched the stack.
+                .overlay(alignment: .topLeading) { nowLine }
             }
             .padding(.horizontal, 80)
             .padding(.bottom, 80)
@@ -157,20 +153,27 @@ struct GuideView: View {
     }
 
     private func channelRow(_ row: GuideRow) -> some View {
-        HStack(spacing: 6) {
-            ForEach(row.channel.programs) { entry in
+        let isFirstRow = viewModel.rows.first?.id == row.id
+        return HStack(spacing: 6) {
+            ForEach(Array(row.channel.programs.enumerated()), id: \.element.id) { index, entry in
                 GuideBlock(
                     row: row,
                     entry: entry,
                     width: width(for: entry),
                     onSelect: { select(row: row, entry: entry) }
                 )
+                // Something has to claim the beam when the screen appears, or
+                // focus stays in the rail and the grid cannot be reached at all.
+                .defaultFocus(in: isFirstRow && index == 0 ? focusNamespace : nil)
             }
             // Channels differ in how far their schedule reaches; without this
             // the shorter rows end mid-grid and the ruler stops lining up.
             Spacer(minLength: 0)
         }
         .frame(width: totalWidth, height: rowHeight, alignment: .leading)
+        // Each row competes for the focus beam on its own, so up/down moves
+        // between channels rather than the whole grid behaving as one target.
+        .focusSection()
     }
 
     private var nowLine: some View {
@@ -235,5 +238,19 @@ private extension Date {
     var nextHalfHour: Date {
         let interval: TimeInterval = 1800
         return Date(timeIntervalSince1970: (timeIntervalSince1970 / interval).rounded(.up) * interval)
+    }
+}
+
+private extension View {
+    /// `prefersDefaultFocus` only when a namespace is supplied, matching how
+    /// Home claims focus for its hero. Without a namespace (previews) this is
+    /// a no-op.
+    @ViewBuilder
+    func defaultFocus(in namespace: Namespace.ID?) -> some View {
+        if let namespace {
+            prefersDefaultFocus(true, in: namespace)
+        } else {
+            self
+        }
     }
 }
