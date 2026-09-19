@@ -293,7 +293,7 @@ struct MainTabView: View {
         case .home, .avatar:
             HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
         case .finTV:
-            FinTVView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+            GuideView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .search:
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:

@@ -1729,6 +1729,19 @@ actor JellyfinClient {
         }
     }
 
+    /// Every channel's schedule for the next `hours` hours.
+    ///
+    /// One request for all channels: the guide draws every row at once, so a
+    /// call per channel would fill the grid a row at a time.
+    func getChannelGuide(hours: Double = 3) async throws -> [ChannelGuide] {
+        do {
+            let data = try await request(path: "/VirtualChannels/Guide?hours=\(hours)")
+            return try JSONDecoder().decode([ChannelGuide].self, from: data)
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            return []
+        }
+    }
+
     /// What `channelId` is airing right now.
     ///
     /// Returns `nil` when the channel is off air. The server answers 204 for

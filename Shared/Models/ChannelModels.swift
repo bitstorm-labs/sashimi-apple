@@ -85,3 +85,64 @@ struct ChannelNowPlaying: Codable, Equatable {
         return parsed
     }
 }
+
+/// A channel's upcoming programmes, as the guide endpoint returns them.
+struct ChannelGuide: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let description: String?
+    let programs: [GuideEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case id = "Id"
+        case name = "Name"
+        case description = "Description"
+        case programs = "Programs"
+    }
+}
+
+struct GuideEntry: Codable, Identifiable, Equatable {
+    let itemId: String
+    let startUtc: Date
+    let endUtc: Date
+
+    /// How far into the item this airing already is. Non-zero only for the one
+    /// in progress when the guide was fetched.
+    let startPositionSeconds: Double
+
+    /// Airings repeat, so the item id alone is not unique within a guide.
+    var id: String { "\(itemId)-\(startUtc.timeIntervalSince1970)" }
+
+    var duration: TimeInterval { endUtc.timeIntervalSince(startUtc) }
+
+    func isAiring(at date: Date) -> Bool { date >= startUtc && date < endUtc }
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "ItemId"
+        case startUtc = "StartUtc"
+        case endUtc = "EndUtc"
+        case startPositionSeconds = "StartPositionSeconds"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        itemId = try container.decode(String.self, forKey: .itemId)
+        startPositionSeconds = try container.decode(Double.self, forKey: .startPositionSeconds)
+        // Same fractional-seconds trap as ChannelNowPlaying.
+        startUtc = try Self.date(container, .startUtc)
+        endUtc = try Self.date(container, .endUtc)
+    }
+
+    private static func date(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys
+    ) throws -> Date {
+        let raw = try container.decode(String.self, forKey: key)
+        guard let parsed = DateFormatting.parseDate(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key, in: container, debugDescription: "Unparseable date: \(raw)"
+            )
+        }
+        return parsed
+    }
+}
