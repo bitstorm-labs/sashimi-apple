@@ -251,11 +251,16 @@ struct SettingsSignOutButton: View {
 enum HomeRowType: String, Codable, CaseIterable {
     case hero
     case continueWatching
+    // Added after release. updateWithLibraries() appends any built-in type the
+    // saved config lacks, so existing users gain the row without a bespoke
+    // migration, and the raw value must never change once shipped.
+    case channels
 
     var displayName: String {
         switch self {
         case .hero: return "Featured"
         case .continueWatching: return "Continue Watching"
+        case .channels: return "Channels"
         }
     }
 }

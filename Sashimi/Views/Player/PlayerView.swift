@@ -5,17 +5,27 @@ struct PlayerView: View {
     let item: BaseItemDto
     var serverID: String?
     var startFromBeginning: Bool = false
+    var channelContext: ChannelPlaybackContext?
 
     @StateObject private var viewModel: PlayerViewModel
     @ObservedObject private var playbackSettings = PlaybackSettings.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
-    init(item: BaseItemDto, serverID: String? = nil, startFromBeginning: Bool = false) {
+    init(
+        item: BaseItemDto,
+        serverID: String? = nil,
+        startFromBeginning: Bool = false,
+        channelContext: ChannelPlaybackContext? = nil
+    ) {
         self.item = item
         self.serverID = serverID
         self.startFromBeginning = startFromBeginning
-        _viewModel = StateObject(wrappedValue: PlayerViewModel(serverID: serverID))
+        self.channelContext = channelContext
+        _viewModel = StateObject(wrappedValue: PlayerViewModel(
+            serverID: serverID,
+            channelContext: channelContext
+        ))
     }
 
     /// Distinguishes THIS presentation of the player in the log.

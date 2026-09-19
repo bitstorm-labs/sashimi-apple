@@ -1710,6 +1710,46 @@ actor JellyfinClient {
         return try await legacyIntroSkipperSegments(itemId: itemId)
     }
 
+    // MARK: - Virtual channels
+
+    /// Channels published by the Channels plugin.
+    ///
+    /// The route is `/VirtualChannels` rather than `/Channels` because Jellyfin
+    /// already owns the latter; registering a second controller there makes
+    /// every request fail with an ambiguous-match error rather than shadowing it.
+    ///
+    /// A server without the plugin answers 404, which is "no channels" and not
+    /// an error — the feature simply is not installed.
+    func getVirtualChannels() async throws -> [VirtualChannel] {
+        do {
+            let data = try await request(path: "/VirtualChannels")
+            return try JSONDecoder().decode([VirtualChannel].self, from: data)
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            return []
+        }
+    }
+
+    /// What `channelId` is airing right now.
+    ///
+    /// Returns `nil` when the channel is off air. The server answers 204 for
+    /// that, because a gap in the broadcast day is a normal state rather than a
+    /// failure, and a client should say "off air" instead of showing an error.
+    func getChannelNowPlaying(channelId: String) async throws -> ChannelNowPlaying? {
+        let data: Data
+        do {
+            data = try await request(path: "/VirtualChannels/\(channelId)/NowPlaying")
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            return nil
+        }
+
+        // 204 arrives as an empty body rather than as an error.
+        guard !data.isEmpty else { return nil }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ChannelNowPlaying.self, from: data)
+    }
+
     /// Intro Skipper plugin ≤ 11: `/Episode/{itemId}/IntroSkipperSegments`
     /// Response: {"Introduction": {"Start": 0, "End": 90}, "Credits": {"Start": 1200, "End": 1300}}
     /// A 404 means the route is gone (plugin 12+ or not installed) — that is
