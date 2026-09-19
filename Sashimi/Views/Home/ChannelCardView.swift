@@ -78,21 +78,33 @@ struct ChannelCard_View: View {
 
     private var artwork: some View {
         ZStack(alignment: .topLeading) {
-            Rectangle().fill(Color.black.opacity(0.65))
-
-            if let item = card.item {
-                LazyImage(url: JellyfinClient.shared.imageURL(
-                    itemId: item.seriesId ?? item.id, imageType: "Backdrop", maxWidth: 900
-                )) { state in
-                    if let image = state.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
+            // The backdrop is an overlay on the placeholder, not a sibling in
+            // this stack. At aspectRatio(.fill) an image reports the size that
+            // COVERS the proposal — 280 x 16/9 = 498pt for a 16:9 backdrop — and
+            // a ZStack takes its size from the largest sibling, so the card drew
+            // 58pt wider than the 440pt slot the row gave it, overflowed into
+            // its neighbours and swallowed the gap between them. A flexible
+            // frame does not save you here: maxWidth grows a frame to the
+            // proposal, it never shrinks a child that reports larger. An overlay
+            // is sized by its host and cannot feed its size back up.
+            Rectangle()
+                .fill(Color.black.opacity(0.65))
+                .overlay {
+                    if let item = card.item {
+                        LazyImage(url: JellyfinClient.shared.imageURL(
+                            itemId: item.seriesId ?? item.id, imageType: "Backdrop", maxWidth: 900
+                        )) { state in
+                            if let image = state.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            }
+                        }
+                        // Crossfade when the programme changes, so a rollover
+                        // reads as the channel moving on rather than the card
+                        // glitching.
+                        .id(item.id)
+                        .transition(.opacity)
                     }
                 }
-                // Crossfade when the programme changes, so a rollover reads as
-                // the channel moving on rather than the card glitching.
-                .id(item.id)
-                .transition(.opacity)
-            }
 
             LinearGradient(
                 colors: [.black.opacity(0.55), .clear, .black.opacity(0.9)],
