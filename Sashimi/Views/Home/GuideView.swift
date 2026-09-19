@@ -25,9 +25,10 @@ struct GuideView: View {
     /// tiles and quietly turns the ruler above them into a lie.
     private let minimumBlockWidth: CGFloat = 60
 
-    /// Wide enough for the longest channel name; at 190 "SATURDAY MORNING"
-    /// truncated to an unreadable stub.
-    private let channelColumnWidth: CGFloat = 300
+    /// Wide enough for the longest channel name plus two lines of its
+    /// description. The timeline still fits beside it without scrolling
+    /// sideways: 340 + 1350 + 160pt of inset is 1850 of 1920.
+    private let channelColumnWidth: CGFloat = 340
     private let rowHeight: CGFloat = 88
 
     private var windowEnd: Date { windowStart.addingTimeInterval(viewModel.hours * 3600) }
@@ -107,8 +108,8 @@ struct GuideView: View {
                     // this spacer expands to fill, taking the whole row's width
                     // and shoving the timeline off to the right.
                     Color.clear.frame(width: channelColumnWidth, height: 40)
-                    ForEach(viewModel.rows) { row in
-                        channelLabel(row)
+                    ForEach(Array(viewModel.rows.enumerated()), id: \.element.id) { index, row in
+                        channelLabel(row, index: index)
                             .frame(width: channelColumnWidth, height: rowHeight, alignment: .leading)
                     }
                 }
@@ -128,16 +129,58 @@ struct GuideView: View {
         }
     }
 
-    private func channelLabel(_ row: GuideRow) -> some View {
-        Text(row.channel.name.uppercased())
-            .font(.system(size: 21, weight: .heavy))
-            .tracking(1.2)
-            .foregroundStyle(SashimiTheme.textPrimary)
-            .lineLimit(1)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Capsule().fill(SashimiTheme.cardBackground))
-            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+    /// Name over its description, against a colour rail.
+    ///
+    /// A channel is not just a label: what it *is* stays true as programmes
+    /// come and go, and the grid to the right only ever says what is on. The
+    /// name alone in a grey capsule left the column carrying none of that.
+    private func channelLabel(_ row: GuideRow, index: Int) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            // The rail runs in row order rather than being derived from the
+            // channel's identity, so the palette reads as an index down the
+            // screen and neighbouring channels never land on the same colour.
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Self.railColour(at: index))
+                .frame(width: 4)
+                .padding(.vertical, 2)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(row.channel.name.uppercased())
+                    .font(.system(size: 21, weight: .heavy))
+                    .tracking(1.2)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .lineLimit(1)
+
+                if let description = row.channel.description, !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 15))
+                        .foregroundStyle(SashimiTheme.textSecondary)
+                        .lineLimit(2)
+                        // Without this a two-line string is given one line's
+                        // height and clipped, because the row's height is fixed.
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.trailing, 24)
+    }
+
+    /// Rail colours, cycled by row. Deliberately no purple: that is the accent
+    /// the grid uses for what is on now, and a channel wearing it would read as
+    /// a state rather than an identity.
+    private static let railPalette: [Color] = [
+        Color(red: 0.30, green: 0.78, blue: 0.80),
+        Color(red: 0.95, green: 0.65, blue: 0.25),
+        Color(red: 0.93, green: 0.36, blue: 0.48),
+        Color(red: 0.40, green: 0.80, blue: 0.50),
+        Color(red: 0.36, green: 0.68, blue: 0.90),
+        Color(red: 0.88, green: 0.78, blue: 0.35)
+    ]
+
+    private static func railColour(at index: Int) -> Color {
+        railPalette[index % railPalette.count]
     }
 
     /// Half-hour ticks across the window.
