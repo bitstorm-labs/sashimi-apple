@@ -38,4 +38,32 @@ struct ChannelNowPlaying: Codable, Equatable {
         case endUtc = "EndUtc"
         case nextItemId = "NextItemId"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        itemId = try container.decode(String.self, forKey: .itemId)
+        startPositionSeconds = try container.decode(Double.self, forKey: .startPositionSeconds)
+        nextItemId = try container.decodeIfPresent(String.self, forKey: .nextItemId)
+
+        // Jellyfin serialises .NET DateTime with up to seven fractional digits
+        // ("...:47.5249994Z"). JSONDecoder's .iso8601 strategy rejects any
+        // fractional seconds at all, so it parsed only the occasional value
+        // that happened to land on a whole second — which read as the countdown
+        // "not working" rather than as an outright failure.
+        startUtc = try Self.date(container, .startUtc)
+        endUtc = try Self.date(container, .endUtc)
+    }
+
+    private static func date(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys
+    ) throws -> Date {
+        let raw = try container.decode(String.self, forKey: key)
+        guard let parsed = DateFormatting.parseDate(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key, in: container, debugDescription: "Unparseable date: \(raw)"
+            )
+        }
+        return parsed
+    }
 }

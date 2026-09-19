@@ -40,7 +40,18 @@ struct FinTVView: View {
             }
         }
         .background(SashimiTheme.background)
-        .task { await viewModel.load() }
+        .task {
+            await viewModel.load()
+            // A channel moves on whether or not anyone is looking at this
+            // screen, so a card rendered once is wrong within minutes: the
+            // thumbnail still shows a finished programme and the countdown
+            // keeps ticking past zero. Re-resolve while the screen is up.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30 * NSEC_PER_SEC)
+                guard !Task.isCancelled else { break }
+                await viewModel.load()
+            }
+        }
         .fullScreenCover(item: $tuned) { tuned in
             PlayerView(item: tuned.item, channelContext: tuned.context)
         }
@@ -116,15 +127,20 @@ struct ChannelCard_View: View {
             }
             .background(SashimiTheme.cardBackground)
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            // The same ring every other card uses: white, not the purple
+            // accent, and a glow rather than a filled highlight. `.plain` is
+            // not enough on tvOS — it still paints the system focus box, which
+            // is what made this card look like a white slab.
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(isFocused ? SashimiTheme.accent : .clear, lineWidth: 4)
+                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
             )
+            .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 15)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
-        .scaleEffect(isFocused ? 1.05 : 1)
-        .animation(.easeOut(duration: 0.18), value: isFocused)
         .opacity(card.isOffAir ? 0.5 : 1)
         .disabled(card.isOffAir || isTuning)
         .accessibilityLabel(card.isOffAir
@@ -162,16 +178,9 @@ struct ChannelCard_View: View {
             } else {
                 // How far into the programme a viewer joins — visible before
                 // pressing, so missing the start is never a surprise after.
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.25))
-                        Capsule().fill(SashimiTheme.accent)
-                            .frame(width: max(4, geo.size.width * card.progress))
-                    }
-                }
-                .frame(height: 6)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+                SashimiProgressBar(progress: card.progress * 100, height: 5, useGradient: true)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 20)
             }
         }
         .frame(height: 260)
