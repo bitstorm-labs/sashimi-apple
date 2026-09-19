@@ -20,14 +20,15 @@ struct GuideView: View {
     /// Below this a title is unreadable. Strict proportionality would render a
     /// 22-minute sitcom at a fifth the width of a film, and a guide you cannot
     /// read defeats the point; the distortion is small across three hours.
-    /// A floor only for genuinely tiny items (a 5-minute short). Anything
-    /// larger stays strictly proportional: a generous floor made every block
-    /// the same width, which turns the ruler above them into a lie, and pushed
-    /// the row wider than its frame so SwiftUI centred it and clipped the first
-    /// block off-screen.
+    /// A floor only for genuinely tiny items. A generous one made every short
+    /// block the same width and near-square, which both looks like a strip of
+    /// tiles and quietly turns the ruler above them into a lie.
     private let minimumBlockWidth: CGFloat = 60
 
-    private let rowHeight: CGFloat = 92
+    /// Wide enough for the longest channel name; at 190 "SATURDAY MORNING"
+    /// truncated to an unreadable stub.
+    private let channelColumnWidth: CGFloat = 300
+    private let rowHeight: CGFloat = 88
 
     private var windowEnd: Date { windowStart.addingTimeInterval(viewModel.hours * 3600) }
 
@@ -98,22 +99,39 @@ struct GuideView: View {
 
     private var grid: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 26) {
-                ForEach(viewModel.rows) { row in
-                    VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 0) {
+                // Channel names sit outside the scrolling timeline so they stay
+                // put while the schedule moves.
+                VStack(alignment: .leading, spacing: 12) {
+                    // Width is mandatory: Color.clear is greedy, and without it
+                    // this spacer expands to fill, taking the whole row's width
+                    // and shoving the timeline off to the right.
+                    Color.clear.frame(width: channelColumnWidth, height: 40)
+                    ForEach(viewModel.rows) { row in
                         channelLabel(row)
+                            .frame(width: channelColumnWidth, height: rowHeight, alignment: .leading)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    timeRuler
+                    ForEach(viewModel.rows) { row in
                         channelRow(row)
                     }
                 }
+                // Overlay rather than a ZStack sibling: a bare Rectangle in a
+                // ZStack has no intrinsic height and stretched the stack.
+                .overlay(alignment: .topLeading) { nowLine }
             }
+            .padding(.horizontal, 80)
             .padding(.bottom, 80)
         }
     }
 
     private func channelLabel(_ row: GuideRow) -> some View {
         Text(row.channel.name.uppercased())
-            .font(.system(size: 22, weight: .heavy))
-            .tracking(1.4)
+            .font(.system(size: 21, weight: .heavy))
+            .tracking(1.2)
             .foregroundStyle(SashimiTheme.textPrimary)
             .lineLimit(1)
             .padding(.horizontal, 14)
@@ -122,48 +140,80 @@ struct GuideView: View {
             .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
     }
 
-    private func channelRow(_ row: GuideRow) -> some View {
-        // Deliberately the same shape as every other row in the app: a
-        // horizontal ScrollView of focusable cards inside a focus section.
-        // The aligned-timeline grid this replaces was a vertical scroll view
-        // containing a horizontal one containing an HStack, and focus could
-        // not be moved into it at all. A guide that cannot be selected is
-        // worth less than one whose columns do not line up perfectly.
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: blockSpacing) {
-                ForEach(row.channel.programs) { entry in
-                    GuideBlock(
-                        row: row,
-                        entry: entry,
-                        width: width(for: entry),
-                        onSelect: { select(row: row, entry: entry) }
-                    )
-                }
-            }
-            .padding(.horizontal, 80)
-            .padding(.vertical, 8)
+    /// Half-hour ticks across the window.
+    private var timeRuler: some View {
+        let firstTick = windowStart.nextHalfHour
+        let ticks = stride(from: 0, through: Int(viewModel.hours * 2), by: 1).map {
+            firstTick.addingTimeInterval(Double($0) * 1800)
         }
+        return ZStack(alignment: .topLeading) {
+            ForEach(ticks, id: \.timeIntervalSince1970) { tick in
+                Text(tick.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .offset(x: offset(for: tick))
+            }
+        }
+        .frame(width: totalWidth, height: 40, alignment: .topLeading)
+    }
+
+    private func channelRow(_ row: GuideRow) -> some View {
+        let isFirstRow = viewModel.rows.first?.id == row.id
+        return HStack(spacing: 6) {
+            ForEach(Array(row.channel.programs.enumerated()), id: \.element.id) { index, entry in
+                GuideBlock(
+                    row: row,
+                    entry: entry,
+                    width: width(for: entry),
+                    onSelect: { select(row: row, entry: entry) }
+                )
+                // Something has to claim the beam when the screen appears, or
+                // focus stays in the rail and the grid cannot be reached at all.
+                .defaultFocus(in: isFirstRow && index == 0 ? focusNamespace : nil)
+            }
+            // Channels differ in how far their schedule reaches; without this
+            // the shorter rows end mid-grid and the ruler stops lining up.
+            Spacer(minLength: 0)
+        }
+        .frame(width: totalWidth, height: rowHeight, alignment: .leading)
+        // Each row competes for the focus beam on its own, so up/down moves
+        // between channels rather than the whole grid behaving as one target.
         .focusSection()
+    }
+
+    private var nowLine: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            Rectangle()
+                .fill(SashimiTheme.accent)
+                .frame(width: 3, height: gridHeight)
+                .offset(x: offset(for: context.date))
+                .opacity(context.date >= windowStart ? 1 : 0)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Explicit because the line is an overlay: ruler, then a row and its gap
+    /// for each channel.
+    private var gridHeight: CGFloat {
+        40 + CGFloat(viewModel.rows.count) * (rowHeight + 12)
     }
 
     // MARK: - Geometry
 
-    private let blockSpacing: CGFloat = 6
-
     private var totalWidth: CGFloat { CGFloat(viewModel.hours * 60) * pointsPerMinute }
 
-    /// Proportional to the part of the programme that falls inside the window.
-    ///
-    /// The guide deliberately includes the programme straddling the right-hand
-    /// edge, so drawing it at full length made every row wider than the ruler.
-    /// An overflowing HStack gets centred, which pushed the leftmost block —
-    /// the one actually airing — off the screen. Trimming at the edge is also
-    /// what a real guide does.
+    private func offset(for date: Date) -> CGFloat {
+        CGFloat(date.timeIntervalSince(windowStart) / 60) * pointsPerMinute
+    }
+
+    /// Proportional to the part of the programme inside the window. The guide
+    /// includes the one straddling the right-hand edge, and drawing it at full
+    /// length pushes the row wider than the ruler.
     private func width(for entry: GuideEntry) -> CGFloat {
         let visibleEnd = min(entry.endUtc, windowEnd)
         let visibleStart = max(entry.startUtc, windowStart)
         let minutes = max(0, visibleEnd.timeIntervalSince(visibleStart) / 60)
-        return max(minimumBlockWidth, CGFloat(minutes) * pointsPerMinute - blockSpacing)
+        return max(minimumBlockWidth, CGFloat(minutes) * pointsPerMinute - 6)
     }
 
     // MARK: - Actions
