@@ -192,6 +192,8 @@ struct MainTabView: View {
     @Environment(\.resetFocus) private var resetFocus
     @State private var selection: NavID = .home
     @State private var libraries: [JellyfinLibrary] = []
+    // The rail's order comes from here; HomeView owns the same singleton.
+    @ObservedObject private var homeSettings = HomeScreenSettings.shared
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
     // One-shot: the hero grabs focus once on cold launch (the rail otherwise
@@ -324,40 +326,6 @@ struct MainTabView: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             didInitialHomeFocus = true
-        }
-    }
-
-    private struct NavRow: Identifiable {
-        let id: NavID
-        let title: String
-        let icon: String
-    }
-
-    /// Nav rows in order: Home, each library, Search, Settings.
-    private var navRows: [NavRow] {
-        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
-        for lib in libraries {
-            rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
-        }
-        rows.append(NavRow(id: .finTV, title: "FinTV", icon: "antenna.radiowaves.left.and.right"))
-        rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
-        rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
-        return rows
-    }
-
-    private func libraryIcon(_ lib: JellyfinLibrary) -> String {
-        if lib.name.lowercased().contains("youtube") { return "play.rectangle.fill" }
-        switch lib.collectionType {
-        case "movies": return "film.stack"
-        case "tvshows": return "tv"
-        case "music": return "music.note"
-        case "musicvideos": return "music.note.tv"
-        case "books": return "books.vertical"
-        case "photos", "homevideos": return "photo.stack"
-        case "playlists": return "list.and.film"
-        case "boxsets": return "square.stack.3d.up.fill"
-        case "livetv": return "dot.radiowaves.left.and.right"
-        default: return "rectangle.stack"
         }
     }
 
@@ -567,5 +535,58 @@ struct MainTabView: View {
             return { selection = .home }
         }
         return nil
+    }
+}
+
+// MARK: - Rail contents
+
+/// Split out of MainTabView so its body stays within the length the
+/// linter allows. These decide what the rail lists, not how it is drawn.
+private extension MainTabView {
+    private struct NavRow: Identifiable {
+        let id: NavID
+        let title: String
+        let icon: String
+    }
+
+    /// Nav rows follow the Home row order set in Settings, so the rail and the
+    /// screen it opens onto agree with each other. Home leads and Search and
+    /// Settings trail: they are destinations rather than rows, and have no place
+    /// in that ordering. RailOrder decides the middle.
+    private var navRows: [NavRow] {
+        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
+
+        for destination in RailOrder.destinations(
+            rowConfigs: homeSettings.rowConfigs,
+            libraryIds: libraries.map(\.id)
+        ) {
+            switch destination {
+            case .finTV:
+                rows.append(NavRow(id: .finTV, title: "FinTV", icon: "antenna.radiowaves.left.and.right"))
+            case .library(let id):
+                guard let lib = libraries.first(where: { $0.id == id }) else { continue }
+                rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
+            }
+        }
+
+        rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
+        rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
+        return rows
+    }
+
+    private func libraryIcon(_ lib: JellyfinLibrary) -> String {
+        if lib.name.lowercased().contains("youtube") { return "play.rectangle.fill" }
+        switch lib.collectionType {
+        case "movies": return "film.stack"
+        case "tvshows": return "tv"
+        case "music": return "music.note"
+        case "musicvideos": return "music.note.tv"
+        case "books": return "books.vertical"
+        case "photos", "homevideos": return "photo.stack"
+        case "playlists": return "list.and.film"
+        case "boxsets": return "square.stack.3d.up.fill"
+        case "livetv": return "dot.radiowaves.left.and.right"
+        default: return "rectangle.stack"
+        }
     }
 }
