@@ -47,9 +47,9 @@ struct HomeView: View {
                 // Fixed hero wallpaper pinned to the top, BEHIND the scrolling
                 // rows. It dims to black as the rows scroll up over it, so the
                 // content stays readable and the art never fights the cards.
-                if !viewModel.heroItems.isEmpty {
+                if !heroSlides.isEmpty {
                     HeroSection(
-                        items: viewModel.heroItems,
+                        slides: heroSlides,
                         libraryNames: viewModel.heroItemLibraryNames,
                         currentIndex: $heroIndex
                     )
@@ -195,6 +195,29 @@ struct HomeView: View {
         }
     }
 
+    /// The hero rotation: what each library last added, with the channels that
+    /// are on air right now spread through it.
+    ///
+    /// An off-air channel is left out rather than shown as a dead slide — there
+    /// is nothing to put in the frame and nothing to watch.
+    private var heroSlides: [HeroSlide] {
+        let channels: [HeroSlide] = channelsViewModel.cards.compactMap { card in
+            guard !card.isOffAir, let item = card.item else { return nil }
+            return HeroSlide(
+                item: item,
+                channel: HeroSlide.Stamp(
+                    id: card.channel.id,
+                    name: card.channel.name,
+                    endsAt: card.endsAt
+                )
+            )
+        }
+        return HeroRotation.interleave(
+            base: viewModel.heroItems.map(HeroSlide.library),
+            inserts: channels
+        )
+    }
+
     /// Resolve what the channel is airing and open the player on it.
     ///
     /// Resolved fresh at the moment of tuning rather than reusing the card's
@@ -281,7 +304,7 @@ struct HomeView: View {
 
 // MARK: - Hero Section
 struct HeroSection: View {
-    let items: [BaseItemDto]
+    let slides: [HeroSlide]
     let libraryNames: [String: String]
     @Binding var currentIndex: Int
 
@@ -291,12 +314,18 @@ struct HeroSection: View {
     private let slideDuration: Double = 6
 
     private var safeIndex: Int {
-        guard !items.isEmpty else { return 0 }
-        return min(currentIndex, items.count - 1)
+        guard !slides.isEmpty else { return 0 }
+        return min(currentIndex, slides.count - 1)
     }
 
+    private var currentSlide: HeroSlide {
+        slides[safeIndex]
+    }
+
+    /// Everything below reads the slide's item; a channel slide differs only in
+    /// carrying the stamp that identifies it.
     private var currentItem: BaseItemDto {
-        items[safeIndex]
+        currentSlide.item
     }
 
     // Detect YouTube content by checking library name
@@ -364,8 +393,8 @@ struct HeroSection: View {
             parts.append("from \(year)")
         }
 
-        if items.count > 1 {
-            parts.append("Item \(safeIndex + 1) of \(items.count)")
+        if slides.count > 1 {
+            parts.append("Item \(safeIndex + 1) of \(slides.count)")
             parts.append("Swipe left or right to browse")
         }
 
@@ -454,6 +483,14 @@ struct HeroSection: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Spacer()
 
+                        // Channel slides say which channel before they say what
+                        // is on: the programme is still the headline, because
+                        // that is what a viewer is choosing between, but without
+                        // this the slide is indistinguishable from a library one.
+                        if let stamp = currentSlide.channel {
+                            channelEyebrow(stamp)
+                        }
+
                         // Title
                         Text(displayTitle)
                             .font(.system(size: 64, weight: .bold))
@@ -518,6 +555,19 @@ struct HeroSection: View {
                                     Text(runtime)
                                 }
                             }
+
+                            // Driven off a clock rather than the fetch, so it
+                            // counts down between refreshes instead of sitting
+                            // at whatever it said when the slide appeared.
+                            if let stamp = currentSlide.channel {
+                                TimelineView(.periodic(from: .now, by: 1)) { context in
+                                    if let remaining = stamp.timeRemaining(at: context.date) {
+                                        Text(remaining)
+                                            .foregroundStyle(SashimiTheme.accent)
+                                            .monospacedDigit()
+                                    }
+                                }
+                            }
                         }
                         .font(.system(size: 24, weight: .medium))
                         .foregroundStyle(.white.opacity(0.85))
@@ -575,8 +625,34 @@ struct HeroSection: View {
         }
     }
 
+    /// LIVE, then the channel's name.
+    private func channelEyebrow(_ stamp: HeroSlide.Stamp) -> some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Circle().fill(Color.red).frame(width: 10, height: 10)
+                Text("LIVE")
+                    .font(.system(size: 18, weight: .bold))
+                    .tracking(1.2)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(.black.opacity(0.55)))
+
+            Text(stamp.name.uppercased())
+                .font(.system(size: 20, weight: .heavy))
+                .tracking(1.4)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+        }
+        .shadow(color: .black.opacity(0.6), radius: 6, x: 0, y: 2)
+    }
+
     private func startAutoAdvance() {
-        guard items.count > 1 else { return }
+        guard slides.count > 1 else { return }
         // A second onAppear without an intervening onDisappear (tab switch,
         // navigation pop) would otherwise orphan the previous timer, which
         // keeps mutating currentIndex — the hero then advances at a multiple
@@ -586,7 +662,7 @@ struct HeroSection: View {
         autoAdvanceTimer = Timer.scheduledTimer(withTimeInterval: slideDuration, repeats: true) { _ in
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.6)) {
-                    currentIndex = (currentIndex + 1) % items.count
+                    currentIndex = (currentIndex + 1) % slides.count
                 }
             }
         }
