@@ -19,7 +19,7 @@ struct GuideBlock: View {
                         Circle().fill(Color.red).frame(width: 7, height: 7)
                     }
                     Text(row.title(for: entry))
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(SashimiTheme.textPrimary)
                         .lineLimit(1)
                 }
@@ -36,7 +36,7 @@ struct GuideBlock: View {
                     .foregroundStyle(SashimiTheme.textTertiary)
                     .lineLimit(1)
             }
-            .frame(width: width, height: 96, alignment: .topLeading)
+            .frame(width: width, height: 76, alignment: .topLeading)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(
