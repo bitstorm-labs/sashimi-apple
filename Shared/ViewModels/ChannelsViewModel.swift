@@ -6,6 +6,9 @@ struct ChannelCard: Identifiable, Equatable {
     let channel: VirtualChannel
     let nowPlaying: ChannelNowPlaying?
     let item: BaseItemDto?
+    /// What airs next, so the card can say so — the most TV-like piece of
+    /// information the server already sends and the UI was throwing away.
+    let nextItem: BaseItemDto?
 
     var id: String { channel.id }
     var isOffAir: Bool { nowPlaying == nil }
@@ -18,9 +21,23 @@ struct ChannelCard: Identifiable, Equatable {
         return min(1, max(0, now.startPositionSeconds / total))
     }
 
+    var endsAt: Date? { nowPlaying?.endUtc }
+
     var minutesRemaining: Int {
         guard let now = nowPlaying else { return 0 }
         return max(0, Int(now.endUtc.timeIntervalSinceNow / 60))
+    }
+
+    /// Time left rendered against a supplied instant, so a view driving a clock
+    /// can re-render it every second without re-fetching anything.
+    func timeRemaining(at date: Date) -> String {
+        guard let end = nowPlaying?.endUtc else { return "" }
+        let seconds = max(0, Int(end.timeIntervalSince(date)))
+        if seconds >= 3600 {
+            return "\(seconds / 3600)h \((seconds % 3600) / 60)m left"
+        }
+        if seconds >= 60 { return "\(seconds / 60)m left" }
+        return "\(seconds)s left"
     }
 }
 
@@ -73,8 +90,14 @@ final class ChannelsViewModel: ObservableObject {
             let now = try? await client.getChannelNowPlaying(channelId: channel.id)
             if now == nil { offAirChannelIDs.insert(channel.id) } else { offAirChannelIDs.remove(channel.id) }
             var item: BaseItemDto?
-            if let now { item = try? await client.getItem(itemId: now.itemId) }
-            built.append(ChannelCard(channel: channel, nowPlaying: now, item: item))
+            var next: BaseItemDto?
+            if let now {
+                item = try? await client.getItem(itemId: now.itemId)
+                if let nextID = now.nextItemId {
+                    next = try? await client.getItem(itemId: nextID)
+                }
+            }
+            built.append(ChannelCard(channel: channel, nowPlaying: now, item: item, nextItem: next))
         }
         cards = built
     }

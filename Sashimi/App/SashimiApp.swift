@@ -176,7 +176,7 @@ struct MainTabView: View {
     /// A destination in the rail. Libraries are dynamic, so this is an enum
     /// rather than a tab index.
     enum NavID: Hashable {
-        case home, search, settings, avatar
+        case home, finTV, search, settings, avatar
         case library(String)
     }
 
@@ -190,7 +190,7 @@ struct MainTabView: View {
     // or when this action runs — clearing focusedNav or a directional beam that
     // misses the content does NOT trigger it on its own.
     @Environment(\.resetFocus) private var resetFocus
-    @State private var selection: NavID = .home
+    @State private var selection: NavID = .finTV
     @State private var libraries: [JellyfinLibrary] = []
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
@@ -292,6 +292,8 @@ struct MainTabView: View {
         switch selection {
         case .home, .avatar:
             HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
+        case .finTV:
+            GuideView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .search:
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
@@ -337,6 +339,7 @@ struct MainTabView: View {
         for lib in libraries {
             rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
         }
+        rows.append(NavRow(id: .finTV, title: "FinTV", icon: "antenna.radiowaves.left.and.right"))
         rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
         rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
         return rows

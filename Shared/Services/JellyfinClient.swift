@@ -1729,6 +1729,25 @@ actor JellyfinClient {
         }
     }
 
+    /// Every channel's schedule for the next `hours` hours.
+    ///
+    /// One request for all channels: the guide draws every row at once, so a
+    /// call per channel would fill the grid a row at a time.
+    func getChannelGuide(hours: Double = 3) async throws -> [ChannelGuide] {
+        do {
+            // Query goes through queryItems, never the path: request() builds the
+            // URL with appendingPathComponent, which percent-encodes the "?" and
+            // turns the whole thing into a path segment the server 404s on.
+            let data = try await request(
+                path: "/VirtualChannels/Guide",
+                queryItems: [URLQueryItem(name: "hours", value: String(hours))]
+            )
+            return try JSONDecoder().decode([ChannelGuide].self, from: data)
+        } catch JellyfinError.httpError(let statusCode) where statusCode == 404 {
+            return []
+        }
+    }
+
     /// What `channelId` is airing right now.
     ///
     /// Returns `nil` when the channel is off air. The server answers 204 for
