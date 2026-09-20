@@ -4,6 +4,7 @@ import NukeUI
 
 enum SidebarSelection: Hashable {
     case home
+    case finTV
     case search
     case downloads
     case settings
@@ -12,6 +13,7 @@ enum SidebarSelection: Hashable {
     var displayName: String {
         switch self {
         case .home: return "Home"
+        case .finTV: return "FinTV"
         case .search: return "Search"
         case .downloads: return "Downloads"
         case .settings: return "Settings"
@@ -22,6 +24,7 @@ enum SidebarSelection: Hashable {
     var icon: String {
         switch self {
         case .home: return "house"
+        case .finTV: return "antenna.radiowaves.left.and.right"
         case .search: return "magnifyingglass"
         case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
@@ -159,6 +162,10 @@ struct MainNavigationView: View {
 
             // Home
             sidebarRow(item: .home)
+
+            // The guide is iPad-only: three hours of grid wants a wide screen,
+            // and the phone gets the channels row on Home instead.
+            sidebarRow(item: .finTV)
 
             // Divider
             Rectangle()
@@ -341,6 +348,8 @@ struct MainNavigationView: View {
             switch selection {
             case .home:
                 MobileHomeView()
+            case .finTV:
+                MobileGuideView()
             case .search:
                 MobileSearchView(
                     initialQuery: searchRequest?.query,
