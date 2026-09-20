@@ -3,12 +3,17 @@ import SwiftUI
 
 enum HomeRowType: String, Codable, Identifiable, CaseIterable {
     case continueWatching = "continue_watching"
+    // Added after release. loadRows() appends any built-in the saved config
+    // lacks, so existing users gain the row without a bespoke migration, and
+    // the raw value must never change once shipped.
+    case channels
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .continueWatching: return "Continue Watching"
+        case .channels: return "FinTV"
         }
     }
 }
@@ -53,11 +58,27 @@ final class HomeRowSettings: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
            let savedRows = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
             rows = savedRows
+            // A config saved before a built-in row existed has no entry for it.
+            // Insert ahead of the library rows rather than appending: built-ins
+            // lead on tvOS too, and a new row appended behind every library is
+            // one the user has to go looking for.
+            let firstLibrary = rows.firstIndex { if case .library = $0.type { return true }; return false }
+            for type in HomeRowType.allCases where !savedRows.contains(where: {
+                if case .builtIn(let saved) = $0.type { return saved == type }
+                return false
+            }) {
+                let config = HomeRowConfig(type: .builtIn(type), isEnabled: true)
+                if let firstLibrary {
+                    rows.insert(config, at: firstLibrary)
+                } else {
+                    rows.append(config)
+                }
+            }
         } else {
             // Default order - just Continue Watching, libraries added dynamically
-            rows = [
-                HomeRowConfig(type: .builtIn(.continueWatching), isEnabled: true)
-            ]
+            rows = HomeRowType.allCases.map {
+                HomeRowConfig(type: .builtIn($0), isEnabled: true)
+            }
         }
     }
 

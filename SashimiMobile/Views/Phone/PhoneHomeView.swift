@@ -3,6 +3,8 @@ import SwiftUI
 struct PhoneHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var rowSettings = HomeRowSettings.shared
+    @StateObject private var channelsViewModel = ChannelsViewModel()
+    @State private var tunedChannel: TunedChannel?
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
 
@@ -67,6 +69,21 @@ struct PhoneHomeView: View {
         }
         .task {
             await viewModel.loadContent()
+            // After the main content: a server without the Channels plugin
+            // answers 404 and yields an empty row, so this must never gate the
+            // rest of Home on it.
+            await channelsViewModel.load()
+            await keepChannelsCurrent()
+        }
+        .fullScreenCover(item: $tunedChannel) { tuned in
+            MobilePlayerView(item: tuned.item, channelContext: tuned.context)
+        }
+        .onChange(of: tunedChannel) { oldValue, newValue in
+            // Coming back from a channel: the schedule moved on while it
+            // played, so the cards are stale by definition.
+            if oldValue != nil && newValue == nil {
+                Task { await channelsViewModel.load() }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
@@ -110,6 +127,13 @@ struct PhoneHomeView: View {
                 }
             }
 
+        case .builtIn(.channels):
+            if !channelsViewModel.cards.isEmpty {
+                MobileChannelsRow(cards: channelsViewModel.cards, cardWidth: PhoneSizing.channelCardWidth) { card in
+                    tuneToChannel(card)
+                }
+            }
+
         case .library(let libraryId, let libraryName):
             let library = viewModel.libraries.first(where: { $0.id == libraryId })
             MobileRecentlyAddedRow(
@@ -120,6 +144,43 @@ struct PhoneHomeView: View {
             ) { item in
                 PhoneDetailView(item: item, libraryName: libraryName)
             }
+        }
+    }
+
+    /// Resolve what the channel is airing and open the player on it.
+    ///
+    /// Resolved at the moment of tapping rather than from the card: the row may
+    /// have been on screen for a while, and a channel moves on whether or not
+    /// anyone is looking at it.
+    private func tuneToChannel(_ card: ChannelCard) {
+        Task {
+            guard let tuned = await channelsViewModel.tuneIn(to: card.channel) else {
+                // Went off air between rendering and tapping. Refresh so the row
+                // tells the truth rather than appearing to do nothing.
+                await channelsViewModel.load()
+                return
+            }
+            guard let item = try? await JellyfinClient.shared.getItem(itemId: tuned.itemID) else { return }
+            tunedChannel = TunedChannel(item: item, context: tuned.context)
+        }
+    }
+
+    /// Keep the FinTV row honest while Home is on screen.
+    ///
+    /// Wake when the soonest programme actually ends rather than on a fixed
+    /// tick — a poll shows a finished programme for up to its whole interval,
+    /// and that is exactly the moment someone is looking at it. Five minutes is
+    /// only a ceiling, for when nothing ends soon and because the schedule can
+    /// be rebuilt underneath us when the library changes.
+    private func keepChannelsCurrent() async {
+        let ceiling: Double = 300
+
+        while !Task.isCancelled {
+            let soonest = channelsViewModel.cards.compactMap(\.endsAt).min()
+            let wait = soonest.map { max(1, $0.timeIntervalSinceNow + 1) } ?? ceiling
+            try? await Task.sleep(nanoseconds: UInt64(min(wait, ceiling) * Double(NSEC_PER_SEC)))
+            guard !Task.isCancelled else { break }
+            await channelsViewModel.load()
         }
     }
 }

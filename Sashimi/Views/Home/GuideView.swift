@@ -279,13 +279,6 @@ struct GuideView: View {
     }
 }
 
-/// A future programme the viewer asked about.
-struct GuideSelection: Identifiable, Equatable {
-    let row: GuideRow
-    let entry: GuideEntry
-    var id: String { "\(row.id)-\(entry.id)" }
-}
-
 private extension Date {
     /// The next :00 or :30 at or after this instant, so the ruler reads in
     /// round numbers rather than starting at whatever minute it happens to be.

@@ -43,6 +43,9 @@ struct MobilePlayerView: View {
     let item: BaseItemDto
     var serverID: String?
     var startFromBeginning: Bool = false
+    /// Set when this playback is a channel rather than a chosen item. The view
+    /// model then reports no watch state and rolls to the next programme.
+    var channelContext: ChannelPlaybackContext?
     var onPlaybackReady: (() -> Void)?
     var onPlaybackFailed: (() -> Void)?
     @StateObject private var viewModel: PlayerViewModel
@@ -58,15 +61,20 @@ struct MobilePlayerView: View {
         item: BaseItemDto,
         serverID: String? = nil,
         startFromBeginning: Bool = false,
+        channelContext: ChannelPlaybackContext? = nil,
         onPlaybackReady: (() -> Void)? = nil,
         onPlaybackFailed: (() -> Void)? = nil
     ) {
         self.item = item
         self.serverID = serverID
         self.startFromBeginning = startFromBeginning
+        self.channelContext = channelContext
         self.onPlaybackReady = onPlaybackReady
         self.onPlaybackFailed = onPlaybackFailed
-        _viewModel = StateObject(wrappedValue: PlayerViewModel(serverID: serverID))
+        _viewModel = StateObject(wrappedValue: PlayerViewModel(
+            serverID: serverID,
+            channelContext: channelContext
+        ))
     }
 
     private var localFileURL: URL? {
