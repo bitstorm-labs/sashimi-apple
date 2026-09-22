@@ -10,20 +10,33 @@ struct GuideView: View {
     @State private var selected: GuideSelection?
     @State private var windowStart = Date()
 
-    /// Horizontal scale. Three hours at 7.5pt is 1350pt, which fits beside the
-    /// rail and the channel column with nothing to scroll sideways — which is
-    /// the point: a horizontal scroll view nested inside a vertical one is
-    /// exactly the arrangement tvOS focus handles worst, and scrolling sideways
-    /// on a remote to read a schedule is miserable anyway.
-    private let pointsPerMinute: CGFloat = 7.5
+    /// Horizontal scale. 14pt a minute, not the 7.5 that fits three hours on
+    /// one screen: at 7.5 a 22-minute episode is 165pt and its title is an
+    /// ellipsis. The grid is therefore wider than the screen and slides
+    /// sideways as focus moves.
+    ///
+    /// It slides by OFFSET, not by a nested horizontal ScrollView. A horizontal
+    /// scroll view inside a vertical one is the arrangement tvOS focus handles
+    /// worst — it is what broke this screen once already. An offset driven by
+    /// which block holds focus leaves the focus engine completely alone.
+    private let pointsPerMinute: CGFloat = 14
 
-    /// Below this a title is unreadable. Strict proportionality would render a
-    /// 22-minute sitcom at a fifth the width of a film, and a guide you cannot
-    /// read defeats the point; the distortion is small across three hours.
-    /// A floor only for genuinely tiny items. A generous one made every short
-    /// block the same width and near-square, which both looks like a strip of
-    /// tiles and quietly turns the ruler above them into a lie.
-    private let minimumBlockWidth: CGFloat = 60
+    /// Wide enough for a title, always. The block a row opens with is usually
+    /// the programme part-way through, often with a minute left, and it is the
+    /// one most worth reading and tuning into.
+    ///
+    /// The cost is honest: a block widened to this minimum pushes the rest of
+    /// its row along, so past that point the ruler is approximate rather than
+    /// exact. It only happens to programmes too short to label at all.
+    private let minimumBlockWidth: CGFloat = 240
+
+    /// What is visible of the timeline: 1920 screen, less the 120pt rail, the
+    /// 80pt insets either side, and the channel column.
+    private let timelineViewport: CGFloat = 1920 - 120 - 160 - 340
+
+    /// How far the timeline is slid left, and which block put it there.
+    @State private var scrollX: CGFloat = 0
+    @State private var focusedEntryID: String?
 
     /// Wide enough for the longest channel name plus two lines of its
     /// description. The timeline still fits beside it without scrolling
@@ -123,6 +136,12 @@ struct GuideView: View {
                 // Overlay rather than a ZStack sibling: a bare Rectangle in a
                 // ZStack has no intrinsic height and stretched the stack.
                 .overlay(alignment: .topLeading) { nowLine }
+                .offset(x: -scrollX)
+                .animation(.easeOut(duration: 0.25), value: scrollX)
+                // Clip to the visible width so the part scrolled past the
+                // channel column is not drawn over it.
+                .frame(width: timelineViewport, alignment: .leading)
+                .clipped()
             }
             .padding(.horizontal, 80)
             .padding(.bottom, 80)
@@ -208,7 +227,12 @@ struct GuideView: View {
                     row: row,
                     entry: entry,
                     width: width(for: entry),
-                    onSelect: { select(row: row, entry: entry) }
+                    onSelect: { select(row: row, entry: entry) },
+                    onFocusChange: { focused in
+                        guard focused else { return }
+                        focusedEntryID = entry.id
+                        scrollToFocus(row: row, entry: entry)
+                    }
                 )
                 // Something has to claim the beam when the screen appears, or
                 // focus stays in the rail and the grid cannot be reached at all.
@@ -257,6 +281,39 @@ struct GuideView: View {
         let visibleStart = max(entry.startUtc, windowStart)
         let minutes = max(0, visibleEnd.timeIntervalSince(visibleStart) / 60)
         return max(minimumBlockWidth, CGFloat(minutes) * pointsPerMinute - 6)
+    }
+
+    /// Where each block sits within its row, matching the HStack that draws
+    /// them: widths plus the 6pt gap, accumulated.
+    private func originX(of entry: GuideEntry, in row: GuideRow) -> CGFloat {
+        var cursor: CGFloat = 0
+        for candidate in row.channel.programs {
+            if candidate.id == entry.id { return cursor }
+            cursor += width(for: candidate) + 6
+        }
+        return cursor
+    }
+
+    private func rowWidth(_ row: GuideRow) -> CGFloat {
+        row.channel.programs.reduce(0) { $0 + width(for: $1) + 6 }
+    }
+
+    /// Keep the focused block on screen, with a margin so the next one along is
+    /// visibly there to move to rather than appearing out of nowhere.
+    private func scrollToFocus(row: GuideRow, entry: GuideEntry) {
+        let margin: CGFloat = 80
+        let left = originX(of: entry, in: row)
+        let right = left + width(for: entry)
+
+        var target = scrollX
+        if left - margin < target {
+            target = left - margin
+        } else if right + margin > target + timelineViewport {
+            target = right + margin - timelineViewport
+        }
+
+        let maxScroll = max(0, rowWidth(row) - timelineViewport)
+        scrollX = min(max(0, target), maxScroll)
     }
 
     // MARK: - Actions

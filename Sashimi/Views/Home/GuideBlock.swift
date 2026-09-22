@@ -6,6 +6,10 @@ struct GuideBlock: View {
     let entry: GuideEntry
     let width: CGFloat
     let onSelect: () -> Void
+    /// Lets the guide scroll the focused block into view. The block already
+    /// tracks its own focus; this just reports it upward, so the focus engine
+    /// itself is untouched.
+    var onFocusChange: (Bool) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
 
@@ -56,6 +60,7 @@ struct GuideBlock: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .onChange(of: isFocused) { _, focused in onFocusChange(focused) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
     }
