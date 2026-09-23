@@ -351,11 +351,21 @@ struct MainTabView: View {
             // and the nav group vertically centered between them.
             Spacer(minLength: 16)
 
-            VStack(alignment: .leading, spacing: 26) {
-                ForEach(navRows, id: \.id) { row in
-                    navButton(row.id, row.title, row.icon)
+            // Scrolls once the nav outgrows the rail. With enough libraries the
+            // VStack's spacers collapse to their minimum and the avatar is
+            // pushed off the bottom of the screen — a user hit exactly that on
+            // Roku. A vertical scroll inside a vertical stack is ordinary on
+            // tvOS; focus moves into it and carries the scroll with it.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 26) {
+                    ForEach(navRows, id: \.id) { row in
+                        navButton(row.id, row.title, row.icon)
+                    }
                 }
             }
+            // Without this the ScrollView is greedy and eats the space the
+            // avatar and version need at the foot.
+            .frame(maxHeight: .infinity)
 
             Spacer(minLength: 16)
 
@@ -562,7 +572,7 @@ private extension MainTabView {
         ) {
             switch destination {
             case .finTV:
-                rows.append(NavRow(id: .finTV, title: "FinTV", icon: "antenna.radiowaves.left.and.right"))
+                rows.append(NavRow(id: .finTV, title: "Stations", icon: "antenna.radiowaves.left.and.right"))
             case .library(let id):
                 guard let lib = libraries.first(where: { $0.id == id }) else { continue }
                 rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
