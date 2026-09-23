@@ -13,7 +13,7 @@ enum HomeRowType: String, Codable, Identifiable, CaseIterable {
     var displayName: String {
         switch self {
         case .continueWatching: return "Continue Watching"
-        case .channels: return "FinTV"
+        case .channels: return "Stations"
         }
     }
 }

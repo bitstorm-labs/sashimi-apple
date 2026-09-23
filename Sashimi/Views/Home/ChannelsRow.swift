@@ -11,7 +11,7 @@ struct ChannelsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("FinTV")
+            Text("Stations")
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(SashimiTheme.textPrimary)
                 .padding(.horizontal, 80)

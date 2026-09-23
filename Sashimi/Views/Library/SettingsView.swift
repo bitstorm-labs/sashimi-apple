@@ -260,7 +260,7 @@ enum HomeRowType: String, Codable, CaseIterable {
         switch self {
         case .hero: return "Featured"
         case .continueWatching: return "Continue Watching"
-        case .channels: return "FinTV"
+        case .channels: return "Stations"
         }
     }
 }

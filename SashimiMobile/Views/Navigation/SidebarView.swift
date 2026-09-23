@@ -13,7 +13,7 @@ enum SidebarSelection: Hashable {
     var displayName: String {
         switch self {
         case .home: return "Home"
-        case .finTV: return "FinTV"
+        case .finTV: return "Stations"
         case .search: return "Search"
         case .downloads: return "Downloads"
         case .settings: return "Settings"
@@ -160,43 +160,45 @@ struct MainNavigationView: View {
             .padding(.top, MobileSpacing.md)
             .padding(.bottom, MobileSpacing.md)
 
-            // Home
-            sidebarRow(item: .home)
+            // Everything between the logo and Settings scrolls. With enough
+            // libraries the trailing Spacer collapsed and Settings was pushed
+            // off the bottom of the sidebar — the same fault a user reported
+            // on Roku's rail. The logo and Settings stay pinned either side.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    sidebarRow(item: .home)
 
-            // The guide is iPad-only: three hours of grid wants a wide screen,
-            // and the phone gets the channels row on Home instead.
-            sidebarRow(item: .finTV)
+                    // The guide is iPad-only: three hours of grid wants a wide
+                    // screen, and the phone gets the channels row on Home.
+                    sidebarRow(item: .finTV)
 
-            // Divider
-            Rectangle()
-                .fill(MobileColors.textTertiary.opacity(0.3))
-                .frame(height: 1)
-                .padding(.horizontal, MobileSpacing.md)
-                .padding(.vertical, MobileSpacing.xs)
+                    Rectangle()
+                        .fill(MobileColors.textTertiary.opacity(0.3))
+                        .frame(height: 1)
+                        .padding(.horizontal, MobileSpacing.md)
+                        .padding(.vertical, MobileSpacing.xs)
 
-            // Libraries
-            ForEach(libraries) { library in
-                sidebarRow(item: .library(
-                    id: library.id,
-                    name: library.name,
-                    collectionType: library.collectionType
-                ))
+                    ForEach(libraries) { library in
+                        sidebarRow(item: .library(
+                            id: library.id,
+                            name: library.name,
+                            collectionType: library.collectionType
+                        ))
+                    }
+
+                    Rectangle()
+                        .fill(MobileColors.textTertiary.opacity(0.3))
+                        .frame(height: 1)
+                        .padding(.horizontal, MobileSpacing.md)
+                        .padding(.vertical, MobileSpacing.xs)
+
+                    sidebarRow(item: .search)
+                    sidebarRow(item: .downloads)
+                }
             }
-
-            // Divider
-            Rectangle()
-                .fill(MobileColors.textTertiary.opacity(0.3))
-                .frame(height: 1)
-                .padding(.horizontal, MobileSpacing.md)
-                .padding(.vertical, MobileSpacing.xs)
-
-            // Search
-            sidebarRow(item: .search)
-
-            // Downloads
-            sidebarRow(item: .downloads)
-
-            Spacer()
+            // Takes the space between logo and Settings, so Settings is pinned
+            // to the foot rather than riding up under the last library.
+            .frame(maxHeight: .infinity)
 
             // Settings at bottom
             Rectangle()
