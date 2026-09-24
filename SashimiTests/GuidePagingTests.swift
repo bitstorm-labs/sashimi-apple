@@ -2,32 +2,32 @@ import XCTest
 @testable import Sashimi
 
 final class GuidePagingTests: XCTestCase {
-    func testAnEmptyRowStillHasOnePage() {
-        XCTAssertEqual(GuidePaging.pageCount(0), 1)
-        XCTAssertTrue(GuidePaging.visible([Int](), page: 0).isEmpty)
-        XCTAssertFalse(GuidePaging.hasMore(0, page: 0))
+    func testAnEmptyRowShowsNothingAndHasNoMore() {
+        XCTAssertTrue(GuidePaging.visible([Int](), offset: 0).isEmpty)
+        XCTAssertFalse(GuidePaging.hasMore(0, offset: 0))
+        XCTAssertEqual(GuidePaging.clamp(offset: 5, count: 0), 0)
     }
 
-    func testPagesDealThreeAtATime() {
+    func testThreeCardsFromAnyOffset() {
         let items = Array(1...7)
-        XCTAssertEqual(GuidePaging.pageCount(items.count), 3)
-        XCTAssertEqual(Array(GuidePaging.visible(items, page: 0)), [1, 2, 3])
-        XCTAssertEqual(Array(GuidePaging.visible(items, page: 1)), [4, 5, 6])
-        XCTAssertEqual(Array(GuidePaging.visible(items, page: 2)), [7])
+        XCTAssertEqual(Array(GuidePaging.visible(items, offset: 0)), [1, 2, 3])
+        XCTAssertEqual(Array(GuidePaging.visible(items, offset: 4)), [5, 6, 7])
+        XCTAssertEqual(Array(GuidePaging.visible(items, offset: 6)), [7], "a jump can land anywhere, not only on a multiple of three")
     }
 
-    func testHasMoreStopsOnTheLastPage() {
-        XCTAssertTrue(GuidePaging.hasMore(7, page: 0))
-        XCTAssertTrue(GuidePaging.hasMore(7, page: 1))
-        XCTAssertFalse(GuidePaging.hasMore(7, page: 2))
-        XCTAssertFalse(GuidePaging.hasMore(3, page: 0))
+    func testPagingMovesByThreeAndStopsAtTheEnds() {
+        XCTAssertEqual(GuidePaging.next(offset: 0, count: 7), 3)
+        XCTAssertEqual(GuidePaging.next(offset: 3, count: 7), 6)
+        XCTAssertEqual(GuidePaging.next(offset: 6, count: 7), 6)
+        XCTAssertEqual(GuidePaging.previous(offset: 1, count: 7), 0)
+        XCTAssertTrue(GuidePaging.hasMore(7, offset: 0))
+        XCTAssertFalse(GuidePaging.hasMore(7, offset: 4), "the last card is already showing")
     }
 
-    func testARememberedPageThatNoLongerExistsIsClampedNotEmpty() {
-        // The guide refreshes every minute and rows shrink as programmes air.
+    func testARememberedOffsetThatNoLongerExistsIsClampedNotEmpty() {
+        // The guide refreshes and rows shrink as programmes air.
         let items = Array(1...4)
-        XCTAssertEqual(GuidePaging.clamp(page: 9, count: items.count), 1)
-        XCTAssertEqual(Array(GuidePaging.visible(items, page: 9)), [4])
-        XCTAssertEqual(GuidePaging.clamp(page: -3, count: items.count), 0)
+        XCTAssertEqual(GuidePaging.clamp(offset: 9, count: items.count), 3)
+        XCTAssertEqual(Array(GuidePaging.visible(items, offset: 9)), [4])
     }
 }

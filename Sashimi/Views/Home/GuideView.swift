@@ -12,15 +12,21 @@ struct GuideView: View {
     var onBackAtRoot: (() -> Void)?
     var focusNamespace: Namespace.ID?
 
-    @StateObject private var viewModel = GuideViewModel()
+    @StateObject private var viewModel = GuideViewModel(hours: 168)
     @State private var tuned: TunedChannel?
     @State private var selected: GuideSelection?
 
-    /// Which page each row is turned to, by channel id. Per row on purpose:
+    /// Each row's first visible programme, by channel id. Per row on purpose:
     /// one shared position is what carried other rows' first cards — the ones
     /// airing now — off the screen and out of the focus engine's reach.
-    @State private var pages: [String: Int] = [:]
+    @State private var offsets: [String: Int] = [:]
     @FocusState private var focusedCard: CardID?
+    /// Which jump chip is lit. Nil is "Now", which is also where every row
+    /// opens; jumping turns each row to the page holding that instant.
+    @State private var jump: String?
+    /// Bumped every minute so "min left" and the Now highlight stay honest
+    /// without refetching a week of guide.
+    @State private var minute = Date()
 
     private struct CardID: Hashable {
         let row: String
@@ -65,6 +71,15 @@ struct GuideView: View {
                     .focusEffectDisabled()
                     .defaultFocus(in: focusNamespace)
             } else {
+                // The jump bar sits above the scrolling strip, not inside it, so
+                // Up from the first row reaches it and it never scrolls away.
+                jumpBar
+                    .padding(.horizontal, 80)
+                    // Enough gap that the first row's focus glow does not brush
+                    // the chips. Outside the scroll view on purpose: padding
+                    // inside it moves the content offset off zero, and then the
+                    // first Up scrolls instead of leaving the row.
+                    .padding(.bottom, 18)
                 strip
             }
             Spacer(minLength: 0)
@@ -72,12 +87,15 @@ struct GuideView: View {
         .background(SashimiTheme.background)
         .task {
             await viewModel.load()
-            // Refresh on the minute so "now" and the minutes left stay honest
-            // without redrawing constantly.
+            // A week of guide is ~600 KB; refetch it every quarter hour, and
+            // let a once-a-minute tick redraw what is on and the minutes left.
+            var ticks = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60 * NSEC_PER_SEC)
                 guard !Task.isCancelled else { break }
-                await viewModel.load()
+                minute = Date()
+                ticks += 1
+                if ticks % 15 == 0 { await viewModel.load() }
             }
         }
         // Focus that enters while the spinner is up sits on the spinner; when
@@ -139,21 +157,56 @@ struct GuideView: View {
                 }
             }
             .padding(.horizontal, 80)
-            // Room above the first row: a focused card grows by 4% and glows
-            // 12pt, and a ScrollView clips its content, so with the row flush
-            // against the top edge the first row's focus ring was sliced flat
-            // along the top (seen in a screenshot) while every other row's
-            // was drawn whole.
-            .padding(.top, 24)
             .padding(.bottom, 80)
         }
+        // A focused card grows by 4% and glows 12pt, and a ScrollView clips its
+        // content: the first row's ring was sliced flat along the top (seen in
+        // a screenshot) while every other row's was drawn whole.
         .scrollClipDisabled()
+    }
+
+    /// Now, Tonight, and the next six days at prime time — the way a printed
+    /// guide was read. One press answers "what's on Saturday night".
+    private var jumpBar: some View {
+        let chips = GuideJump.chips(now: minute)
+        return HStack(spacing: 10) {
+            ForEach(chips) { chip in
+                let selected = (jump ?? "Now") == chip.id
+                Button {
+                    jump = chip.kind == .now ? nil : chip.id
+                    turnAllRows(to: chip)
+                } label: {
+                    Text(chip.label)
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(selected ? Color.black : SashimiTheme.textPrimary)
+                        .padding(.horizontal, 22).padding(.vertical, 9)
+                        .background(Capsule().fill(selected ? SashimiTheme.accent : SashimiTheme.cardBackground))
+                }
+                .buttonStyle(PlainNoHighlightButtonStyle())
+            }
+            Spacer(minLength: 0)
+        }
+
+        // Its own section, so Down from any chip lands in the channels rather
+        // than the beam picking a card by geometry across the whole strip.
+        .focusSection()
+    }
+
+    /// Put the programme airing at the chip's instant first in every row.
+    /// Focus stays on the chip; the rows change beneath it.
+    private func turnAllRows(to chip: GuideJump) {
+        for row in viewModel.rows {
+            let programs = row.channel.programs
+            offsets[row.id] = chip.kind == .now
+                ? 0
+                : (programs.firstIndex { $0.endUtc > chip.target } ?? max(0, programs.count - 1))
+        }
     }
 
     private func channelStrip(_ row: GuideRow, index: Int) -> some View {
         let programs = row.channel.programs
-        let page = GuidePaging.clamp(page: pages[row.id, default: 0], count: programs.count)
-        let visible = GuidePaging.visible(programs, page: page)
+        let offset = GuidePaging.clamp(offset: offsets[row.id, default: 0], count: programs.count)
+        let visible = GuidePaging.visible(programs, offset: offset)
         let isFirstRow = index == 0
 
         return HStack(alignment: .center, spacing: 0) {
@@ -166,7 +219,7 @@ struct GuideView: View {
                 // turn hands it focus, and a focused button at the far end of
                 // the row is exactly where the viewer was not looking.
                 PageTurn(systemImage: "chevron.left", width: turnWidth, height: rowHeight,
-                         enabled: page > 0) { turn(row, to: page - 1) }
+                         enabled: offset > 0) { turn(row, to: GuidePaging.previous(offset: offset, count: programs.count)) }
                     .id("turn-back-\(row.id)")
 
                 ForEach(Array(visible.enumerated()), id: \.element.id) { slot, entry in
@@ -176,11 +229,11 @@ struct GuideView: View {
                     .focused($focusedCard, equals: CardID(row: row.id, entry: entry.id))
                     // Something has to claim the beam when the screen appears,
                     // or focus stays in the rail and the grid cannot be reached.
-                    .defaultFocus(in: isFirstRow && page == 0 && slot == 0 ? focusNamespace : nil)
+                    .defaultFocus(in: isFirstRow && offset == 0 && slot == 0 ? focusNamespace : nil)
                 }
 
                 PageTurn(systemImage: "chevron.right", width: turnWidth, height: rowHeight,
-                         enabled: GuidePaging.hasMore(programs.count, page: page)) { turn(row, to: page + 1) }
+                         enabled: GuidePaging.hasMore(programs.count, offset: offset)) { turn(row, to: GuidePaging.next(offset: offset, count: programs.count)) }
                     .id("turn-forward-\(row.id)")
 
                 Spacer(minLength: 0)
@@ -191,13 +244,12 @@ struct GuideView: View {
         .focusSection()
     }
 
-    /// Turn a row to another page. Focus stays on the button that was
+    /// Turn a row to another offset. Focus stays on the button that was
     /// pressed: moving it onto a card programmatically leaves the focus
     /// engine's own idea of where it is behind, and the next Up or Down then
     /// lands in a slot the viewer did not choose — seen on a real Apple TV.
-    private func turn(_ row: GuideRow, to page: Int) {
-        let target = GuidePaging.clamp(page: page, count: row.channel.programs.count)
-        pages[row.id] = target
+    private func turn(_ row: GuideRow, to offset: Int) {
+        offsets[row.id] = offset
     }
 
     /// Name over its description, against a colour rail.

@@ -110,6 +110,16 @@ struct GuideEntry: Codable, Identifiable, Equatable {
     /// in progress when the guide was fetched.
     let startPositionSeconds: Double
 
+    // Filled by the server since plugin 0.4.0 so a week of guide does not
+    // cost a request per programme. All optional: an older plugin omits them
+    // and the guide falls back to fetching the item.
+    let name: String?
+    let type: String?
+    let seriesName: String?
+    let seasonNumber: Int?
+    let episodeNumber: Int?
+    let productionYear: Int?
+
     /// Airings repeat, so the item id alone is not unique within a guide.
     var id: String { "\(itemId)-\(startUtc.timeIntervalSince1970)" }
 
@@ -122,12 +132,24 @@ struct GuideEntry: Codable, Identifiable, Equatable {
         case startUtc = "StartUtc"
         case endUtc = "EndUtc"
         case startPositionSeconds = "StartPositionSeconds"
+        case name = "Name"
+        case type = "Type"
+        case seriesName = "SeriesName"
+        case seasonNumber = "SeasonNumber"
+        case episodeNumber = "EpisodeNumber"
+        case productionYear = "ProductionYear"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         itemId = try container.decode(String.self, forKey: .itemId)
         startPositionSeconds = try container.decode(Double.self, forKey: .startPositionSeconds)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        seriesName = try container.decodeIfPresent(String.self, forKey: .seriesName)
+        seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
+        episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
+        productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
         // Same fractional-seconds trap as ChannelNowPlaying.
         startUtc = try Self.date(container, .startUtc)
         endUtc = try Self.date(container, .endUtc)

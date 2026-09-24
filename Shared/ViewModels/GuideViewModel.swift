@@ -11,32 +11,47 @@ struct GuideRow: Identifiable, Equatable {
     var id: String { channel.id }
 
     func title(for entry: GuideEntry) -> String {
+        // The server's own words first; the fetched item only for a guide
+        // from a plugin that predates them.
+        if let name = entry.name, !name.isEmpty {
+            if entry.type == "Episode", let series = entry.seriesName, !series.isEmpty { return series }
+            return name
+        }
         guard let item = items[entry.itemId] else { return "—" }
-        if item.type == .episode { return item.seriesName ?? item.name ?? "—" }
-        return item.name ?? "—"
+        if item.type == .episode { return item.seriesName ?? item.name }
+        return item.name
     }
 
     func subtitle(for entry: GuideEntry) -> String? {
+        if let name = entry.name, !name.isEmpty {
+            if entry.type == "Episode", let season = entry.seasonNumber, let episode = entry.episodeNumber {
+                return Self.episodeLabel(season: season, episode: episode, title: name)
+            }
+            if let year = entry.productionYear { return String(year) }
+            return nil
+        }
         guard let item = items[entry.itemId] else { return nil }
         if item.type == .episode, let season = item.parentIndexNumber, let episode = item.indexNumber {
-            // A YouTube channel's "episodes" carry the upload year as the
-            // season and a five-or-six-digit index as the episode, so
-            // "S2025E123199" says nothing. The video's own title is what the
-            // card should say beneath the channel's name.
-            if season >= 1900, episode > 999, !item.name.isEmpty {
-                return item.name
-            }
-            return "S\(season)E\(episode)"
+            return Self.episodeLabel(season: season, episode: episode, title: item.name)
         }
         if let year = item.productionYear { return String(year) }
         return nil
     }
+
+    /// A YouTube channel's "episodes" carry the upload year as the season and
+    /// a five-or-six-digit index as the episode, so "S2025E123199" says
+    /// nothing. The video's own title is what the card should say beneath
+    /// the channel's name.
+    static func episodeLabel(season: Int, episode: Int, title: String) -> String {
+        if season >= 1900, episode > 999, !title.isEmpty { return title }
+        return "S\(season)E\(episode)"
+    }
 }
 
-/// The two calls the guide makes. A protocol rather than the concrete client
-/// so the model's rules — what a failed refresh does to rows already shown —
-/// can be tested without a server, the same seam the filmography and episode
-/// navigation models use.
+/// The three calls the guide makes. A protocol rather than the concrete client
+/// so the model's rules — what a failed refresh does to rows already shown,
+/// which programmes need an item fetch — can be tested without a server, the
+/// same seam the filmography and episode navigation models use.
 protocol GuideClient: Sendable {
     func getChannelGuide(hours: Double) async throws -> [ChannelGuide]
     func getItem(itemId: String) async throws -> BaseItemDto
@@ -51,14 +66,15 @@ final class GuideViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var loadFailed = false
 
-    /// The window the guide covers. Three hours reads on one screen without
-    /// horizontal scrolling, which matters on a remote.
-    let hours: Double = 3
+    /// The window the guide covers. Three hours is what the iPad's grid can
+    /// show; the tvOS strip pages per row and asks for a week.
+    let hours: Double
 
     private let client: GuideClient
 
-    init(client: GuideClient? = nil) {
+    init(client: GuideClient? = nil, hours: Double = 3) {
         self.client = client ?? JellyfinClient.shared
+        self.hours = hours
     }
 
     func load() async {
@@ -69,10 +85,11 @@ final class GuideViewModel: ObservableObject {
         do {
             let guides = try await client.getChannelGuide(hours: hours)
 
-            // Fetch each distinct item once. The same episode airs repeatedly
-            // across a window, and six channels of 22-minute programmes would
-            // otherwise be dozens of duplicate requests.
-            let ids = Set(guides.flatMap { $0.programs.map(\.itemId) })
+            // Only items the server did not describe are fetched — one request
+            // each, once per distinct item. A week of guide from a plugin that
+            // names its programmes needs none; from an older one this is the
+            // old behaviour.
+            let ids = Set(guides.flatMap { $0.programs.filter { $0.name == nil }.map(\.itemId) })
             var items: [String: BaseItemDto] = [:]
             for id in ids {
                 if let item = try? await client.getItem(itemId: id) { items[id] = item }
