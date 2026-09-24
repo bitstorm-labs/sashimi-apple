@@ -77,6 +77,19 @@ final class StationReminders: ObservableObject {
 
     func dismiss() { due = nil }
 
+    func remove(_ reminder: Reminder) {
+        guard reminders.contains(reminder) else { return }
+        toggle(reminder)
+        if due == reminder { due = nil }
+    }
+
+    func clearAll() {
+        for reminder in reminders { cancelNotification(reminder) }
+        reminders = []
+        due = nil
+        save()
+    }
+
     /// The reminder to announce now: the soonest one inside its window that has
     /// not been announced yet. Pure, so the timing rules are testable.
     nonisolated static func announcement(in reminders: [Reminder], at now: Date, excluding: Set<String>) -> Reminder? {

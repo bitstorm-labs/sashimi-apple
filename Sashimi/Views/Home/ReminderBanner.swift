@@ -21,6 +21,14 @@ private struct StationReminderHost: ViewModifier {
                 }
             }
             .animation(.easeInOut(duration: 0.35), value: reminders.due)
+            // Ignored, it clears itself; the reminder is still in the list
+            // until its programme ends.
+            .task(id: reminders.due?.id) {
+                guard let id = reminders.due?.id else { return }
+                try? await Task.sleep(nanoseconds: 45 * NSEC_PER_SEC)
+                guard !Task.isCancelled, reminders.due?.id == id else { return }
+                reminders.dismiss()
+            }
             .onReceive(clock) { _ in reminders.tick() }
             .onAppear { reminders.tick() }
             .onPlayPauseCommand {

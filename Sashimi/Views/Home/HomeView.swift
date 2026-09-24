@@ -131,7 +131,7 @@ struct HomeView: View {
                 // without waiting for a real airtime.
                 if let station = ProcessInfo.processInfo.environment["SASHIMI_TEST_REMINDER"] {
                     StationReminders.shared.toggle(.init(
-                        channelID: station, channelName: "Unscripted", channelNumber: 3,
+                        channelID: station, channelName: "Unscripted", channelNumber: 67,
                         title: "Survivor", startsAt: Date().addingTimeInterval(180)))
                     StationReminders.shared.tick()
                 }

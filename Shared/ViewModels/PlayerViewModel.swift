@@ -952,7 +952,7 @@ final class PlayerViewModel: ObservableObject {
         }
 
         stationBanner = StationBanner(
-            number: index.map { $0 + 1 },
+            number: station?.number ?? row?.number ?? index.map { $0 + 1 },
             channelName: station?.name ?? row?.name ?? "SashimiTV",
             channelDescription: station?.description,
             title: title,

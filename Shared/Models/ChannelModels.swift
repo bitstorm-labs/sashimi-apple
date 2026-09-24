@@ -9,6 +9,9 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
     let description: String?
     let timeZoneId: String
     let daypartCount: Int
+    /// The channel number the server assigned (plugin 0.7.0+): scattered,
+    /// fixed, the same on every client. Absent from older servers.
+    var number: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -16,6 +19,7 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
         case description = "Description"
         case timeZoneId = "TimeZoneId"
         case daypartCount = "DaypartCount"
+        case number = "Number"
     }
 }
 
@@ -92,12 +96,14 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
     let name: String
     let description: String?
     let programs: [GuideEntry]
+    var number: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
         case name = "Name"
         case description = "Description"
         case programs = "Programs"
+        case number = "Number"
     }
 }
 

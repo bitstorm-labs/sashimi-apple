@@ -133,7 +133,8 @@ struct ChannelCard_View: View {
     }
 
     private var channelBadge: some View {
-        Text(card.channel.name.uppercased())
+        // The channel number leads, the way a cable box labels a station.
+        Text(card.channel.number.map { "\($0) · \(card.channel.name.uppercased())" } ?? card.channel.name.uppercased())
             .font(.system(size: 18, weight: .heavy))
             .tracking(1.2)
             .foregroundStyle(.white)

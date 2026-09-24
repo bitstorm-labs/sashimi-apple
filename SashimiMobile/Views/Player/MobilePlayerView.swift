@@ -126,6 +126,22 @@ struct MobilePlayerView: View {
                 } else {
                     customOverlay
                 }
+
+                if let banner = viewModel.stationBanner {
+                    VStack {
+                        Spacer()
+                        MobileStationBannerView(banner: banner)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, showCustomOverlay ? 96 : 24)
+                            .task(id: banner.id) {
+                                try? await Task.sleep(nanoseconds: 6 * NSEC_PER_SEC)
+                                guard !Task.isCancelled else { return }
+                                viewModel.dismissStationBanner(banner.id)
+                            }
+                    }
+                    .allowsHitTesting(false)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             } else {
                 MobilePlayerLoadingView(
                     viewModel: viewModel,
@@ -152,6 +168,7 @@ struct MobilePlayerView: View {
                 }
                 await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning, localFileURL: nil)
                 timeoutTask.cancel()
+                await viewModel.announceStation()
             } else {
                 await viewModel.loadMedia(
                     item: item,
@@ -282,6 +299,20 @@ struct MobilePlayerView: View {
                     Spacer()
                 }
                 .transition(.opacity)
+
+                // Channel up/down on a touch screen: explicit buttons rather than
+                // a swipe, which AVKit's own gestures make unreliable.
+                if viewModel.isWatchingStation {
+                    HStack {
+                        Spacer()
+                        MobileChannelStepper(
+                            onUp: { Task { await viewModel.changeStation(by: -1) } },
+                            onDown: { Task { await viewModel.changeStation(by: 1) } }
+                        )
+                        .padding(.trailing, 16)
+                    }
+                    .transition(.opacity)
+                }
             }
 
             if usesEpisodeTransportControls {
