@@ -25,6 +25,10 @@ struct GuideJump: Identifiable, Equatable {
 
         let weekday = DateFormatter()
         weekday.calendar = calendar
+        // The formatter does not inherit the calendar's zone. Without this a
+        // machine in another zone labels 18:00 Denver as the next day — which
+        // is exactly what a UTC CI runner did.
+        weekday.timeZone = calendar.timeZone
         weekday.dateFormat = "EEE"
         for offset in 1...6 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today),
