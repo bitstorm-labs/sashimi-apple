@@ -15,7 +15,7 @@ struct MobileChannelsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Stations")
+            Text("SashimiTV")
                 .font(.title2.bold())
                 .foregroundStyle(MobileColors.textPrimary)
                 .padding(.horizontal, MobileSpacing.md)
