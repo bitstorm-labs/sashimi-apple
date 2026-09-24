@@ -2816,6 +2816,10 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func checkCurrentSegment(at currentSeconds: Double) {
+        // A channel runs on the clock: skipping an intro, by hand or
+        // automatically, would put the viewer ahead of the schedule and the
+        // next programme would start late. Live TV has no skip button.
+        guard !isWatchingStation else { return }
         // Find if we're currently in any skippable segment
         let skippableTypes: [MediaSegmentType] = [.intro, .outro, .recap, .preview]
         let activeSegment = segments.first { segment in
