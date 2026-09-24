@@ -233,7 +233,9 @@ struct HomeView: View {
                 channel: HeroSlide.Stamp(
                     id: card.channel.id,
                     name: card.channel.name,
-                    endsAt: card.endsAt
+                    endsAt: card.endsAt,
+                    number: card.channel.number,
+                    logo: card.channel.logo
                 )
             )
         }
@@ -661,7 +663,8 @@ struct HeroSection: View {
         }
     }
 
-    /// LIVE, then the channel's name.
+    /// LIVE, then the station the way every other channel label reads:
+    /// number, logo, name.
     private func channelEyebrow(_ stamp: HeroSlide.Stamp) -> some View {
         HStack(spacing: 14) {
             HStack(spacing: 8) {
@@ -675,14 +678,22 @@ struct HeroSection: View {
             .padding(.vertical, 7)
             .background(Capsule().fill(.black.opacity(0.55)))
 
-            Text(stamp.name.uppercased())
-                .font(.system(size: 20, weight: .heavy))
-                .tracking(1.4)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(.black.opacity(0.55)))
-                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+            HStack(spacing: 10) {
+                if let number = stamp.number {
+                    Text("\(number)")
+                }
+                if stamp.logo != nil {
+                    ChannelLogoView(channelId: stamp.id, logo: stamp.logo, mono: true, size: 26)
+                }
+                Text(stamp.name.uppercased())
+            }
+            .font(.system(size: 20, weight: .heavy))
+            .tracking(1.4)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(.black.opacity(0.55)))
+            .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
         }
         .shadow(color: .black.opacity(0.6), radius: 6, x: 0, y: 2)
     }
