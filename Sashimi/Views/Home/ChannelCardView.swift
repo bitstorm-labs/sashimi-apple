@@ -91,8 +91,9 @@ struct ChannelCard_View: View {
                 .fill(Color.black.opacity(0.65))
                 .overlay {
                     if let item = card.item {
+                        let art = item.channelArtwork
                         LazyImage(url: JellyfinClient.shared.imageURL(
-                            itemId: item.seriesId ?? item.id, imageType: "Backdrop", maxWidth: 900
+                            itemId: art.itemId, imageType: art.imageType, maxWidth: 900
                         )) { state in
                             if let image = state.image {
                                 image.resizable().aspectRatio(contentMode: .fill)
