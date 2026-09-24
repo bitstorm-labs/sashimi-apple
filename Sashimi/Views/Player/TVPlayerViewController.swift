@@ -313,7 +313,8 @@ class PlayerContainerVC: UIViewController {
     func installStationFlipping() {
         let active: () -> Bool = { [weak self] in self?.canStepStation() ?? false }
         let presses: [(UIPress.PressType, Int)] = [
-            (.upArrow, -1), (.downArrow, 1), (.leftArrow, 0), (.rightArrow, 0), (.playPause, 2), (.menu, 3)
+            // Up is channel up — the higher number — as on a cable remote and on Roku.
+            (.upArrow, 1), (.downArrow, -1), (.leftArrow, 0), (.rightArrow, 0), (.playPause, 2), (.menu, 3)
         ]
         for (type, delta) in presses {
             let press = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
