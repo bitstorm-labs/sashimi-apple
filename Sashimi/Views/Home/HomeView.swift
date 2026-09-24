@@ -362,6 +362,12 @@ struct HeroSection: View {
     // Fallback image IDs for hero display - prefer series backdrop for episodes
     private var heroFallbackIds: [String] {
         var ids: [String] = []
+        // A channel slide leads with the same art its card shows, so a YouTube
+        // programme — not in the library-name map, so never detected as
+        // YouTube below — gets its thumbnail instead of a missing backdrop.
+        if currentSlide.channel != nil {
+            ids.append(currentItem.channelArtwork.itemId)
+        }
         if currentItem.type == .episode {
             // For YouTube: use episode thumbnail
             if isYouTubeContent {
@@ -379,11 +385,16 @@ struct HeroSection: View {
         } else {
             ids.append(currentItem.id)
         }
-        return ids
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
     }
 
     // Image types for hero - YouTube uses episode thumbnail, others use Backdrop
     private var heroImageTypes: [String] {
+        if currentSlide.channel != nil {
+            let lead = currentItem.channelArtwork.imageType
+            return [lead] + ["Backdrop", "Art", "Thumb", "Primary"].filter { $0 != lead }
+        }
         if isYouTubeContent {
             // YouTube episodes have thumbnails as Primary or Thumb
             return ["Primary", "Thumb", "Backdrop"]
@@ -525,7 +536,7 @@ struct HeroSection: View {
 
                         // Episode info for TV shows, video title for YouTube
                         if currentItem.type == .episode {
-                            if isYouTubeContent {
+                            if isYouTubeContent || currentItem.hasDatedEpisodeNumbers {
                                 // YouTube: show video title
                                 Text(currentItem.name)
                                     .font(.system(size: 28, weight: .medium))
@@ -699,6 +710,7 @@ struct HeroSection: View {
     }
 
     private func formatEpisodeInfo(_ item: BaseItemDto) -> String {
+        if item.hasDatedEpisodeNumbers { return item.name }
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"

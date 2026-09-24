@@ -50,7 +50,8 @@ struct MobileChannelCard: View {
     private var metadata: String {
         guard let item = card.item else { return "" }
         var parts: [String] = []
-        if item.type == .episode, let season = item.parentIndexNumber, let episode = item.indexNumber {
+        if item.type == .episode, !item.hasDatedEpisodeNumbers,
+           let season = item.parentIndexNumber, let episode = item.indexNumber {
             parts.append("S\(season)E\(episode)")
         }
         if let year = item.productionYear { parts.append(String(year)) }
@@ -101,8 +102,9 @@ struct MobileChannelCard: View {
                 .fill(Color.black.opacity(0.65))
                 .overlay {
                     if let item = card.item {
+                        let art = item.channelArtwork
                         LazyImage(url: JellyfinClient.shared.imageURL(
-                            itemId: item.seriesId ?? item.id, imageType: "Backdrop", maxWidth: 800
+                            itemId: art.itemId, imageType: art.imageType, maxWidth: 800
                         )) { state in
                             if let image = state.image {
                                 image.resizable().aspectRatio(contentMode: .fill)
