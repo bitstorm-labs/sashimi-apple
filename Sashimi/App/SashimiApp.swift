@@ -200,6 +200,10 @@ struct MainTabView: View {
     // steals it while content is still loading). Also gates the edge guard so
     // it doesn't interfere with that initial focus resolution.
     @State private var didInitialHomeFocus = false
+    /// Set the moment an arrow press lands while focus is in the rail. The
+    /// hero handoff below reads it: a viewer who has started moving through the
+    /// rail before the hero finished loading must not have focus yanked back.
+    @State private var viewerNavigatedRail = false
 
     private let railWidth: CGFloat = 120
     private let panelWidth: CGFloat = 340
@@ -234,6 +238,7 @@ struct MainTabView: View {
                 .focusSection()
 
             sidebar
+                .onMoveCommand { _ in viewerNavigatedRail = true }
         }
         .ignoresSafeArea()
         .focusScope(mainScope)
@@ -242,17 +247,20 @@ struct MainTabView: View {
         // Focus-driven: moving focus onto a nav item switches the content
         // behind the blur immediately — no click needed (Plex behavior).
         .onChange(of: focusedNav) { old, newValue in
-            if let newValue, newValue != .avatar {
-                // Entering the rail from content: land on the CURRENT
-                // section's row, not whatever geometry picked — otherwise
-                // focus-follows-selection immediately switches the content
-                // underneath the user.
-                if old == nil, newValue != selection {
-                    focusedNav = selection
-                    return
-                }
-                selection = newValue
+            guard let newValue else { return }
+            // Entering the rail from content: land on the CURRENT section's
+            // row, not whatever geometry picked — otherwise focus-follows-
+            // selection immediately switches the content underneath the user.
+            // This includes landing on the avatar: it sits at the foot of the
+            // rail and is what the engine reaches for on a low entry, and
+            // leaving it there is how the rail "opens at the bottom".
+            if old == nil {
+                if newValue != selection { focusedNav = selection }
+                return
             }
+            // Moving within the rail: focus is selection. The avatar is the
+            // one row that is not a destination.
+            if newValue != .avatar { selection = newValue }
         }
         // Re-auth a saved server whose session expired: picking it in the
         // switcher raises reauthServer; present a prefilled login for it.
@@ -316,6 +324,15 @@ struct MainTabView: View {
     /// guard is armed a beat later so it can't interfere with this handoff.
     private func handleHeroReady() {
         guard !didInitialHomeFocus, selection == .home || selection == .avatar else { return }
+        // The hero can arrive seconds after launch, and the selection guard
+        // above cannot tell "parked on Home since launch" from "entered the
+        // rail and is about to move": both read selection == .home. An arrow
+        // press in the rail can. Seen on a real Apple TV: open the rail during
+        // launch and this reset pulled focus back to the hero mid-navigation.
+        if viewerNavigatedRail {
+            didInitialHomeFocus = true
+            return
+        }
         focusedNav = nil
         // Clearing focusedNav drops the rail button but the engine keeps focus
         // parked on the rail — it never re-evaluates the mainScope default. Kick
@@ -351,21 +368,20 @@ struct MainTabView: View {
             // and the nav group vertically centered between them.
             Spacer(minLength: 16)
 
-            // Scrolls once the nav outgrows the rail. With enough libraries the
-            // VStack's spacers collapse to their minimum and the avatar is
-            // pushed off the bottom of the screen — a user hit exactly that on
-            // Roku. A vertical scroll inside a vertical stack is ordinary on
-            // tvOS; focus moves into it and carries the scroll with it.
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 26) {
-                    ForEach(navRows, id: \.id) { row in
-                        navButton(row.id, row.title, row.icon)
-                    }
+            // Deliberately NOT a ScrollView. Wrapping these buttons in one to
+            // stop a long nav pushing the avatar off the foot made the rail
+            // unusable: the scroll drags focus through every row it passes, and
+            // because this rail is focus-driven — see onChange(of: focusedNav),
+            // where focus IS selection — each row swept through swapped the
+            // whole content view. Three key presses produced dozens of focus
+            // changes on a real Apple TV and the selection landed wherever the
+            // scroll animation stopped rather than where the viewer aimed.
+            // If the nav ever does outgrow the rail, shrink it; do not scroll it.
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(navRows, id: \.id) { row in
+                    navButton(row.id, row.title, row.icon)
                 }
             }
-            // Without this the ScrollView is greedy and eats the space the
-            // avatar and version need at the foot.
-            .frame(maxHeight: .infinity)
 
             Spacer(minLength: 16)
 
@@ -572,7 +588,7 @@ private extension MainTabView {
         ) {
             switch destination {
             case .finTV:
-                rows.append(NavRow(id: .finTV, title: "Stations", icon: "antenna.radiowaves.left.and.right"))
+                rows.append(NavRow(id: .finTV, title: "SashimiTV", icon: "antenna.radiowaves.left.and.right"))
             case .library(let id):
                 guard let lib = libraries.first(where: { $0.id == id }) else { continue }
                 rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
