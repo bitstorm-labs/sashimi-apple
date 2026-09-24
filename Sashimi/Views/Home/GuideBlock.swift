@@ -5,11 +5,17 @@ struct GuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
+    var channelNumber: Int?
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
+    @ObservedObject private var reminders = StationReminders.shared
 
     private var isNow: Bool { entry.isAiring(at: Date()) }
+
+    private var hasReminder: Bool {
+        reminders.isSet(channelID: row.channel.id, startsAt: entry.startUtc)
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -22,6 +28,20 @@ struct GuideBlock: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(SashimiTheme.textPrimary)
                         .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if entry.isNew {
+                        Text("NEW")
+                            .font(.system(size: 13, weight: .heavy))
+                            .tracking(0.8)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red.opacity(0.85)))
+                    }
+                    if hasReminder {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(SashimiTheme.accent)
+                    }
                 }
 
                 if let subtitle = row.subtitle(for: entry) {
@@ -61,6 +81,24 @@ struct GuideBlock: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        // Long press on anything still to come: "Remind me". What is on now
+        // needs no reminder — selecting it tunes in.
+        .contextMenu {
+            if !isNow && entry.startUtc > Date() {
+                Button {
+                    reminders.toggle(.init(
+                        channelID: row.channel.id,
+                        channelName: row.channel.name,
+                        channelNumber: channelNumber,
+                        title: row.title(for: entry),
+                        startsAt: entry.startUtc
+                    ))
+                } label: {
+                    Label(hasReminder ? "Cancel Reminder" : "Remind Me",
+                          systemImage: hasReminder ? "bell.slash" : "bell")
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
     }

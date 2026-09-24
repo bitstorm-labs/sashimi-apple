@@ -79,6 +79,7 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("startFromBeginning", startFromBeginning)
             ])
             await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
+            await viewModel.announceStation()
         }
         .onDisappear {
             PlayerDiagnostics.event(.viewDisappear, [

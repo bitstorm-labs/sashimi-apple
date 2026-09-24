@@ -20,6 +20,8 @@ struct MobileGuideView: View {
     /// Where the timeline scrolls to after a jump: 18:00 for a day, now for Now.
     @State private var scrollTarget: Date?
     @State private var minute = Date()
+    @State private var showReminders = false
+    @ObservedObject private var reminders = StationReminders.shared
 
     /// Wide enough that a half-hour programme can show a title.
     private let pointsPerMinute: CGFloat = 6
@@ -62,6 +64,7 @@ struct MobileGuideView: View {
         .fullScreenCover(item: $tuned) { tuned in
             MobilePlayerView(item: tuned.item, channelContext: tuned.context)
         }
+        .sheet(isPresented: $showReminders) { MobileRemindersList() }
         .sheet(item: $selected) { selection in
             MobileGuideDetailSheet(row: selection.row, entry: selection.entry)
         }
@@ -73,6 +76,14 @@ struct MobileGuideView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(MobileColors.textPrimary)
             Spacer()
+            if !reminders.reminders.isEmpty {
+                Button { showReminders = true } label: {
+                    Label("\(reminders.reminders.count)", systemImage: "bell.fill")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .tint(MobileColors.accent)
+                .accessibilityLabel("Reminders")
+            }
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 Text(context.date.formatted(date: .abbreviated, time: .shortened))
                     .font(.subheadline)
@@ -179,11 +190,17 @@ struct MobileGuideView: View {
                 .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(row.channel.name.uppercased())
-                    .font(.caption.bold())
-                    .tracking(0.8)
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(row.channel.number ?? index + 1)")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                    Text(row.channel.name.uppercased())
+                        .font(.caption.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(MobileColors.textPrimary)
+                        .lineLimit(1)
+                }
 
                 if let description = row.channel.description, !description.isEmpty {
                     Text(description)
@@ -248,6 +265,7 @@ struct MobileGuideView: View {
                     row: row,
                     entry: entry,
                     width: width(for: entry),
+                    channelNumber: row.channel.number ?? viewModel.rows.firstIndex { $0.id == row.id }.map { $0 + 1 },
                     onSelect: { select(row: row, entry: entry) }
                 )
             }
@@ -334,9 +352,16 @@ struct MobileGuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
+    var channelNumber: Int?
     let onSelect: () -> Void
 
+    @ObservedObject private var reminders = StationReminders.shared
+
     private var isNow: Bool { entry.isAiring(at: Date()) }
+
+    private var hasReminder: Bool {
+        reminders.isSet(channelID: row.channel.id, startsAt: entry.startUtc)
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -349,6 +374,18 @@ struct MobileGuideBlock: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(MobileColors.textPrimary)
                         .lineLimit(1)
+                    if entry.isNew {
+                        Text("NEW")
+                            .font(.system(size: 9, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red.opacity(0.85)))
+                    }
+                    if hasReminder {
+                        Image(systemName: "bell.fill")
+                            .font(.caption2)
+                            .foregroundStyle(MobileColors.accent)
+                    }
                 }
 
                 if let subtitle = row.subtitle(for: entry) {
@@ -379,6 +416,22 @@ struct MobileGuideBlock: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if !isNow && entry.startUtc > Date() {
+                Button {
+                    reminders.toggle(.init(
+                        channelID: row.channel.id,
+                        channelName: row.channel.name,
+                        channelNumber: channelNumber,
+                        title: row.title(for: entry),
+                        startsAt: entry.startUtc
+                    ))
+                } label: {
+                    Label(hasReminder ? "Cancel Reminder" : "Remind Me",
+                          systemImage: hasReminder ? "bell.slash" : "bell")
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.channel.name), \(row.title(for: entry)), "
             + (isNow ? "now airing" : "at \(entry.startUtc.formatted(date: .omitted, time: .shortened))"))

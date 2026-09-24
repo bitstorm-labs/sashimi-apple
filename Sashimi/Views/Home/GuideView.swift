@@ -24,6 +24,8 @@ struct GuideView: View {
     /// Which jump chip is lit. Nil is "Now", which is also where every row
     /// opens; jumping turns each row to the page holding that instant.
     @State private var jump: String?
+    @State private var showReminders = false
+    @ObservedObject private var reminders = StationReminders.shared
     /// Bumped every minute so "min left" and the Now highlight stay honest
     /// without refetching a week of guide.
     @State private var minute = Date()
@@ -112,6 +114,9 @@ struct GuideView: View {
         .fullScreenCover(item: $tuned) { tuned in
             PlayerView(item: tuned.item, channelContext: tuned.context)
         }
+        .fullScreenCover(isPresented: $showReminders) {
+            RemindersListView()
+        }
         .fullScreenCover(item: $selected) { selection in
             GuideDetailView(row: selection.row, entry: selection.entry)
         }
@@ -171,18 +176,15 @@ struct GuideView: View {
         let chips = GuideJump.chips(now: minute)
         return HStack(spacing: 10) {
             ForEach(chips) { chip in
-                let selected = (jump ?? "Now") == chip.id
-                Button {
+                GuideChip(label: chip.label, selected: (jump ?? "Now") == chip.id) {
                     jump = chip.kind == .now ? nil : chip.id
                     turnAllRows(to: chip)
-                } label: {
-                    Text(chip.label)
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(selected ? Color.black : SashimiTheme.textPrimary)
-                        .padding(.horizontal, 22).padding(.vertical, 9)
-                        .background(Capsule().fill(selected ? SashimiTheme.accent : SashimiTheme.cardBackground))
                 }
-                .buttonStyle(PlainNoHighlightButtonStyle())
+            }
+            if !reminders.reminders.isEmpty {
+                GuideChip(label: "Reminders · \(reminders.reminders.count)", systemImage: "bell.fill", selected: false) {
+                    showReminders = true
+                }
             }
             Spacer(minLength: 0)
         }
@@ -223,7 +225,7 @@ struct GuideView: View {
                     .id("turn-back-\(row.id)")
 
                 ForEach(Array(visible.enumerated()), id: \.element.id) { slot, entry in
-                    GuideBlock(row: row, entry: entry, width: cardWidth) {
+                    GuideBlock(row: row, entry: entry, width: cardWidth, channelNumber: row.channel.number ?? index + 1) {
                         select(row: row, entry: entry)
                     }
                     .focused($focusedCard, equals: CardID(row: row.id, entry: entry.id))
@@ -268,11 +270,19 @@ struct GuideView: View {
                 .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(row.channel.name.uppercased())
-                    .font(.system(size: 21, weight: .heavy))
-                    .tracking(1.2)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .lineLimit(1)
+                // Numbered in guide order — the same number the player's banner
+                // shows and channel up/down steps through.
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(row.channel.number ?? index + 1)")
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                    Text(row.channel.name.uppercased())
+                        .font(.system(size: 21, weight: .heavy))
+                        .tracking(1.2)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                        .lineLimit(1)
+                }
 
                 if let description = row.channel.description, !description.isEmpty {
                     Text(description)

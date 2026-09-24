@@ -138,7 +138,8 @@ struct MobileChannelCard: View {
     }
 
     private var channelBadge: some View {
-        Text(card.channel.name.uppercased())
+        // The channel number leads, the way a cable box labels a station.
+        Text(card.channel.number.map { "\($0) · \(card.channel.name.uppercased())" } ?? card.channel.name.uppercased())
             .font(.caption.bold())
             .tracking(0.8)
             .foregroundStyle(.white)
