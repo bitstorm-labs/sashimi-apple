@@ -212,7 +212,7 @@ struct StationBannerView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Text("▲▼ channels     click  info     hold  subtitles & audio")
+                Text("▲▼ channels     ◀▶ guide     click  info     hold  subtitles & audio")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             }

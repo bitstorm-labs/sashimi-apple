@@ -936,27 +936,42 @@ final class PlayerViewModel: ObservableObject {
 
         for step in 1..<count {
             let station = stations[((here + delta * step) % count + count) % count]
-            guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
-                  let item = try? await client.getItem(itemId: now.itemId) else { continue }
-            guard !Task.isCancelled else { return }
-            channelContext = ChannelPlaybackContext(
-                channelID: station.id,
-                startPositionSeconds: now.startPositionSeconds,
-                endsAt: now.endUtc,
-                nextItemID: now.nextItemId
-            )
-            diag(.nextEpisode, [
-                PlayerDiagnostics.field("item", item.id),
-                PlayerDiagnostics.field("kind", "channel-change"),
-                PlayerDiagnostics.field("channel", station.id)
-            ])
-            rejoinLive()
-            // The new station's bar goes up before its stream loads: the number
-            // should answer the press at once, the picture can take a moment.
-            await announceStation()
-            await loadMedia(item: item)
-            return
+            if await tune(station, kind: "channel-change") { return }
         }
+    }
+
+    /// Tune a station picked from the guide over the picture.
+    func tuneStation(id: String) async {
+        guard isWatchingStation else { return }
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let key = Self.stationKey(id)
+        guard let station = stations.first(where: { Self.stationKey($0.id) == key }) else { return }
+        _ = await tune(station, kind: "guide")
+    }
+
+    /// Join `station` where it is now. False when it is off air or its
+    /// programme cannot be fetched, so channel up/down can skip past it.
+    private func tune(_ station: VirtualChannel, kind: String) async -> Bool {
+        guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
+              let item = try? await client.getItem(itemId: now.itemId) else { return false }
+        guard !Task.isCancelled else { return true }
+        channelContext = ChannelPlaybackContext(
+            channelID: station.id,
+            startPositionSeconds: now.startPositionSeconds,
+            endsAt: now.endUtc,
+            nextItemID: now.nextItemId
+        )
+        diag(.nextEpisode, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("kind", kind),
+            PlayerDiagnostics.field("channel", station.id)
+        ])
+        rejoinLive()
+        // The new station's bar goes up before its stream loads: the number
+        // should answer the press at once, the picture can take a moment.
+        await announceStation()
+        await loadMedia(item: item)
+        return true
     }
 
     /// Show the banner for what is on now. Called on tune-in, on each channel
@@ -1033,6 +1048,11 @@ final class PlayerViewModel: ObservableObject {
     /// before anyone saw it (seen in simulator frames).
     func dismissStationBanner(_ id: UUID) {
         if stationBanner?.id == id { stationBanner = nil }
+    }
+
+    /// Clear whatever bar is up — the guide is about to cover it.
+    func dismissStationBannerNow() {
+        stationBanner = nil
     }
 
     /// Channel ids arrive with and without dashes depending on the endpoint.

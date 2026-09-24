@@ -84,6 +84,28 @@ struct TVPlayerView: UIViewControllerRepresentable {
             StationOptions.present(from: container, model: model)
         }
         container.onStationExit = onDismiss
+        container.onStationGuide = { [weak container, weak coordinator] in
+            guard let container, let model = coordinator?.currentViewModel,
+                  container.presentedViewController == nil else { return }
+            model.dismissStationBannerNow()
+            // The guide over the live picture, the way a cable box opens it:
+            // the channel keeps playing behind; an airing pick tunes it here.
+            // Weak: the presentation owns the controller; a strong capture here
+            // would be a cycle through its own root view.
+            weak var host: UIHostingController<GuideView>?
+            let guide = GuideView(
+                onTuneStation: { id in
+                    host?.dismiss(animated: true)
+                    Task { await model.tuneStation(id: id) }
+                },
+                onClose: { host?.dismiss(animated: true) }
+            )
+            let controller = UIHostingController(rootView: guide)
+            controller.modalPresentationStyle = .overFullScreen
+            controller.view.backgroundColor = .clear
+            host = controller
+            container.present(controller, animated: true)
+        }
         container.installStationFlipping()
 
         return container
@@ -305,6 +327,7 @@ class PlayerContainerVC: UIViewController {
     var onStationPlayPause: (() -> Void)?
     var onStationOptions: (() -> Void)?
     var onStationExit: (() -> Void)?
+    var onStationGuide: (() -> Void)?
 
     /// Every press a channel uses, taken before AVKit sees it. With the
     /// transport bar off (see `showsAVKitControls`) these are the only
@@ -314,7 +337,7 @@ class PlayerContainerVC: UIViewController {
         let active: () -> Bool = { [weak self] in self?.canStepStation() ?? false }
         let presses: [(UIPress.PressType, Int)] = [
             // Up is channel up — the higher number — as on a cable remote and on Roku.
-            (.upArrow, 1), (.downArrow, -1), (.leftArrow, 0), (.rightArrow, 0), (.playPause, 2), (.menu, 3)
+            (.upArrow, 1), (.downArrow, -1), (.leftArrow, 4), (.rightArrow, 4), (.playPause, 2), (.menu, 3)
         ]
         for (type, delta) in presses {
             let press = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
@@ -335,6 +358,7 @@ class PlayerContainerVC: UIViewController {
         case -1, 1: onStationStep?(recognizer.delta)
         case 2: onStationPlayPause?()
         case 3: onStationExit?()
+        case 4: onStationGuide?()
         default: break
         }
     }

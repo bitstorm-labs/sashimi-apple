@@ -11,6 +11,11 @@ import SwiftUI
 struct GuideView: View {
     var onBackAtRoot: (() -> Void)?
     var focusNamespace: Namespace.ID?
+    /// Set when the guide is laid over a playing channel: picking something
+    /// airing tunes the player already on screen (rather than opening a second
+    /// one), the background lets the picture show through, and Menu closes.
+    var onTuneStation: ((String) -> Void)?
+    var onClose: (() -> Void)?
 
     @StateObject private var viewModel = GuideViewModel(hours: 168)
     @State private var tuned: TunedChannel?
@@ -86,7 +91,8 @@ struct GuideView: View {
             }
             Spacer(minLength: 0)
         }
-        .background(SashimiTheme.background)
+        .background(onTuneStation == nil ? SashimiTheme.background : Color.black.opacity(0.78))
+        .onExitCommand(perform: onClose)
         .task {
             await viewModel.load()
             // A week of guide is ~600 KB; refetch it every quarter hour, and
@@ -330,6 +336,10 @@ struct GuideView: View {
         // detail instead, because you cannot watch what has not aired.
         guard entry.isAiring(at: Date()) else {
             selected = GuideSelection(row: row, entry: entry)
+            return
+        }
+        if let onTuneStation {
+            onTuneStation(row.channel.id)
             return
         }
         Task {
