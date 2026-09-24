@@ -217,7 +217,17 @@ final class HomeViewModel: ObservableObject {
         let isResume: Bool
     }
 
-    private func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
+    // Internal rather than private so the rule below is testable. The dedupe
+    // test that predates this re-implemented the loop inside the test and
+    // proved nothing about this method.
+    func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
+        // Only things that can be played belong here. The resume endpoint,
+        // asked without a media filter, also returns Seasons and Series whose
+        // children are partly watched; the request now filters, but a folder
+        // must never reach this row whatever the server sends.
+        let resume = resume.filter(\.isPlayable)
+        let nextUp = nextUp.filter(\.isPlayable)
+
         // Both APIs return items sorted by activity:
         // - Resume: by DatePlayed descending (most recently played partial episode first)
         // - NextUp: by series activity (most recently finished series first)
@@ -299,5 +309,16 @@ final class HomeViewModel: ObservableObject {
     private func isMediaLibrary(_ library: JellyfinLibrary) -> Bool {
         guard let collectionType = library.collectionType?.lowercased() else { return true }
         return ["movies", "tvshows", "music", "mixed", "homevideos"].contains(collectionType)
+    }
+}
+
+private extension BaseItemDto {
+    /// Not a folder. Everything else — episodes, movies, plain videos, and an
+    /// unknown type the server may add later — is given the benefit of the doubt.
+    var isPlayable: Bool {
+        switch type {
+        case .season, .series, .boxSet, .folder, .collectionFolder: return false
+        default: return true
+        }
     }
 }

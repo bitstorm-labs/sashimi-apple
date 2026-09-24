@@ -225,4 +225,37 @@ final class HomeViewModelTests: XCTestCase {
         imageType = "Primary"
         XCTAssertEqual(imageType, "Primary")
     }
+
+    @MainActor
+    func testFoldersFromTheResumeEndpointNeverReachContinueWatching() {
+        // Asked without a media filter, /Items/Resume returns Seasons and
+        // Series whose children are partly watched. They have no playback
+        // position and cannot be resumed; the row must drop them.
+        func item(_ id: String, _ type: ItemType, played: String) -> BaseItemDto {
+            BaseItemDto(
+                id: id, name: id, type: type,
+                seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
+                indexNumber: nil, parentIndexNumber: nil, overview: nil,
+                runTimeTicks: nil, userData: UserItemDataDto(
+                    playbackPositionTicks: 0, playCount: 0, isFavorite: false, played: false,
+                    lastPlayedDate: played, unplayedItemCount: nil
+                ), imageTags: nil,
+                backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil,
+                taglines: nil, people: nil, criticRating: nil,
+                premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
+            )
+        }
+        let resume = [
+            item("season-1", .season, played: "2026-09-23T20:00:00Z"),
+            item("ep-1", .episode, played: "2026-09-23T19:00:00Z"),
+            item("series-1", .series, played: "2026-09-23T18:00:00Z"),
+            item("movie-1", .movie, played: "2026-09-23T17:00:00Z")
+        ]
+
+        let row = HomeViewModel().mergeAndSortContinueItems(resume: resume, nextUp: [])
+
+        XCTAssertEqual(row.map(\.id), ["ep-1", "movie-1"], "a Season or Series reached Continue Watching")
+    }
 }
