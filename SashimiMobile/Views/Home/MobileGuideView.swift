@@ -183,29 +183,24 @@ struct MobileGuideView: View {
     /// Name over its description, against a colour rail — the same treatment as
     /// tvOS, so the two screens describe a channel the same way.
     private func channelLabel(_ row: GuideRow, index: Int) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(Self.railColour(at: index))
                 .frame(width: 3)
                 .padding(.vertical, 2)
 
-            if row.channel.logo != nil {
-                VStack(spacing: 2) {
-                    ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 28)
-                    Text("\(row.channel.number ?? index + 1)")
-                        .font(.caption2.weight(.heavy))
-                        .foregroundStyle(Self.railColour(at: index))
-                        .monospacedDigit()
-                }
-            }
+            // Number, logo, then name — each centred in the row.
+            Text("\(row.channel.number ?? index + 1)")
+                .font(.subheadline.weight(.heavy))
+                .foregroundStyle(Self.railColour(at: index))
+                .monospacedDigit()
+                .frame(width: 24, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if row.channel.logo == nil {
-                        Text("\(row.channel.number ?? index + 1)")
-                            .font(.caption.weight(.heavy))
-                            .foregroundStyle(Self.railColour(at: index))
-                            .monospacedDigit()
+                // The logo travels with the name, on its line.
+                HStack(alignment: .center, spacing: 6) {
+                    if row.channel.logo != nil {
+                        ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 18)
                     }
                     Text(row.channel.name.uppercased())
                         .font(.caption.bold())

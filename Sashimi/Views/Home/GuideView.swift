@@ -260,7 +260,7 @@ struct GuideView: View {
     /// come and go, and the grid to the right only ever says what is on. The
     /// name alone in a grey capsule left the column carrying none of that.
     private func channelLabel(_ row: GuideRow, index: Int) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             // The rail runs in row order rather than being derived from the
             // channel's identity, so the palette reads as an index down the
             // screen and neighbouring channels never land on the same colour.
@@ -269,27 +269,20 @@ struct GuideView: View {
                 .frame(width: 4)
                 .padding(.vertical, 2)
 
-            // With a logo, the number sits under it: mark and number read as
-            // one badge, the way a printed guide set them.
-            if row.channel.logo != nil {
-                VStack(spacing: 4) {
-                    ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 44)
-                    Text("\(row.channel.number ?? index + 1)")
-                        .font(.system(size: 19, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Self.railColour(at: index))
-                        .monospacedDigit()
-                }
-            }
+            // Number, logo, then name — each centred in the row, the number
+            // leading at the left the way a printed guide set its columns. The
+            // same number the player's bar shows and channel up/down steps.
+            Text("\(row.channel.number ?? index + 1)")
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .foregroundStyle(Self.railColour(at: index))
+                .monospacedDigit()
+                .frame(width: 44, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
-                // Numbered in guide order — the same number the player's banner
-                // shows and channel up/down steps through.
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    if row.channel.logo == nil {
-                        Text("\(row.channel.number ?? index + 1)")
-                            .font(.system(size: 21, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Self.railColour(at: index))
-                            .monospacedDigit()
+                // The logo travels with the name, on its line.
+                HStack(alignment: .center, spacing: 10) {
+                    if row.channel.logo != nil {
+                        ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 30)
                     }
                     Text(row.channel.name.uppercased())
                         .font(.system(size: 21, weight: .heavy))
