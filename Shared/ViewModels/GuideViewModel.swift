@@ -26,6 +26,18 @@ struct GuideRow: Identifiable, Equatable {
     }
 }
 
+/// The two calls the guide makes. A protocol rather than the concrete client
+/// so the model's rules — what a failed refresh does to rows already shown —
+/// can be tested without a server, the same seam the filmography and episode
+/// navigation models use.
+protocol GuideClient: Sendable {
+    func getChannelGuide(hours: Double) async throws -> [ChannelGuide]
+    func getItem(itemId: String) async throws -> BaseItemDto
+    func getChannelNowPlaying(channelId: String) async throws -> ChannelNowPlaying?
+}
+
+extension JellyfinClient: GuideClient {}
+
 @MainActor
 final class GuideViewModel: ObservableObject {
     @Published private(set) var rows: [GuideRow] = []
@@ -36,9 +48,9 @@ final class GuideViewModel: ObservableObject {
     /// horizontal scrolling, which matters on a remote.
     let hours: Double = 3
 
-    private let client: JellyfinClient
+    private let client: GuideClient
 
-    init(client: JellyfinClient? = nil) {
+    init(client: GuideClient? = nil) {
         self.client = client ?? JellyfinClient.shared
     }
 
@@ -62,9 +74,12 @@ final class GuideViewModel: ObservableObject {
             rows = guides.map { GuideRow(channel: $0, items: items) }
         } catch {
             // An unreachable server is not the same as a server with no
-            // channels; the client returns [] for the latter.
+            // channels; the client returns [] for the latter. And a failed
+            // *refresh* is not the same as a failed first load: the guide
+            // reloads itself every minute, and one dropped request must not
+            // wipe a grid the viewer is looking at — the rows already shown
+            // stay until a load succeeds or they are cleared on purpose.
             loadFailed = true
-            rows = []
         }
     }
 

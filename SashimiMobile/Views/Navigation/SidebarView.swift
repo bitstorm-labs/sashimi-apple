@@ -13,7 +13,7 @@ enum SidebarSelection: Hashable {
     var displayName: String {
         switch self {
         case .home: return "Home"
-        case .finTV: return "Stations"
+        case .finTV: return "SashimiTV"
         case .search: return "Search"
         case .downloads: return "Downloads"
         case .settings: return "Settings"
