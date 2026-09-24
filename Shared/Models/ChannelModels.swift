@@ -184,3 +184,43 @@ struct GuideEntry: Codable, Identifiable, Equatable {
         return parsed
     }
 }
+
+// MARK: - Programme artwork
+
+extension BaseItemDto {
+    /// Landscape art for a programme airing on a channel, in the order the Roku
+    /// client has always used: the series backdrop when the series has one,
+    /// then the programme's own backdrop, then its own image, then the series
+    /// poster.
+    ///
+    /// Asking for the series backdrop unconditionally left the card black for
+    /// every series without one — YouTube channels, whose only art is the
+    /// episode thumbnail stored as the episode's Primary.
+    var channelArtwork: (itemId: String, imageType: String) {
+        if parentBackdropImageTags?.isEmpty == false, let seriesId {
+            return (seriesId, "Backdrop")
+        }
+        if backdropImageTags?.isEmpty == false {
+            return (id, "Backdrop")
+        }
+        if imageTags?["Primary"] != nil {
+            return (id, "Primary")
+        }
+        if let seriesId {
+            return (seriesId, "Primary")
+        }
+        return (id, "Primary")
+    }
+
+    /// A YouTube channel's "episodes" carry the upload year as the season and
+    /// a date-like index as the episode ("S2025:E102999"), which says nothing.
+    /// Anything labelling a programme leaves those numbers off.
+    var hasDatedEpisodeNumbers: Bool {
+        guard let season = parentIndexNumber, let episode = indexNumber else { return false }
+        return BaseItemDto.isDatedEpisode(season: season, episode: episode)
+    }
+
+    static func isDatedEpisode(season: Int, episode: Int) -> Bool {
+        season >= 1900 && episode > 999
+    }
+}

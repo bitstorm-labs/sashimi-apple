@@ -43,7 +43,7 @@ struct GuideRow: Identifiable, Equatable {
     /// nothing. The video's own title is what the card should say beneath
     /// the channel's name.
     static func episodeLabel(season: Int, episode: Int, title: String) -> String {
-        if season >= 1900, episode > 999, !title.isEmpty { return title }
+        if BaseItemDto.isDatedEpisode(season: season, episode: episode), !title.isEmpty { return title }
         return "S\(season)E\(episode)"
     }
 }
