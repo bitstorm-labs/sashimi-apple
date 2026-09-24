@@ -205,4 +205,16 @@ extension BaseItemDto {
         }
         return (id, "Primary")
     }
+
+    /// A YouTube channel's "episodes" carry the upload year as the season and
+    /// a date-like index as the episode ("S2025:E102999"), which says nothing.
+    /// Anything labelling a programme leaves those numbers off.
+    var hasDatedEpisodeNumbers: Bool {
+        guard let season = parentIndexNumber, let episode = indexNumber else { return false }
+        return BaseItemDto.isDatedEpisode(season: season, episode: episode)
+    }
+
+    static func isDatedEpisode(season: Int, episode: Int) -> Bool {
+        season >= 1900 && episode > 999
+    }
 }

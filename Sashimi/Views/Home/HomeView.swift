@@ -536,7 +536,7 @@ struct HeroSection: View {
 
                         // Episode info for TV shows, video title for YouTube
                         if currentItem.type == .episode {
-                            if isYouTubeContent {
+                            if isYouTubeContent || currentItem.hasDatedEpisodeNumbers {
                                 // YouTube: show video title
                                 Text(currentItem.name)
                                     .font(.system(size: 28, weight: .medium))
@@ -710,6 +710,7 @@ struct HeroSection: View {
     }
 
     private func formatEpisodeInfo(_ item: BaseItemDto) -> String {
+        if item.hasDatedEpisodeNumbers { return item.name }
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"

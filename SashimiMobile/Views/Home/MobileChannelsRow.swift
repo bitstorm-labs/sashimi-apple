@@ -50,7 +50,8 @@ struct MobileChannelCard: View {
     private var metadata: String {
         guard let item = card.item else { return "" }
         var parts: [String] = []
-        if item.type == .episode, let season = item.parentIndexNumber, let episode = item.indexNumber {
+        if item.type == .episode, !item.hasDatedEpisodeNumbers,
+           let season = item.parentIndexNumber, let episode = item.indexNumber {
             parts.append("S\(season)E\(episode)")
         }
         if let year = item.productionYear { parts.append(String(year)) }

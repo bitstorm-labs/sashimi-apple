@@ -50,3 +50,20 @@ final class ChannelArtworkTests: XCTestCase {
         XCTAssertEqual(art.imageType, "Primary")
     }
 }
+
+/// YouTube "episodes" (year as season, date as episode) never show S/E numbers.
+final class DatedEpisodeTests: XCTestCase {
+    func testYouTubeNumberingIsDated() {
+        XCTAssertTrue(BaseItemDto.isDatedEpisode(season: 2025, episode: 102999))
+    }
+
+    func testOrdinaryNumberingIsNot() {
+        XCTAssertFalse(BaseItemDto.isDatedEpisode(season: 5, episode: 10))
+        XCTAssertFalse(BaseItemDto.isDatedEpisode(season: 1999, episode: 12))
+    }
+
+    func testGuideLabelUsesTheVideoTitleForDatedEpisodes() {
+        XCTAssertEqual(GuideRow.episodeLabel(season: 2025, episode: 102999, title: "I Made a Choice"), "I Made a Choice")
+        XCTAssertEqual(GuideRow.episodeLabel(season: 2, episode: 25, title: "x"), "S2E25")
+    }
+}
