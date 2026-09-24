@@ -190,15 +190,23 @@ struct MobileGuideView: View {
                 .padding(.vertical, 2)
 
             if row.channel.logo != nil {
-                ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 28)
+                VStack(spacing: 2) {
+                    ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 28)
+                    Text("\(row.channel.number ?? index + 1)")
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                }
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(row.channel.number ?? index + 1)")
-                        .font(.caption.weight(.heavy))
-                        .foregroundStyle(Self.railColour(at: index))
-                        .monospacedDigit()
+                    if row.channel.logo == nil {
+                        Text("\(row.channel.number ?? index + 1)")
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(Self.railColour(at: index))
+                            .monospacedDigit()
+                    }
                     Text(row.channel.name.uppercased())
                         .font(.caption.bold())
                         .tracking(0.8)

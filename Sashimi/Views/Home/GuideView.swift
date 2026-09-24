@@ -269,18 +269,28 @@ struct GuideView: View {
                 .frame(width: 4)
                 .padding(.vertical, 2)
 
+            // With a logo, the number sits under it: mark and number read as
+            // one badge, the way a printed guide set them.
             if row.channel.logo != nil {
-                ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 44)
+                VStack(spacing: 4) {
+                    ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 44)
+                    Text("\(row.channel.number ?? index + 1)")
+                        .font(.system(size: 19, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                }
             }
 
             VStack(alignment: .leading, spacing: 5) {
                 // Numbered in guide order — the same number the player's banner
                 // shows and channel up/down steps through.
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("\(row.channel.number ?? index + 1)")
-                        .font(.system(size: 21, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Self.railColour(at: index))
-                        .monospacedDigit()
+                    if row.channel.logo == nil {
+                        Text("\(row.channel.number ?? index + 1)")
+                            .font(.system(size: 21, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Self.railColour(at: index))
+                            .monospacedDigit()
+                    }
                     Text(row.channel.name.uppercased())
                         .font(.system(size: 21, weight: .heavy))
                         .tracking(1.2)
