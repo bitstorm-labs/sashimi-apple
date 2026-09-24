@@ -91,6 +91,12 @@ struct StationBannerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 24) {
+                if let number = banner.number {
+                    Text("\(number)")
+                        .font(.system(size: 60, weight: .heavy, design: .rounded))
+                        .foregroundStyle(SashimiTheme.accent)
+                        .monospacedDigit()
+                }
                 if let logo = banner.logoURL {
                     LazyImage(url: logo) { state in
                         if let image = state.image {
@@ -99,12 +105,6 @@ struct StationBannerView: View {
                     }
                     .id(logo)
                     .frame(width: 96, height: 96)
-                }
-                if let number = banner.number {
-                    Text("\(number)")
-                        .font(.system(size: 60, weight: .heavy, design: .rounded))
-                        .foregroundStyle(SashimiTheme.accent)
-                        .monospacedDigit()
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(banner.channelName.uppercased())

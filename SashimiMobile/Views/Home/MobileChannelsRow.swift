@@ -140,16 +140,20 @@ struct MobileChannelCard: View {
     }
 
     private var channelBadge: some View {
-        // The channel number leads, the way a cable box labels a station.
-        HStack(spacing: 8) {
+        // Number, the station's logo, then its name — number first, the way
+        // a cable box labels a station.
+        HStack(spacing: 6) {
+            if let number = card.channel.number {
+                Text("\(number)")
+            }
             if card.channel.logo != nil {
                 ChannelLogoView(channelId: card.channel.id, logo: card.channel.logo, mono: true, size: 18)
             }
-            Text(card.channel.number.map { "\($0) · \(card.channel.name.uppercased())" } ?? card.channel.name.uppercased())
-                .font(.caption.bold())
-                .tracking(0.8)
-                .foregroundStyle(.white)
+            Text(card.channel.name.uppercased())
         }
+        .font(.caption.bold())
+        .tracking(0.8)
+        .foregroundStyle(.white)
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
         .background(Capsule().fill(.black.opacity(0.6)))

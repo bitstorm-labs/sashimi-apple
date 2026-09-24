@@ -569,13 +569,8 @@ struct PlayerContentOverlay: View {
                 // bar is down.
                 VStack {
                     HStack {
-                        // Stacked — number, logo, name — on one centred column.
-                        VStack(spacing: 4) {
-                            if let number = mark.number {
-                                Text("\(number)")
-                                    .font(.system(size: 26, weight: .heavy, design: .rounded))
-                                    .monospacedDigit()
-                            }
+                        // Stacked — logo over name — on one centred column.
+                        VStack(spacing: 6) {
                             if let logo = mark.logoURL {
                                 LazyImage(url: logo) { state in
                                     if let image = state.image {
@@ -597,8 +592,8 @@ struct PlayerContentOverlay: View {
                     .opacity(0.45)
                     Spacer()
                 }
-                .padding(.leading, 80)
-                .padding(.top, 60)
+                .padding(.leading, 48)
+                .padding(.top, 34)
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
