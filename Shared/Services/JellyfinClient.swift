@@ -789,6 +789,13 @@ actor JellyfinClient {
             path: "/Users/\(userId)/Items/Resume",
             queryItems: [
                 URLQueryItem(name: "Limit", value: "\(limit)"),
+                // Without this the server also returns Seasons and Series whose
+                // children are partly watched — folders with a PlayedPercentage
+                // but no playback position — and they land in Continue
+                // Watching as cards that cannot be resumed. Verified against
+                // the live server: unfiltered, 5 Seasons and a Series came back
+                // among the episodes; with MediaTypes=Video, episodes only.
+                URLQueryItem(name: "MediaTypes", value: "Video"),
                 URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ParentBackdropImageTags,UserData,Path,MediaStreams"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "Recursive", value: "true")
