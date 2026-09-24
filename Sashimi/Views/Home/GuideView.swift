@@ -139,8 +139,15 @@ struct GuideView: View {
                 }
             }
             .padding(.horizontal, 80)
+            // Room above the first row: a focused card grows by 4% and glows
+            // 12pt, and a ScrollView clips its content, so with the row flush
+            // against the top edge the first row's focus ring was sliced flat
+            // along the top (seen in a screenshot) while every other row's
+            // was drawn whole.
+            .padding(.top, 24)
             .padding(.bottom, 80)
         }
+        .scrollClipDisabled()
     }
 
     private func channelStrip(_ row: GuideRow, index: Int) -> some View {

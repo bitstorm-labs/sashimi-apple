@@ -19,6 +19,13 @@ struct GuideRow: Identifiable, Equatable {
     func subtitle(for entry: GuideEntry) -> String? {
         guard let item = items[entry.itemId] else { return nil }
         if item.type == .episode, let season = item.parentIndexNumber, let episode = item.indexNumber {
+            // A YouTube channel's "episodes" carry the upload year as the
+            // season and a five-or-six-digit index as the episode, so
+            // "S2025E123199" says nothing. The video's own title is what the
+            // card should say beneath the channel's name.
+            if season >= 1900, episode > 999, !item.name.isEmpty {
+                return item.name
+            }
             return "S\(season)E\(episode)"
         }
         if let year = item.productionYear { return String(year) }
