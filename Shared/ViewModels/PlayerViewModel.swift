@@ -864,6 +864,124 @@ final class PlayerViewModel: ObservableObject {
         return false
     }
 
+    // MARK: - Stations: flipping and idents
+
+    /// The banner that flashes up when a station is tuned, changed or moves on
+    /// to its next programme — a cable box's info banner: number, station, what
+    /// is on and how far in, and what is next.
+    struct StationBanner: Equatable, Identifiable {
+        let id = UUID()
+        let number: Int?
+        let channelName: String
+        let channelDescription: String?
+        let title: String
+        let detail: String?
+        let isNew: Bool
+        let startsAt: Date?
+        let endsAt: Date?
+        let nextTitle: String?
+        let nextStartsAt: Date?
+    }
+
+    @Published private(set) var stationBanner: StationBanner?
+    private var stations: [VirtualChannel] = []
+
+    var isWatchingStation: Bool { channelContext != nil }
+
+    /// Channel up/down: tune the station above or below this one in guide
+    /// order, skipping any that are off air, wrapping at the ends.
+    func changeStation(by delta: Int) async {
+        guard let current = channelContext, delta != 0 else { return }
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let count = stations.count
+        let key = Self.stationKey(current.channelID)
+        guard count > 1, let here = stations.firstIndex(where: { Self.stationKey($0.id) == key }) else { return }
+
+        for step in 1..<count {
+            let station = stations[((here + delta * step) % count + count) % count]
+            guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
+                  let item = try? await client.getItem(itemId: now.itemId) else { continue }
+            guard !Task.isCancelled else { return }
+            channelContext = ChannelPlaybackContext(
+                channelID: station.id,
+                startPositionSeconds: now.startPositionSeconds,
+                endsAt: now.endUtc,
+                nextItemID: now.nextItemId
+            )
+            diag(.nextEpisode, [
+                PlayerDiagnostics.field("item", item.id),
+                PlayerDiagnostics.field("kind", "channel-change"),
+                PlayerDiagnostics.field("channel", station.id)
+            ])
+            await loadMedia(item: item)
+            await announceStation()
+            return
+        }
+    }
+
+    /// Show the banner for what is on now. Called on tune-in, on each channel
+    /// change and when the channel rolls to its next programme. One short guide
+    /// request supplies now and next with names, episode numbers and the new
+    /// flag, so the banner reads the same as the guide.
+    func announceStation() async {
+        guard let channel = channelContext else { return }
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let key = Self.stationKey(channel.channelID)
+        let index = stations.firstIndex { Self.stationKey($0.id) == key }
+        let station = index.map { stations[$0] }
+
+        let guide = (try? await client.getChannelGuide(hours: 0.5)) ?? []
+        let row = guide.first { Self.stationKey($0.id) == key }
+        let clock = Date()
+        let now = row?.programs.first { $0.isAiring(at: clock) } ?? row?.programs.first
+        let next = row?.programs.first { $0.startUtc >= (now?.endUtc ?? clock) }
+        let labels = row.map { GuideRow(channel: $0, items: [:]) }
+
+        var title = currentItem.map { $0.type == .episode ? ($0.seriesName ?? $0.name) : $0.name } ?? ""
+        var detail: String?
+        if let labels, let now {
+            title = labels.title(for: now)
+            detail = labels.subtitle(for: now)
+            // Many episodes are named after their show; "S10E19 · Australian
+            // Survivor" under "Australian Survivor (2002)" says nothing twice.
+            let bareTitle = title.replacingOccurrences(of: #" \(\d{4}\)$"#, with: "", options: .regularExpression)
+            if let episodeName = now.name, now.type == "Episode", let label = detail, label.hasPrefix("S"),
+               episodeName != title, episodeName != bareTitle {
+                detail = "\(label) · \(episodeName)"
+            }
+        }
+
+        stationBanner = StationBanner(
+            number: index.map { $0 + 1 },
+            channelName: station?.name ?? row?.name ?? "SashimiTV",
+            channelDescription: station?.description,
+            title: title,
+            detail: detail,
+            isNew: now?.isNew ?? false,
+            // The guide clips the programme on air to the moment it was asked
+            // for and says how far in it already is; the real start is that far
+            // back. Without this the bar read "15:23 – 15:24" for a programme
+            // an hour in (seen in a simulator frame).
+            startsAt: now.map { $0.startUtc.addingTimeInterval(-$0.startPositionSeconds) },
+            endsAt: now?.endUtc ?? channel.endsAt,
+            nextTitle: next.flatMap { entry in labels?.title(for: entry) },
+            nextStartsAt: next?.startUtc
+        )
+    }
+
+    /// Clear the banner once it has been on screen long enough. The view calls
+    /// this, not a timer here: playback opens with the transport bar up, the
+    /// banner is hidden behind it, and a timer started at tune-in expired
+    /// before anyone saw it (seen in simulator frames).
+    func dismissStationBanner(_ id: UUID) {
+        if stationBanner?.id == id { stationBanner = nil }
+    }
+
+    /// Channel ids arrive with and without dashes depending on the endpoint.
+    static func stationKey(_ id: String) -> String {
+        id.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+
     /// Move to whatever the channel is airing now.
     ///
     /// Re-queried rather than trusting the `nextItemID` carried in the context:
@@ -902,6 +1020,7 @@ final class PlayerViewModel: ObservableObject {
                 PlayerDiagnostics.field("joinSeconds", next.startPositionSeconds)
             ])
             await loadMedia(item: item)
+            await announceStation()
         } catch {
             // A failed roll ends the session rather than stranding the viewer on
             // a finished programme with no way forward.

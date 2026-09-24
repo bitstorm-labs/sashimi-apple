@@ -120,6 +120,31 @@ struct HomeView: View {
             .fullScreenCover(item: $tunedChannel) { tuned in
                 PlayerView(item: tuned.item, channelContext: tuned.context)
             }
+            #if DEBUG
+            // Test harness: SASHIMI_TUNE_STATION=<channel id> tunes that station
+            // straight after launch, so on-device tests of channel flipping do
+            // not depend on steering the remote blind through the rail. Debug
+            // builds only.
+            .task {
+                // SASHIMI_TEST_REMINDER=<channel id>: a reminder for that station
+                // three minutes out, so the reminder banner can be exercised
+                // without waiting for a real airtime.
+                if let station = ProcessInfo.processInfo.environment["SASHIMI_TEST_REMINDER"] {
+                    StationReminders.shared.toggle(.init(
+                        channelID: station, channelName: "Unscripted", channelNumber: 3,
+                        title: "Survivor", startsAt: Date().addingTimeInterval(180)))
+                    StationReminders.shared.tick()
+                }
+                guard let station = ProcessInfo.processInfo.environment["SASHIMI_TUNE_STATION"] else { return }
+                try? await Task.sleep(nanoseconds: 8 * NSEC_PER_SEC)
+                let guide = GuideViewModel()
+                guard let tuned = await guide.tuneIn(to: station),
+                      let item = try? await JellyfinClient.shared.getItem(itemId: tuned.itemID) else {
+                    return
+                }
+                tunedChannel = TunedChannel(item: item, context: tuned.context)
+            }
+            #endif
             .onChange(of: selectedItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
                     Task { await viewModel.refresh() }

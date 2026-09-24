@@ -179,11 +179,17 @@ struct MobileGuideView: View {
                 .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(row.channel.name.uppercased())
-                    .font(.caption.bold())
-                    .tracking(0.8)
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(index + 1)")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                    Text(row.channel.name.uppercased())
+                        .font(.caption.bold())
+                        .tracking(0.8)
+                        .foregroundStyle(MobileColors.textPrimary)
+                        .lineLimit(1)
+                }
 
                 if let description = row.channel.description, !description.isEmpty {
                     Text(description)

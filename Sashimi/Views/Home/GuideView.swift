@@ -223,7 +223,7 @@ struct GuideView: View {
                     .id("turn-back-\(row.id)")
 
                 ForEach(Array(visible.enumerated()), id: \.element.id) { slot, entry in
-                    GuideBlock(row: row, entry: entry, width: cardWidth) {
+                    GuideBlock(row: row, entry: entry, width: cardWidth, channelNumber: index + 1) {
                         select(row: row, entry: entry)
                     }
                     .focused($focusedCard, equals: CardID(row: row.id, entry: entry.id))
@@ -268,11 +268,19 @@ struct GuideView: View {
                 .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(row.channel.name.uppercased())
-                    .font(.system(size: 21, weight: .heavy))
-                    .tracking(1.2)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .lineLimit(1)
+                // Numbered in guide order — the same number the player's banner
+                // shows and channel up/down steps through.
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Self.railColour(at: index))
+                        .monospacedDigit()
+                    Text(row.channel.name.uppercased())
+                        .font(.system(size: 21, weight: .heavy))
+                        .tracking(1.2)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                        .lineLimit(1)
+                }
 
                 if let description = row.channel.description, !description.isEmpty {
                     Text(description)
