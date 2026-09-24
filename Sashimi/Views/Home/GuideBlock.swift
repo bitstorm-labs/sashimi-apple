@@ -34,8 +34,7 @@ struct GuideBlock: View {
                 // The card says when it is, not which column it sits in: pages
                 // are turned per row, so "Now / Next / Later" would only be
                 // true on a row's first page.
-                Text(isNow ? "Now · \(remaining) left"
-                           : entry.startUtc.formatted(date: .omitted, time: .shortened))
+                Text(isNow ? "Now · \(remaining) left" : startLabel)
                     .font(.system(size: 16, weight: isNow ? .semibold : .regular))
                     .foregroundStyle(isNow ? SashimiTheme.accent : SashimiTheme.textTertiary)
                     .lineLimit(1)
@@ -64,6 +63,15 @@ struct GuideBlock: View {
         .focused($isFocused)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
+    }
+
+    /// "13:55" today; "Sat 18:00" for any other day, because a week of guide
+    /// makes a bare time ambiguous.
+    private var startLabel: String {
+        if Calendar.current.isDateInToday(entry.startUtc) {
+            return entry.startUtc.formatted(date: .omitted, time: .shortened)
+        }
+        return entry.startUtc.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
     private var remaining: String {
