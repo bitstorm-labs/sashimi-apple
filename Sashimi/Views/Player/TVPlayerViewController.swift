@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import NukeUI
 
 // MARK: - SwiftUI Bridge
 
@@ -16,13 +17,21 @@ struct TVPlayerView: UIViewControllerRepresentable {
         )
     }
 
+    /// A channel has no scrubber, skip or chapter to offer — only the station
+    /// bar — and AVKit's transport bar, while up, takes the clickpad's up and
+    /// down away from channel changes. So a channel turns it off and the
+    /// container handles every press itself.
+    private var showsAVKitControls: Bool {
+        !usesEpisodeTransportControls && !viewModel.isWatchingStation
+    }
+
     func makeUIViewController(context: Context) -> PlayerContainerVC {
         let container = PlayerContainerVC()
         container.view.backgroundColor = .black
 
         let playerVC = AVPlayerViewController()
         playerVC.player = player
-        playerVC.showsPlaybackControls = !usesEpisodeTransportControls
+        playerVC.showsPlaybackControls = showsAVKitControls
         playerVC.delegate = context.coordinator
 
         // Subtitles are rendered by our own overlay and selected through the
@@ -58,6 +67,23 @@ struct TVPlayerView: UIViewControllerRepresentable {
             guard let model = coordinator?.currentViewModel else { return }
             Task { await model.changeStation(by: delta) }
         }
+        container.onStationInfo = { [weak coordinator] in
+            guard let model = coordinator?.currentViewModel else { return }
+            // A click toggles the bar, except while paused, when it stays up.
+            if let banner = model.stationBanner, !banner.isPaused {
+                model.dismissStationBanner(banner.id)
+            } else {
+                Task { await model.announceStation() }
+            }
+        }
+        container.onStationPlayPause = { [weak coordinator] in
+            coordinator?.currentViewModel?.toggleStationPause()
+        }
+        container.onStationOptions = { [weak container, weak coordinator] in
+            guard let container, let model = coordinator?.currentViewModel else { return }
+            StationOptions.present(from: container, model: model)
+        }
+        container.onStationExit = onDismiss
         container.installStationFlipping()
 
         return container
@@ -82,7 +108,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         if let navigationVC = context.coordinator.navigationVC {
             let shouldShow = usesEpisodeTransportControls
-            playerVC.showsPlaybackControls = !usesEpisodeTransportControls
+            playerVC.showsPlaybackControls = showsAVKitControls
             let wasHidden = navigationVC.view.isHidden
             navigationVC.update(
                 state: viewModel.transitionState,
@@ -275,20 +301,49 @@ class PlayerContainerVC: UIViewController {
     /// presses first and the container would never see them.
     var onStationStep: ((Int) -> Void)?
     var canStepStation: () -> Bool = { false }
+    var onStationInfo: (() -> Void)?
+    var onStationPlayPause: (() -> Void)?
+    var onStationOptions: (() -> Void)?
+    var onStationExit: (() -> Void)?
 
+    /// Every press a channel uses, taken before AVKit sees it. With the
+    /// transport bar off (see `showsAVKitControls`) these are the only
+    /// controls a channel has; left and right are swallowed so they cannot
+    /// seek a live channel.
     func installStationFlipping() {
-        for (type, delta) in [(UIPress.PressType.upArrow, -1), (.downArrow, 1)] {
-            let tap = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
-            tap.delaysTouchesBegan = false
-            tap.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            tap.delta = delta
-            tap.shouldStep = { [weak self] in self?.canStepStation() ?? false }
-            view.addGestureRecognizer(tap)
+        let active: () -> Bool = { [weak self] in self?.canStepStation() ?? false }
+        let presses: [(UIPress.PressType, Int)] = [
+            (.upArrow, -1), (.downArrow, 1), (.leftArrow, 0), (.rightArrow, 0), (.playPause, 2), (.menu, 3)
+        ]
+        for (type, delta) in presses {
+            let press = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
+            press.delaysTouchesBegan = false
+            press.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            press.delta = delta
+            press.shouldStep = active
+            view.addGestureRecognizer(press)
         }
+        let select = StationSelectRecognizer(target: self, action: #selector(stationSelect(_:)))
+        select.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
+        select.isActive = active
+        view.addGestureRecognizer(select)
     }
 
     @objc private func stationStep(_ recognizer: StationStepRecognizer) {
-        onStationStep?(recognizer.delta)
+        switch recognizer.delta {
+        case -1, 1: onStationStep?(recognizer.delta)
+        case 2: onStationPlayPause?()
+        case 3: onStationExit?()
+        default: break
+        }
+    }
+
+    @objc private func stationSelect(_ recognizer: StationSelectRecognizer) {
+        guard recognizer.state == .ended else { return }
+        switch recognizer.kind {
+        case .click: onStationInfo?()
+        case .hold: onStationOptions?()
+        }
     }
 
     /// When the skip button is visible, route the focus engine to it. Otherwise
@@ -491,18 +546,45 @@ struct PlayerContentOverlay: View {
                 VStack {
                     Spacer()
                     StationBannerView(banner: banner)
-                        .padding(.horizontal, 80)
-                        .padding(.bottom, 60)
                         // Counted only while visible: hidden behind the transport
                         // bar the task is cancelled and restarts when it hides.
+                        // A paused channel keeps its bar up — the picture is not
+                        // moving, and "paused, 4 min behind live" is the point.
                         .task(id: banner.id) {
+                            guard !banner.isPaused else { return }
                             try? await Task.sleep(nanoseconds: 6 * NSEC_PER_SEC)
                             guard !Task.isCancelled else { return }
                             viewModel.dismissStationBanner(banner.id)
                         }
                 }
+                // The bottom-edge mirror of the top bar, which ignores the top
+                // inset for the same reason: a scrim stopping short of the edge.
+                .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let bug = viewModel.stationBugURL, !controlsVisible {
+                // The station's logo, faint in the corner, the way broadcast TV
+                // marks its picture. Only while the info bar is down.
+                VStack {
+                    HStack {
+                        LazyImage(url: bug) { state in
+                            if let image = state.image {
+                                image.resizable().aspectRatio(contentMode: .fit)
+                            }
+                        }
+                        // A new identity per station: the image view otherwise
+                        // kept the previous station's logo after a flip.
+                        .id(bug)
+                        .frame(width: 84, height: 84)
+                        .opacity(0.35)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 80)
+                .padding(.top, 60)
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
 
             // Top info bar + clock (only when transport bar is visible)

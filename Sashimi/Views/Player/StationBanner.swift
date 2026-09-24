@@ -1,3 +1,4 @@
+import NukeUI
 import SwiftUI
 import UIKit
 
@@ -30,10 +31,56 @@ final class StationStepRecognizer: UIGestureRecognizer {
     }
 }
 
-/// The cable-box info banner shown on tune-in and channel change: number and
-/// station, what is on with its episode and a live progress bar, and what is
-/// next. Uses the guide's accent and wording so a station reads the same in
-/// both places.
+/// Click and hold on the clickpad while a station plays: a click shows the
+/// info banner, a hold opens subtitles and audio. One recogniser tells them
+/// apart by duration, because a tap recogniser and a long-press recogniser
+/// on the same button each claimed the other's presses under AVKit.
+final class StationSelectRecognizer: UIGestureRecognizer {
+    enum Kind { case click, hold }
+
+    private(set) var kind: Kind = .click
+    var isActive: () -> Bool = { false }
+    private var holdTimer: DispatchWorkItem?
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+        guard isActive(), presses.contains(where: { $0.type == .select }) else {
+            state = .failed
+            return
+        }
+        state = .began
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .began || self.state == .changed else { return }
+            self.kind = .hold
+            self.state = .ended
+        }
+        holdTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: timer)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+        holdTimer?.cancel()
+        guard state == .began || state == .changed else { return }
+        kind = .click
+        state = .ended
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+        holdTimer?.cancel()
+        state = .cancelled
+    }
+
+    override func reset() {
+        holdTimer?.cancel()
+        holdTimer = nil
+        kind = .click
+        super.reset()
+    }
+}
+
+/// The channel's info bar: the bottom-edge mirror of the player's top bar —
+/// full width, the same translucent black, the same 80pt margins. Logo, number
+/// and station; what is on with a live progress bar; what is next; and how the
+/// remote drives a channel, since none of the usual controls are there.
 struct StationBannerView: View {
     let banner: PlayerViewModel.StationBanner
 
@@ -42,124 +89,138 @@ struct StationBannerView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline, spacing: 22) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 24) {
+                if let logo = banner.logoURL {
+                    LazyImage(url: logo) { state in
+                        if let image = state.image {
+                            image.resizable().aspectRatio(contentMode: .fit)
+                        }
+                    }
+                    .id(logo)
+                    .frame(width: 96, height: 96)
+                }
                 if let number = banner.number {
                     Text("\(number)")
-                        .font(.system(size: 64, weight: .heavy, design: .rounded))
+                        .font(.system(size: 60, weight: .heavy, design: .rounded))
                         .foregroundStyle(SashimiTheme.accent)
                         .monospacedDigit()
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(banner.channelName.uppercased())
-                        .font(.system(size: 30, weight: .heavy))
+                        .font(.system(size: 34, weight: .heavy))
                         .tracking(1.6)
                         .foregroundStyle(.white)
                     if let description = banner.channelDescription, !description.isEmpty {
                         Text(description)
-                            .font(.system(size: 20))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
                     }
                 }
                 Spacer()
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    Text(time(context.date))
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .monospacedDigit()
+                VStack(alignment: .trailing, spacing: 6) {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(time(context.date))
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .monospacedDigit()
+                    }
+                    if banner.isPaused {
+                        Label("PAUSED", systemImage: "pause.fill")
+                            .font(.system(size: 20, weight: .heavy))
+                            .foregroundStyle(SashimiTheme.accent)
+                    } else if banner.minutesBehindLive > 0 {
+                        Text("\(banner.minutesBehindLive) min behind live")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
                 }
             }
 
-            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    Text("NOW")
+            HStack(spacing: 12) {
+                Text("NOW")
+                    .font(.system(size: 18, weight: .heavy))
+                    .tracking(1.2)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(SashimiTheme.accent))
+                Text(banner.title)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let detail = banner.detail {
+                    Text(detail)
+                        .font(.system(size: 24))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+                if banner.isNew {
+                    Text("NEW")
                         .font(.system(size: 18, weight: .heavy))
                         .tracking(1.2)
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Capsule().fill(SashimiTheme.accent))
-                    Text(banner.title)
-                        .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let detail = banner.detail {
-                        Text(detail)
-                            .font(.system(size: 24))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .lineLimit(1)
-                    }
-                    if banner.isNew {
-                        Text("NEW")
-                            .font(.system(size: 18, weight: .heavy))
-                            .tracking(1.2)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Capsule().fill(Color.red.opacity(0.85)))
-                    }
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.red.opacity(0.85)))
                 }
+            }
 
-                if let start = banner.startsAt, let end = banner.endsAt, end > start {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let total = end.timeIntervalSince(start)
-                        let done = min(max(context.date.timeIntervalSince(start), 0), total)
-                        let left = Int((end.timeIntervalSince(context.date) / 60).rounded(.up))
-                        HStack(spacing: 16) {
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(.white.opacity(0.18))
-                                    Capsule().fill(SashimiTheme.accent)
-                                        .frame(width: geo.size.width * done / total)
-                                }
+            if let start = banner.startsAt, let end = banner.endsAt, end > start {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let total = end.timeIntervalSince(start)
+                    let done = min(max(context.date.timeIntervalSince(start), 0), total)
+                    let left = Int((end.timeIntervalSince(context.date) / 60).rounded(.up))
+                    HStack(spacing: 16) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(.white.opacity(0.25))
+                                Capsule().fill(SashimiTheme.accent)
+                                    .frame(width: geo.size.width * done / total)
                             }
-                            .frame(height: 8)
-                            Text("\(time(start)) – \(time(end))")
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .frame(height: 6)
+                        Text("\(time(start)) – \(time(end))")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .monospacedDigit()
+                            .fixedSize()
+                        if left > 0 {
+                            Text("\(left) min left")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(SashimiTheme.accent)
                                 .monospacedDigit()
                                 .fixedSize()
-                            if left > 0 {
-                                Text("\(left) min left")
-                                    .font(.system(size: 22, weight: .semibold))
-                                    .foregroundStyle(SashimiTheme.accent)
-                                    .monospacedDigit()
-                                    .fixedSize()
-                            }
                         }
-                    }
-                }
-
-                if let next = banner.nextTitle {
-                    HStack(spacing: 12) {
-                        Text("NEXT")
-                            .font(.system(size: 18, weight: .heavy))
-                            .tracking(1.2)
-                            .foregroundStyle(.white.opacity(0.7))
-                        Text(next)
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                        if let at = banner.nextStartsAt {
-                            Text("· \(time(at))")
-                                .font(.system(size: 22))
-                                .foregroundStyle(.white.opacity(0.6))
-                        }
-                        Spacer()
-                        Text("▲▼ change channel")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.45))
                     }
                 }
             }
+
+            HStack(spacing: 12) {
+                if let next = banner.nextTitle {
+                    Text("NEXT")
+                        .font(.system(size: 18, weight: .heavy))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.7))
+                    if let at = banner.nextStartsAt {
+                        Text(time(at))
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    Text(next)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text("▲▼ channels     click  info     hold  subtitles & audio")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
         }
-        .padding(28)
+        .padding(.horizontal, 80)
+        .padding(.top, 28)
+        .padding(.bottom, 48)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22)
-                .fill(.black.opacity(0.78))
-                .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.08), lineWidth: 1))
-        )
+        .background(.black.opacity(0.4))
     }
 }

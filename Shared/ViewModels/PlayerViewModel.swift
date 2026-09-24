@@ -881,9 +881,40 @@ final class PlayerViewModel: ObservableObject {
         let endsAt: Date?
         let nextTitle: String?
         let nextStartsAt: Date?
+        var logoURL: URL?
+        /// Paused on a live channel, and how far behind live that has left
+        /// the viewer — a channel does not wait.
+        var isPaused = false
+        var minutesBehindLive = 0
     }
 
     @Published private(set) var stationBanner: StationBanner?
+    /// The white logo laid faintly over the picture while a station plays.
+    @Published private(set) var stationBugURL: URL?
+    private var stationPausedAt: Date?
+    private var secondsBehindLive: TimeInterval = 0
+
+    /// Play/Pause on a channel. Pausing puts the viewer behind live, which the
+    /// banner then says; the next programme boundary (or a channel change)
+    /// rejoins live, because both tune at the channel's current offset.
+    func toggleStationPause() {
+        guard isWatchingStation, let player else { return }
+        if player.rate == 0 {
+            if let since = stationPausedAt { secondsBehindLive += Date().timeIntervalSince(since) }
+            stationPausedAt = nil
+            player.play()
+        } else {
+            player.pause()
+            stationPausedAt = Date()
+        }
+        Task { await announceStation() }
+    }
+
+    /// Back on live: a new programme or station joins at the channel's own offset.
+    private func rejoinLive() {
+        stationPausedAt = nil
+        secondsBehindLive = 0
+    }
     private var stations: [VirtualChannel] = []
 
     var isWatchingStation: Bool { channelContext != nil }
@@ -913,8 +944,11 @@ final class PlayerViewModel: ObservableObject {
                 PlayerDiagnostics.field("kind", "channel-change"),
                 PlayerDiagnostics.field("channel", station.id)
             ])
-            await loadMedia(item: item)
+            rejoinLive()
+            // The new station's bar goes up before its stream loads: the number
+            // should answer the press at once, the picture can take a moment.
             await announceStation()
+            await loadMedia(item: item)
             return
         }
     }
@@ -951,6 +985,17 @@ final class PlayerViewModel: ObservableObject {
             }
         }
 
+        let logoKey = station?.logo ?? row?.logo
+        var logoURL: URL?
+        if let logoKey {
+            logoURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey)
+            stationBugURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey, mono: true)
+        } else {
+            stationBugURL = nil
+        }
+        var behind = secondsBehindLive
+        if let since = stationPausedAt { behind += clock.timeIntervalSince(since) }
+
         stationBanner = StationBanner(
             number: station?.number ?? row?.number ?? index.map { $0 + 1 },
             channelName: station?.name ?? row?.name ?? "SashimiTV",
@@ -965,7 +1010,10 @@ final class PlayerViewModel: ObservableObject {
             startsAt: now.map { $0.startUtc.addingTimeInterval(-$0.startPositionSeconds) },
             endsAt: now?.endUtc ?? channel.endsAt,
             nextTitle: next.flatMap { entry in labels?.title(for: entry) },
-            nextStartsAt: next?.startUtc
+            nextStartsAt: next?.startUtc,
+            logoURL: logoURL,
+            isPaused: stationPausedAt != nil,
+            minutesBehindLive: Int(behind / 60)
         )
     }
 
@@ -1019,6 +1067,7 @@ final class PlayerViewModel: ObservableObject {
                 PlayerDiagnostics.field("kind", "channel"),
                 PlayerDiagnostics.field("joinSeconds", next.startPositionSeconds)
             ])
+            rejoinLive()
             await loadMedia(item: item)
             await announceStation()
         } catch {

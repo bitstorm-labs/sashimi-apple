@@ -269,6 +269,10 @@ struct GuideView: View {
                 .frame(width: 4)
                 .padding(.vertical, 2)
 
+            if row.channel.logo != nil {
+                ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 44)
+            }
+
             VStack(alignment: .leading, spacing: 5) {
                 // Numbered in guide order — the same number the player's banner
                 // shows and channel up/down steps through.

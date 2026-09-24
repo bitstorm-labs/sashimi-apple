@@ -189,6 +189,10 @@ struct MobileGuideView: View {
                 .frame(width: 3)
                 .padding(.vertical, 2)
 
+            if row.channel.logo != nil {
+                ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 28)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(row.channel.number ?? index + 1)")
