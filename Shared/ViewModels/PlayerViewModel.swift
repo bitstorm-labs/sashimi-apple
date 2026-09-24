@@ -889,8 +889,14 @@ final class PlayerViewModel: ObservableObject {
     }
 
     @Published private(set) var stationBanner: StationBanner?
-    /// The white logo laid faintly over the picture while a station plays.
-    @Published private(set) var stationBugURL: URL?
+    /// The station's mark, laid faintly over the picture while it plays:
+    /// white logo, number and name.
+    struct StationMark: Equatable {
+        let logoURL: URL?
+        let number: Int?
+        let name: String
+    }
+    @Published private(set) var stationMark: StationMark?
     private var stationPausedAt: Date?
     private var secondsBehindLive: TimeInterval = 0
 
@@ -987,12 +993,16 @@ final class PlayerViewModel: ObservableObject {
 
         let logoKey = station?.logo ?? row?.logo
         var logoURL: URL?
+        var monoURL: URL?
         if let logoKey {
             logoURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey)
-            stationBugURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey, mono: true)
-        } else {
-            stationBugURL = nil
+            monoURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey, mono: true)
         }
+        stationMark = StationMark(
+            logoURL: monoURL,
+            number: station?.number ?? row?.number,
+            name: (station?.name ?? row?.name ?? "SashimiTV").uppercased()
+        )
         var behind = secondsBehindLive
         if let since = stationPausedAt { behind += clock.timeIntervalSince(since) }
 
@@ -1037,11 +1047,33 @@ final class PlayerViewModel: ObservableObject {
     /// long enough for the schedule underneath it to have been rebuilt — an
     /// episode deleted by a cleanup tool shifts everything after it. The
     /// carried id is for warming the next item, not for deciding what to play.
+    /// What the channel airs once the programme that just ended is over.
+    ///
+    /// The stream can finish a moment before the server's schedule does — its
+    /// clock runs a few seconds ahead of the device's, and a programme joined
+    /// mid-way starts that far out. Asked at once, the server still names the
+    /// finished programme with a second or two left, and tuning that replays
+    /// its last frames: seen on a real Apple TV as three black reloads in a
+    /// row before the channel moved on, which read as a crash. So while the
+    /// answer is the item that just ended, wait for its scheduled end and ask
+    /// again, a few times at most.
+    private func nowPlayingAfterBoundary(channelID: String) async throws -> ChannelNowPlaying? {
+        let finished = currentItem?.id
+        for _ in 0..<4 {
+            let now = try await client.getChannelNowPlaying(channelId: channelID)
+            guard let now, now.itemId == finished else { return now }
+            let wait = min(max(now.endUtc.timeIntervalSinceNow, 0) + 1, 20)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled else { return nil }
+        }
+        return try await client.getChannelNowPlaying(channelId: channelID)
+    }
+
     private func rollToNextChannelProgramme(attempt: Int) async {
         guard let channel = channelContext else { return }
 
         do {
-            guard let next = try await client.getChannelNowPlaying(channelId: channel.channelID) else {
+            guard let next = try await nowPlayingAfterBoundary(channelID: channel.channelID) else {
                 // The channel went off air between programmes — a gap in the
                 // broadcast day. Stop rather than inventing something to play.
                 diag(.playbackEnded, [

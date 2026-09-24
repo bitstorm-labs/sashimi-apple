@@ -563,23 +563,38 @@ struct PlayerContentOverlay: View {
                 .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if let bug = viewModel.stationBugURL, !controlsVisible {
-                // The station's logo, faint in the corner, the way broadcast TV
-                // marks its picture. Only while the info bar is down.
+            } else if let mark = viewModel.stationMark, !controlsVisible {
+                // The station's mark, faint in the corner, the way broadcast TV
+                // marks its picture: logo, number and name. Only while the info
+                // bar is down.
                 VStack {
                     HStack {
-                        LazyImage(url: bug) { state in
-                            if let image = state.image {
-                                image.resizable().aspectRatio(contentMode: .fit)
+                        // Stacked — logo, number, name — on one centred column.
+                        VStack(spacing: 4) {
+                            if let logo = mark.logoURL {
+                                LazyImage(url: logo) { state in
+                                    if let image = state.image {
+                                        image.resizable().aspectRatio(contentMode: .fit)
+                                    }
+                                }
+                                // A new identity per station: the image view otherwise
+                                // kept the previous station's logo after a flip.
+                                .id(logo)
+                                .frame(width: 72, height: 72)
                             }
+                            if let number = mark.number {
+                                Text("\(number)")
+                                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                                    .monospacedDigit()
+                            }
+                            Text(mark.name)
+                                .font(.system(size: 16, weight: .heavy))
+                                .tracking(1.2)
                         }
-                        // A new identity per station: the image view otherwise
-                        // kept the previous station's logo after a flip.
-                        .id(bug)
-                        .frame(width: 84, height: 84)
-                        .opacity(0.35)
+                        .foregroundStyle(.white)
                         Spacer()
                     }
+                    .opacity(0.45)
                     Spacer()
                 }
                 .padding(.leading, 80)
