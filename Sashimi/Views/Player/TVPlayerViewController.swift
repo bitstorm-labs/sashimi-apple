@@ -49,6 +49,17 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // Add content overlay (subtitles, info, clock)
         setupOverlay(on: playerVC, container: container, context: context)
 
+        let coordinator = context.coordinator
+        container.canStepStation = { [weak coordinator] in
+            guard let coordinator, let model = coordinator.currentViewModel else { return false }
+            return model.isWatchingStation && !coordinator.controlsVisible && !model.showingSkipButton
+        }
+        container.onStationStep = { [weak coordinator] delta in
+            guard let model = coordinator?.currentViewModel else { return }
+            Task { await model.changeStation(by: delta) }
+        }
+        container.installStationFlipping()
+
         return container
     }
 
@@ -258,6 +269,28 @@ class PlayerContainerVC: UIViewController {
     var navigationVC: EpisodeNavigationViewController?
     weak var playerVC: AVPlayerViewController?
 
+    /// Channel up/down while watching a station. A click on the top or bottom of
+    /// the clickpad flips stations, the way a TV remote's channel buttons do.
+    /// Gesture recognisers rather than pressesBegan: the focused AVKit view gets
+    /// presses first and the container would never see them.
+    var onStationStep: ((Int) -> Void)?
+    var canStepStation: () -> Bool = { false }
+
+    func installStationFlipping() {
+        for (type, delta) in [(UIPress.PressType.upArrow, -1), (.downArrow, 1)] {
+            let tap = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
+            tap.delaysTouchesBegan = false
+            tap.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            tap.delta = delta
+            tap.shouldStep = { [weak self] in self?.canStepStation() ?? false }
+            view.addGestureRecognizer(tap)
+        }
+    }
+
+    @objc private func stationStep(_ recognizer: StationStepRecognizer) {
+        onStationStep?(recognizer.delta)
+    }
+
     /// When the skip button is visible, route the focus engine to it. Otherwise
     /// give focus back to the AVPlayerViewController so the user retains
     /// normal playback controls.
@@ -454,6 +487,24 @@ struct PlayerContentOverlay: View {
             // Subtitles (always active)
             SubtitleOverlay(manager: viewModel.subtitleManager)
 
+            if let banner = viewModel.stationBanner, !controlsVisible {
+                VStack {
+                    Spacer()
+                    StationBannerView(banner: banner)
+                        .padding(.horizontal, 80)
+                        .padding(.bottom, 60)
+                        // Counted only while visible: hidden behind the transport
+                        // bar the task is cancelled and restarts when it hides.
+                        .task(id: banner.id) {
+                            try? await Task.sleep(nanoseconds: 6 * NSEC_PER_SEC)
+                            guard !Task.isCancelled else { return }
+                            viewModel.dismissStationBanner(banner.id)
+                        }
+                }
+                .allowsHitTesting(false)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // Top info bar + clock (only when transport bar is visible)
             if controlsVisible {
                 VStack {
@@ -476,6 +527,7 @@ struct PlayerContentOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: controlsVisible)
+        .animation(.easeInOut(duration: 0.35), value: viewModel.stationBanner)
         .onReceive(clockTimer) { _ in
             clockTime = Date()
         }

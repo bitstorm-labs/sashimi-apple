@@ -240,6 +240,7 @@ struct MainTabView: View {
             sidebar
                 .onMoveCommand { _ in viewerNavigatedRail = true }
         }
+        .stationReminders()
         .ignoresSafeArea()
         .focusScope(mainScope)
         .onExitCommand(perform: exitCommandAction)

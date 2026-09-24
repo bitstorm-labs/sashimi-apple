@@ -42,6 +42,7 @@ struct SashimiMobileApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(sessionManager)
+                .mobileStationReminders()
         }
         .modelContainer(modelContainer)
         // Mirrors SashimiApp (tvOS): background/lock is a scene-phase change,

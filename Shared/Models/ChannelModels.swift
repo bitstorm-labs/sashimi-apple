@@ -9,6 +9,9 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
     let description: String?
     let timeZoneId: String
     let daypartCount: Int
+    /// The channel number the server assigned (plugin 0.7.0+): scattered,
+    /// fixed, the same on every client. Absent from older servers.
+    var number: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -16,6 +19,7 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
         case description = "Description"
         case timeZoneId = "TimeZoneId"
         case daypartCount = "DaypartCount"
+        case number = "Number"
     }
 }
 
@@ -92,12 +96,14 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
     let name: String
     let description: String?
     let programs: [GuideEntry]
+    var number: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
         case name = "Name"
         case description = "Description"
         case programs = "Programs"
+        case number = "Number"
     }
 }
 
@@ -119,6 +125,8 @@ struct GuideEntry: Codable, Identifiable, Equatable {
     let seasonNumber: Int?
     let episodeNumber: Int?
     let productionYear: Int?
+    /// Added to the library within the last week (plugin 0.6.0+).
+    let isNew: Bool
 
     /// Airings repeat, so the item id alone is not unique within a guide.
     var id: String { "\(itemId)-\(startUtc.timeIntervalSince1970)" }
@@ -138,6 +146,7 @@ struct GuideEntry: Codable, Identifiable, Equatable {
         case seasonNumber = "SeasonNumber"
         case episodeNumber = "EpisodeNumber"
         case productionYear = "ProductionYear"
+        case isNew = "IsNew"
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +159,7 @@ struct GuideEntry: Codable, Identifiable, Equatable {
         seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
+        isNew = try container.decodeIfPresent(Bool.self, forKey: .isNew) ?? false
         // Same fractional-seconds trap as ChannelNowPlaying.
         startUtc = try Self.date(container, .startUtc)
         endUtc = try Self.date(container, .endUtc)
