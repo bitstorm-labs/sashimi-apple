@@ -592,8 +592,12 @@ struct PlayerContentOverlay: View {
                     .opacity(0.45)
                     Spacer()
                 }
-                .padding(.leading, 48)
-                .padding(.top, 34)
+                // Measured from the screen edge, not the overscan safe area
+                // (~80pt sides, ~60pt top), so it can sit tight in the corner
+                // the way a broadcast mark does.
+                .padding(.leading, 64)
+                .padding(.top, 47)
+                .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
