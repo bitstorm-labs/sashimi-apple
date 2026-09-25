@@ -570,3 +570,16 @@ struct ChapterInfo: Codable {
         Double(startPositionTicks) / 10_000_000.0
     }
 }
+
+extension BaseItemDto {
+    /// An episode of Season 0. Specials play after the regular seasons.
+    var isSpecial: Bool { type == .episode && parentIndexNumber == 0 }
+}
+
+extension Array where Element == BaseItemDto {
+    /// Seasons with Specials (Season 0) moved to the end, the order a viewer
+    /// works through a show. Relative order is otherwise kept.
+    var specialsLast: [BaseItemDto] {
+        filter { $0.indexNumber != 0 } + filter { $0.indexNumber == 0 }
+    }
+}
