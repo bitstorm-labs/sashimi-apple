@@ -178,16 +178,7 @@ struct SettingsOptionRow: View {
             // other row — LibraryView, HomeRowToggleButton, etc.). A solid
             // SashimiTheme.focus (Color.white) fill made the focused row a
             // white box with the white-on-focus text vanishing into it.
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.02 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusHighlight(isFocused, cornerRadius: 16)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -520,14 +511,7 @@ struct HomeRowMoveButton: View {
                 .font(Typography.bodySmall.weight(.semibold))
                 .foregroundStyle(isEnabled ? (isFocused ? .white : SashimiTheme.textSecondary) : SashimiTheme.textTertiary.opacity(0.3))
                 .frame(width: 50, height: 50)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 2)
-                )
+                .focusHighlight(isFocused, cornerRadius: 10, lineWidth: 2, scales: false)
         }
         .buttonStyle(.card)
         .focused($isFocused)
@@ -566,16 +550,7 @@ struct HomeRowToggleButton: View {
         .buttonStyle(.card)
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focusHighlight(isFocused, cornerRadius: 14)
         .focused($isFocused)
     }
 }
@@ -627,16 +602,7 @@ struct SettingsToggleRow: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focusHighlight(isFocused, cornerRadius: 12)
         .focused($isFocused)
     }
 }
@@ -816,16 +782,7 @@ struct SettingsNavigationRow<Destination: View>: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focusHighlight(isFocused, cornerRadius: 14)
         .focused($isFocused)
     }
 }
@@ -903,16 +860,7 @@ struct SettingsPickerOptionRow: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focusHighlight(isFocused, cornerRadius: 14)
         .focused($isFocused)
     }
 }
