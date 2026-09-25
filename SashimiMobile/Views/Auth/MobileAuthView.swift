@@ -21,6 +21,8 @@ struct MobileAuthView: View {
     @State private var errorMessage: String?
     @State private var showLogin = false
     @State private var normalizedServerURL: URL?
+    /// The sign-in attempt in flight, so the user can cancel it (#476).
+    @State private var signInTask: Task<Void, Never>?
 
     var body: some View {
         // No NavigationStack here on purpose: this view is always hosted inside
@@ -117,6 +119,13 @@ struct MobileAuthView: View {
                 }
                 .disabled(username.isEmpty || isConnecting)
 
+                if isConnecting {
+                    Button("Cancel", role: .cancel) {
+                        cancelSignIn()
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
                 Button {
                     showLogin = false
                     serverURL = ""
@@ -177,19 +186,30 @@ struct MobileAuthView: View {
         isConnecting = true
         errorMessage = nil
 
-        Task {
+        signInTask = Task { @MainActor in
             do {
                 try await sessionManager.login(serverURL: url, username: username, password: password)
-                await MainActor.run {
-                    isConnecting = false
-                    onComplete?()
-                }
+                guard !Task.isCancelled else { return }
+                isConnecting = false
+                signInTask = nil
+                onComplete?()
             } catch {
-                await MainActor.run {
-                    isConnecting = false
-                    errorMessage = "Sign in failed: \(error.localizedDescription)"
-                }
+                // A cancelled attempt has already reset the form.
+                guard !Task.isCancelled else { return }
+                isConnecting = false
+                signInTask = nil
+                errorMessage = SignInFailure.message(for: error)
+                    ?? "Sign in failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Abandons the attempt in flight and returns the form to idle, with no
+    /// error: the user chose to stop, nothing failed.
+    private func cancelSignIn() {
+        signInTask?.cancel()
+        signInTask = nil
+        isConnecting = false
+        errorMessage = nil
     }
 }
