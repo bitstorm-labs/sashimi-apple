@@ -1445,11 +1445,7 @@ struct MediaDetailView: View {
         let remainingSeconds = TimeInterval(remainingTicks) / 10_000_000
         let finishDate = Date().addingTimeInterval(remainingSeconds)
 
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short  // e.g., "10:45 PM"
-        formatter.dateStyle = .none
-
-        return "Ends at \(formatter.string(from: finishDate))"
+        return "Ends at \(ClockTime.time(finishDate))"
     }
 }
 

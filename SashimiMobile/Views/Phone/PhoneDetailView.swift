@@ -562,12 +562,12 @@ struct PhoneDetailView: View {
         DateFormatting.formatMediumDate(episode.premiereDate)
     }
 
-    /// "Ends at 9:41 PM"
+    /// "Ends at 9:41 PM" from now + what is left to watch (tvOS parity)
     private var endsAtText: String? {
         guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
-        let end = Date().addingTimeInterval(Double(ticks) / 10_000_000)
-        let fmt = DateFormatter(); fmt.timeStyle = .short
-        return "Ends at \(fmt.string(from: end))"
+        let remaining = ticks - (item.userData?.playbackPositionTicks ?? 0)
+        guard remaining > 0 else { return nil }
+        return "Ends at \(ClockTime.time(Date().addingTimeInterval(Double(remaining) / 10_000_000)))"
     }
 
     // MARK: - Metadata Row
