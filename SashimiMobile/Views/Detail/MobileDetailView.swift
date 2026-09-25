@@ -50,6 +50,7 @@ struct MobileDetailView: View {
     @State private var showingDeleteConfirm = false
     @State private var isRefreshing = false
     @State private var adminError: String?
+    @State private var seasonWatchRequest: SeasonWatchRequest?
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
 
@@ -290,6 +291,9 @@ struct MobileDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Are you sure you want to delete this item? This cannot be undone.")
+        }
+        .seasonWatchConfirmation($seasonWatchRequest) { request in
+            Task { await applySeasonWatch(request) }
         }
         .alert("Error", isPresented: .constant(adminError != nil)) {
             Button("OK") { adminError = nil }
@@ -1067,6 +1071,11 @@ struct MobileDetailView: View {
                                     .foregroundStyle(selectedSeason?.id == season.id ? .black : .white)
                                     .clipShape(Capsule())
                             }
+                            .seasonWatchMenu(
+                                for: season,
+                                action: seasonWatchAction(for: season),
+                                request: $seasonWatchRequest
+                            )
                         }
                     }
                     .padding(.horizontal, MobileSpacing.md)
@@ -1298,7 +1307,7 @@ struct MobileDetailView: View {
             let seasonsToCheck = preferredSeasonID
                 .flatMap { seasonID in seasons.filter { $0.id == seasonID } }
                 ?? seasons
-            for season in seasonsToCheck {
+            for season in seasonsToCheck.specialsLast {
                 let eps = try await JellyfinClient.shared.getEpisodes(
                     seriesId: contentSeriesId,
                     seasonId: season.id
@@ -1310,6 +1319,43 @@ struct MobileDetailView: View {
             }
         } catch {
             // Silently fail
+        }
+    }
+
+    // MARK: - Season watched state
+
+    private func seasonWatchAction(for season: BaseItemDto) -> SeasonWatchAction {
+        // `episodes` only describes the selected season, and only once loaded.
+        let loaded = season.id == selectedSeason?.id && !isLoadingEpisodes ? episodes : nil
+        return SeasonWatchAction.resolve(season: season, loadedEpisodes: loaded)
+    }
+
+    private func applySeasonWatch(_ request: SeasonWatchRequest) async {
+        do {
+            try await request.action.apply(seasonId: request.season.id)
+        } catch {
+            adminError = SeasonWatchAction.failureMessage
+            return
+        }
+        await reloadAfterSeasonWatchChange()
+    }
+
+    /// Refresh what a season-wide played change touches (watched badges, the
+    /// season list, Next Up / Play), staying on the season on screen.
+    private func reloadAfterSeasonWatchChange() async {
+        if let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+            isWatched = freshItem.userData?.played ?? false
+            hasProgress = freshItem.progressPercent > 0 && !isWatched
+        }
+        if let reloaded = try? await JellyfinClient.shared.getSeasons(seriesId: contentSeriesId) {
+            seasons = reloaded
+            selectedSeason = reloaded.first { $0.id == selectedSeason?.id } ?? selectedSeason
+        }
+        if let season = selectedSeason {
+            await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
+        }
+        if isSeries || isSeason {
+            await findNextEpisodeToPlay(preferredSeasonID: isSeason ? item.id : nil)
         }
     }
 

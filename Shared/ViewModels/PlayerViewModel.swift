@@ -1520,6 +1520,9 @@ final class PlayerViewModel: ObservableObject {
                 .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
                 .first { ($0.indexNumber ?? 0) > currentIndex }
         } catch {
+            // Auto-advance just stops here; log so a failing lookup is not
+            // indistinguishable from "this was the last video".
+            logger.error("Next-video lookup failed for \(item.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -1897,6 +1900,19 @@ final class PlayerViewModel: ObservableObject {
         if type == .series, let next = try? await client.getNextUp(seriesId: item.id, limit: 1).first {
             logResolution(from: item, to: next, via: "next-up")
             return next
+        }
+
+        // Specials last: the first unwatched regular episode, else — every
+        // regular one watched — the first regular episode to start over.
+        if type == .series {
+            var regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: true)
+            if regular == nil {
+                regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: false)
+            }
+            if let regular {
+                logResolution(from: item, to: regular, via: "first-regular")
+                return regular
+            }
         }
 
         if type == .series || type == .season {

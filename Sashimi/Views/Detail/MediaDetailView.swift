@@ -39,6 +39,7 @@ struct MediaDetailView: View {
     @State private var selectedServerMedia: ServerMediaResult?
     @State private var showingFileInfo = false
     @State private var showingDeleteConfirm = false
+    @State private var seasonWatchRequest: SeasonWatchRequest?
     @State private var showingFullOverview = false
     @State private var isFavorite: Bool = false
     @State private var isRefreshing = false
@@ -286,6 +287,9 @@ struct MediaDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Are you sure you want to delete this item? This cannot be undone.")
+        }
+        .seasonWatchConfirmation($seasonWatchRequest) { request in
+            Task { await applySeasonWatch(request) }
         }
         .task {
             await loadContent()
@@ -1128,6 +1132,13 @@ struct MediaDetailView: View {
                                         Task { await loadEpisodesForSeason(seriesId: seriesId, season: season) }
                                     }
                                 }
+                                // Long-press a season tab: the same idiom
+                                // MediaRow uses for item-level watched.
+                                .seasonWatchMenu(
+                                    for: season,
+                                    action: seasonWatchAction(for: season),
+                                    request: $seasonWatchRequest
+                                )
                             }
                         }
                         .padding(.horizontal, 60)
@@ -1242,6 +1253,49 @@ struct MediaDetailView: View {
         }
     }
 
+    // MARK: - Season watched state
+
+    private func seasonWatchAction(for season: BaseItemDto) -> SeasonWatchAction {
+        // `episodes` only describes the selected season, and only once loaded.
+        let loaded = season.id == selectedSeason?.id && !isLoadingEpisodes ? episodes : nil
+        return SeasonWatchAction.resolve(season: season, loadedEpisodes: loaded)
+    }
+
+    private func applySeasonWatch(_ request: SeasonWatchRequest) async {
+        do {
+            try await request.action.apply(seasonId: request.season.id)
+        } catch {
+            ToastManager.shared.show(SeasonWatchAction.failureMessage)
+            return
+        }
+        ToastManager.shared.show(request.action.successMessage, type: .success)
+        await reloadAfterSeasonWatchChange()
+    }
+
+    /// Refresh everything a season-wide played change touches, keeping the
+    /// user on the season they were looking at (loadSeriesContent would jump
+    /// to whichever season now holds Next Up).
+    private func reloadAfterSeasonWatchChange() async {
+        guard isSeries else { return }
+        if let refreshed = try? await JellyfinClient.shared.getItem(itemId: item.id) {
+            item = refreshed
+            isWatched = refreshed.userData?.played ?? false
+            hasProgress = refreshed.progressPercent > 0 && !isWatched
+        }
+        if let reloaded = try? await JellyfinClient.shared.getSeasons(seriesId: item.id) {
+            seasons = reloaded
+            selectedSeason = reloaded.first { $0.id == selectedSeason?.id } ?? selectedSeason
+        }
+        // findNextEpisodeToPlay only ever assigns, so a fully watched series
+        // would otherwise keep pointing Play at the old Next Up.
+        nextEpisodeToPlay = nil
+        await findNextEpisodeToPlay()
+        if let season = selectedSeason {
+            await loadEpisodesForSeason(seriesId: item.id, season: season)
+        }
+        refreshID = UUID()
+    }
+
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
         do {
@@ -1318,7 +1372,7 @@ struct MediaDetailView: View {
                 return
             }
             // If no next up, find first unwatched episode
-            for season in seasons {
+            for season in seasons.specialsLast {
                 let eps = try await JellyfinClient.shared.getEpisodes(seriesId: item.id, seasonId: season.id)
                 if let firstUnwatched = eps.first(where: { !($0.userData?.played ?? false) }) {
                     nextEpisodeToPlay = firstUnwatched
