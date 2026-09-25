@@ -437,6 +437,9 @@ actor JellyfinClient {
     /// disagreed, the API worked on a self-signed server while every image
     /// silently failed.
     let certificateDelegate: CertificateValidationDelegate
+    /// Short-budget session for sign-in requests only (#476); see
+    /// `SignInNetworking`.
+    private let signInSession: URLSession
     private let maxRetries = 3
     private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "JellyfinClient")
 
@@ -506,6 +509,7 @@ actor JellyfinClient {
         let delegate = Self.makeCertificateDelegate()
         self.certificateDelegate = delegate
         self.urlSession = Self.makeURLSession(delegate: delegate)
+        self.signInSession = SignInNetworking.makeSession()
     }
 
     init() {
@@ -680,6 +684,7 @@ actor JellyfinClient {
         queryItems: [URLQueryItem]? = nil,
         body: Data? = nil,
         isAuthRequest: Bool = false,
+        isSignInStep: Bool = false,
         retryCount: Int = 0
     ) async throws -> Data {
         guard let serverURL else {
@@ -708,10 +713,12 @@ actor JellyfinClient {
         // POST (e.g. reportPlaybackStopped) would otherwise be applied twice.
         // GET and DELETE are idempotent per HTTP semantics (repeating a
         // DELETE, e.g. unmark-favorite, converges to the same state).
-        let isIdempotent = method == "GET" || method == "DELETE"
+        // Sign-in steps are never retried: the user is watching a spinner, and
+        // retrying an unreachable server multiplied the wait (#476).
+        let isRetryable = (method == "GET" || method == "DELETE") && !isSignInStep
 
         do {
-            let (data, response) = try await urlSession.data(for: request)
+            let (data, response) = try await send(request, isSignInStep: isSignInStep)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw JellyfinError.invalidResponse
@@ -738,7 +745,7 @@ actor JellyfinClient {
             }
 
             // Retry on 5xx server errors
-            if (500...599).contains(httpResponse.statusCode) && isIdempotent && retryCount < maxRetries {
+            if (500...599).contains(httpResponse.statusCode) && isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
                 return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
@@ -755,13 +762,22 @@ actor JellyfinClient {
             throw CancellationError()
         } catch {
             // Retry on network errors (URLError)
-            if isIdempotent && retryCount < maxRetries {
+            if isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
                 return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
             }
             throw JellyfinError.networkError(error)
         }
+    }
+
+    private func send(_ request: URLRequest, isSignInStep: Bool) async throws -> (Data, URLResponse) {
+        guard isSignInStep else { return try await urlSession.data(for: request) }
+        return try await SignInNetworking.data(
+            for: request,
+            session: signInSession,
+            trustPolicy: certificateDelegate
+        )
     }
 
     func authenticate(username: String, password: String) async throws -> AuthenticationResult {
@@ -772,7 +788,8 @@ actor JellyfinClient {
             path: "/Users/AuthenticateByName",
             method: "POST",
             body: bodyData,
-            isAuthRequest: true
+            isAuthRequest: true,
+            isSignInStep: true
         )
 
         let result = try JSONDecoder().decode(AuthenticationResult.self, from: data)
@@ -1521,9 +1538,10 @@ actor JellyfinClient {
         enum CodingKeys: String, CodingKey { case serverName = "ServerName" }
     }
 
-    /// Unauthenticated server info — used to label saved servers.
+    /// Unauthenticated server info — used to label saved servers. Only called
+    /// while signing in, so it runs on the short sign-in budget.
     func getPublicSystemInfo() async throws -> PublicSystemInfo {
-        let data = try await request(path: "/System/Info/Public")
+        let data = try await request(path: "/System/Info/Public", isSignInStep: true)
         return try JSONDecoder().decode(PublicSystemInfo.self, from: data)
     }
 

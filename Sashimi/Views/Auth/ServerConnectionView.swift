@@ -7,6 +7,7 @@ enum ServerConnectionField {
     case username
     case password
     case connectButton
+    case cancelSignInButton
 }
 
 enum ServerValidationState: Equatable {
@@ -51,6 +52,8 @@ struct ServerConnectionView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showDiscoveredServers = false
+    /// The sign-in attempt in flight, so the user can cancel it (#476).
+    @State private var signInTask: Task<Void, Never>?
 
     // Validation state
     @State private var serverAddressValidation: ServerValidationState = .idle
@@ -258,6 +261,15 @@ struct ServerConnectionView: View {
                 }
                 .disabled(isLoading || !isFormValid)
                 .focused($focusedField, equals: .connectButton)
+
+                // The Connect button is disabled while signing in, so this is
+                // where focus lands: always a way out of a slow attempt.
+                if isLoading {
+                    Button("Cancel") {
+                        cancelSignIn()
+                    }
+                    .focused($focusedField, equals: .cancelSignInButton)
+                }
             }
             .frame(maxWidth: 600)
         }
@@ -392,16 +404,31 @@ struct ServerConnectionView: View {
 
         isLoading = true
         errorMessage = nil
+        focusedField = .cancelSignInButton
 
-        Task {
+        signInTask = Task {
             do {
                 try await sessionManager.login(serverURL: url, username: username, password: password)
+                guard !Task.isCancelled else { return }
                 onComplete?()
             } catch {
-                errorMessage = error.localizedDescription
+                // A cancelled attempt has already reset the form.
+                guard !Task.isCancelled else { return }
+                errorMessage = SignInFailure.message(for: error) ?? error.localizedDescription
             }
             isLoading = false
+            signInTask = nil
         }
+    }
+
+    /// Abandons the attempt in flight and returns the form to idle, with no
+    /// error: the user chose to stop, nothing failed.
+    private func cancelSignIn() {
+        signInTask?.cancel()
+        signInTask = nil
+        isLoading = false
+        errorMessage = nil
+        focusedField = .connectButton
     }
 }
 
