@@ -135,7 +135,7 @@ struct GuideView: View {
                 .foregroundStyle(SashimiTheme.textPrimary)
             Spacer()
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(context.date.formatted(date: .abbreviated, time: .shortened))
+                Text(ClockTime.dateTime(context.date))
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(SashimiTheme.textSecondary)
             }
@@ -231,7 +231,7 @@ struct GuideView: View {
                     .id("turn-back-\(row.id)")
 
                 ForEach(Array(visible.enumerated()), id: \.element.id) { slot, entry in
-                    GuideBlock(row: row, entry: entry, width: cardWidth, channelNumber: row.channel.number ?? index + 1) {
+                    GuideBlock(row: row, entry: entry, width: cardWidth) {
                         select(row: row, entry: entry)
                     }
                     .focused($focusedCard, equals: CardID(row: row.id, entry: entry.id))
@@ -274,15 +274,6 @@ struct GuideView: View {
                 .fill(Self.railColour(at: index))
                 .frame(width: 4)
                 .padding(.vertical, 2)
-
-            // Number, logo, then name — each centred in the row, the number
-            // leading at the left the way a printed guide set its columns. The
-            // same number the player's bar shows and channel up/down steps.
-            Text("\(row.channel.number ?? index + 1)")
-                .font(.system(size: 28, weight: .heavy, design: .rounded))
-                .foregroundStyle(Self.railColour(at: index))
-                .monospacedDigit()
-                .frame(width: 44, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
                 // The logo travels with the name, on its line.

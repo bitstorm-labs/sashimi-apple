@@ -85,7 +85,7 @@ struct MobileGuideView: View {
                 .accessibilityLabel("Reminders")
             }
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(context.date.formatted(date: .abbreviated, time: .shortened))
+                Text(ClockTime.dateTime(context.date))
                     .font(.subheadline)
                     .foregroundStyle(MobileColors.textSecondary)
             }
@@ -189,13 +189,6 @@ struct MobileGuideView: View {
                 .frame(width: 3)
                 .padding(.vertical, 2)
 
-            // Number, logo, then name — each centred in the row.
-            Text("\(row.channel.number ?? index + 1)")
-                .font(.subheadline.weight(.heavy))
-                .foregroundStyle(Self.railColour(at: index))
-                .monospacedDigit()
-                .frame(width: 24, alignment: .leading)
-
             VStack(alignment: .leading, spacing: 3) {
                 // The logo travels with the name, on its line.
                 HStack(alignment: .center, spacing: 6) {
@@ -235,7 +228,7 @@ struct MobileGuideView: View {
             Color.clear.frame(width: max(0, offset(for: firstTick)), height: 28)
                 .id(Self.timelineStart)
             ForEach(ticks, id: \.timeIntervalSince1970) { tick in
-                Text(tick.formatted(date: .omitted, time: .shortened))
+                Text(ClockTime.time(tick))
                     .font(.caption2)
                     .foregroundStyle(MobileColors.textTertiary)
                     .frame(width: 30 * pointsPerMinute, height: 28, alignment: .leading)
@@ -272,7 +265,6 @@ struct MobileGuideView: View {
                     row: row,
                     entry: entry,
                     width: width(for: entry),
-                    channelNumber: row.channel.number ?? viewModel.rows.firstIndex { $0.id == row.id }.map { $0 + 1 },
                     onSelect: { select(row: row, entry: entry) }
                 )
             }
@@ -359,7 +351,6 @@ struct MobileGuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
-    var channelNumber: Int?
     let onSelect: () -> Void
 
     @ObservedObject private var reminders = StationReminders.shared
@@ -403,8 +394,8 @@ struct MobileGuideBlock: View {
                 }
 
                 Text(Calendar.current.isDateInToday(entry.startUtc)
-                     ? entry.startUtc.formatted(date: .omitted, time: .shortened)
-                     : entry.startUtc.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
+                     ? ClockTime.time(entry.startUtc)
+                     : ClockTime.weekdayTime(entry.startUtc))
                     .font(.caption2)
                     .foregroundStyle(MobileColors.textTertiary)
                     .lineLimit(1)
@@ -429,7 +420,6 @@ struct MobileGuideBlock: View {
                     reminders.toggle(.init(
                         channelID: row.channel.id,
                         channelName: row.channel.name,
-                        channelNumber: channelNumber,
                         title: row.title(for: entry),
                         startsAt: entry.startUtc
                     ))
@@ -441,7 +431,7 @@ struct MobileGuideBlock: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.channel.name), \(row.title(for: entry)), "
-            + (isNow ? "now airing" : "at \(entry.startUtc.formatted(date: .omitted, time: .shortened))"))
+            + (isNow ? "now airing" : "at \(ClockTime.time(entry.startUtc))"))
     }
 
     private var rowContentHeight: CGFloat { 64 }
@@ -499,8 +489,8 @@ struct MobileGuideDetailSheet: View {
     }
 
     private var timing: String {
-        let start = entry.startUtc.formatted(date: .omitted, time: .shortened)
-        let end = entry.endUtc.formatted(date: .omitted, time: .shortened)
+        let start = ClockTime.time(entry.startUtc)
+        let end = ClockTime.time(entry.endUtc)
         var parts = ["\(start) – \(end)"]
         if let subtitle = row.subtitle(for: entry) { parts.append(subtitle) }
         if let certificate = item?.officialRating { parts.append(certificate) }

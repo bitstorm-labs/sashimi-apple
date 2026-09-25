@@ -887,11 +887,10 @@ final class PlayerViewModel: ObservableObject {
     // MARK: - Stations: flipping and idents
 
     /// The banner that flashes up when a station is tuned, changed or moves on
-    /// to its next programme — a cable box's info banner: number, station, what
-    /// is on and how far in, and what is next.
+    /// to its next programme — a cable box's info banner: station, what is on
+    /// and how far in, and what is next.
     struct StationBanner: Equatable, Identifiable {
         let id = UUID()
-        let number: Int?
         let channelName: String
         let channelDescription: String?
         let title: String
@@ -913,7 +912,6 @@ final class PlayerViewModel: ObservableObject {
     /// The card a channel shows during a break between slots.
     struct UpNext: Equatable {
         let logoURL: URL?
-        let number: Int?
         let channelName: String
         let title: String
         let detail: String?
@@ -942,7 +940,6 @@ final class PlayerViewModel: ObservableObject {
         }
         return UpNext(
             logoURL: logoURL,
-            number: station?.number,
             channelName: (station?.name ?? "SashimiTV").uppercased(),
             title: isEpisode ? (item.seriesName ?? item.name).cleanedYouTubeTitle : item.name,
             detail: detail,
@@ -950,10 +947,9 @@ final class PlayerViewModel: ObservableObject {
         )
     }
     /// The station's mark, laid faintly over the picture while it plays:
-    /// white logo, number and name.
+    /// white logo and name.
     struct StationMark: Equatable {
         let logoURL: URL?
-        let number: Int?
         let name: String
     }
     @Published private(set) var stationMark: StationMark?
@@ -1022,7 +1018,7 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("channel", station.id)
         ])
         rejoinLive()
-        // The new station's bar goes up before its stream loads: the number
+        // The new station's bar goes up before its stream loads: the station
         // should answer the press at once, the picture can take a moment.
         await announceStation()
         await loadMedia(item: item)
@@ -1037,8 +1033,7 @@ final class PlayerViewModel: ObservableObject {
         guard let channel = channelContext else { return }
         if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
         let key = Self.stationKey(channel.channelID)
-        let index = stations.firstIndex { Self.stationKey($0.id) == key }
-        let station = index.map { stations[$0] }
+        let station = stations.first { Self.stationKey($0.id) == key }
 
         let guide = (try? await client.getChannelGuide(hours: 0.5)) ?? []
         let row = guide.first { Self.stationKey($0.id) == key }
@@ -1070,14 +1065,12 @@ final class PlayerViewModel: ObservableObject {
         }
         stationMark = StationMark(
             logoURL: monoURL,
-            number: station?.number ?? row?.number,
             name: (station?.name ?? row?.name ?? "SashimiTV").uppercased()
         )
         var behind = secondsBehindLive
         if let since = stationPausedAt { behind += clock.timeIntervalSince(since) }
 
         stationBanner = StationBanner(
-            number: station?.number ?? row?.number ?? index.map { $0 + 1 },
             channelName: station?.name ?? row?.name ?? "SashimiTV",
             channelDescription: station?.description,
             title: title,

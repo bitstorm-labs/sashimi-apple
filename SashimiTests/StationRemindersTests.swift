@@ -5,7 +5,7 @@ final class StationRemindersTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func reminder(_ title: String, at date: Date) -> StationReminders.Reminder {
-        .init(channelID: "c", channelName: "Unscripted", channelNumber: 3, title: title, startsAt: date)
+        .init(channelID: "c", channelName: "Unscripted", title: title, startsAt: date)
     }
 
     func testNothingIsAnnouncedBeforeTheFiveMinuteLead() {
