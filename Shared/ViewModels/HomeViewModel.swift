@@ -11,7 +11,6 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Ho
 final class HomeViewModel: ObservableObject {
     @Published var continueWatchingItems: [BaseItemDto] = []
     @Published var continueWatchingLibraryNames: [String: String] = [:]  // itemId -> libraryName
-    @Published var recentlyAddedItems: [BaseItemDto] = []
     @Published var heroItems: [BaseItemDto] = []
     @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
     @Published var libraries: [JellyfinLibrary] = []
@@ -40,13 +39,11 @@ final class HomeViewModel: ObservableObject {
         do {
             async let resumeItems = client.getResumeItems()
             async let nextUpItems = client.getNextUp()
-            async let latestItems = client.getLatestMedia()
             async let libraryViews = client.getLibraryViews()
 
-            let (resume, nextUp, latest, libs) = try await (resumeItems, nextUpItems, latestItems, libraryViews)
+            let (resume, nextUp, libs) = try await (resumeItems, nextUpItems, libraryViews)
 
             continueWatchingItems = mergeAndSortContinueItems(resume: resume, nextUp: nextUp)
-            recentlyAddedItems = latest
             libraries = libs.filter { isMediaLibrary($0) }
 
             saveContinueWatchingForTopShelf()
