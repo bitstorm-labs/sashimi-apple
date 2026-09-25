@@ -19,7 +19,11 @@ final class HomeViewModel: ObservableObject {
     @Published var error: Error?
 
     private let client = JellyfinClient.shared
+    #if os(tvOS)
+    /// Shared with the Top Shelf extension. iOS has no such extension and no
+    /// app-group entitlement, so the write is tvOS-only (#311).
     private let appGroupIdentifier = "group.com.mondominator.sashimi"
+    #endif
 
     private let dateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -49,7 +53,9 @@ final class HomeViewModel: ObservableObject {
             recentlyAddedItems = latest
             libraries = libs.filter { isMediaLibrary($0) }
 
+            #if os(tvOS)
             saveContinueWatchingForTopShelf()
+            #endif
             await loadContinueWatchingLibraryNames()
             await loadHeroItems()
         } catch {
@@ -101,6 +107,7 @@ final class HomeViewModel: ObservableObject {
         continueWatchingLibraryNames = libraryNames
     }
 
+    #if os(tvOS)
     private func saveContinueWatchingForTopShelf() {
         guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
               let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return }
@@ -146,10 +153,9 @@ final class HomeViewModel: ObservableObject {
         }
 
         defaults.set(items, forKey: "continueWatchingItems")
-        #if os(tvOS)
         TVTopShelfContentProvider.topShelfContentDidChange()
-        #endif
     }
+    #endif
 
     /// One library's latest-media result, tagged with its position so the
     /// concurrent fetches can be put back into the original library order.
