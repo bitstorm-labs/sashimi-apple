@@ -1,6 +1,5 @@
 import SwiftUI
 import AVKit
-import NukeUI
 
 // MARK: - SwiftUI Bridge
 
@@ -58,55 +57,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // Add content overlay (subtitles, info, clock)
         setupOverlay(on: playerVC, container: container, context: context)
 
-        let coordinator = context.coordinator
-        container.canStepStation = { [weak coordinator] in
-            guard let coordinator, let model = coordinator.currentViewModel else { return false }
-            return model.isWatchingStation && !coordinator.controlsVisible && !model.showingSkipButton
-        }
-        container.onStationStep = { [weak coordinator] delta in
-            guard let model = coordinator?.currentViewModel else { return }
-            Task { await model.changeStation(by: delta) }
-        }
-        container.onStationInfo = { [weak coordinator] in
-            guard let model = coordinator?.currentViewModel else { return }
-            // A click toggles the bar, except while paused, when it stays up.
-            if let banner = model.stationBanner, !banner.isPaused {
-                model.dismissStationBanner(banner.id)
-            } else {
-                Task { await model.announceStation() }
-            }
-        }
-        container.onStationPlayPause = { [weak coordinator] in
-            coordinator?.currentViewModel?.toggleStationPause()
-        }
-        container.onStationOptions = { [weak container, weak coordinator] in
-            guard let container, let model = coordinator?.currentViewModel else { return }
-            StationOptions.present(from: container, model: model)
-        }
-        container.onStationExit = onDismiss
-        container.onStationGuide = { [weak container, weak coordinator] in
-            guard let container, let model = coordinator?.currentViewModel,
-                  container.presentedViewController == nil else { return }
-            model.dismissStationBannerNow()
-            // The guide over the live picture, the way a cable box opens it:
-            // the channel keeps playing behind; an airing pick tunes it here.
-            // Weak: the presentation owns the controller; a strong capture here
-            // would be a cycle through its own root view.
-            weak var host: UIHostingController<GuideView>?
-            let guide = GuideView(
-                onTuneStation: { id in
-                    host?.dismiss(animated: true)
-                    Task { await model.tuneStation(id: id) }
-                },
-                onClose: { host?.dismiss(animated: true) }
-            )
-            let controller = UIHostingController(rootView: guide)
-            controller.modalPresentationStyle = .overFullScreen
-            controller.view.backgroundColor = .clear
-            host = controller
-            container.present(controller, animated: true)
-        }
-        container.installStationFlipping()
+        container.wireStationControls(coordinator: context.coordinator, onExit: onDismiss)
 
         return container
     }
@@ -329,48 +280,6 @@ class PlayerContainerVC: UIViewController {
     var onStationExit: (() -> Void)?
     var onStationGuide: (() -> Void)?
 
-    /// Every press a channel uses, taken before AVKit sees it. With the
-    /// transport bar off (see `showsAVKitControls`) these are the only
-    /// controls a channel has; left and right are swallowed so they cannot
-    /// seek a live channel.
-    func installStationFlipping() {
-        let active: () -> Bool = { [weak self] in self?.canStepStation() ?? false }
-        let presses: [(UIPress.PressType, Int)] = [
-            // Up is channel up — the higher number — as on a cable remote and on Roku.
-            (.upArrow, 1), (.downArrow, -1), (.leftArrow, 4), (.rightArrow, 4), (.playPause, 2), (.menu, 3)
-        ]
-        for (type, delta) in presses {
-            let press = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
-            press.delaysTouchesBegan = false
-            press.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            press.delta = delta
-            press.shouldStep = active
-            view.addGestureRecognizer(press)
-        }
-        let select = StationSelectRecognizer(target: self, action: #selector(stationSelect(_:)))
-        select.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
-        select.isActive = active
-        view.addGestureRecognizer(select)
-    }
-
-    @objc private func stationStep(_ recognizer: StationStepRecognizer) {
-        switch recognizer.delta {
-        case -1, 1: onStationStep?(recognizer.delta)
-        case 2: onStationPlayPause?()
-        case 3: onStationExit?()
-        case 4: onStationGuide?()
-        default: break
-        }
-    }
-
-    @objc private func stationSelect(_ recognizer: StationSelectRecognizer) {
-        guard recognizer.state == .ended else { return }
-        switch recognizer.kind {
-        case .click: onStationInfo?()
-        case .hold: onStationOptions?()
-        }
-    }
-
     /// When the skip button is visible, route the focus engine to it. Otherwise
     /// give focus back to the AVPlayerViewController so the user retains
     /// normal playback controls.
@@ -588,42 +497,9 @@ struct PlayerContentOverlay: View {
                 .allowsHitTesting(false)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let mark = viewModel.stationMark, !controlsVisible {
-                // The station's mark, faint in the corner, the way broadcast TV
-                // marks its picture: logo, number and name. Only while the info
-                // bar is down.
-                VStack {
-                    HStack {
-                        // Stacked — logo over name — on one centred column.
-                        VStack(spacing: 6) {
-                            if let logo = mark.logoURL {
-                                LazyImage(url: logo) { state in
-                                    if let image = state.image {
-                                        image.resizable().aspectRatio(contentMode: .fit)
-                                    }
-                                }
-                                // A new identity per station: the image view otherwise
-                                // kept the previous station's logo after a flip.
-                                .id(logo)
-                                .frame(width: 72, height: 72)
-                            }
-                            Text(mark.name)
-                                .font(.system(size: 16, weight: .heavy))
-                                .tracking(1.2)
-                        }
-                        .foregroundStyle(.white)
-                        Spacer()
-                    }
-                    .opacity(0.45)
-                    Spacer()
-                }
-                // Measured from the screen edge, not the overscan safe area
-                // (~80pt sides, ~60pt top), so it can sit tight in the corner
-                // the way a broadcast mark does.
-                .padding(.leading, 64)
-                .padding(.top, 47)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                .transition(.opacity)
+                StationMarkView(mark: mark)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
 
             // Top info bar + clock (only when transport bar is visible)

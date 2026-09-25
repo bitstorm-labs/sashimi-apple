@@ -224,3 +224,42 @@ struct StationBannerView: View {
         .background(.black.opacity(0.4))
     }
 }
+
+/// The station's mark, faint in the corner while a channel plays, the way
+/// broadcast TV marks its picture: logo over name. Only while the bar is down.
+struct StationMarkView: View {
+    let mark: PlayerViewModel.StationMark
+
+    var body: some View {
+        VStack {
+            HStack {
+                // Stacked — logo over name — on one centred column.
+                VStack(spacing: 6) {
+                    if let logo = mark.logoURL {
+                        LazyImage(url: logo) { state in
+                            if let image = state.image {
+                                image.resizable().aspectRatio(contentMode: .fit)
+                            }
+                        }
+                        // A new identity per station: the image view otherwise
+                        // kept the previous station's logo after a flip.
+                        .id(logo)
+                        .frame(width: 72, height: 72)
+                    }
+                    Text(mark.name)
+                        .font(.system(size: 16, weight: .heavy))
+                        .tracking(1.2)
+                }
+                .foregroundStyle(.white)
+                Spacer()
+            }
+            .opacity(0.45)
+            Spacer()
+        }
+        // Measured from the screen edge, not the overscan safe area (~80pt
+        // sides, ~60pt top), so it can sit tight in the corner.
+        .padding(.leading, 64)
+        .padding(.top, 47)
+        .ignoresSafeArea()
+    }
+}
