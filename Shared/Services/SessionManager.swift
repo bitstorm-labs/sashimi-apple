@@ -272,9 +272,12 @@ final class SessionManager: ObservableObject {
     // MARK: - Persistence
 
     private func loadServers() {
-        if let data = UserDefaults.standard.data(forKey: serversKey),
-           let list = try? JSONDecoder().decode([ServerConfig].self, from: data) {
-            servers = list
+        if let data = UserDefaults.standard.data(forKey: serversKey) {
+            do {
+                servers = try JSONDecoder().decode([ServerConfig].self, from: data)
+            } catch {
+                logger.error("Could not decode saved server metadata: \(error.localizedDescription, privacy: .public)")
+            }
         }
         activeServerId = UserDefaults.standard.string(forKey: activeServerIdKey)
         defaultServerId = UserDefaults.standard.string(forKey: defaultServerIdKey)
