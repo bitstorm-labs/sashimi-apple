@@ -101,13 +101,12 @@ struct MobileDetailView: View {
         DateFormatting.formatLongDate(item.premiereDate)
     }
 
-    /// "Ends at 9:41 PM" from now + runtime (tvOS parity, accent-colored)
+    /// "Ends at 9:41 PM" from now + what is left to watch (tvOS parity, accent-colored)
     private var endsAtText: String? {
         guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
-        let end = Date().addingTimeInterval(Double(ticks) / 10_000_000)
-        let fmt = DateFormatter()
-        fmt.timeStyle = .short
-        return "Ends at \(fmt.string(from: end))"
+        let remaining = ticks - (item.userData?.playbackPositionTicks ?? 0)
+        guard remaining > 0 else { return nil }
+        return "Ends at \(ClockTime.time(Date().addingTimeInterval(Double(remaining) / 10_000_000)))"
     }
 
     private var isYouTubeChannelEpisode: Bool {
