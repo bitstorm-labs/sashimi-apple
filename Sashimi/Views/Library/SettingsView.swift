@@ -611,6 +611,7 @@ struct SettingsToggleRow: View {
 
 struct PlaybackSettingsView: View {
     @StateObject private var settings = PlaybackSettings.shared
+    @ObservedObject private var viewModes = VideoViewModeStore.shared
     /// Nil until the client answers; drives the Auto-quality diagnostics row.
     @State private var bandwidthStatus: JellyfinClient.BandwidthStatus?
 
@@ -643,6 +644,9 @@ struct PlaybackSettingsView: View {
                 // Video Player Section
                 SettingsSection(title: "Video Player") {
                     SettingsToggleRow(title: "Show Episode Navigation Controls", isOn: $settings.showEpisodeNavigationControls)
+                    SettingsNavigationRow(title: "Default View Mode", subtitle: viewModes.defaultMode.displayName) {
+                        ViewModeSettingsView()
+                    }
                 }
 
                 // Playback Behavior Section

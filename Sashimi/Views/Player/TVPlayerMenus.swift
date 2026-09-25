@@ -64,7 +64,43 @@ extension TVPlayerView {
         )
         menus.append(qualityMenu)
 
+        menus.append(Self.viewModeMenu(store: viewModes))
+
         return menus
+    }
+
+    /// "View Mode": Normal, Zoom or Stretch for this session, plus "Use for
+    /// All Videos" to save the active mode as the default. The entry's
+    /// subtitle names the active mode.
+    static func viewModeMenu(store: VideoViewModeStore) -> UIMenu {
+        let active = store.activeMode
+        let modeActions = VideoViewMode.allCases.map { mode in
+            UIAction(
+                title: mode.displayName,
+                image: UIImage(systemName: mode.systemImage),
+                state: mode == active ? .on : .off
+            ) { _ in
+                store.choose(mode)
+            }
+        }
+        // Checked once the active mode already is the default, so the menu
+        // answers "is this saved?" without a second screen.
+        let useForAll = UIAction(
+            title: "Use for All Videos",
+            subtitle: "Default: \(store.defaultMode.displayName)",
+            state: active == store.defaultMode ? .on : .off
+        ) { _ in
+            store.useActiveModeForAllVideos()
+        }
+        return UIMenu(
+            title: "View Mode",
+            subtitle: active.displayName,
+            image: UIImage(systemName: "aspectratio"),
+            children: [
+                UIMenu(options: .displayInline, children: modeActions),
+                UIMenu(options: .displayInline, children: [useForAll])
+            ]
+        )
     }
 
     private func audioMenu() -> UIMenu {

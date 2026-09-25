@@ -9,6 +9,9 @@ struct TVPlayerView: UIViewControllerRepresentable {
     let item: BaseItemDto
     let onDismiss: () -> Void
     @ObservedObject var playbackSettings = PlaybackSettings.shared
+    /// Observed so a view-mode pick re-runs `updateUIViewController`, which
+    /// applies it to the live picture without restarting playback.
+    @ObservedObject var viewModes = VideoViewModeStore.shared
 
     private var usesEpisodeTransportControls: Bool {
         viewModel.transitionState.usesEpisodeTransportControls(
@@ -32,6 +35,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         playerVC.player = player
         playerVC.showsPlaybackControls = showsAVKitControls
         playerVC.delegate = context.coordinator
+        playerVC.videoGravity = viewModes.activeMode.videoGravity
 
         // Subtitles are rendered by our own overlay and selected through the
         // custom captions.bubble menu below, but AVPlayerViewController also
@@ -68,6 +72,13 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // Update player if changed (quality switch recreates player)
         if playerVC.player !== player {
             playerVC.player = player
+        }
+
+        // The gravity lives on the controller, not the player, so it survives
+        // the player swap above and every stream rebuild.
+        let gravity = viewModes.activeMode.videoGravity
+        if playerVC.videoGravity != gravity {
+            playerVC.videoGravity = gravity
         }
 
         // Rebuild menus when selection state changes
