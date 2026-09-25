@@ -830,7 +830,40 @@ actor JellyfinClient {
         )
 
         let response = try JSONDecoder().decode(ItemsResponse.self, from: data)
-        return response.items
+        // Jellyfin's Next Up hands a never-started show a special (Ted Lasso
+        // S0E9, Battlestar Galactica S0E1 on a real server). Specials come
+        // after the regular seasons, so swap one for the first unwatched
+        // regular episode while there is one.
+        var items = response.items
+        for index in items.indices where items[index].isSpecial {
+            if let seriesId = items[index].seriesId,
+               let regular = try? await firstRegularEpisode(seriesId: seriesId, unplayedOnly: true) {
+                items[index] = regular
+            }
+        }
+        return items
+    }
+
+    /// The first regular (non-special) episode of a series, optionally the
+    /// first unwatched one. Sorted by season, Season 0 comes first, so this
+    /// steps past however many specials there are.
+    func firstRegularEpisode(seriesId: String, unplayedOnly: Bool) async throws -> BaseItemDto? {
+        // swiftlint:disable:next discouraged_optional_boolean
+        let isPlayed: Bool? = unplayedOnly ? false : nil
+        var specials = 0
+        if let season = try await getSeasons(seriesId: seriesId).first(where: { $0.indexNumber == 0 }) {
+            specials = try await getItems(
+                parentId: season.id, includeTypes: [.episode], limit: 1, isPlayed: isPlayed
+            ).totalRecordCount
+        }
+        return try await getItems(
+            parentId: seriesId,
+            includeTypes: [.episode],
+            sortBy: "ParentIndexNumber,IndexNumber",
+            limit: 1,
+            startIndex: specials,
+            isPlayed: isPlayed
+        ).items.first
     }
 
     func getLatestMedia(parentId: String? = nil, limit: Int = 16, includeWatched: Bool = false, collectionType: String? = nil, groupItems: Bool = true) async throws -> [BaseItemDto] {

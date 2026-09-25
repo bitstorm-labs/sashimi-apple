@@ -1318,7 +1318,7 @@ struct MediaDetailView: View {
                 return
             }
             // If no next up, find first unwatched episode
-            for season in seasons {
+            for season in seasons.specialsLast {
                 let eps = try await JellyfinClient.shared.getEpisodes(seriesId: item.id, seasonId: season.id)
                 if let firstUnwatched = eps.first(where: { !($0.userData?.played ?? false) }) {
                     nextEpisodeToPlay = firstUnwatched

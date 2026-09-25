@@ -1298,7 +1298,7 @@ struct MobileDetailView: View {
             let seasonsToCheck = preferredSeasonID
                 .flatMap { seasonID in seasons.filter { $0.id == seasonID } }
                 ?? seasons
-            for season in seasonsToCheck {
+            for season in seasonsToCheck.specialsLast {
                 let eps = try await JellyfinClient.shared.getEpisodes(
                     seriesId: contentSeriesId,
                     seasonId: season.id
