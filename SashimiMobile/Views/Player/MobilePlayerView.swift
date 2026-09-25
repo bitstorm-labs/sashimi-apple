@@ -98,6 +98,12 @@ struct MobilePlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            // A break between slots on a channel covers everything, loading included.
+            if let card = viewModel.upNext {
+                UpNextCardView(card: card)
+                    .zIndex(10)
+            }
+
             if let player = viewModel.player {
                 PlayerViewController(
                     player: player,

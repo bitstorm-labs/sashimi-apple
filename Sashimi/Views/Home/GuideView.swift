@@ -11,6 +11,11 @@ import SwiftUI
 struct GuideView: View {
     var onBackAtRoot: (() -> Void)?
     var focusNamespace: Namespace.ID?
+    /// Set when the guide is laid over a playing channel: picking something
+    /// airing tunes the player already on screen (rather than opening a second
+    /// one), the background lets the picture show through, and Menu closes.
+    var onTuneStation: ((String) -> Void)?
+    var onClose: (() -> Void)?
 
     @StateObject private var viewModel = GuideViewModel(hours: 168)
     @State private var tuned: TunedChannel?
@@ -86,7 +91,8 @@ struct GuideView: View {
             }
             Spacer(minLength: 0)
         }
-        .background(SashimiTheme.background)
+        .background(onTuneStation == nil ? SashimiTheme.background : Color.black.opacity(0.78))
+        .onExitCommand(perform: onClose)
         .task {
             await viewModel.load()
             // A week of guide is ~600 KB; refetch it every quarter hour, and
@@ -260,7 +266,7 @@ struct GuideView: View {
     /// come and go, and the grid to the right only ever says what is on. The
     /// name alone in a grey capsule left the column carrying none of that.
     private func channelLabel(_ row: GuideRow, index: Int) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             // The rail runs in row order rather than being derived from the
             // channel's identity, so the palette reads as an index down the
             // screen and neighbouring channels never land on the same colour.
@@ -269,14 +275,21 @@ struct GuideView: View {
                 .frame(width: 4)
                 .padding(.vertical, 2)
 
+            // Number, logo, then name — each centred in the row, the number
+            // leading at the left the way a printed guide set its columns. The
+            // same number the player's bar shows and channel up/down steps.
+            Text("\(row.channel.number ?? index + 1)")
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .foregroundStyle(Self.railColour(at: index))
+                .monospacedDigit()
+                .frame(width: 44, alignment: .leading)
+
             VStack(alignment: .leading, spacing: 5) {
-                // Numbered in guide order — the same number the player's banner
-                // shows and channel up/down steps through.
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("\(row.channel.number ?? index + 1)")
-                        .font(.system(size: 21, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Self.railColour(at: index))
-                        .monospacedDigit()
+                // The logo travels with the name, on its line.
+                HStack(alignment: .center, spacing: 10) {
+                    if row.channel.logo != nil {
+                        ChannelLogoView(channelId: row.channel.id, logo: row.channel.logo, size: 30)
+                    }
                     Text(row.channel.name.uppercased())
                         .font(.system(size: 21, weight: .heavy))
                         .tracking(1.2)
@@ -323,6 +336,10 @@ struct GuideView: View {
         // detail instead, because you cannot watch what has not aired.
         guard entry.isAiring(at: Date()) else {
             selected = GuideSelection(row: row, entry: entry)
+            return
+        }
+        if let onTuneStation {
+            onTuneStation(row.channel.id)
             return
         }
         Task {

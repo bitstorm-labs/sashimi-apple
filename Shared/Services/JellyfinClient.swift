@@ -1389,6 +1389,20 @@ actor JellyfinClient {
         return components?.url
     }
 
+    /// A channel's logo (plugin 0.8.0+). The key is in the URL so a seasonal
+    /// swap is a new URL rather than a stale cached image; `mono` is the white
+    /// version laid over the picture.
+    func channelLogoURL(channelId: String, key: String, mono: Bool = false) -> URL? {
+        guard let serverURL,
+              var components = URLComponents(
+                url: serverURL.appendingPathComponent("/VirtualChannels/\(channelId)/Logo"),
+                resolvingAgainstBaseURL: false
+              ) else { return nil }
+        components.queryItems = [URLQueryItem(name: "key", value: key)]
+            + (mono ? [URLQueryItem(name: "style", value: "mono")] : [])
+        return components.url
+    }
+
     func imageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
         guard let serverURL else { return nil }
 

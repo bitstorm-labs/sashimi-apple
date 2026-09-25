@@ -113,12 +113,7 @@ final class GuideViewModel: ObservableObject {
             guard let now = try await client.getChannelNowPlaying(channelId: channelID) else { return nil }
             return (
                 now.itemId,
-                ChannelPlaybackContext(
-                    channelID: channelID,
-                    startPositionSeconds: now.startPositionSeconds,
-                    endsAt: now.endUtc,
-                    nextItemID: now.nextItemId
-                )
+                ChannelPlaybackContext(channelID: channelID, now: now)
             )
         } catch {
             return nil

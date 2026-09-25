@@ -116,12 +116,7 @@ final class ChannelsViewModel: ObservableObject {
             offAirChannelIDs.remove(channel.id)
             return (
                 now.itemId,
-                ChannelPlaybackContext(
-                    channelID: channel.id,
-                    startPositionSeconds: now.startPositionSeconds,
-                    endsAt: now.endUtc,
-                    nextItemID: now.nextItemId
-                )
+                ChannelPlaybackContext(channelID: channel.id, now: now)
             )
         } catch {
             return nil

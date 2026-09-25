@@ -12,6 +12,8 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
     /// The channel number the server assigned (plugin 0.7.0+): scattered,
     /// fixed, the same on every client. Absent from older servers.
     var number: Int?
+    /// The logo key in effect today (plugin 0.8.0+); see `JellyfinClient.channelLogoURL`.
+    var logo: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -20,6 +22,7 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
         case timeZoneId = "TimeZoneId"
         case daypartCount = "DaypartCount"
         case number = "Number"
+        case logo = "Logo"
     }
 }
 
@@ -38,6 +41,9 @@ struct ChannelNowPlaying: Codable, Equatable {
     let startUtc: Date
     let endUtc: Date
     let nextItemId: String?
+    /// The channel is between slots (plugin 0.9.0+): `itemId` starts at
+    /// `startUtc`, from its beginning; show "up next" until then.
+    var isBreak = false
 
     enum CodingKeys: String, CodingKey {
         case itemId = "ItemId"
@@ -45,6 +51,7 @@ struct ChannelNowPlaying: Codable, Equatable {
         case startUtc = "StartUtc"
         case endUtc = "EndUtc"
         case nextItemId = "NextItemId"
+        case isBreak = "IsBreak"
     }
 
     init(
@@ -52,13 +59,15 @@ struct ChannelNowPlaying: Codable, Equatable {
         startPositionSeconds: Double,
         startUtc: Date,
         endUtc: Date,
-        nextItemId: String?
+        nextItemId: String?,
+        isBreak: Bool = false
     ) {
         self.itemId = itemId
         self.startPositionSeconds = startPositionSeconds
         self.startUtc = startUtc
         self.endUtc = endUtc
         self.nextItemId = nextItemId
+        self.isBreak = isBreak
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +75,7 @@ struct ChannelNowPlaying: Codable, Equatable {
         itemId = try container.decode(String.self, forKey: .itemId)
         startPositionSeconds = try container.decode(Double.self, forKey: .startPositionSeconds)
         nextItemId = try container.decodeIfPresent(String.self, forKey: .nextItemId)
+        isBreak = try container.decodeIfPresent(Bool.self, forKey: .isBreak) ?? false
 
         // Jellyfin serialises .NET DateTime with up to seven fractional digits
         // ("...:47.5249994Z"). JSONDecoder's .iso8601 strategy rejects any
@@ -97,6 +107,8 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
     let description: String?
     let programs: [GuideEntry]
     var number: Int?
+    /// The logo key in effect today (plugin 0.8.0+).
+    var logo: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -104,6 +116,7 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
         case description = "Description"
         case programs = "Programs"
         case number = "Number"
+        case logo = "Logo"
     }
 }
 
