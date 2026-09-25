@@ -18,7 +18,7 @@ struct UpNextCardView: View {
     private let accent = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
 
     private func time(_ date: Date) -> String {
-        date.formatted(date: .omitted, time: .shortened)
+        ClockTime.time(date)
     }
 
     var body: some View {

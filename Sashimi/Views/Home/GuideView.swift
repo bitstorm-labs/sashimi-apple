@@ -135,7 +135,7 @@ struct GuideView: View {
                 .foregroundStyle(SashimiTheme.textPrimary)
             Spacer()
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(context.date.formatted(date: .abbreviated, time: .shortened))
+                Text(ClockTime.dateTime(context.date))
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(SashimiTheme.textSecondary)
             }

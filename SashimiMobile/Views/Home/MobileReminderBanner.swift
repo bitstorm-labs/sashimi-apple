@@ -88,7 +88,7 @@ struct MobileRemindersList: View {
                 ForEach(reminders.reminders.sorted { $0.startsAt < $1.startsAt }) { reminder in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(reminder.title).font(.headline)
-                        Text("\(reminder.startsAt.formatted(.dateTime.weekday(.wide).hour().minute())) · \(reminder.channelName)")
+                        Text("\(ClockTime.weekdayTime(reminder.startsAt, wide: true)) · \(reminder.channelName)")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .swipeActions {

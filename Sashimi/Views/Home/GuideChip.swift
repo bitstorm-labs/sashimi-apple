@@ -68,7 +68,7 @@ struct RemindersListView: View {
                                         Image(systemName: "bell.slash")
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(reminder.title).font(.system(size: 30, weight: .semibold))
-                                            Text("\(reminder.startsAt.formatted(.dateTime.weekday(.wide).hour().minute())) · \(reminder.channelName)")
+                                            Text("\(ClockTime.weekdayTime(reminder.startsAt, wide: true)) · \(reminder.channelName)")
                                                 .font(.system(size: 22))
                                                 .opacity(0.75)
                                         }

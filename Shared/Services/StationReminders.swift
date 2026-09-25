@@ -111,7 +111,7 @@ final class StationReminders: ObservableObject {
             guard granted else { return }
             let content = UNMutableNotificationContent()
             content.title = reminder.title
-            content.body = "Starts at \(reminder.startsAt.formatted(date: .omitted, time: .shortened)) on \(reminder.channelName)."
+            content.body = "Starts at \(ClockTime.time(reminder.startsAt)) on \(reminder.channelName)."
             content.sound = .default
             content.userInfo = ["stationID": reminder.channelID]
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireAt)

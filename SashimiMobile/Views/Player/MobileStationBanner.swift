@@ -5,7 +5,7 @@ import SwiftUI
 struct MobileStationBannerView: View {
     let banner: PlayerViewModel.StationBanner
 
-    private func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+    private func time(_ date: Date) -> String { ClockTime.time(date) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -85,7 +85,7 @@ struct StationBannerView: View {
     let banner: PlayerViewModel.StationBanner
 
     private func time(_ date: Date) -> String {
-        date.formatted(date: .omitted, time: .shortened)
+        ClockTime.time(date)
     }
 
     var body: some View {
