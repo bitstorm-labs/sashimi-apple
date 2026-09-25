@@ -549,6 +549,7 @@ final class SessionManager: ObservableObject {
         await JellyfinClient.shared.configure(serverURL: serverURL)
 
         let result = try await JellyfinClient.shared.authenticate(username: username, password: password)
+        try await abandonIfCancelled()
 
         if ensureDefaultServer() {
             saveServers()
@@ -584,6 +585,7 @@ final class SessionManager: ObservableObject {
         if let info = try? await JellyfinClient.shared.getPublicSystemInfo(), let name = info.serverName {
             serverName = name
         }
+        try await abandonIfCancelled()
 
         let config = ServerConfig(
             id: UUID().uuidString,
@@ -610,6 +612,14 @@ final class SessionManager: ObservableObject {
 
         self.logoutReason = nil
         await activate(config, token: result.accessToken)
+    }
+
+    /// The user cancelled sign-in after the server accepted the credentials:
+    /// drop the fresh token rather than save a server they backed out of.
+    private func abandonIfCancelled() async throws {
+        guard Task.isCancelled else { return }
+        await JellyfinClient.shared.clearCredentials()
+        throw CancellationError()
     }
 
     /// Switch the active server (no-op if already active or unknown).
