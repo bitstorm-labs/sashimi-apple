@@ -651,6 +651,9 @@ struct PlaybackSettingsView: View {
                     SettingsToggleRow(title: "Auto-Skip Intro", isOn: $settings.autoSkipIntro)
                     SettingsToggleRow(title: "Auto-Skip Credits", isOn: $settings.autoSkipCredits)
                     SettingsToggleRow(title: "Play Theme Songs", isOn: $settings.playThemeSongs)
+                    SettingsNavigationRow(title: "TV Shuffle", subtitle: settings.tvShuffleMode.title) {
+                        TVShuffleSettingsView()
+                    }
                 }
 
                 Text("Auto-skip requires the intro-skipper plugin on your server.")
@@ -896,6 +899,38 @@ struct ResumeThresholdSettingsView: View {
                         isSelected: resumeThresholdSeconds == option.value
                     ) {
                         resumeThresholdSeconds = option.value
+                    }
+                }
+            }
+            .padding(.horizontal, 60)
+            .padding(.bottom, 60)
+        }
+    }
+}
+
+struct TVShuffleSettingsView: View {
+    @StateObject private var settings = PlaybackSettings.shared
+
+    var body: some View {
+        SettingsContainer {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("TV Shuffle")
+                    .font(Typography.headline)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.bottom, 8)
+
+                Text("What a TV library's Shuffle button plays. A show's own Shuffle always picks a random episode.")
+                    .font(Typography.caption)
+                    .foregroundStyle(SashimiTheme.textSecondary)
+                    .padding(.bottom, 16)
+
+                ForEach(TVShuffleMode.allCases) { mode in
+                    SettingsPickerOptionRow(
+                        title: mode.title,
+                        subtitle: mode.detail,
+                        isSelected: settings.tvShuffleMode == mode
+                    ) {
+                        settings.tvShuffleMode = mode
                     }
                 }
             }

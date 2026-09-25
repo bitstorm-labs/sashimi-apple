@@ -504,14 +504,19 @@ struct LibraryDetailView: View {
     }
 
     /// Shuffle: play one random item from this library — a random movie for a
-    /// movie library, a random episode for a TV library.
+    /// movie library; for a TV library, what the TV Shuffle setting picks.
     private func shufflePlay() async {
         let types: [ItemType] = switch library.collectionType {
         case "tvshows": [.episode]
         case "movies": [.movie]
         default: [.movie, .episode]
         }
-        if let item = try? await JellyfinClient.shared.getRandomItem(parentId: library.id, itemTypes: types) {
+        if let item = try? await TVShuffle.pick(
+            libraryId: library.id,
+            itemTypes: types,
+            mode: PlaybackSettings.shared.tvShuffleMode,
+            source: JellyfinClient.shared
+        ) {
             selectedItemIsYouTube = false
             selectedItem = item
         }
