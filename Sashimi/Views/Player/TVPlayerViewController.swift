@@ -460,9 +460,7 @@ struct PlayerContentOverlay: View {
     }
 
     private var clockText: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = PlaybackSettings.shared.use24HourTime ? "HH:mm" : "h:mm a"
-        return formatter.string(from: clockTime)
+        ClockTime.time(clockTime)
     }
 
     private var finishesAtText: String? {
@@ -477,9 +475,7 @@ struct PlayerContentOverlay: View {
 
         let rate = player.rate > 0 ? Double(player.rate) : 1.0
         let finishDate = clockTime.addingTimeInterval(remainingSeconds / rate)
-        let formatter = DateFormatter()
-        formatter.dateFormat = PlaybackSettings.shared.use24HourTime ? "HH:mm" : "h:mm a"
-        return "Finishes at " + formatter.string(from: finishDate)
+        return "Finishes at " + ClockTime.time(finishDate)
     }
 
     var body: some View {

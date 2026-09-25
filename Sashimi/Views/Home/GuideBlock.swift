@@ -5,7 +5,6 @@ struct GuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
-    var channelNumber: Int?
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -89,7 +88,6 @@ struct GuideBlock: View {
                     reminders.toggle(.init(
                         channelID: row.channel.id,
                         channelName: row.channel.name,
-                        channelNumber: channelNumber,
                         title: row.title(for: entry),
                         startsAt: entry.startUtc
                     ))
@@ -107,9 +105,9 @@ struct GuideBlock: View {
     /// makes a bare time ambiguous.
     private var startLabel: String {
         if Calendar.current.isDateInToday(entry.startUtc) {
-            return entry.startUtc.formatted(date: .omitted, time: .shortened)
+            return ClockTime.time(entry.startUtc)
         }
-        return entry.startUtc.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        return ClockTime.weekdayTime(entry.startUtc)
     }
 
     private var remaining: String {
@@ -118,7 +116,7 @@ struct GuideBlock: View {
     }
 
     private var accessibility: String {
-        let time = entry.startUtc.formatted(date: .omitted, time: .shortened)
+        let time = ClockTime.time(entry.startUtc)
         let when = isNow ? "now airing, \(remaining) left" : "at \(time)"
         return "\(row.channel.name), \(row.title(for: entry)), \(when)"
     }
@@ -173,8 +171,8 @@ struct GuideDetailView: View {
     }
 
     private var timing: String {
-        let start = entry.startUtc.formatted(date: .omitted, time: .shortened)
-        let end = entry.endUtc.formatted(date: .omitted, time: .shortened)
+        let start = ClockTime.time(entry.startUtc)
+        let end = ClockTime.time(entry.endUtc)
         var parts = ["\(start) – \(end)"]
         if let subtitle = row.subtitle(for: entry) { parts.append(subtitle) }
         if let certificate = item?.officialRating { parts.append(certificate) }

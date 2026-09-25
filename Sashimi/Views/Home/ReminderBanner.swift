@@ -50,14 +50,13 @@ extension View {
     func stationReminders() -> some View { modifier(StationReminderHost()) }
 }
 
-/// "Survivor starts in 5 min on 3 · Unscripted — press ⏯ to watch."
+/// "Survivor starts in 5 min on Unscripted — press ⏯ to watch."
 struct ReminderBanner: View {
     let reminder: StationReminders.Reminder
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             let minutes = Int((reminder.startsAt.timeIntervalSince(context.date) / 60).rounded(.up))
-            let station = reminder.channelNumber.map { "\($0) · \(reminder.channelName)" } ?? reminder.channelName
             HStack(spacing: 18) {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 30, weight: .semibold))
@@ -67,8 +66,8 @@ struct ReminderBanner: View {
                         .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(.white)
                     Text(minutes > 0
-                         ? "Starts in \(minutes) min on \(station)"
-                         : "On now on \(station)")
+                         ? "Starts in \(minutes) min on \(reminder.channelName)"
+                         : "On now on \(reminder.channelName)")
                         .font(.system(size: 22))
                         .foregroundStyle(.white.opacity(0.75))
                 }
