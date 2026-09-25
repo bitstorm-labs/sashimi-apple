@@ -65,7 +65,18 @@ struct PlayerView: View {
                 .onAppear { viewModel.loadAllTracks() }
                 .onChange(of: viewModel.tracksVersion) { _, _ in viewModel.loadAllTracks() }
             }
+
+            // A channel's break between slots. Up here rather than in the
+            // player's overlay: tuning in during a break creates no player
+            // until the programme starts, and the overlay lives inside it —
+            // so the card never showed and the viewer sat on a black screen.
+            if let card = viewModel.upNext {
+                UpNextCardView(card: card)
+                    .ignoresSafeArea()
+                    .zIndex(10)
+            }
         }
+        .animation(.easeInOut(duration: 0.5), value: viewModel.upNext)
         .task {
             // One `view.task` line per presentation. Two lines with different
             // `view` tags for the same item means SwiftUI rebuilt the player;

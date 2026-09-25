@@ -135,15 +135,24 @@ struct ChannelCard_View: View {
     }
 
     private var channelBadge: some View {
-        // The channel number leads, the way a cable box labels a station.
-        Text(card.channel.number.map { "\($0) · \(card.channel.name.uppercased())" } ?? card.channel.name.uppercased())
-            .font(.system(size: 18, weight: .heavy))
-            .tracking(1.2)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(.black.opacity(0.6)))
-            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
+        // Number, the station's logo, then its name — number first, the way
+        // a cable box labels a station.
+        HStack(spacing: 8) {
+            if let number = card.channel.number {
+                Text("\(number)")
+            }
+            if card.channel.logo != nil {
+                ChannelLogoView(channelId: card.channel.id, logo: card.channel.logo, mono: true, size: 24)
+            }
+            Text(card.channel.name.uppercased())
+        }
+        .font(.system(size: 18, weight: .heavy))
+        .tracking(1.2)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(.black.opacity(0.6)))
+        .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 1))
     }
 
     private var livePill: some View {

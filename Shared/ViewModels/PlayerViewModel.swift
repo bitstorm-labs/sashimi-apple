@@ -506,6 +506,26 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("hadPlayer", player != nil),
             PlayerDiagnostics.field("previousItem", currentItem?.id)
         ])
+        // Tuned during a break between slots: the programme starts when its
+        // slot opens, so hold on an "up next" card until then. A newer load —
+        // a channel change during the card — supersedes this one.
+        if let until = channelContext?.breakUntil, until > Date(), let context = channelContext {
+            let attempt = playbackAttempt
+            player?.pause()
+            stationBanner = nil
+            upNext = await upNextCard(for: item, channelID: context.channelID, startsAt: until)
+            let wait = until.timeIntervalSinceNow
+            if wait > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+            guard attempt == playbackAttempt, !Task.isCancelled else { return }
+            upNext = nil
+            channelContext = ChannelPlaybackContext(
+                channelID: context.channelID, startPositionSeconds: 0,
+                endsAt: context.endsAt, nextItemID: context.nextItemID)
+        } else {
+            upNext = nil
+        }
         self.offlineSubtitles = offlineSubtitles
         // Tear down everything tied to the previous player first — auto-play
         // next episode reuses this ViewModel, and observers left on the old
@@ -881,9 +901,86 @@ final class PlayerViewModel: ObservableObject {
         let endsAt: Date?
         let nextTitle: String?
         let nextStartsAt: Date?
+        var logoURL: URL?
+        /// Paused on a live channel, and how far behind live that has left
+        /// the viewer — a channel does not wait.
+        var isPaused = false
+        var minutesBehindLive = 0
     }
 
     @Published private(set) var stationBanner: StationBanner?
+
+    /// The card a channel shows during a break between slots.
+    struct UpNext: Equatable {
+        let logoURL: URL?
+        let number: Int?
+        let channelName: String
+        let title: String
+        let detail: String?
+        let startsAt: Date
+    }
+    @Published private(set) var upNext: UpNext?
+
+    private func upNextCard(for item: BaseItemDto, channelID: String, startsAt: Date) async -> UpNext {
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let key = Self.stationKey(channelID)
+        let station = stations.first { Self.stationKey($0.id) == key }
+        var logoURL: URL?
+        if let logo = station?.logo {
+            logoURL = await client.channelLogoURL(channelId: channelID, key: logo)
+        }
+        let isEpisode = item.type == .episode
+        var detail: String?
+        if isEpisode {
+            if item.hasDatedEpisodeNumbers {
+                detail = item.name
+            } else if let season = item.parentIndexNumber, let episode = item.indexNumber {
+                detail = "S\(season)E\(episode) · \(item.name)"
+            }
+        } else if let year = item.productionYear {
+            detail = String(year)
+        }
+        return UpNext(
+            logoURL: logoURL,
+            number: station?.number,
+            channelName: (station?.name ?? "SashimiTV").uppercased(),
+            title: isEpisode ? (item.seriesName ?? item.name).cleanedYouTubeTitle : item.name,
+            detail: detail,
+            startsAt: startsAt
+        )
+    }
+    /// The station's mark, laid faintly over the picture while it plays:
+    /// white logo, number and name.
+    struct StationMark: Equatable {
+        let logoURL: URL?
+        let number: Int?
+        let name: String
+    }
+    @Published private(set) var stationMark: StationMark?
+    private var stationPausedAt: Date?
+    private var secondsBehindLive: TimeInterval = 0
+
+    /// Play/Pause on a channel. Pausing puts the viewer behind live, which the
+    /// banner then says; the next programme boundary (or a channel change)
+    /// rejoins live, because both tune at the channel's current offset.
+    func toggleStationPause() {
+        guard isWatchingStation, let player else { return }
+        if player.rate == 0 {
+            if let since = stationPausedAt { secondsBehindLive += Date().timeIntervalSince(since) }
+            stationPausedAt = nil
+            player.play()
+        } else {
+            player.pause()
+            stationPausedAt = Date()
+        }
+        Task { await announceStation() }
+    }
+
+    /// Back on live: a new programme or station joins at the channel's own offset.
+    private func rejoinLive() {
+        stationPausedAt = nil
+        secondsBehindLive = 0
+    }
     private var stations: [VirtualChannel] = []
 
     var isWatchingStation: Bool { channelContext != nil }
@@ -899,24 +996,37 @@ final class PlayerViewModel: ObservableObject {
 
         for step in 1..<count {
             let station = stations[((here + delta * step) % count + count) % count]
-            guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
-                  let item = try? await client.getItem(itemId: now.itemId) else { continue }
-            guard !Task.isCancelled else { return }
-            channelContext = ChannelPlaybackContext(
-                channelID: station.id,
-                startPositionSeconds: now.startPositionSeconds,
-                endsAt: now.endUtc,
-                nextItemID: now.nextItemId
-            )
-            diag(.nextEpisode, [
-                PlayerDiagnostics.field("item", item.id),
-                PlayerDiagnostics.field("kind", "channel-change"),
-                PlayerDiagnostics.field("channel", station.id)
-            ])
-            await loadMedia(item: item)
-            await announceStation()
-            return
+            if await tune(station, kind: "channel-change") { return }
         }
+    }
+
+    /// Tune a station picked from the guide over the picture.
+    func tuneStation(id: String) async {
+        guard isWatchingStation else { return }
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let key = Self.stationKey(id)
+        guard let station = stations.first(where: { Self.stationKey($0.id) == key }) else { return }
+        _ = await tune(station, kind: "guide")
+    }
+
+    /// Join `station` where it is now. False when it is off air or its
+    /// programme cannot be fetched, so channel up/down can skip past it.
+    private func tune(_ station: VirtualChannel, kind: String) async -> Bool {
+        guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
+              let item = try? await client.getItem(itemId: now.itemId) else { return false }
+        guard !Task.isCancelled else { return true }
+        channelContext = ChannelPlaybackContext(channelID: station.id, now: now)
+        diag(.nextEpisode, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("kind", kind),
+            PlayerDiagnostics.field("channel", station.id)
+        ])
+        rejoinLive()
+        // The new station's bar goes up before its stream loads: the number
+        // should answer the press at once, the picture can take a moment.
+        await announceStation()
+        await loadMedia(item: item)
+        return true
     }
 
     /// Show the banner for what is on now. Called on tune-in, on each channel
@@ -951,6 +1061,21 @@ final class PlayerViewModel: ObservableObject {
             }
         }
 
+        let logoKey = station?.logo ?? row?.logo
+        var logoURL: URL?
+        var monoURL: URL?
+        if let logoKey {
+            logoURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey)
+            monoURL = await client.channelLogoURL(channelId: channel.channelID, key: logoKey, mono: true)
+        }
+        stationMark = StationMark(
+            logoURL: monoURL,
+            number: station?.number ?? row?.number,
+            name: (station?.name ?? row?.name ?? "SashimiTV").uppercased()
+        )
+        var behind = secondsBehindLive
+        if let since = stationPausedAt { behind += clock.timeIntervalSince(since) }
+
         stationBanner = StationBanner(
             number: station?.number ?? row?.number ?? index.map { $0 + 1 },
             channelName: station?.name ?? row?.name ?? "SashimiTV",
@@ -965,7 +1090,10 @@ final class PlayerViewModel: ObservableObject {
             startsAt: now.map { $0.startUtc.addingTimeInterval(-$0.startPositionSeconds) },
             endsAt: now?.endUtc ?? channel.endsAt,
             nextTitle: next.flatMap { entry in labels?.title(for: entry) },
-            nextStartsAt: next?.startUtc
+            nextStartsAt: next?.startUtc,
+            logoURL: logoURL,
+            isPaused: stationPausedAt != nil,
+            minutesBehindLive: Int(behind / 60)
         )
     }
 
@@ -975,6 +1103,11 @@ final class PlayerViewModel: ObservableObject {
     /// before anyone saw it (seen in simulator frames).
     func dismissStationBanner(_ id: UUID) {
         if stationBanner?.id == id { stationBanner = nil }
+    }
+
+    /// Clear whatever bar is up — the guide is about to cover it.
+    func dismissStationBannerNow() {
+        stationBanner = nil
     }
 
     /// Channel ids arrive with and without dashes depending on the endpoint.
@@ -989,11 +1122,33 @@ final class PlayerViewModel: ObservableObject {
     /// long enough for the schedule underneath it to have been rebuilt — an
     /// episode deleted by a cleanup tool shifts everything after it. The
     /// carried id is for warming the next item, not for deciding what to play.
+    /// What the channel airs once the programme that just ended is over.
+    ///
+    /// The stream can finish a moment before the server's schedule does — its
+    /// clock runs a few seconds ahead of the device's, and a programme joined
+    /// mid-way starts that far out. Asked at once, the server still names the
+    /// finished programme with a second or two left, and tuning that replays
+    /// its last frames: seen on a real Apple TV as three black reloads in a
+    /// row before the channel moved on, which read as a crash. So while the
+    /// answer is the item that just ended, wait for its scheduled end and ask
+    /// again, a few times at most.
+    private func nowPlayingAfterBoundary(channelID: String) async throws -> ChannelNowPlaying? {
+        let finished = currentItem?.id
+        for _ in 0..<4 {
+            let now = try await client.getChannelNowPlaying(channelId: channelID)
+            guard let now, now.itemId == finished else { return now }
+            let wait = min(max(now.endUtc.timeIntervalSinceNow, 0) + 1, 20)
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard !Task.isCancelled else { return nil }
+        }
+        return try await client.getChannelNowPlaying(channelId: channelID)
+    }
+
     private func rollToNextChannelProgramme(attempt: Int) async {
         guard let channel = channelContext else { return }
 
         do {
-            guard let next = try await client.getChannelNowPlaying(channelId: channel.channelID) else {
+            guard let next = try await nowPlayingAfterBoundary(channelID: channel.channelID) else {
                 // The channel went off air between programmes — a gap in the
                 // broadcast day. Stop rather than inventing something to play.
                 diag(.playbackEnded, [
@@ -1007,18 +1162,14 @@ final class PlayerViewModel: ObservableObject {
             let item = try await client.getItem(itemId: next.itemId)
             guard !Task.isCancelled else { return }
 
-            channelContext = ChannelPlaybackContext(
-                channelID: channel.channelID,
-                startPositionSeconds: next.startPositionSeconds,
-                endsAt: next.endUtc,
-                nextItemID: next.nextItemId
-            )
+            channelContext = ChannelPlaybackContext(channelID: channel.channelID, now: next)
             diag(.nextEpisode, [
                 PlayerDiagnostics.field("item", item.id),
                 PlayerDiagnostics.field("automatic", true),
                 PlayerDiagnostics.field("kind", "channel"),
                 PlayerDiagnostics.field("joinSeconds", next.startPositionSeconds)
             ])
+            rejoinLive()
             await loadMedia(item: item)
             await announceStation()
         } catch {
@@ -2735,6 +2886,10 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func checkCurrentSegment(at currentSeconds: Double) {
+        // A channel runs on the clock: skipping an intro, by hand or
+        // automatically, would put the viewer ahead of the schedule and the
+        // next programme would start late. Live TV has no skip button.
+        guard !isWatchingStation else { return }
         // Find if we're currently in any skippable segment
         let skippableTypes: [MediaSegmentType] = [.intro, .outro, .recap, .preview]
         let activeSegment = segments.first { segment in

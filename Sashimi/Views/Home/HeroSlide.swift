@@ -15,6 +15,8 @@ struct HeroSlide: Identifiable, Equatable {
         let id: String
         let name: String
         let endsAt: Date?
+        var number: Int?
+        var logo: String?
 
         /// Matches the wording the FinTV cards use, so the same programme does
         /// not describe its remaining time two different ways on one screen.

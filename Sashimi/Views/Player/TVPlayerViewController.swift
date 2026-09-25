@@ -16,13 +16,21 @@ struct TVPlayerView: UIViewControllerRepresentable {
         )
     }
 
+    /// A channel has no scrubber, skip or chapter to offer — only the station
+    /// bar — and AVKit's transport bar, while up, takes the clickpad's up and
+    /// down away from channel changes. So a channel turns it off and the
+    /// container handles every press itself.
+    private var showsAVKitControls: Bool {
+        !usesEpisodeTransportControls && !viewModel.isWatchingStation
+    }
+
     func makeUIViewController(context: Context) -> PlayerContainerVC {
         let container = PlayerContainerVC()
         container.view.backgroundColor = .black
 
         let playerVC = AVPlayerViewController()
         playerVC.player = player
-        playerVC.showsPlaybackControls = !usesEpisodeTransportControls
+        playerVC.showsPlaybackControls = showsAVKitControls
         playerVC.delegate = context.coordinator
 
         // Subtitles are rendered by our own overlay and selected through the
@@ -49,16 +57,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // Add content overlay (subtitles, info, clock)
         setupOverlay(on: playerVC, container: container, context: context)
 
-        let coordinator = context.coordinator
-        container.canStepStation = { [weak coordinator] in
-            guard let coordinator, let model = coordinator.currentViewModel else { return false }
-            return model.isWatchingStation && !coordinator.controlsVisible && !model.showingSkipButton
-        }
-        container.onStationStep = { [weak coordinator] delta in
-            guard let model = coordinator?.currentViewModel else { return }
-            Task { await model.changeStation(by: delta) }
-        }
-        container.installStationFlipping()
+        container.wireStationControls(coordinator: context.coordinator, onExit: onDismiss)
 
         return container
     }
@@ -82,7 +81,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         if let navigationVC = context.coordinator.navigationVC {
             let shouldShow = usesEpisodeTransportControls
-            playerVC.showsPlaybackControls = !usesEpisodeTransportControls
+            playerVC.showsPlaybackControls = showsAVKitControls
             let wasHidden = navigationVC.view.isHidden
             navigationVC.update(
                 state: viewModel.transitionState,
@@ -275,21 +274,11 @@ class PlayerContainerVC: UIViewController {
     /// presses first and the container would never see them.
     var onStationStep: ((Int) -> Void)?
     var canStepStation: () -> Bool = { false }
-
-    func installStationFlipping() {
-        for (type, delta) in [(UIPress.PressType.upArrow, -1), (.downArrow, 1)] {
-            let tap = StationStepRecognizer(target: self, action: #selector(stationStep(_:)))
-            tap.delaysTouchesBegan = false
-            tap.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            tap.delta = delta
-            tap.shouldStep = { [weak self] in self?.canStepStation() ?? false }
-            view.addGestureRecognizer(tap)
-        }
-    }
-
-    @objc private func stationStep(_ recognizer: StationStepRecognizer) {
-        onStationStep?(recognizer.delta)
-    }
+    var onStationInfo: (() -> Void)?
+    var onStationPlayPause: (() -> Void)?
+    var onStationOptions: (() -> Void)?
+    var onStationExit: (() -> Void)?
+    var onStationGuide: (() -> Void)?
 
     /// When the skip button is visible, route the focus engine to it. Otherwise
     /// give focus back to the AVPlayerViewController so the user retains
@@ -491,18 +480,26 @@ struct PlayerContentOverlay: View {
                 VStack {
                     Spacer()
                     StationBannerView(banner: banner)
-                        .padding(.horizontal, 80)
-                        .padding(.bottom, 60)
                         // Counted only while visible: hidden behind the transport
                         // bar the task is cancelled and restarts when it hides.
+                        // A paused channel keeps its bar up — the picture is not
+                        // moving, and "paused, 4 min behind live" is the point.
                         .task(id: banner.id) {
+                            guard !banner.isPaused else { return }
                             try? await Task.sleep(nanoseconds: 6 * NSEC_PER_SEC)
                             guard !Task.isCancelled else { return }
                             viewModel.dismissStationBanner(banner.id)
                         }
                 }
+                // The bottom-edge mirror of the top bar, which ignores the top
+                // inset for the same reason: a scrim stopping short of the edge.
+                .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let mark = viewModel.stationMark, !controlsVisible {
+                StationMarkView(mark: mark)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
 
             // Top info bar + clock (only when transport bar is visible)
