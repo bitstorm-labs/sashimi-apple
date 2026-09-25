@@ -85,11 +85,16 @@ struct MobileLibraryBrowseView: View {
         }
     }
 
-    /// Shuffle: play one random item — a random movie for a movie library, a
-    /// random episode for a TV library.
+    /// Shuffle: play one random item — a random movie for a movie library;
+    /// for a TV library, what the TV Shuffle setting picks.
     private func shufflePlay() async {
         let types: [ItemType] = collectionType == "tvshows" ? [.episode] : [.movie]
-        if let item = try? await JellyfinClient.shared.getRandomItem(parentId: libraryId, itemTypes: types) {
+        if let item = try? await TVShuffle.pick(
+            libraryId: libraryId,
+            itemTypes: types,
+            mode: PlaybackSettings.shared.tvShuffleMode,
+            source: JellyfinClient.shared
+        ) {
             ThemeSongPlayer.shared.stopForPlayback()
             shuffleItem = item
         }
