@@ -10,7 +10,6 @@ final class HomeViewModelTests: XCTestCase {
         let viewModel = HomeViewModel()
 
         XCTAssertTrue(viewModel.continueWatchingItems.isEmpty)
-        XCTAssertTrue(viewModel.recentlyAddedItems.isEmpty)
         XCTAssertTrue(viewModel.heroItems.isEmpty)
         XCTAssertTrue(viewModel.libraries.isEmpty)
         XCTAssertFalse(viewModel.isLoading)

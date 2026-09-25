@@ -10,7 +10,6 @@ struct MediaPosterButton: View {
     var serverURL: URL?
     var serverID: String?
     let onSelect: () -> Void
-    var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
 
     @FocusState private var isFocused: Bool
     @AppStorage("showQualityBadges") private var showQualityBadges = true
@@ -308,11 +307,6 @@ struct MediaPosterButton: View {
                 }
             } label: {
                 Label("Refresh Metadata", systemImage: "arrow.triangle.2.circlepath")
-            }
-        }
-        .onPlayPauseCommand {
-            if let playPause = onPlayPause {
-                playPause()
             }
         }
     }
