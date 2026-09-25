@@ -513,13 +513,21 @@ extension PersonInfo {
         return type
     }
 
+    /// On screen rather than behind the camera. Jellyfin types an episode's
+    /// guest actors as GuestStar, so Actor alone sorted them in with the crew.
+    var isCast: Bool {
+        guard let type else { return false }
+        return type.caseInsensitiveCompare("Actor") == .orderedSame
+            || type.caseInsensitiveCompare("GuestStar") == .orderedSame
+    }
+
     /// Actors lead the roster while directors, writers, and other people stay
     /// discoverable behind them. A stable name sort keeps the section calm
     /// when a server returns people in a different order.
     static func sortedForDisplay(_ people: [PersonInfo], limit: Int = 20) -> [PersonInfo] {
         let sorted = people.sorted { lhs, rhs in
-            let lhsIsActor = lhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
-            let rhsIsActor = rhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            let lhsIsActor = lhs.isCast
+            let rhsIsActor = rhs.isCast
             if lhsIsActor != rhsIsActor {
                 return lhsIsActor
             }
