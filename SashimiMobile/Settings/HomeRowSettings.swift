@@ -48,14 +48,32 @@ final class HomeRowSettings: ObservableObject {
 
     @Published var rows: [HomeRowConfig] = []
 
-    private let userDefaultsKey = "homeRowOrder"
+    /// Pre-multi-server installs saved one unscoped list; it seeds a server
+    /// that has no list of its own yet.
+    private let legacyKey = "homeRowOrder"
+    /// Library ids belong to one server, so each server keeps its own list:
+    /// sharing one let a switch prune the other server's rows (apple#422).
+    private(set) var serverID: String?
+
+    private var userDefaultsKey: String {
+        serverID.map { "\(legacyKey).\($0)" } ?? legacyKey
+    }
 
     private init() {
+        serverID = SessionManager.shared.activeServerId
+        loadRows()
+    }
+
+    /// Switches to `serverID`'s saved rows; a no-op for the current server.
+    func use(serverID: String?) {
+        guard serverID != self.serverID else { return }
+        self.serverID = serverID
         loadRows()
     }
 
     func loadRows() {
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: userDefaultsKey) ?? defaults.data(forKey: legacyKey),
            let savedRows = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
             rows = savedRows
             // A config saved before a built-in row existed has no entry for it.
