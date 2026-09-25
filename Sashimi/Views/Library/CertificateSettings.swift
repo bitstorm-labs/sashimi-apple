@@ -155,16 +155,7 @@ struct TrustedHostRow: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(SashimiTheme.focus.opacity(isFocused ? 1.0 : 0), lineWidth: 3)
-        )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+        .focusHighlight(isFocused, cornerRadius: 14)
         .focused($isFocused)
     }
 }

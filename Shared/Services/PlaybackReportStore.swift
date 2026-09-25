@@ -76,12 +76,7 @@ final class PlaybackReportStore {
 
     init(defaults: UserDefaults = .standard, now: Date = Date()) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Self.storageKey),
-           let decoded = try? JSONDecoder().decode([PendingPlaybackReport].self, from: data) {
-            reports = decoded.sorted { $0.createdAt < $1.createdAt }
-        } else {
-            reports = []
-        }
+        reports = Self.loadReports(from: defaults)
         pruneExpiredReports(now: now)
     }
 
@@ -159,9 +154,30 @@ final class PlaybackReportStore {
         persist()
     }
 
+    /// A decode failure drops every queued report, so it must not be silent:
+    /// the server would simply never learn about those sessions.
+    private static func loadReports(from defaults: UserDefaults) -> [PendingPlaybackReport] {
+        guard let data = defaults.data(forKey: storageKey) else { return [] }
+        do {
+            return try JSONDecoder().decode([PendingPlaybackReport].self, from: data)
+                .sorted { $0.createdAt < $1.createdAt }
+        } catch {
+            playbackReportLogger.error(
+                "Discarding unreadable pending playback reports: \(error.localizedDescription, privacy: .public)"
+            )
+            return []
+        }
+    }
+
     private func persist() {
-        guard let data = try? JSONEncoder().encode(reports) else { return }
-        defaults.set(data, forKey: Self.storageKey)
+        do {
+            let data = try JSONEncoder().encode(reports)
+            defaults.set(data, forKey: Self.storageKey)
+        } catch {
+            playbackReportLogger.error(
+                "Could not persist pending playback reports: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }
 

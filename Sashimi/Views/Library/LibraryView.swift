@@ -320,6 +320,10 @@ struct LibraryDetailView: View {
                         }
                         .padding(.horizontal, 50)
                         .padding(.top, 40)
+                        // The pills are left-clustered; without a section, Up
+                        // from a right-hand grid column has nothing directly
+                        // above it and focus stays put.
+                        .focusSection()
 
                         if isLoading && items.isEmpty {
                             ProgressView()
@@ -734,14 +738,7 @@ struct SortMenuButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -770,14 +767,7 @@ struct ShuffleButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -800,14 +790,7 @@ struct SortOrderButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -837,14 +820,7 @@ struct FilterMenuButton: View {
             .foregroundStyle(currentFilter != .all ? SashimiTheme.accent : SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
