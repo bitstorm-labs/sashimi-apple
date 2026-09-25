@@ -15,7 +15,6 @@ final class StationReminders: ObservableObject {
     struct Reminder: Codable, Hashable, Identifiable {
         let channelID: String
         let channelName: String
-        let channelNumber: Int?
         let title: String
         let startsAt: Date
 
@@ -112,8 +111,7 @@ final class StationReminders: ObservableObject {
             guard granted else { return }
             let content = UNMutableNotificationContent()
             content.title = reminder.title
-            let station = reminder.channelNumber.map { "\($0) · \(reminder.channelName)" } ?? reminder.channelName
-            content.body = "Starts at \(reminder.startsAt.formatted(date: .omitted, time: .shortened)) on \(station)."
+            content.body = "Starts at \(reminder.startsAt.formatted(date: .omitted, time: .shortened)) on \(reminder.channelName)."
             content.sound = .default
             content.userInfo = ["stationID": reminder.channelID]
             let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireAt)

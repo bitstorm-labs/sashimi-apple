@@ -78,8 +78,8 @@ final class StationSelectRecognizer: UIGestureRecognizer {
 }
 
 /// The channel's info bar: the bottom-edge mirror of the player's top bar —
-/// full width, the same translucent black, the same 80pt margins. Logo, number
-/// and station; what is on with a live progress bar; what is next; and how the
+/// full width, the same translucent black, the same 80pt margins. Logo and
+/// station; what is on with a live progress bar; what is next; and how the
 /// remote drives a channel, since none of the usual controls are there.
 struct StationBannerView: View {
     let banner: PlayerViewModel.StationBanner
@@ -91,12 +91,6 @@ struct StationBannerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 24) {
-                if let number = banner.number {
-                    Text("\(number)")
-                        .font(.system(size: 60, weight: .heavy, design: .rounded))
-                        .foregroundStyle(SashimiTheme.accent)
-                        .monospacedDigit()
-                }
                 if let logo = banner.logoURL {
                     LazyImage(url: logo) { state in
                         if let image = state.image {

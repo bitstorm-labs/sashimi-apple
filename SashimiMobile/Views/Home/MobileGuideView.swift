@@ -189,13 +189,6 @@ struct MobileGuideView: View {
                 .frame(width: 3)
                 .padding(.vertical, 2)
 
-            // Number, logo, then name — each centred in the row.
-            Text("\(row.channel.number ?? index + 1)")
-                .font(.subheadline.weight(.heavy))
-                .foregroundStyle(Self.railColour(at: index))
-                .monospacedDigit()
-                .frame(width: 24, alignment: .leading)
-
             VStack(alignment: .leading, spacing: 3) {
                 // The logo travels with the name, on its line.
                 HStack(alignment: .center, spacing: 6) {
@@ -272,7 +265,6 @@ struct MobileGuideView: View {
                     row: row,
                     entry: entry,
                     width: width(for: entry),
-                    channelNumber: row.channel.number ?? viewModel.rows.firstIndex { $0.id == row.id }.map { $0 + 1 },
                     onSelect: { select(row: row, entry: entry) }
                 )
             }
@@ -359,7 +351,6 @@ struct MobileGuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
-    var channelNumber: Int?
     let onSelect: () -> Void
 
     @ObservedObject private var reminders = StationReminders.shared
@@ -429,7 +420,6 @@ struct MobileGuideBlock: View {
                     reminders.toggle(.init(
                         channelID: row.channel.id,
                         channelName: row.channel.name,
-                        channelNumber: channelNumber,
                         title: row.title(for: entry),
                         startsAt: entry.startUtc
                     ))

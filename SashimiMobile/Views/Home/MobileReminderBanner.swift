@@ -52,12 +52,11 @@ struct MobileReminderBanner: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             let minutes = Int((reminder.startsAt.timeIntervalSince(context.date) / 60).rounded(.up))
-            let station = reminder.channelNumber.map { "\($0) · \(reminder.channelName)" } ?? reminder.channelName
             HStack(spacing: 12) {
                 Image(systemName: "bell.fill").foregroundStyle(MobileColors.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(reminder.title).font(.headline).foregroundStyle(.white)
-                    Text(minutes > 0 ? "Starts in \(minutes) min on \(station)" : "On now on \(station)")
+                    Text(minutes > 0 ? "Starts in \(minutes) min on \(reminder.channelName)" : "On now on \(reminder.channelName)")
                         .font(.subheadline).foregroundStyle(.white.opacity(0.75))
                 }
                 Spacer(minLength: 8)
@@ -89,8 +88,7 @@ struct MobileRemindersList: View {
                 ForEach(reminders.reminders.sorted { $0.startsAt < $1.startsAt }) { reminder in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(reminder.title).font(.headline)
-                        let station = reminder.channelNumber.map { "\($0) · \(reminder.channelName)" } ?? reminder.channelName
-                        Text("\(reminder.startsAt.formatted(.dateTime.weekday(.wide).hour().minute())) · \(station)")
+                        Text("\(reminder.startsAt.formatted(.dateTime.weekday(.wide).hour().minute())) · \(reminder.channelName)")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .swipeActions {

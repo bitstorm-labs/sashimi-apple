@@ -27,12 +27,6 @@ struct UpNextCardView: View {
 
             VStack(spacing: 22 * scale) {
                 HStack(spacing: 18 * scale) {
-                    if let number = card.number {
-                        Text("\(number)")
-                            .font(.system(size: 44 * scale, weight: .heavy, design: .rounded))
-                            .foregroundStyle(accent)
-                            .monospacedDigit()
-                    }
                     if let logo = card.logoURL {
                         LazyImage(url: logo) { state in
                             if let image = state.image {

@@ -135,12 +135,8 @@ struct ChannelCard_View: View {
     }
 
     private var channelBadge: some View {
-        // Number, the station's logo, then its name — number first, the way
-        // a cable box labels a station.
+        // The station's logo, then its name.
         HStack(spacing: 8) {
-            if let number = card.channel.number {
-                Text("\(number)")
-            }
             if card.channel.logo != nil {
                 ChannelLogoView(channelId: card.channel.id, logo: card.channel.logo, mono: true, size: 24)
             }

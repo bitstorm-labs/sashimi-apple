@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The station info banner at phone/tablet size — number and station, what is
-/// on with a live progress bar, and what is next. Same content as tvOS.
+/// The station info banner at phone/tablet size — the station, what is on
+/// with a live progress bar, and what is next. Same content as tvOS.
 struct MobileStationBannerView: View {
     let banner: PlayerViewModel.StationBanner
 
@@ -10,12 +10,6 @@ struct MobileStationBannerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if let number = banner.number {
-                    Text("\(number)")
-                        .font(.system(.title, design: .rounded).weight(.heavy))
-                        .foregroundStyle(MobileColors.accent)
-                        .monospacedDigit()
-                }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(banner.channelName.uppercased())
                         .font(.subheadline.weight(.heavy))

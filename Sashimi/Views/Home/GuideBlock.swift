@@ -5,7 +5,6 @@ struct GuideBlock: View {
     let row: GuideRow
     let entry: GuideEntry
     let width: CGFloat
-    var channelNumber: Int?
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -89,7 +88,6 @@ struct GuideBlock: View {
                     reminders.toggle(.init(
                         channelID: row.channel.id,
                         channelName: row.channel.name,
-                        channelNumber: channelNumber,
                         title: row.title(for: entry),
                         startsAt: entry.startUtc
                     ))
