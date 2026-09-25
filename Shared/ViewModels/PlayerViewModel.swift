@@ -506,6 +506,26 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("hadPlayer", player != nil),
             PlayerDiagnostics.field("previousItem", currentItem?.id)
         ])
+        // Tuned during a break between slots: the programme starts when its
+        // slot opens, so hold on an "up next" card until then. A newer load —
+        // a channel change during the card — supersedes this one.
+        if let until = channelContext?.breakUntil, until > Date(), let context = channelContext {
+            let attempt = playbackAttempt
+            player?.pause()
+            stationBanner = nil
+            upNext = await upNextCard(for: item, channelID: context.channelID, startsAt: until)
+            let wait = until.timeIntervalSinceNow
+            if wait > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+            guard attempt == playbackAttempt, !Task.isCancelled else { return }
+            upNext = nil
+            channelContext = ChannelPlaybackContext(
+                channelID: context.channelID, startPositionSeconds: 0,
+                endsAt: context.endsAt, nextItemID: context.nextItemID)
+        } else {
+            upNext = nil
+        }
         self.offlineSubtitles = offlineSubtitles
         // Tear down everything tied to the previous player first — auto-play
         // next episode reuses this ViewModel, and observers left on the old
@@ -889,6 +909,46 @@ final class PlayerViewModel: ObservableObject {
     }
 
     @Published private(set) var stationBanner: StationBanner?
+
+    /// The card a channel shows during a break between slots.
+    struct UpNext: Equatable {
+        let logoURL: URL?
+        let number: Int?
+        let channelName: String
+        let title: String
+        let detail: String?
+        let startsAt: Date
+    }
+    @Published private(set) var upNext: UpNext?
+
+    private func upNextCard(for item: BaseItemDto, channelID: String, startsAt: Date) async -> UpNext {
+        if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
+        let key = Self.stationKey(channelID)
+        let station = stations.first { Self.stationKey($0.id) == key }
+        var logoURL: URL?
+        if let logo = station?.logo {
+            logoURL = await client.channelLogoURL(channelId: channelID, key: logo)
+        }
+        let isEpisode = item.type == .episode
+        var detail: String?
+        if isEpisode {
+            if item.hasDatedEpisodeNumbers {
+                detail = item.name
+            } else if let season = item.parentIndexNumber, let episode = item.indexNumber {
+                detail = "S\(season)E\(episode) · \(item.name)"
+            }
+        } else if let year = item.productionYear {
+            detail = String(year)
+        }
+        return UpNext(
+            logoURL: logoURL,
+            number: station?.number,
+            channelName: (station?.name ?? "SashimiTV").uppercased(),
+            title: isEpisode ? (item.seriesName ?? item.name).cleanedYouTubeTitle : item.name,
+            detail: detail,
+            startsAt: startsAt
+        )
+    }
     /// The station's mark, laid faintly over the picture while it plays:
     /// white logo, number and name.
     struct StationMark: Equatable {
@@ -955,12 +1015,7 @@ final class PlayerViewModel: ObservableObject {
         guard let now = try? await client.getChannelNowPlaying(channelId: station.id),
               let item = try? await client.getItem(itemId: now.itemId) else { return false }
         guard !Task.isCancelled else { return true }
-        channelContext = ChannelPlaybackContext(
-            channelID: station.id,
-            startPositionSeconds: now.startPositionSeconds,
-            endsAt: now.endUtc,
-            nextItemID: now.nextItemId
-        )
+        channelContext = ChannelPlaybackContext(channelID: station.id, now: now)
         diag(.nextEpisode, [
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("kind", kind),
@@ -1107,12 +1162,7 @@ final class PlayerViewModel: ObservableObject {
             let item = try await client.getItem(itemId: next.itemId)
             guard !Task.isCancelled else { return }
 
-            channelContext = ChannelPlaybackContext(
-                channelID: channel.channelID,
-                startPositionSeconds: next.startPositionSeconds,
-                endsAt: next.endUtc,
-                nextItemID: next.nextItemId
-            )
+            channelContext = ChannelPlaybackContext(channelID: channel.channelID, now: next)
             diag(.nextEpisode, [
                 PlayerDiagnostics.field("item", item.id),
                 PlayerDiagnostics.field("automatic", true),

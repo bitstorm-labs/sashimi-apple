@@ -19,6 +19,29 @@ struct ChannelPlaybackContext: Equatable {
     /// The following programme, so it can be prepared before the boundary.
     let nextItemID: String?
 
+    /// Tuned during a break: the programme starts then, from its beginning,
+    /// and the player shows "up next" until it does.
+    var breakUntil: Date?
+
+    init(channelID: String, startPositionSeconds: Double, endsAt: Date, nextItemID: String?, breakUntil: Date? = nil) {
+        self.channelID = channelID
+        self.startPositionSeconds = startPositionSeconds
+        self.endsAt = endsAt
+        self.nextItemID = nextItemID
+        self.breakUntil = breakUntil
+    }
+
+    /// The context for joining a channel from its now-playing answer.
+    init(channelID: String, now: ChannelNowPlaying) {
+        self.init(
+            channelID: channelID,
+            startPositionSeconds: now.isBreak ? 0 : now.startPositionSeconds,
+            endsAt: now.endUtc,
+            nextItemID: now.nextItemId,
+            breakUntil: now.isBreak ? now.startUtc : nil
+        )
+    }
+
     var startPositionTicks: Int64 {
         Int64(startPositionSeconds * 10_000_000)
     }
