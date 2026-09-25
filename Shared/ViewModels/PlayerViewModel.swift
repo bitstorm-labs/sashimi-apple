@@ -1899,6 +1899,19 @@ final class PlayerViewModel: ObservableObject {
             return next
         }
 
+        // Specials last: the first unwatched regular episode, else — every
+        // regular one watched — the first regular episode to start over.
+        if type == .series {
+            var regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: true)
+            if regular == nil {
+                regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: false)
+            }
+            if let regular {
+                logResolution(from: item, to: regular, via: "first-regular")
+                return regular
+            }
+        }
+
         if type == .series || type == .season {
             // For a series this searches all episodes (getItems is recursive);
             // for a season, just that season's.
