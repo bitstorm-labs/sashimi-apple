@@ -680,9 +680,12 @@ final class SessionManager: ObservableObject {
             reauthServer = server
             return
         }
+        // Point the client at the new server first: the authenticated root is
+        // keyed on activeServerId, so publishing it earlier rebuilt Home against
+        // the old server with nothing to reload it afterwards (apple#422).
+        await activate(server, token: token)
         activeServerId = id
         saveServers()
-        await activate(server, token: token)
     }
 
     @discardableResult
