@@ -70,7 +70,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi
-        MARKETING_VERSION: 1.6.6
+        MARKETING_VERSION: 1.6.7
         CURRENT_PROJECT_VERSION: 3
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
@@ -148,7 +148,7 @@ targets:
         # Shared bundle ID with the tvOS app for Universal Purchase (one "Sashimi"
         # app spanning Apple TV + iPhone + iPad). Distinguished by platform.
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi
-        MARKETING_VERSION: 1.6.6
+        MARKETING_VERSION: 1.6.7
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         SDKROOT: iphoneos
@@ -212,7 +212,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mondominator.sashimi.topshelf
-        MARKETING_VERSION: 1.6.6
+        MARKETING_VERSION: 1.6.7
         CURRENT_PROJECT_VERSION: 3
         SWIFT_VERSION: 5.9
         SDKROOT: appletvos
