@@ -30,6 +30,7 @@ share their networking, authentication, and playback logic.
 - Support for movies, TV shows, and YouTube-style content
 - Continue watching with playback progress sync
 - Audio/subtitle track selection, quality switching, and skip intro/credits
+- **View modes** on Apple TV — Normal, Zoom or Stretch from the player's View Mode menu (hold OK on a channel), kept for the session; *Use for All Videos* or Settings → Playback sets the default
 - **Shuffle** — play one random item from a library or a single show
 - **Trailers** — plays a local trailer inline when one exists
   (`LocalTrailerCount > 0`, e.g. downloaded by [Trailarr](https://github.com/nandyalu/trailarr))

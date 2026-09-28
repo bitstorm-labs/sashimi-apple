@@ -23,6 +23,10 @@ class PlaybackSettings: ObservableObject {
     // when nothing is stored yet, so this only affects a fresh install —
     // an iPhone user who explicitly turns it on keeps that choice.
     @AppStorage("playThemeSongs") var playThemeSongs = PlaybackSettings.defaultPlayThemeSongs()
+    // How a TV library's Shuffle picks (roku#141). Random Episode is what
+    // Shuffle always did, so an existing install is unchanged.
+    static let defaultTVShuffleMode = TVShuffleMode.randomEpisode
+    @AppStorage("tvShuffleMode") var tvShuffleMode = defaultTVShuffleMode
     @AppStorage("resumeThresholdSeconds") var resumeThresholdSeconds = 30
     @AppStorage("preferredAudioLanguage") var preferredAudioLanguage = ""
     @AppStorage("preferredSubtitleLanguage") var preferredSubtitleLanguage = ""

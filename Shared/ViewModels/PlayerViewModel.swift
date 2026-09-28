@@ -96,7 +96,21 @@ final class PlayerViewModel: ObservableObject {
     ///
     /// Mutable because it advances with the channel: when a programme ends, the
     /// next one carries its own offset, boundary and successor.
-    private(set) var channelContext: ChannelPlaybackContext?
+    private(set) var channelContext: ChannelPlaybackContext? {
+        didSet { updateKeepsScreenAwake() }
+    }
+
+    /// A channel is live TV: the screen stays on for as long as one is being
+    /// watched, INCLUDING the Up Next breaks between programmes. AVKit only
+    /// holds off the screensaver while video plays, so a long break let it
+    /// start, and the next programme then played its audio under it. Off when
+    /// the channel is paused, so a forgotten pause still lets the TV rest.
+    @Published private(set) var keepsScreenAwake = false
+
+    private func updateKeepsScreenAwake() {
+        let awake = channelContext != nil && stationPausedAt == nil
+        if keepsScreenAwake != awake { keepsScreenAwake = awake }
+    }
     private let recoverySetup: RecoverySetup?
 
     init(
@@ -111,6 +125,7 @@ final class PlayerViewModel: ObservableObject {
     ) {
         self.serverID = serverID
         self.channelContext = channelContext
+        keepsScreenAwake = channelContext != nil
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
         let resolvedClient = client
             ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
@@ -887,11 +902,10 @@ final class PlayerViewModel: ObservableObject {
     // MARK: - Stations: flipping and idents
 
     /// The banner that flashes up when a station is tuned, changed or moves on
-    /// to its next programme — a cable box's info banner: number, station, what
-    /// is on and how far in, and what is next.
+    /// to its next programme — a cable box's info banner: station, what is on
+    /// and how far in, and what is next.
     struct StationBanner: Equatable, Identifiable {
         let id = UUID()
-        let number: Int?
         let channelName: String
         let channelDescription: String?
         let title: String
@@ -913,7 +927,6 @@ final class PlayerViewModel: ObservableObject {
     /// The card a channel shows during a break between slots.
     struct UpNext: Equatable {
         let logoURL: URL?
-        let number: Int?
         let channelName: String
         let title: String
         let detail: String?
@@ -942,7 +955,6 @@ final class PlayerViewModel: ObservableObject {
         }
         return UpNext(
             logoURL: logoURL,
-            number: station?.number,
             channelName: (station?.name ?? "SashimiTV").uppercased(),
             title: isEpisode ? (item.seriesName ?? item.name).cleanedYouTubeTitle : item.name,
             detail: detail,
@@ -950,14 +962,15 @@ final class PlayerViewModel: ObservableObject {
         )
     }
     /// The station's mark, laid faintly over the picture while it plays:
-    /// white logo, number and name.
+    /// white logo and name.
     struct StationMark: Equatable {
         let logoURL: URL?
-        let number: Int?
         let name: String
     }
     @Published private(set) var stationMark: StationMark?
-    private var stationPausedAt: Date?
+    private var stationPausedAt: Date? {
+        didSet { updateKeepsScreenAwake() }
+    }
     private var secondsBehindLive: TimeInterval = 0
 
     /// Play/Pause on a channel. Pausing puts the viewer behind live, which the
@@ -1022,7 +1035,7 @@ final class PlayerViewModel: ObservableObject {
             PlayerDiagnostics.field("channel", station.id)
         ])
         rejoinLive()
-        // The new station's bar goes up before its stream loads: the number
+        // The new station's bar goes up before its stream loads: the station
         // should answer the press at once, the picture can take a moment.
         await announceStation()
         await loadMedia(item: item)
@@ -1037,8 +1050,7 @@ final class PlayerViewModel: ObservableObject {
         guard let channel = channelContext else { return }
         if stations.isEmpty { stations = (try? await client.getVirtualChannels()) ?? [] }
         let key = Self.stationKey(channel.channelID)
-        let index = stations.firstIndex { Self.stationKey($0.id) == key }
-        let station = index.map { stations[$0] }
+        let station = stations.first { Self.stationKey($0.id) == key }
 
         let guide = (try? await client.getChannelGuide(hours: 0.5)) ?? []
         let row = guide.first { Self.stationKey($0.id) == key }
@@ -1070,14 +1082,12 @@ final class PlayerViewModel: ObservableObject {
         }
         stationMark = StationMark(
             logoURL: monoURL,
-            number: station?.number ?? row?.number,
             name: (station?.name ?? row?.name ?? "SashimiTV").uppercased()
         )
         var behind = secondsBehindLive
         if let since = stationPausedAt { behind += clock.timeIntervalSince(since) }
 
         stationBanner = StationBanner(
-            number: station?.number ?? row?.number ?? index.map { $0 + 1 },
             channelName: station?.name ?? row?.name ?? "SashimiTV",
             channelDescription: station?.description,
             title: title,
@@ -1520,6 +1530,9 @@ final class PlayerViewModel: ObservableObject {
                 .sorted { ($0.indexNumber ?? 0) < ($1.indexNumber ?? 0) }
                 .first { ($0.indexNumber ?? 0) > currentIndex }
         } catch {
+            // Auto-advance just stops here; log so a failing lookup is not
+            // indistinguishable from "this was the last video".
+            logger.error("Next-video lookup failed for \(item.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -1897,6 +1910,19 @@ final class PlayerViewModel: ObservableObject {
         if type == .series, let next = try? await client.getNextUp(seriesId: item.id, limit: 1).first {
             logResolution(from: item, to: next, via: "next-up")
             return next
+        }
+
+        // Specials last: the first unwatched regular episode, else — every
+        // regular one watched — the first regular episode to start over.
+        if type == .series {
+            var regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: true)
+            if regular == nil {
+                regular = try? await client.firstRegularEpisode(seriesId: item.id, unplayedOnly: false)
+            }
+            if let regular {
+                logResolution(from: item, to: regular, via: "first-regular")
+                return regular
+            }
         }
 
         if type == .series || type == .season {

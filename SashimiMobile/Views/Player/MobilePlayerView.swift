@@ -200,7 +200,14 @@ struct MobilePlayerView: View {
             await viewModel.refreshStreamInfo()
             scheduleAutoHide()
         }
+        // Live channels keep the screen on through Up Next breaks (see
+        // keepsScreenAwake); the system default returns when the player goes.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = viewModel.keepsScreenAwake }
+        .onChange(of: viewModel.keepsScreenAwake) { _, awake in
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
         .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             let stopTask = viewModel.beginStop(reason: .viewDisappeared)

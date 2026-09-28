@@ -36,10 +36,6 @@ struct RemindersListView: View {
     @ObservedObject private var reminders = StationReminders.shared
     @Environment(\.dismiss) private var dismiss
 
-    private func station(_ r: StationReminders.Reminder) -> String {
-        r.channelNumber.map { "\($0) · \(r.channelName)" } ?? r.channelName
-    }
-
     var body: some View {
         ZStack {
             SashimiTheme.background.ignoresSafeArea()
@@ -72,7 +68,7 @@ struct RemindersListView: View {
                                         Image(systemName: "bell.slash")
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(reminder.title).font(.system(size: 30, weight: .semibold))
-                                            Text("\(reminder.startsAt.formatted(.dateTime.weekday(.wide).hour().minute())) · \(station(reminder))")
+                                            Text("\(ClockTime.weekdayTime(reminder.startsAt, wide: true)) · \(reminder.channelName)")
                                                 .font(.system(size: 22))
                                                 .opacity(0.75)
                                         }
