@@ -96,7 +96,21 @@ final class PlayerViewModel: ObservableObject {
     ///
     /// Mutable because it advances with the channel: when a programme ends, the
     /// next one carries its own offset, boundary and successor.
-    private(set) var channelContext: ChannelPlaybackContext?
+    private(set) var channelContext: ChannelPlaybackContext? {
+        didSet { updateKeepsScreenAwake() }
+    }
+
+    /// A channel is live TV: the screen stays on for as long as one is being
+    /// watched, INCLUDING the Up Next breaks between programmes. AVKit only
+    /// holds off the screensaver while video plays, so a long break let it
+    /// start, and the next programme then played its audio under it. Off when
+    /// the channel is paused, so a forgotten pause still lets the TV rest.
+    @Published private(set) var keepsScreenAwake = false
+
+    private func updateKeepsScreenAwake() {
+        let awake = channelContext != nil && stationPausedAt == nil
+        if keepsScreenAwake != awake { keepsScreenAwake = awake }
+    }
     private let recoverySetup: RecoverySetup?
 
     init(
@@ -111,6 +125,7 @@ final class PlayerViewModel: ObservableObject {
     ) {
         self.serverID = serverID
         self.channelContext = channelContext
+        keepsScreenAwake = channelContext != nil
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
         let resolvedClient = client
             ?? resolvedServerID.flatMap { SessionManager.shared.makeClient(for: $0) }
@@ -953,7 +968,9 @@ final class PlayerViewModel: ObservableObject {
         let name: String
     }
     @Published private(set) var stationMark: StationMark?
-    private var stationPausedAt: Date?
+    private var stationPausedAt: Date? {
+        didSet { updateKeepsScreenAwake() }
+    }
     private var secondsBehindLive: TimeInterval = 0
 
     /// Play/Pause on a channel. Pausing puts the viewer behind live, which the

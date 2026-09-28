@@ -54,6 +54,18 @@ final class ChannelPlaybackTests: XCTestCase {
         XCTAssertEqual(viewModel.channelContext?.channelID, "11111111222233334444555555555555")
     }
 
+    /// A channel is live TV: the screensaver must not start during an Up Next
+    /// break, or the next programme plays its audio underneath it.
+    func testWatchingAChannelKeepsTheScreenAwake() {
+        XCTAssertTrue(PlayerViewModel(channelContext: context()).keepsScreenAwake)
+    }
+
+    /// Ordinary playback leaves the screensaver to AVKit, which already holds
+    /// it off while video plays and lets it in when paused.
+    func testOrdinaryPlaybackLeavesTheScreensaverToTheSystem() {
+        XCTAssertFalse(PlayerViewModel(reporter: SpyReporter()).keepsScreenAwake)
+    }
+
     func testOrdinaryPlaybackIsUnaffected() {
         let spy = SpyReporter()
         let viewModel = PlayerViewModel(reporter: spy)
