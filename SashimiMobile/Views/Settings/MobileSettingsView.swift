@@ -218,6 +218,7 @@ struct HomeRowOrderView: View {
             }
         }
         .navigationTitle("Row Order")
+        .onAppear { settings.use(serverID: SessionManager.shared.activeServerId) }
         .environment(\.editMode, .constant(.active))
     }
 }

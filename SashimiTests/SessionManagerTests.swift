@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import Sashimi
 
@@ -251,6 +252,45 @@ final class SessionManagerTests: XCTestCase {
                      "Sign-out must clear the active server rather than activating another")
         XCTAssertNil(manager.serverURL)
         XCTAssertNil(manager.currentUser)
+    }
+
+    /// Regression (apple#422): switching servers published the new
+    /// activeServerId, which rebuilds the authenticated root, before the client
+    /// was pointed at that server. The rebuilt Home loaded against the old
+    /// server and nothing reloaded it once the switch finished.
+    @MainActor
+    func testSwitchServerPublishesNewServerOnlyOnceTheClientPointsAtIt() async {
+        let keys = ["servers", "activeServerId", "defaultServerId", "serverURL", "userId", "userName",
+                    "legacyAccessTokenServerID"]
+        let previousValues = snapshotDefaults(for: keys)
+        let previousToken = KeychainHelper.get(forKey: "accessToken")
+        defer {
+            restoreDefaults(previousValues, for: keys)
+            if let previousToken { _ = KeychainHelper.save(previousToken, forKey: "accessToken") }
+            _ = KeychainHelper.delete(forKey: "accessToken.server-next")
+        }
+
+        let current = makeServer(id: "server-current")
+        let next = makeServer(id: "server-next")
+        _ = KeychainHelper.save("token-next", forKey: "accessToken.server-next")
+        let manager = SessionManager(
+            restoreOnLaunch: false,
+            initialServers: [current, next],
+            initialActiveServerId: current.id,
+            initialDefaultServerId: current.id
+        )
+
+        var urlWhenPublished: URL?
+        let observation = manager.$activeServerId.dropFirst().sink { _ in
+            urlWhenPublished = manager.serverURL
+        }
+        defer { observation.cancel() }
+
+        await manager.switchServer(to: next.id)
+
+        XCTAssertEqual(manager.activeServerId, next.id)
+        XCTAssertEqual(urlWhenPublished, next.url,
+                       "The root rebuilds on activeServerId; the client must already be on the new server")
     }
 
     // MARK: - UserDto Tests
