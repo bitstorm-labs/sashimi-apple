@@ -68,6 +68,7 @@ struct PhoneHomeView: View {
             await viewModel.loadContent()
         }
         .task {
+            rowSettings.use(serverID: SessionManager.shared.activeServerId)
             await viewModel.loadContent()
             // After the main content: a server without the Channels plugin
             // answers 404 and yields an empty row, so this must never gate the
