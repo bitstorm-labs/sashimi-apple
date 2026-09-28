@@ -320,6 +320,10 @@ struct LibraryDetailView: View {
                         }
                         .padding(.horizontal, 50)
                         .padding(.top, 40)
+                        // The pills are left-clustered; without a section, Up
+                        // from a right-hand grid column has nothing directly
+                        // above it and focus stays put.
+                        .focusSection()
 
                         if isLoading && items.isEmpty {
                             ProgressView()
@@ -500,14 +504,19 @@ struct LibraryDetailView: View {
     }
 
     /// Shuffle: play one random item from this library — a random movie for a
-    /// movie library, a random episode for a TV library.
+    /// movie library; for a TV library, what the TV Shuffle setting picks.
     private func shufflePlay() async {
         let types: [ItemType] = switch library.collectionType {
         case "tvshows": [.episode]
         case "movies": [.movie]
         default: [.movie, .episode]
         }
-        if let item = try? await JellyfinClient.shared.getRandomItem(parentId: library.id, itemTypes: types) {
+        if let item = try? await TVShuffle.pick(
+            libraryId: library.id,
+            itemTypes: types,
+            mode: PlaybackSettings.shared.tvShuffleMode,
+            source: JellyfinClient.shared
+        ) {
             selectedItemIsYouTube = false
             selectedItem = item
         }
@@ -729,14 +738,7 @@ struct SortMenuButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -765,14 +767,7 @@ struct ShuffleButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -795,14 +790,7 @@ struct SortOrderButton: View {
             .foregroundStyle(SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
@@ -832,14 +820,7 @@ struct FilterMenuButton: View {
             .foregroundStyle(currentFilter != .all ? SashimiTheme.accent : SashimiTheme.textPrimary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(isFocused ? SashimiTheme.focus.opacity(0.15) : SashimiTheme.cardBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-            )
-            .scaleEffect(isFocused ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
+            .focusPillHighlight(isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)

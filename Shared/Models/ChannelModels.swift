@@ -9,9 +9,6 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
     let description: String?
     let timeZoneId: String
     let daypartCount: Int
-    /// The channel number the server assigned (plugin 0.7.0+): scattered,
-    /// fixed, the same on every client. Absent from older servers.
-    var number: Int?
     /// The logo key in effect today (plugin 0.8.0+); see `JellyfinClient.channelLogoURL`.
     var logo: String?
 
@@ -21,7 +18,6 @@ struct VirtualChannel: Codable, Identifiable, Equatable {
         case description = "Description"
         case timeZoneId = "TimeZoneId"
         case daypartCount = "DaypartCount"
-        case number = "Number"
         case logo = "Logo"
     }
 }
@@ -106,7 +102,6 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
     let name: String
     let description: String?
     let programs: [GuideEntry]
-    var number: Int?
     /// The logo key in effect today (plugin 0.8.0+).
     var logo: String?
 
@@ -115,7 +110,6 @@ struct ChannelGuide: Codable, Identifiable, Equatable {
         case name = "Name"
         case description = "Description"
         case programs = "Programs"
-        case number = "Number"
         case logo = "Logo"
     }
 }

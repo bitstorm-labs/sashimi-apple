@@ -64,7 +64,7 @@ extension PlayerContainerVC {
     func installStationFlipping() {
         let active: () -> Bool = { [weak self] in self?.canStepStation() ?? false }
         let presses: [(UIPress.PressType, Int)] = [
-            // Up is channel up — the higher number — as on a cable remote and on Roku.
+            // Up is channel up — the next station down the guide — as on a cable remote and on Roku.
             (.upArrow, 1), (.downArrow, -1), (.leftArrow, 4), (.rightArrow, 4), (.playPause, 2), (.menu, 3)
         ]
         for (type, delta) in presses {

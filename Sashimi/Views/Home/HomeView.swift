@@ -131,7 +131,7 @@ struct HomeView: View {
                 // without waiting for a real airtime.
                 if let station = ProcessInfo.processInfo.environment["SASHIMI_TEST_REMINDER"] {
                     StationReminders.shared.toggle(.init(
-                        channelID: station, channelName: "Unscripted", channelNumber: 67,
+                        channelID: station, channelName: "Unscripted",
                         title: "Survivor", startsAt: Date().addingTimeInterval(180)))
                     StationReminders.shared.tick()
                 }
@@ -234,7 +234,6 @@ struct HomeView: View {
                     id: card.channel.id,
                     name: card.channel.name,
                     endsAt: card.endsAt,
-                    number: card.channel.number,
                     logo: card.channel.logo
                 )
             )
@@ -664,7 +663,7 @@ struct HeroSection: View {
     }
 
     /// LIVE, then the station the way every other channel label reads:
-    /// number, logo, name.
+    /// logo, then name.
     private func channelEyebrow(_ stamp: HeroSlide.Stamp) -> some View {
         HStack(spacing: 14) {
             HStack(spacing: 8) {
@@ -679,9 +678,6 @@ struct HeroSection: View {
             .background(Capsule().fill(.black.opacity(0.55)))
 
             HStack(spacing: 10) {
-                if let number = stamp.number {
-                    Text("\(number)")
-                }
                 if stamp.logo != nil {
                     ChannelLogoView(channelId: stamp.id, logo: stamp.logo, mono: true, size: 26)
                 }

@@ -92,7 +92,14 @@ struct PlayerView: View {
             await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
             await viewModel.announceStation()
         }
+        // Live channels keep the screen on (see keepsScreenAwake); the system
+        // default is restored the moment the player goes away.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = viewModel.keepsScreenAwake }
+        .onChange(of: viewModel.keepsScreenAwake) { _, awake in
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
         .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
             PlayerDiagnostics.event(.viewDisappear, [
                 PlayerDiagnostics.field("view", viewTag),
                 PlayerDiagnostics.field("item", item.id)

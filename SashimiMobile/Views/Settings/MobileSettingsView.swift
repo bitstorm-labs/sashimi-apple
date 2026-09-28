@@ -107,6 +107,11 @@ struct MobileSettingsView: View {
                     Text("5 minutes").tag(300)
                     Text("10 minutes").tag(600)
                 }
+                Picker("TV Shuffle", selection: $playbackSettings.tvShuffleMode) {
+                    ForEach(TVShuffleMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
             }
 
             // Language Section (tvOS parity — same AppStorage keys, so the

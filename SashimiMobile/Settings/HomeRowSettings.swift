@@ -1,5 +1,8 @@
 import Foundation
+import os
 import SwiftUI
+
+private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "HomeRowSettings")
 
 enum HomeRowType: String, Codable, Identifiable, CaseIterable {
     case continueWatching = "continue_watching"
@@ -74,7 +77,7 @@ final class HomeRowSettings: ObservableObject {
     func loadRows() {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: userDefaultsKey) ?? defaults.data(forKey: legacyKey),
-           let savedRows = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
+           let savedRows = decodeSavedRows(data) {
             rows = savedRows
             // A config saved before a built-in row existed has no entry for it.
             // Insert ahead of the library rows rather than appending: built-ins
@@ -100,9 +103,24 @@ final class HomeRowSettings: ObservableObject {
         }
     }
 
+    /// Falling back to defaults is correct, but doing it silently made a
+    /// schema change indistinguishable from "user never customised".
+    private func decodeSavedRows(_ data: Data) -> [HomeRowConfig]? {
+        do {
+            return try JSONDecoder().decode([HomeRowConfig].self, from: data)
+        } catch {
+            logger.error("Failed to decode home row config: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     func saveRows() {
-        if let data = try? JSONEncoder().encode(rows) {
+        do {
+            let data = try JSONEncoder().encode(rows)
             UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        } catch {
+            // The user's row layout is dropped if this throws.
+            logger.error("Failed to encode home row config: \(error.localizedDescription, privacy: .public)")
         }
     }
 

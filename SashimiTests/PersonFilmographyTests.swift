@@ -90,6 +90,18 @@ final class PersonFilmographyTests: XCTestCase {
         XCTAssertEqual(sorted[1].displayRole, "Hero")
     }
 
+    /// Episodes list guest actors as GuestStar; they belong with the cast,
+    /// ahead of the director and writer.
+    func testEpisodeGuestStarsSortWithTheCast() {
+        let people = [
+            PersonInfo(id: "director", name: "Antonio Negret", role: nil, type: "Director", primaryImageTag: nil),
+            PersonInfo(id: "writer", name: "James Thorpe", role: nil, type: "Writer", primaryImageTag: nil),
+            PersonInfo(id: "guest", name: "Rekha Sharma", role: "Dr. Tsing", type: "GuestStar", primaryImageTag: nil)
+        ]
+
+        XCTAssertEqual(PersonInfo.sortedForDisplay(people).map(\.id), ["guest", "director", "writer"])
+    }
+
     func testPersonMatchingKeyIgnoresPunctuationCaseAndDiacritics() {
         XCTAssertEqual(
             PersonInfo.matchingNameKey(for: "Robert Downey Jr."),

@@ -513,13 +513,21 @@ extension PersonInfo {
         return type
     }
 
+    /// On screen rather than behind the camera. Jellyfin types an episode's
+    /// guest actors as GuestStar, so Actor alone sorted them in with the crew.
+    var isCast: Bool {
+        guard let type else { return false }
+        return type.caseInsensitiveCompare("Actor") == .orderedSame
+            || type.caseInsensitiveCompare("GuestStar") == .orderedSame
+    }
+
     /// Actors lead the roster while directors, writers, and other people stay
     /// discoverable behind them. A stable name sort keeps the section calm
     /// when a server returns people in a different order.
     static func sortedForDisplay(_ people: [PersonInfo], limit: Int = 20) -> [PersonInfo] {
         let sorted = people.sorted { lhs, rhs in
-            let lhsIsActor = lhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
-            let rhsIsActor = rhs.type?.caseInsensitiveCompare("Actor") == .orderedSame
+            let lhsIsActor = lhs.isCast
+            let rhsIsActor = rhs.isCast
             if lhsIsActor != rhsIsActor {
                 return lhsIsActor
             }
@@ -568,5 +576,18 @@ struct ChapterInfo: Codable {
 
     var startSeconds: Double {
         Double(startPositionTicks) / 10_000_000.0
+    }
+}
+
+extension BaseItemDto {
+    /// An episode of Season 0. Specials play after the regular seasons.
+    var isSpecial: Bool { type == .episode && parentIndexNumber == 0 }
+}
+
+extension Array where Element == BaseItemDto {
+    /// Seasons with Specials (Season 0) moved to the end, the order a viewer
+    /// works through a show. Relative order is otherwise kept.
+    var specialsLast: [BaseItemDto] {
+        filter { $0.indexNumber != 0 } + filter { $0.indexNumber == 0 }
     }
 }

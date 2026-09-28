@@ -272,9 +272,12 @@ final class SessionManager: ObservableObject {
     // MARK: - Persistence
 
     private func loadServers() {
-        if let data = UserDefaults.standard.data(forKey: serversKey),
-           let list = try? JSONDecoder().decode([ServerConfig].self, from: data) {
-            servers = list
+        if let data = UserDefaults.standard.data(forKey: serversKey) {
+            do {
+                servers = try JSONDecoder().decode([ServerConfig].self, from: data)
+            } catch {
+                logger.error("Could not decode saved server metadata: \(error.localizedDescription, privacy: .public)")
+            }
         }
         activeServerId = UserDefaults.standard.string(forKey: activeServerIdKey)
         defaultServerId = UserDefaults.standard.string(forKey: defaultServerIdKey)
@@ -549,6 +552,7 @@ final class SessionManager: ObservableObject {
         await JellyfinClient.shared.configure(serverURL: serverURL)
 
         let result = try await JellyfinClient.shared.authenticate(username: username, password: password)
+        try await abandonIfCancelled()
 
         if ensureDefaultServer() {
             saveServers()
@@ -584,6 +588,7 @@ final class SessionManager: ObservableObject {
         if let info = try? await JellyfinClient.shared.getPublicSystemInfo(), let name = info.serverName {
             serverName = name
         }
+        try await abandonIfCancelled()
 
         let config = ServerConfig(
             id: UUID().uuidString,
@@ -610,6 +615,14 @@ final class SessionManager: ObservableObject {
 
         self.logoutReason = nil
         await activate(config, token: result.accessToken)
+    }
+
+    /// The user cancelled sign-in after the server accepted the credentials:
+    /// drop the fresh token rather than save a server they backed out of.
+    private func abandonIfCancelled() async throws {
+        guard Task.isCancelled else { return }
+        await JellyfinClient.shared.clearCredentials()
+        throw CancellationError()
     }
 
     /// Switch the active server (no-op if already active or unknown).
