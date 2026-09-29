@@ -8,6 +8,8 @@ struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
     @State private var showingDeleteAll = false
+    @State private var playingItem: BaseItemDto?
+    @State private var playingServerID: String?
 
     var body: some View {
         Group {
@@ -18,6 +20,7 @@ struct DownloadsListView: View {
             }
         }
         .navigationTitle("Downloads")
+        .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAll) {
             Button("Delete All", role: .destructive) {
                 Task { await downloadManager.deleteAllDownloads() }
@@ -258,6 +261,18 @@ struct DownloadsListView: View {
 
             Spacer()
 
+            // Downloads are for watching: play right here, from the local file,
+            // instead of leaving to search for the title (iPad feedback).
+            Button {
+                play(item)
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(MobileColors.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play \(item.displayTitle)")
+
             Button {
                 Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
             } label: {
@@ -268,6 +283,15 @@ struct DownloadsListView: View {
             .buttonStyle(.plain)
         }
         .padding(MobileSpacing.md)
+        // The whole row plays; the play and delete buttons keep their own taps.
+        .contentShape(Rectangle())
+        .onTapGesture { play(item) }
+    }
+
+    private func play(_ item: DownloadedItem) {
+        ThemeSongPlayer.shared.stopForPlayback()
+        playingServerID = item.serverID
+        playingItem = item.asBaseItemDto
     }
 
     // MARK: - Failed Download Row
