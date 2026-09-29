@@ -55,6 +55,11 @@ struct MainNavigationView: View {
     @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
+    /// Downloads opened from the header indicator or a download toast is a
+    /// sheet over whatever is showing, so Done returns exactly there. Switching
+    /// the section instead rebuilt the NavigationStack and left no way back to
+    /// the screen the viewer came from (iPad feedback).
+    @State private var showingDownloads = false
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
@@ -108,7 +113,7 @@ struct MainNavigationView: View {
         .overlay(alignment: .top) {
             if let message = downloadManager.toastMessage {
                 Button {
-                    selection = .downloads
+                    showingDownloads = true
                     downloadManager.toastMessage = nil
                 } label: {
                     HStack(spacing: 8) {
@@ -297,6 +302,16 @@ struct MainNavigationView: View {
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
         }
+        .sheet(isPresented: $showingDownloads) {
+            NavigationStack {
+                DownloadsListView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingDownloads = false }
+                        }
+                    }
+            }
+        }
     }
 
     @ViewBuilder
@@ -446,7 +461,7 @@ struct MainNavigationView: View {
                 .clipShape(Capsule())
             }
         }
-        .onTapGesture { selection = .downloads }
+        .onTapGesture { showingDownloads = true }
     }
 
     private func downloadCompletedCount() -> Int {

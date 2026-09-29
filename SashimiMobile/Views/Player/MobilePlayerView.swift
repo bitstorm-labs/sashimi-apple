@@ -378,6 +378,8 @@ struct MobilePlayerView: View {
                 }
 
                 Spacer(minLength: 0)
+                PlayerSubtitlesMenu(viewModel: viewModel)
+                    .disabled(viewModel.transitionState.isTransitioning)
                 settingsMenu
             }
 
