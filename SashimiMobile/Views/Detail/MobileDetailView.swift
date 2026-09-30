@@ -37,14 +37,6 @@ struct MobileDetailView: View {
     @State private var selectedServerMedia: ServerMediaResult?
     @State private var mediaInfo: MediaSourceInfo?
     @State private var navigateToSeriesItem: BaseItemDto?
-    @State private var downloadScope: DownloadScope?
-    @State private var showingDownloadQuality = false
-    @State private var showingNextNAlert = false
-    @State private var showingNoUnwatchedAlert = false
-    @State private var nextNInput = ""
-    // Fail-closed: hide Original in the season/bulk menu unless the representative
-    // first episode is confirmed device-compatible.
-    @State private var seasonOriginalAllowed = false
     // Admin menu (tvOS parity): File Info / Refresh Metadata / Delete
     @State private var showingFileInfo = false
     @State private var showingDeleteConfirm = false
@@ -111,30 +103,6 @@ struct MobileDetailView: View {
 
     private var isYouTubeChannelEpisode: Bool {
         isEpisode && isYouTubeStyle
-    }
-
-    private enum DownloadScope {
-        case all
-        case unwatched
-        case nextN(Int)
-    }
-
-    private var episodesForDownload: [BaseItemDto] {
-        guard let scope = downloadScope else { return [] }
-        switch scope {
-        case .all:
-            return episodes
-        case .unwatched:
-            return episodes.filter { !($0.userData?.played ?? false) }
-        case .nextN(let count):
-            return Array(episodes.filter { !($0.userData?.played ?? false) }.prefix(count))
-        }
-    }
-
-    // Drops .original from the season/bulk menu unless the representative episode
-    // is confirmed device-compatible (mirrors DownloadButton.availableQualities).
-    private var availableSeasonQualities: [DownloadQuality] {
-        DownloadQuality.allCases.filter { $0 != .original || seasonOriginalAllowed }
     }
 
     var body: some View {
@@ -274,10 +242,6 @@ struct MobileDetailView: View {
                 }
             }
         }
-        .onChange(of: episodes.first?.id) { _, _ in
-            seasonOriginalAllowed = false
-            Task { await refreshSeasonOriginalAllowed() }
-        }
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -363,23 +327,6 @@ struct MobileDetailView: View {
             dismiss()
         } catch {
             adminError = "Failed to delete: \(error.localizedDescription)"
-        }
-    }
-
-    /// Determines whether the season/bulk menu should offer Original, using the
-    /// first (representative) episode as a proxy — series are uniformly encoded.
-    /// Fails closed: any missing episode / source / error leaves it false.
-    private func refreshSeasonOriginalAllowed() async {
-        guard NetworkMonitor.shared.isConnected, let first = episodes.first else {
-            seasonOriginalAllowed = false
-            return
-        }
-        do {
-            let info = try await JellyfinClient.shared.getPlaybackInfo(itemId: first.id, itemType: first.type, engine: .avFoundation)
-            seasonOriginalAllowed = info.mediaSources?.first
-                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
-        } catch {
-            seasonOriginalAllowed = false
         }
     }
 
@@ -848,51 +795,13 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            // Download menu with scope options
-            if !episodes.isEmpty && NetworkMonitor.shared.isConnected {
-                Menu {
-                    Button("All Episodes") {
-                        downloadScope = .all
-                        showingDownloadQuality = true
-                    }
-                    Button("Unwatched Only") {
-                        let unwatched = episodes.filter { !($0.userData?.played ?? false) }
-                        if unwatched.isEmpty {
-                            showingNoUnwatchedAlert = true
-                        } else {
-                            downloadScope = .unwatched
-                            showingDownloadQuality = true
-                        }
-                    }
-                    Button("Custom...") {
-                        let unwatched = episodes.filter { !($0.userData?.played ?? false) }
-                        if unwatched.isEmpty {
-                            showingNoUnwatchedAlert = true
-                        } else {
-                            nextNInput = ""
-                            showingNextNAlert = true
-                        }
-                    }
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-                .confirmationDialog("Select Quality", isPresented: $showingDownloadQuality) {
-                    ForEach(availableSeasonQualities) { quality in
-                        Button("\(quality.displayName) — \(quality.subtitle)") {
-                            DownloadManager.shared.downloadSeason(
-                                episodes: episodesForDownload,
-                                quality: quality,
-                                serverID: serverID
-                            )
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {
-                        downloadScope = nil
-                    }
-                }
+            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isConnected {
+                BulkDownloadMenu(
+                    seasonEpisodes: episodes,
+                    seasonName: selectedSeason?.name,
+                    seriesId: isSeries ? item.id : nil,
+                    serverID: serverID
+                )
             }
 
             if NetworkMonitor.shared.isConnected {
@@ -900,26 +809,6 @@ struct MobileDetailView: View {
             }
 
             Spacer()
-        }
-        .alert("Download Unwatched Episodes", isPresented: $showingNextNAlert) {
-            TextField("Number of episodes", text: $nextNInput)
-                .keyboardType(.numberPad)
-            Button("OK") {
-                if let n = Int(nextNInput), n > 0 {
-                    downloadScope = .nextN(n)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showingDownloadQuality = true
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("How many unwatched episodes would you like to download?")
-        }
-        .alert("No Unwatched Episodes", isPresented: $showingNoUnwatchedAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("All episodes in this season are already watched.")
         }
     }
 

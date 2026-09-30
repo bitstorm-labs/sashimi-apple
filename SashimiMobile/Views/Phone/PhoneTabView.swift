@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PhoneTabView: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var downloadManager = DownloadManager.shared
     var searchRequest: SashimiIntentCoordinator.SearchRequest?
     var onSearchRequestConsumed: (UUID) -> Void = { _ in }
     @State private var selectedTab: PhoneTab = .home
@@ -60,6 +61,10 @@ struct PhoneTabView: View {
             .tabItem {
                 Label("Downloads", systemImage: "arrow.down.circle")
             }
+            // Tab items only render an image and text, so the iPad's progress
+            // ring can't live here; the badge carries the active/queued count
+            // and disappears at zero.
+            .badge(downloadManager.activitySnapshot.activeCount)
             .tag(PhoneTab.downloads)
 
             NavigationStack {

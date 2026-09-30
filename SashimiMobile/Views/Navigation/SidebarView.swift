@@ -398,50 +398,28 @@ struct MainNavigationView: View {
         navigationResetId += 1
     }
 
+    /// Global download activity: a progress ring with the active + queued
+    /// count while anything downloads, plus a failed badge. Hidden when idle.
     @ViewBuilder
     private var downloadIndicator: some View {
-        // Use in-memory state for active (always current), SwiftData for completed/failed
-        let activeCount = downloadManager.activeDownloads.count
-            + downloadManager.preparingItems.count
-            + downloadManager.queuedCount
+        let activity = downloadManager.activitySnapshot
         let failedCount = downloadFailedCount()
-        let completedCount = downloadCompletedCount()
         let speed = downloadManager.downloadSpeed
 
         HStack(spacing: 6) {
-            if activeCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 14))
-                        .foregroundStyle(MobileColors.accent)
-                        .symbolEffect(.pulse)
-                    Text("\(activeCount)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MobileColors.accent)
+            if activity.isActive {
+                HStack(spacing: 6) {
+                    DownloadActivityRing(snapshot: activity)
                     if !speed.isEmpty {
-                        Text("(\(speed))")
+                        Text(speed)
                             .font(.system(size: 11))
+                            .monospacedDigit()
                             .foregroundStyle(MobileColors.accent.opacity(0.8))
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .background(MobileColors.accent.opacity(0.15))
-                .clipShape(Capsule())
-            }
-
-            if completedCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(MobileColors.success)
-                    Text("\(completedCount)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MobileColors.success)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(MobileColors.success.opacity(0.15))
                 .clipShape(Capsule())
             }
 
@@ -461,16 +439,10 @@ struct MainNavigationView: View {
                 .clipShape(Capsule())
             }
         }
+        .contentShape(Rectangle())
         .onTapGesture { showingDownloads = true }
-    }
-
-    private func downloadCompletedCount() -> Int {
-        _ = downloadManager.stateVersion
-        guard let container = DownloadManager.shared.modelContainer else { return 0 }
-        let context = ModelContext(container)
-        let predicate = #Predicate<DownloadedItem> { $0.statusRaw == "completed" }
-        let descriptor = FetchDescriptor<DownloadedItem>(predicate: predicate)
-        return (try? context.fetchCount(descriptor)) ?? 0
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens Downloads")
     }
 
     private func downloadFailedCount() -> Int {
