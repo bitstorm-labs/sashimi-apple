@@ -426,57 +426,8 @@ struct PlayerContentOverlay: View {
     let item: BaseItemDto
     var controlsVisible: Bool = false
 
-    // Check if this is a YouTube episode
-    /// Above these, a "season"/"episode" is a YouTube upload year and counter
-    /// rather than real TV numbering.
-    private static let maxPlausibleSeason = 2100
-    private static let maxPlausibleEpisode = 1000
-
-    private var isYouTubeEpisode: Bool {
-        guard item.type == .episode else { return false }
-        if item.path?.lowercased().contains("youtube") == true { return true }
-        // Pinchflat encodes the upload year as the season and a running
-        // counter as the episode, so values far outside real TV numbering are
-        // the tell. Named rather than inline so the intent survives.
-        if let season = item.parentIndexNumber, let episode = item.indexNumber {
-            if season > Self.maxPlausibleSeason || episode > Self.maxPlausibleEpisode { return true }
-        }
-        return false
-    }
-
     @State private var clockTime = Date()
     private let clockTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
-
-    private var formattedReleaseDate: String? {
-        if let premiereDateStr = item.premiereDate {
-            if let formatted = DateFormatting.formatLongDate(premiereDateStr) {
-                return formatted
-            }
-        }
-        if let year = item.productionYear {
-            return String(year)
-        }
-        return nil
-    }
-
-    private var clockText: String {
-        ClockTime.time(clockTime)
-    }
-
-    private var finishesAtText: String? {
-        guard let player = viewModel.player,
-              let duration = player.currentItem?.duration,
-              duration.isValid && !duration.isIndefinite,
-              duration.seconds > 0 else { return nil }
-
-        let currentSeconds = player.currentTime().seconds
-        let remainingSeconds = duration.seconds - currentSeconds
-        guard remainingSeconds > 0 else { return nil }
-
-        let rate = player.rate > 0 ? Double(player.rate) : 1.0
-        let finishDate = clockTime.addingTimeInterval(remainingSeconds / rate)
-        return "Finishes at " + ClockTime.time(finishDate)
-    }
 
     var body: some View {
         ZStack {
@@ -543,126 +494,35 @@ struct PlayerContentOverlay: View {
         }
     }
 
-    // MARK: - Stream info chip
-
-    private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(chipColor(for: info.method))
-                .frame(width: 10, height: 10)
-            Text(chipText(for: info))
-        }
-    }
-
-    private func chipColor(for method: PlayerViewModel.StreamInfo.Method) -> Color {
-        switch method {
-        case .directPlay: return .green
-        case .directStream: return .yellow
-        case .transcode: return .orange
-        }
-    }
-
-    private func chipText(for info: PlayerViewModel.StreamInfo) -> String {
-        var text = info.label
-        if let detail = info.detail {
-            text += " → \(detail)"
-        }
-        if let reason = info.reason {
-            text += " (\(reason))"
-        }
-        return text
-    }
-
     // MARK: - Top Info Bar
 
     private var topInfoBar: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Series logo or channel art
-                if item.type == .episode, let seriesId = item.seriesId {
-                    if isYouTubeEpisode {
-                        HStack(spacing: 20) {
-                            Circle()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(width: 80, height: 80)
-                                .overlay(
-                                    AsyncItemImage(
-                                        itemId: seriesId,
-                                        imageType: "Primary",
-                                        maxWidth: 160,
-                                        contentMode: .fill,
-                                        fallbackImageTypes: ["Thumb"]
-                                    )
-                                    .clipShape(Circle())
-                                )
-                            if let seriesName = item.seriesName {
-                                Text(seriesName)
-                                    .font(.system(size: 28, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                            }
-                        }
-                    } else {
-                        AsyncItemImage(
-                            itemId: seriesId,
-                            imageType: "Logo",
-                            maxWidth: 800,
-                            contentMode: .fit,
-                            fallbackImageTypes: []
-                        )
-                        .frame(maxHeight: 100, alignment: .leading)
-                        .frame(maxWidth: 500, alignment: .leading)
-                        .clipped()
-                    }
-                }
-
-                // Title with S#:E# prefix for episodes
-                HStack(spacing: 10) {
-                    if !isYouTubeEpisode, let season = item.parentIndexNumber, let episode = item.indexNumber {
-                        Text("S\(season):E\(episode)")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("·")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    Text(item.type == .episode ? item.name : item.displayTitle)
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
-
-                // Release date, quality, finish time, and delivery method
-                HStack(spacing: 8) {
-                    if let dateText = formattedReleaseDate {
-                        Text(dateText)
-                    }
-                    if let resolution = viewModel.videoResolution {
-                        if formattedReleaseDate != nil {
-                            Text("·")
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-                        Text(resolution)
-                    }
-                    if let finishText = finishesAtText {
-                        if formattedReleaseDate != nil || viewModel.videoResolution != nil {
-                            Text("·")
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-                        Text(finishText)
-                    }
-                    if let info = viewModel.streamInfo {
-                        Text("·")
-                            .foregroundStyle(.white.opacity(0.4))
-                        streamInfoChip(info)
-                    }
-                }
-                .font(.system(size: 24, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+        PlayerInfoBar(
+            item: item,
+            resolution: viewModel.videoResolution,
+            finishesAt: PlayerInfoText.finishesAt(player: viewModel.player, now: clockTime),
+            streamInfo: viewModel.streamInfo,
+            clock: ClockTime.time(clockTime),
+            metrics: .tv
+        ) { artwork in
+            switch artwork {
+            case .channelAvatar(let seriesId):
+                AsyncItemImage(
+                    itemId: seriesId,
+                    imageType: "Primary",
+                    maxWidth: 160,
+                    contentMode: .fill,
+                    fallbackImageTypes: ["Thumb"]
+                )
+            case .seriesLogo(let seriesId):
+                AsyncItemImage(
+                    itemId: seriesId,
+                    imageType: "Logo",
+                    maxWidth: 800,
+                    contentMode: .fit,
+                    fallbackImageTypes: []
+                )
             }
-            Spacer()
-            Text(clockText)
-                .font(.system(size: 42, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
         }
     }
 }
