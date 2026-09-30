@@ -62,6 +62,11 @@ struct MainNavigationView: View {
     @State private var showingDownloads = false
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    /// The Search tab's query. It lives here, not in MobileSearchView, because
+    /// the field that edits it is in `headerBar` (#126).
+    @State private var searchQuery = ""
+    @State private var searchSubmitCount = 0
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         GeometryReader { geometry in
@@ -74,7 +79,7 @@ struct MainNavigationView: View {
                     // Content area
                     NavigationStack {
                         detailView
-                            .navigationBarHidden(selection == .search ? false : true)
+                            .navigationBarHidden(true)
                     }
                     .id("\(selection)-\(navigationResetId)")
                 }
@@ -146,6 +151,32 @@ struct MainNavigationView: View {
         }
         .onChange(of: searchRequest?.id) { _, _ in
             applySearchRequest()
+        }
+        .onChange(of: selection) { _, newSelection in
+            if newSelection == .search {
+                focusSearchFieldIfTyping()
+            } else {
+                // Leaving the tab ends the search, as it did when the query
+                // was the search view's own state.
+                searchFieldFocused = false
+                searchQuery = ""
+            }
+        }
+    }
+
+    private var showsHeaderSearch: Bool {
+        selection == .search && networkMonitor.isConnected
+    }
+
+    /// Opening Search by hand puts the caret in the field. A Siri/App Intents
+    /// search arrives with its query already running, so it keeps the results
+    /// uncovered by the keyboard.
+    private func focusSearchFieldIfTyping() {
+        guard searchRequest == nil else { return }
+        // The field is inserted by this same update; focus it on the next
+        // pass, once it exists.
+        DispatchQueue.main.async {
+            searchFieldFocused = true
         }
     }
 
@@ -230,6 +261,12 @@ struct MainNavigationView: View {
         Button {
             if selection == item {
                 navigationResetId += 1
+                if item == .search {
+                    // Re-selecting Search starts over, as the rebuilt view did
+                    // when it owned the query.
+                    searchQuery = ""
+                    focusSearchFieldIfTyping()
+                }
             } else {
                 selection = item
             }
@@ -265,7 +302,17 @@ struct MainNavigationView: View {
                     }
                 }
 
-            Spacer()
+            if showsHeaderSearch {
+                HeaderSearchField(
+                    text: $searchQuery,
+                    isFocused: $searchFieldFocused,
+                    onSubmit: { searchSubmitCount += 1 }
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, MobileSpacing.xs)
+            } else {
+                Spacer()
+            }
 
             // Download activity indicator
             if selection != .downloads {
@@ -374,7 +421,9 @@ struct MainNavigationView: View {
                         if let id = searchRequest?.id {
                             onSearchRequestConsumed(id)
                         }
-                    }
+                    },
+                    query: $searchQuery,
+                    submitCount: searchSubmitCount
                 )
             case .downloads:
                 DownloadsListView()

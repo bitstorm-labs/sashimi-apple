@@ -43,12 +43,39 @@ struct MobileSearchView: View {
     // that returned results (avoids logging every keystroke prefix).
     @State private var historyTask: Task<Void, Never>?
 
-    init(initialQuery: String? = nil, onInitialQueryConsumed: (() -> Void)? = nil) {
+    /// The iPad header bar's search field when it drives this view. `nil`
+    /// (iPhone) keeps the query private and uses the system `.searchable`
+    /// field in the navigation bar.
+    private let externalQuery: Binding<String>?
+    /// Bumped by the owner of `externalQuery` when Return is pressed in its
+    /// field: search now instead of waiting out the typing debounce.
+    private let submitCount: Int
+
+    init(
+        initialQuery: String? = nil,
+        onInitialQueryConsumed: (() -> Void)? = nil,
+        query externalQuery: Binding<String>? = nil,
+        submitCount: Int = 0
+    ) {
         self.initialQuery = initialQuery
         self.onInitialQueryConsumed = onInitialQueryConsumed
+        self.externalQuery = externalQuery
+        self.submitCount = submitCount
         _searchText = State(
             initialValue: SashimiMediaSearchQuery.normalizedTerm(initialQuery ?? "")
         )
+    }
+
+    /// The live query, wherever it's stored.
+    private var currentQuery: String {
+        get { externalQuery?.wrappedValue ?? searchText }
+        nonmutating set {
+            if let externalQuery {
+                externalQuery.wrappedValue = newValue
+            } else {
+                searchText = newValue
+            }
+        }
     }
 
     // Same column math as MobileLibraryBrowseView so search results read as
@@ -66,7 +93,7 @@ struct MobileSearchView: View {
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                if searchText.isEmpty {
+                if currentQuery.isEmpty {
                     if recentSearches.isEmpty {
                         ContentUnavailableView(
                             "Search",
@@ -92,7 +119,7 @@ struct MobileSearchView: View {
                             ContentUnavailableView(
                                 "No Results",
                                 systemImage: "magnifyingglass",
-                                description: Text("No results found for \"\(searchText)\"")
+                                description: Text("No results found for \"\(currentQuery)\"")
                             )
                         }
                     }
@@ -103,8 +130,7 @@ struct MobileSearchView: View {
             }
         }
         .background(MobileColors.background)
-        .navigationTitle("Search")
-        .searchable(text: $searchText, prompt: "Movies, shows, and more")
+        .modifier(SystemSearchChrome(isEnabled: externalQuery == nil, text: $searchText))
         .fullScreenCover(item: $selectedSource) { source in
             NavigationStack {
                 ServerScopedMediaDetailView(source: source)
@@ -115,7 +141,7 @@ struct MobileSearchView: View {
                 selectedSource = source
             }
         }
-        .onChange(of: searchText) { _, newValue in
+        .onChange(of: currentQuery) { _, newValue in
             guard !isApplyingInitialQuery else { return }
             searchTask?.cancel()
             let query = newValue
@@ -130,23 +156,34 @@ struct MobileSearchView: View {
             historyTask = Task {
                 try? await Task.sleep(for: .seconds(1.5))
                 guard !Task.isCancelled,
-                      searchText == query,
+                      currentQuery == query,
                       !query.isEmpty,
                       !searchResults.isEmpty else { return }
                 recentSearches = RecentSearches.add(query)
             }
         }
+        .onChange(of: submitCount) { _, _ in
+            submitNow()
+        }
         .task(id: initialQuery) {
-            guard let initialQuery, !initialQuery.isEmpty else { return }
+            guard let initialQuery, !initialQuery.isEmpty else {
+                // A header-owned query outlives this view (the tab's stack is
+                // rebuilt on re-selection), so rerun it rather than show
+                // "No Results" for text that was never searched here.
+                if externalQuery != nil, !currentQuery.isEmpty, searchResults.isEmpty {
+                    await performSearch(query: currentQuery)
+                }
+                return
+            }
             let normalizedQuery = SashimiMediaSearchQuery.normalizedTerm(initialQuery)
             guard !normalizedQuery.isEmpty else {
                 onInitialQueryConsumed?()
                 return
             }
 
-            isApplyingInitialQuery = searchText != normalizedQuery
+            isApplyingInitialQuery = currentQuery != normalizedQuery
             if isApplyingInitialQuery {
-                searchText = normalizedQuery
+                currentQuery = normalizedQuery
             }
             defer {
                 isApplyingInitialQuery = false
@@ -177,7 +214,7 @@ struct MobileSearchView: View {
                 HStack(spacing: MobileSpacing.xs) {
                     ForEach(recentSearches, id: \.self) { query in
                         Button {
-                            searchText = query
+                            currentQuery = query
                         } label: {
                             Label(query, systemImage: "clock.arrow.circlepath")
                                 .font(MobileTypography.bodySmall)
@@ -278,7 +315,7 @@ struct MobileSearchView: View {
 
     private func performSearch(query: String) async {
         guard !query.isEmpty else {
-            if searchText == query {
+            if currentQuery == query {
                 searchResults = []
                 searchServerWarning = nil
                 isSearching = false
@@ -286,18 +323,18 @@ struct MobileSearchView: View {
             return
         }
 
-        guard searchText == query else { return }
+        guard currentQuery == query else { return }
 
         isSearching = true
         searchServerWarning = nil
         defer {
-            if searchText == query {
+            if currentQuery == query {
                 isSearching = false
             }
         }
 
         let search = await MultiServerSearchService.searchWithStatus(query: query, limit: 50)
-        guard !Task.isCancelled, searchText == query else { return }
+        guard !Task.isCancelled, currentQuery == query else { return }
         let activeServerID = await MainActor.run { SessionManager.shared.activeServerId }
         searchResults = ServerMediaResultGrouping.groups(
             from: search.results,
@@ -308,11 +345,40 @@ struct MobileSearchView: View {
             : nil
     }
 
+    /// Return in the header field: skip the debounce and record the query.
+    private func submitNow() {
+        let submitted = currentQuery
+        searchTask?.cancel()
+        historyTask?.cancel()
+        searchTask = Task {
+            await performSearch(query: submitted)
+            guard !Task.isCancelled, currentQuery == submitted, !searchResults.isEmpty else { return }
+            recentSearches = RecentSearches.add(submitted)
+        }
+    }
+
     private func select(_ group: ServerMediaResultGroup) {
         if group.sources.count == 1, let source = group.sources.first {
             selectedSource = source
         } else {
             selectedGroup = group
+        }
+    }
+}
+
+/// iPhone's navigation-bar title and system search field. The iPad hides the
+/// system bar and puts its search field in MainNavigationView's header.
+private struct SystemSearchChrome: ViewModifier {
+    let isEnabled: Bool
+    @Binding var text: String
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .navigationTitle("Search")
+                .searchable(text: $text, prompt: "Movies, shows, and more")
+        } else {
+            content
         }
     }
 }
