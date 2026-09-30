@@ -1,5 +1,4 @@
 import SwiftUI
-import AVKit
 
 struct MobilePlayerLoadingView: View {
     @ObservedObject var viewModel: PlayerViewModel
@@ -37,85 +36,6 @@ struct MobilePlayerLoadingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
-    }
-}
-
-/// Owns the complete transport row when episode navigation is opted in.
-/// AVPlayer has no public insertion point on iOS, so using one app-owned row
-/// keeps the ordering and spacing identical on iPhone, iPad, and tvOS.
-struct MobileEpisodeTransportControls: View {
-    let state: PlayerTransitionState
-    let player: AVPlayer?
-    let onPrevious: () -> Void
-    let onNext: () -> Void
-    let onSkipBackward: () -> Void
-    let onPlayPause: () -> Void
-    let onSkipForward: () -> Void
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-            HStack(spacing: 18) {
-                MobileEpisodeNavigationButton(
-                    title: "Previous Episode",
-                    systemImage: "backward.fill",
-                    isEnabled: state.canPlayPrevious,
-                    action: onPrevious
-                )
-                MobileEpisodeNavigationButton(
-                    title: "Skip Backward 10 Seconds",
-                    systemImage: "gobackward.10",
-                    isEnabled: player != nil,
-                    action: onSkipBackward
-                )
-                MobileEpisodeNavigationButton(
-                    title: player?.timeControlStatus == .playing ? "Pause" : "Play",
-                    systemImage: player?.timeControlStatus == .playing ? "pause.fill" : "play.fill",
-                    isEnabled: player != nil,
-                    action: onPlayPause,
-                    isPrimary: true
-                )
-                MobileEpisodeNavigationButton(
-                    title: "Skip Forward 10 Seconds",
-                    systemImage: "goforward.10",
-                    isEnabled: player != nil,
-                    action: onSkipForward
-                )
-                MobileEpisodeNavigationButton(
-                    title: "Next Episode",
-                    systemImage: "forward.fill",
-                    isEnabled: state.canPlayNext,
-                    action: onNext
-                )
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 54)
-        .allowsHitTesting(true)
-        .ignoresSafeArea()
-    }
-}
-
-private struct MobileEpisodeNavigationButton: View {
-    let title: String
-    let systemImage: String
-    let isEnabled: Bool
-    let action: () -> Void
-    var isPrimary = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: isPrimary ? 26 : 20, weight: .semibold))
-                .frame(width: isPrimary ? 64 : 52, height: isPrimary ? 64 : 52)
-        }
-        .disabled(!isEnabled)
-        .accessibilityLabel(title)
-        .foregroundStyle(.white)
-        .background(Color.white.opacity(0.18), in: Circle())
-        .contentShape(Circle())
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.45)
     }
 }
 

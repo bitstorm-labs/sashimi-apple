@@ -1,70 +1,14 @@
 import SwiftUI
 import AVKit
 
-// The mobile player keeps presentation, controls, and teardown together so a
-// dismissal can await the same view-model session.
-// swiftlint:disable file_length
-
 extension Notification.Name {
     static let playbackDidStop = Notification.Name("playbackDidStop")
-}
-
-// MARK: - AVPlayerViewController Wrapper
-
-private struct PlayerViewController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    let showsPlaybackControls: Bool
-    /// Every tap on the video, observed WITHOUT consuming it: AVKit still shows
-    /// its own controls, and the app's top bar (captions, gear) comes back with
-    /// them. Before this, that bar auto-hid after a few seconds and nothing
-    /// brought it back while AVKit owned the taps, so subtitles and settings
-    /// were unreachable (iPad feedback: "only the playback speed").
-    var onTap: () -> Void = {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap) }
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        controller.showsPlaybackControls = showsPlaybackControls
-        controller.allowsPictureInPicturePlayback = true
-        controller.entersFullScreenWhenPlaybackBegins = false
-        // Tint the native transport controls with the brand accent (purple)
-        controller.view.tintColor = UIColor(MobileColors.accent)
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped))
-        tap.cancelsTouchesInView = false
-        tap.delegate = context.coordinator
-        controller.view.addGestureRecognizer(tap)
-        return controller
-    }
-
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        if controller.player !== player {
-            controller.player = player
-        }
-        controller.showsPlaybackControls = showsPlaybackControls
-        context.coordinator.onTap = onTap
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onTap: () -> Void
-        init(onTap: @escaping () -> Void) { self.onTap = onTap }
-
-        @objc func tapped() { onTap() }
-
-        // Recognise alongside AVKit's own gestures, never instead of them.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
-        ) -> Bool { true }
-    }
 }
 
 // MARK: - Mobile Player View
 
 // Player controls, handoff callbacks, and teardown stay together at this
 // presentation boundary so a dismissal can await the same view-model session.
-// swiftlint:disable:next type_body_length
 struct MobilePlayerView: View {
     let item: BaseItemDto
     var serverID: String?
@@ -76,10 +20,13 @@ struct MobilePlayerView: View {
     var onPlaybackFailed: (() -> Void)?
     @StateObject private var viewModel: PlayerViewModel
     @ObservedObject private var playbackSettings = PlaybackSettings.shared
+    @ObservedObject private var viewModes = VideoViewModeStore.shared
+    @StateObject private var pictureInPicture = PictureInPictureModel()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
+    @State private var isScrubbing = false
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
 
@@ -131,10 +78,11 @@ struct MobilePlayerView: View {
             }
 
             if let player = viewModel.player {
-                PlayerViewController(
+                // The picture only: every control is the app's own overlay.
+                PlayerSurface(
                     player: player,
-                    showsPlaybackControls: !usesEpisodeTransportControls,
-                    onTap: revealOverlay
+                    videoGravity: viewModes.activeMode.videoGravity,
+                    pictureInPicture: pictureInPicture
                 )
                     .ignoresSafeArea()
 
@@ -157,7 +105,7 @@ struct MobilePlayerView: View {
                         }
                     )
                 } else {
-                    customOverlay
+                    overlay
                 }
 
                 if let banner = viewModel.stationBanner {
@@ -165,7 +113,7 @@ struct MobilePlayerView: View {
                         Spacer()
                         MobileStationBannerView(banner: banner)
                             .padding(.horizontal, 16)
-                            .padding(.bottom, showCustomOverlay ? 96 : 24)
+                            .padding(.bottom, showCustomOverlay ? 170 : 24)
                             .task(id: banner.id) {
                                 try? await Task.sleep(nanoseconds: 6 * NSEC_PER_SEC)
                                 guard !Task.isCancelled else { return }
@@ -188,6 +136,9 @@ struct MobilePlayerView: View {
             }
         }
         .navigationBarHidden(true)
+        // The top band carries its own clock, so the system status bar stays
+        // hidden for the whole time the player is up, controls or not.
+        .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .task {
             // For online playback, add a timeout so we don't hang forever if unreachable
@@ -244,7 +195,9 @@ struct MobilePlayerView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .background else { return }
+            // Picture in Picture is the one way to keep watching outside the
+            // app; leaving the app otherwise stops playback as before.
+            guard newPhase == .background, !pictureInPicture.isActive else { return }
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             let stopTask = viewModel.beginStop(reason: .sceneBackground)
@@ -288,6 +241,12 @@ struct MobilePlayerView: View {
                 dismiss()
             }
         }
+        // The delivery chip is refreshed each time the controls come up (the
+        // transcode session may register or change after playback starts).
+        .onChange(of: showCustomOverlay) { _, visible in
+            guard visible else { return }
+            Task { await viewModel.refreshStreamInfo() }
+        }
         .onChange(of: viewModel.isPlayerReady) { _, _ in
             acknowledgePlaybackHandoff()
         }
@@ -308,340 +267,54 @@ struct MobilePlayerView: View {
         }
     }
 
-    // MARK: - Custom Overlay (close, title, settings, skip)
+    // MARK: - Overlay
 
-    private var customOverlay: some View {
-        ZStack {
-            // Keep the reveal action accessible after the toolbar auto-hides.
-            // Transport buttons later in this stack retain their own hit targets.
-            Button(action: toggleOverlay) {
-                Color.clear.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(showCustomOverlay ? "Hide Playback Controls" : "Show Playback Controls")
-            .allowsHitTesting(usesEpisodeTransportControls || showCustomOverlay)
-
-            if showCustomOverlay {
-                // Top gradient scrim
-                VStack {
-                    LinearGradient(
-                        colors: [.black.opacity(0.6), .clear],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .frame(height: 100)
-                    Spacer()
-                }
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-                VStack {
-                    topBar
-                    Spacer()
-                }
-                .transition(.opacity)
-
-                // Channel up/down on a touch screen: explicit buttons rather than
-                // a swipe, which AVKit's own gestures make unreliable.
-                if viewModel.isWatchingStation {
-                    HStack {
-                        Spacer()
-                        MobileChannelStepper(
-                            onUp: { Task { await viewModel.changeStation(by: -1) } },
-                            onDown: { Task { await viewModel.changeStation(by: 1) } }
-                        )
-                        .padding(.trailing, 16)
-                    }
-                    .transition(.opacity)
-                }
-            }
-
-            if usesEpisodeTransportControls {
-                MobileEpisodeTransportControls(
-                    state: viewModel.transitionState,
-                    player: viewModel.player,
-                    onPrevious: { Task { await viewModel.playPreviousEpisode() } },
-                    onNext: { Task { await viewModel.playNextEpisode() } },
-                    onSkipBackward: { seek(by: -10) },
-                    onPlayPause: {
-                        guard let player = viewModel.player else { return }
-                        if player.timeControlStatus == .playing { player.pause() } else { player.play() }
-                    },
-                    onSkipForward: { seek(by: 10) }
-                )
-            }
-
-            // Skip button (always visible when active)
-            VStack {
-                Spacer()
-                skipButtonView
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: showCustomOverlay)
-    }
-
-    // MARK: - Top Bar
-
-    private var topBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                closeButton
-
-                // Keep the title in its own flexible column. Putting it in the
-                // same row as stream and episode actions made narrow phones
-                // render real titles as "Wh..." and wrap the bitrate chip one
-                // character per line.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(displayedItem.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-
-                    if let subtitle = controlBarSubtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 0)
-                PlayerSubtitlesMenu(viewModel: viewModel)
-                    .disabled(viewModel.transitionState.isTransitioning)
-                settingsMenu
-            }
-
-            HStack(spacing: 10) {
-                // Stream-info chip (Direct Play / Transcode + bitrate)
-                if let info = viewModel.streamInfo {
-                    streamInfoChip(info)
-                }
-
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(.horizontal, 20)
-        // With AVKit's native controls on screen, its top row (Picture in
-        // Picture, AirPlay, volume) draws over the top of the video and covered
-        // this bar, captions and gear included (iPad feedback). Sit below it.
-        .padding(.top, usesEpisodeTransportControls ? 8 : 64)
-        .transition(.move(edge: .top).combined(with: .opacity))
-    }
-
-    private var closeButton: some View {
-        Button {
-            viewModel.player?.pause()
-            // Capture BEFORE stop(): stop() nils the player, and for
-            // offline playback it hits no await first, so it completes long
-            // before the dismiss animation lets onDisappear run -- which is
-            // where the offline save lives. The position was silently lost
-            // every time the X was used.
-            saveOfflinePositionIfNeeded()
-            Task {
-                await viewModel.stop(reason: .userStop)
-                dismiss()
-            }
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.15))
-                .clipShape(Circle())
-        }
-    }
-
-    private func streamInfoChip(_ info: PlayerViewModel.StreamInfo) -> some View {
-        var text = info.label
-        if let detail = info.detail { text += " · \(detail)" }
-        let color: Color
-        switch info.method {
-        case .directPlay: color = .green
-        case .directStream: color = .yellow
-        case .transcode: color = .orange
-        }
-        return HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(text)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.white.opacity(0.15))
-        .clipShape(Capsule())
-    }
-
-    private var controlBarSubtitle: String? {
-        if let seriesName = displayedItem.seriesName {
-            var parts = [seriesName]
-            if let season = displayedItem.parentIndexNumber, let episode = displayedItem.indexNumber {
-                parts.append("S\(season):E\(episode)")
-            }
-            return parts.joined(separator: " \u{2022} ")
-        }
-        if let year = displayedItem.displayYear {
-            return String(year)
-        }
-        return nil
-    }
-
-    private var metadataText: String? {
-        var parts: [String] = []
-        if let year = displayedItem.displayYear {
-            parts.append(String(year))
-        }
-        if let ticks = displayedItem.runTimeTicks {
-            let minutes = Int(Double(ticks) / 10_000_000.0 / 60.0)
-            if minutes > 0 {
-                parts.append("\(minutes) min")
-            }
-        }
-        if let info = viewModel.streamInfo {
-            parts.append(info.label)
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    // MARK: - Settings Menu
-
-    private var settingsMenu: some View {
-        PlayerSettingsMenu(viewModel: viewModel, playbackSpeed: $playbackSpeed)
-            .disabled(viewModel.transitionState.isTransitioning)
-    }
-
-    // MARK: - Skip Button
-
-    private var skipButtonView: some View {
-        HStack {
-            Spacer()
-            if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
-                Button {
-                    viewModel.skipCurrentSegment()
-                } label: {
-                    Label(skipLabel(for: segment.type), systemImage: "forward.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                }
-                .padding(.trailing, 20)
-                .padding(.bottom, 80)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut, value: viewModel.showingSkipButton)
+    private var overlay: some View {
+        MobilePlayerOverlay(
+            viewModel: viewModel,
+            viewModes: viewModes,
+            pictureInPicture: pictureInPicture,
+            item: displayedItem,
+            serverID: serverID,
+            isOffline: localFileURL != nil,
+            showsEpisodeNavigation: usesEpisodeTransportControls,
+            layout: .current,
+            isVisible: $showCustomOverlay,
+            playbackSpeed: $playbackSpeed,
+            onInteract: scheduleAutoHide,
+            onScrubbing: { scrubbing in
+                isScrubbing = scrubbing
+                scheduleAutoHide()
+            },
+            onClose: closePlayer
+        )
     }
 
     // MARK: - Helpers
 
-    /// Bring the app's top bar back (never hide it) and restart its timer.
-    private func revealOverlay() {
-        if !showCustomOverlay {
-            showCustomOverlay = true
-            Task { await viewModel.refreshStreamInfo() }
+    private func closePlayer() {
+        viewModel.player?.pause()
+        // Capture BEFORE stop(): stop() nils the player, and for
+        // offline playback it hits no await first, so it completes long
+        // before the dismiss animation lets onDisappear run -- which is
+        // where the offline save lives. The position was silently lost
+        // every time the X was used.
+        saveOfflinePositionIfNeeded()
+        Task {
+            await viewModel.stop(reason: .userStop)
+            dismiss()
         }
-        scheduleAutoHide()
-    }
-
-    private func toggleOverlay() {
-        showCustomOverlay.toggle()
-        // Refresh the stream-info chip each time the overlay is brought up
-        // (the transcode session may register/change after playback starts).
-        if showCustomOverlay {
-            Task { await viewModel.refreshStreamInfo() }
-        }
-        scheduleAutoHide()
-    }
-
-    private func seek(by seconds: Double) {
-        guard let player = viewModel.player else { return }
-        let current = player.currentTime().seconds
-        guard current.isFinite else { return }
-        let target = max(0, current + seconds)
-        player.seek(
-            to: CMTime(seconds: target, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
-        )
     }
 
     private func scheduleAutoHide() {
         hideTask?.cancel()
-        guard showCustomOverlay else { return }
+        guard showCustomOverlay, !isScrubbing else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(5))
             if !Task.isCancelled {
                 showCustomOverlay = false
             }
         }
-    }
-
-    private func skipLabel(for type: MediaSegmentType) -> String {
-        switch type {
-        case .intro: return "Skip Intro"
-        case .outro: return "Skip Credits"
-        case .recap: return "Skip Recap"
-        case .preview: return "Skip Preview"
-        default: return "Skip"
-        }
-    }
-
-    // MARK: - Loading/Error
-
-    private var loadingOrErrorView: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-
-            // Always show a close button
-            Button {
-                viewModel.player?.pause()
-                // Capture BEFORE stop(): stop() nils the player, and for
-                // offline playback it hits no await first, so it completes long
-                // before the dismiss animation lets onDisappear run -- which is
-                // where the offline save lives. The position was silently lost
-                // every time the X was used.
-                saveOfflinePositionIfNeeded()
-                Task {
-                    await viewModel.stop(reason: .userStop)
-                    dismiss()
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.white.opacity(0.15))
-                    .clipShape(Circle())
-            }
-            .padding(20)
-
-            VStack(spacing: 16) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text("Loading...")
-                        .foregroundStyle(.white)
-                } else if let errorMessage = viewModel.errorMessage {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundStyle(.yellow)
-                    Text(errorMessage)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .padding()
-                    Button("Dismiss") {
-                        Task {
-                            await viewModel.stop(reason: .userStop)
-                            dismiss()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .ignoresSafeArea()
     }
 
     /// Persists the offline resume point. Safe to call more than once: the
@@ -651,105 +324,6 @@ struct MobilePlayerView: View {
         guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
         let ticks = Int64(currentTime.seconds * 10_000_000)
         DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
-    }
-}
-
-// MARK: - Settings Menu (quality / audio / speed / subtitles)
-
-private struct PlayerSettingsMenu: View {
-    @ObservedObject var viewModel: PlayerViewModel
-    @Binding var playbackSpeed: Float
-
-    var body: some View {
-        Menu {
-            Section("Quality") {
-                ForEach(QualityOption.allCases) { quality in
-                    Button {
-                        Task { await viewModel.changeQuality(quality) }
-                    } label: {
-                        HStack {
-                            Text(quality.displayName)
-                            if viewModel.selectedQuality == quality {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !viewModel.audioTracks.isEmpty {
-                Section("Audio") {
-                    ForEach(Array(viewModel.audioTracks.enumerated()), id: \.element.id) { _, track in
-                        Button {
-                            viewModel.selectAudioTrack(track)
-                        } label: {
-                            HStack {
-                                Text(track.displayName)
-                                if viewModel.selectedAudioTrackId == track.id {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Speed") {
-                ForEach([Float(0.5), 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
-                    Button {
-                        playbackSpeed = speed
-                        // defaultRate keeps the speed across pause/play
-                        viewModel.player?.defaultRate = speed
-                        if viewModel.player?.rate != 0 {
-                            viewModel.player?.rate = speed
-                        }
-                    } label: {
-                        HStack {
-                            Text(speed == 1.0 ? "Normal" : String(format: "%g×", speed))
-                            if playbackSpeed == speed {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Subtitles") {
-                Button {
-                    // Route through the ViewModel so the subtitle overlay is
-                    // actually cleared, not just the selection state.
-                    viewModel.disableSubtitles()
-                } label: {
-                    HStack {
-                        Text("Off")
-                        if viewModel.selectedSubtitleTrackId == nil || viewModel.selectedSubtitleTrackId == "off" {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-
-                // Skip the ViewModel's built-in "Off" option — this menu renders its own above
-                ForEach(viewModel.subtitleTracks.filter { !$0.isOffOption }) { subtitle in
-                    Button {
-                        viewModel.selectSubtitleTrack(subtitle)
-                    } label: {
-                        HStack {
-                            Text(subtitle.displayName)
-                            if viewModel.selectedSubtitleTrackId == subtitle.id {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.15))
-                .clipShape(Circle())
-        }
     }
 }
 
