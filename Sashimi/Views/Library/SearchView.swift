@@ -98,7 +98,10 @@ struct SearchView: View {
     @State private var results: [ServerMediaResultGroup] = []
     @State private var isSearching = false
     @State private var selectedGroup: ServerMediaResultGroup?
-    @State private var selectedSource: ServerMediaResult?
+    /// A source picked in the server sheet, opened once the sheet is gone so
+    /// the push doesn't race the sheet's dismissal.
+    @State private var pendingSource: ServerMediaResult?
+    @EnvironmentObject private var router: DetailRouter
     @State private var searchTask: Task<Void, Never>?
     @StateObject private var historyManager = SearchHistoryManager.shared
 
@@ -118,27 +121,26 @@ struct SearchView: View {
     }
 
     var body: some View {
-        ZStack {
-            SashimiTheme.background.ignoresSafeArea()
+        // Results push their title (server-scoped) onto the path; the
+        // lifecycle modifiers stay outside the stack (see DetailNavigationStack).
+        DetailNavigationStack {
+            ZStack {
+                SashimiTheme.background.ignoresSafeArea()
 
-            HStack(spacing: 0) {
-                keyboardPanel
-                    .frame(width: 640)
-                    .focusSection()
+                HStack(spacing: 0) {
+                    keyboardPanel
+                        .frame(width: 640)
+                        .focusSection()
 
-                resultsPanel
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .focusSection()
+                    resultsPanel
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .focusSection()
+                }
             }
         }
-        .fullScreenCover(item: $selectedSource) { source in
-            NavigationStack {
-                ServerScopedMediaDetailView(source: source)
-            }
-        }
-        .sheet(item: $selectedGroup) { group in
+        .sheet(item: $selectedGroup, onDismiss: openPendingSource) { group in
             ServerMediaSourcePickerView(group: group) { source in
-                selectedSource = source
+                pendingSource = source
             }
         }
         .onChange(of: searchText) { _, _ in
@@ -291,9 +293,15 @@ struct SearchView: View {
         }
     }
 
+    private func openPendingSource() {
+        guard let source = pendingSource else { return }
+        pendingSource = nil
+        router.push(.serverMedia(source))
+    }
+
     private func select(_ group: ServerMediaResultGroup) {
         if group.sources.count == 1, let source = group.sources.first {
-            selectedSource = source
+            router.push(.serverMedia(source))
         } else {
             selectedGroup = group
         }
