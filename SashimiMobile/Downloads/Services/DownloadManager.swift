@@ -21,6 +21,16 @@ final class DownloadManager: NSObject, ObservableObject {
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
+
+    // A locked iPad keeps a queue moving only if the NEXT download starts while
+    // iOS has the app awake. Starting one is async (playback info for Original,
+    // then the task), and the app used to hand back the system's completion
+    // handler before that finished, so iOS suspended it and the queue sat until
+    // the app was reopened. While preparing, hold a background-time assertion
+    // and defer the handler until the next task has actually been created.
+    private var preparingKey: String?
+    private var preparationTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundEventsFinished = false
     private(set) var modelContainer: ModelContainer?
     private var cachedContext: ModelContext?
 
@@ -215,6 +225,7 @@ final class DownloadManager: NSObject, ObservableObject {
             currentDownloadServerID = nil
             stopProgressTimer()
             downloadSpeed = ""
+            endPreparation()
             return
         }
 
@@ -247,6 +258,7 @@ final class DownloadManager: NSObject, ObservableObject {
         // the (only-for-.original) compatibility check below.
         currentDownloadItemId = itemId
         currentDownloadServerID = serverID
+        beginPreparation(key: downloadKey(itemId: itemId, serverID: serverID))
 
         // Resolve the effective quality — for `.original`, verify the raw source
         // will direct-play on this device; if not (or on any error) downgrade to
@@ -362,6 +374,7 @@ final class DownloadManager: NSObject, ObservableObject {
         // currentDownloadItemId was already set synchronously in startNextDownload
         // so re-entrant enqueues couldn't start a second concurrent download.
         task.resume()
+        endPreparation(key: downloadKey(itemId: itemId, serverID: serverID))
         persistence.updateStatus(itemId: itemId, serverID: serverID, status: .downloading)
         let key = downloadKey(itemId: itemId, serverID: serverID)
         preparingItems.insert(key)
@@ -371,6 +384,32 @@ final class DownloadManager: NSObject, ObservableObject {
 
         // Download assets in background
         downloadAssets(for: item, server: context.server, token: context.token)
+    }
+
+    private func beginPreparation(key: String) {
+        preparingKey = key
+        guard preparationTaskID == .invalid else { return }
+        preparationTaskID = UIApplication.shared.beginBackgroundTask(withName: "prepare-next-download") { [weak self] in
+            // Out of time: give everything back rather than be killed for it.
+            Task { @MainActor in self?.endPreparation() }
+        }
+    }
+
+    /// Preparation of `key` (or, with nil, of anything) is over: the task
+    /// exists or the queue is empty. Returns the background time, and the
+    /// deferred system completion handler if iOS already finished its events.
+    private func endPreparation(key: String? = nil) {
+        if let key, preparingKey != key { return }
+        preparingKey = nil
+        if backgroundEventsFinished {
+            backgroundEventsFinished = false
+            backgroundCompletionHandler?()
+            backgroundCompletionHandler = nil
+        }
+        if preparationTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(preparationTaskID)
+            preparationTaskID = .invalid
+        }
     }
 
     private func dequeueNext() {
@@ -612,16 +651,29 @@ final class DownloadManager: NSObject, ObservableObject {
         let descriptor = FetchDescriptor<DownloadedItem>()
         guard let items = try? context.fetch(descriptor) else { return }
 
+        var requeue: [(itemId: String, serverID: String?)] = []
         for item in items {
             let status = item.status
             let isIncomplete = status == .downloading || status == .preparing || status == .queued
-            if isIncomplete && !activeTaskItemIds.contains(item.recordID) {
+            guard isIncomplete && !activeTaskItemIds.contains(item.recordID) else { continue }
+            if status == .queued {
+                // Never started: the in-memory queue was lost when iOS ended the
+                // app (e.g. a long lock), not the download. Queue it again
+                // rather than failing a whole season the user set going.
+                requeue.append((item.itemId, item.serverID))
+            } else {
                 item.status = .failed
                 item.errorMessage = "Download interrupted. Tap retry to restart."
             }
         }
         try? context.save()
         stateVersion += 1
+        guard !requeue.isEmpty else { return }
+        Task {
+            for entry in requeue {
+                await retryDownload(itemId: entry.itemId, serverID: entry.serverID)
+            }
+        }
     }
 
     func restartAllFailed() async {
@@ -950,6 +1002,12 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
         Task { @MainActor in
+            // Still preparing the next queued download: hand the handler back
+            // once its task exists (endPreparation), or iOS suspends us first.
+            if preparingKey != nil {
+                backgroundEventsFinished = true
+                return
+            }
             backgroundCompletionHandler?()
             backgroundCompletionHandler = nil
         }
