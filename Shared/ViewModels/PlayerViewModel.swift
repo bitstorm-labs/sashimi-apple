@@ -323,6 +323,10 @@ final class PlayerViewModel: ObservableObject {
     /// Last stall count already reported, so a climbing counter is logged once
     /// per new stall instead of on every access-log entry.
     private var lastReportedStallCount = 0
+    /// Serves the current item's rewritten master playlist (tvOS HDR
+    /// stream-copy only, #449). `AVAssetResourceLoader` holds its delegate
+    /// weakly, so it lives here for as long as the asset it feeds.
+    private var hlsPlaylistLoader: HLSPlaylistResourceLoader?
     private let client: JellyfinClient
     private let navigationClient: any PlayerEpisodeNavigationClient
     private let transitionLoader: (any PlayerTransitionLoader)?
@@ -2096,11 +2100,14 @@ final class PlayerViewModel: ObservableObject {
         // Only meaningful for `.transcodeHLS`: whether AVPlayer gets one media
         // playlist pinned out of the master (see `HLSMultivariantPlaylist`, #443).
         var pinnedHLSVariant = false
+        // The pinned master with its trickplay image stream kept (#449).
+        var pinnedMultivariantPlaylist: String?
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS
             let resolution = await client.resolveHLSStreamURL(transcodingPath: transcodingPath)
             resolvedURL = resolution?.url
             pinnedHLSVariant = resolution?.pinnedVariant ?? false
+            pinnedMultivariantPlaylist = resolution?.pinnedMultivariantPlaylist
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             streamKind = .directStream
@@ -2163,10 +2170,18 @@ final class PlayerViewModel: ObservableObject {
         // used to be retained in a published `attemptedURL` property that
         // nothing ever read — a credential (`api_key`) parked in view-model
         // state, one `Text(...)` away from being on screen.
-        let asset = AVURLAsset(url: resolvedURL)
+        let asset: AVURLAsset
+        let playlistLoader = Self.pinnedPlaylistLoader(for: pinnedMultivariantPlaylist)
+        hlsPlaylistLoader = playlistLoader
+        if let playlistLoader {
+            asset = playlistLoader.makeAsset()
+        } else {
+            asset = AVURLAsset(url: resolvedURL)
+        }
         diag(.assetCreated, [
             PlayerDiagnostics.field("kind", streamKind.rawValue),
-            PlayerDiagnostics.field("chapters", item.chapters?.count ?? 0)
+            PlayerDiagnostics.field("chapters", item.chapters?.count ?? 0),
+            PlayerDiagnostics.field("pinnedMasterWithImageStream", playlistLoader != nil)
         ])
         let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
 
@@ -2177,6 +2192,22 @@ final class PlayerViewModel: ObservableObject {
         }
 
         makePlayerAndObservers(for: playerItem)
+    }
+
+    /// The in-memory master to play instead of the pinned media playlist, so
+    /// the HDR stream-copy path keeps its scrub thumbnails (#449).
+    ///
+    /// tvOS only. `AVPlayerViewController` there draws scrub previews from the
+    /// master's `#EXT-X-IMAGE-STREAM-INF` and offers no other way to supply
+    /// them. iOS keeps the plain media-playlist pin: an AirPlay sender hands
+    /// the asset URL to the receiver, which cannot reach this process's
+    /// resource loader, so a private-scheme URL would not play there at all.
+    nonisolated static func pinnedPlaylistLoader(for playlist: String?) -> HLSPlaylistResourceLoader? {
+        #if os(tvOS)
+        return playlist.flatMap { HLSPlaylistResourceLoader(playlist: $0) }
+        #else
+        return nil
+        #endif
     }
 
     /// Builds the AVPlayer and wires every observer it needs.

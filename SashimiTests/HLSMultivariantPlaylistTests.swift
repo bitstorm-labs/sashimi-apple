@@ -124,4 +124,127 @@ final class HLSMultivariantPlaylistTests: XCTestCase {
         XCTAssertNil(HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: "<html>502</html>", multivariantURL: multivariantURL))
         XCTAssertNil(HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: "", multivariantURL: multivariantURL))
     }
+
+    // MARK: - Pinned master keeping the image stream (#449)
+
+    /// The #443 pin dropped Jellyfin's trickplay `#EXT-X-IMAGE-STREAM-INF`,
+    /// which only the master carries. The rewrite keeps exactly the variant
+    /// the pin chose, keeps the image stream, drops both fallbacks, and makes
+    /// every URI absolute (the result is served from a private scheme).
+    func testHDRCopyPlaylistKeepsOnlyThePrimaryAndTheImageStream() {
+        let rewritten = HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(
+            playlist: hdrCopyPlaylist,
+            multivariantURL: multivariantURL
+        )
+
+        XCTAssertEqual(rewritten, """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=15730824,AVERAGE-BANDWIDTH=15730824,VIDEO-RANGE=PQ,CODECS="hvc1.2.4.L150.B0,ec-3",SUPPLEMENTAL-CODECS="hvc1.2.4.L150.B0/cdm4",RESOLUTION=3840x2160,FRAME-RATE=23.976
+        http://jellyfin.test:8096/videos/abc/main.m3u8?DeviceId=DEV&MediaSourceId=src1&VideoCodec=hevc,h264&AudioCodec=copy&SegmentContainer=mp4&PlaySessionId=ps1&ApiKey=REDACTED&hevc-profile=main10&TranscodeReasons=ContainerNotSupported
+        #EXT-X-IMAGE-STREAM-INF:BANDWIDTH=6794,RESOLUTION=320x180,CODECS="jpeg",URI="http://jellyfin.test:8096/videos/abc/Trickplay/320/tiles.m3u8?MediaSourceId=src1&ApiKey=REDACTED"
+
+        """)
+    }
+
+    /// The stall fix must survive the rewrite: the one variant left is the
+    /// one the pin plays, and no fallback URI survives anywhere.
+    func testRewrittenPlaylistOffersOnlyThePinnedVariant() throws {
+        let rewritten = try XCTUnwrap(HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(
+            playlist: hdrCopyPlaylist,
+            multivariantURL: multivariantURL
+        ))
+        let pinned = HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: hdrCopyPlaylist, multivariantURL: multivariantURL)
+
+        let variants = HLSMultivariantPlaylist.variants(in: rewritten)
+        XCTAssertEqual(variants.map(\.uri), [pinned?.absoluteString])
+        XCTAssertFalse(rewritten.contains("AllowVideoStreamCopy=false"))
+        // Re-reading the output must not find anything left to pin away.
+        XCTAssertNil(HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: rewritten, multivariantURL: multivariantURL))
+    }
+
+    /// Without an image stream there is nothing to gain over the plain pin,
+    /// so the proven path stays in charge.
+    func testPlaylistWithoutImageStreamIsNotRewritten() {
+        let playlist = hdrCopyPlaylist
+            .split(separator: "\n")
+            .filter { !$0.hasPrefix("#EXT-X-IMAGE-STREAM-INF") }
+            .joined(separator: "\n")
+        XCTAssertNotNil(HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: playlist, multivariantURL: multivariantURL))
+        XCTAssertNil(HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(playlist: playlist, multivariantURL: multivariantURL))
+    }
+
+    /// Titles that were never pinned (SDR, forced re-encode, ABR ladder) keep
+    /// the real master untouched, image stream and all.
+    func testUnpinnedPlaylistsAreNotRewritten() {
+        let image = #"#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=6794,RESOLUTION=320x180,CODECS="jpeg",URI="Trickplay/320/tiles.m3u8?ApiKey=REDACTED""#
+        let singleSDR = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=8000000,VIDEO-RANGE=SDR,CODECS="hvc1.1.6.L120.B0,mp4a.40.2",RESOLUTION=1920x1080
+        main.m3u8?VideoCodec=hevc,h264&PlaySessionId=ps1&ApiKey=REDACTED
+        \(image)
+        """
+        let forcedReencode = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=8000000,VIDEO-RANGE=SDR,CODECS="hvc1.1.6.L153.B0,ec-3",RESOLUTION=3840x2160
+        main.m3u8?VideoCodec=hevc,h264&PlaySessionId=ps1&ApiKey=REDACTED&AllowVideoStreamCopy=false
+        \(image)
+        """
+        for playlist in [singleSDR, forcedReencode, ""] {
+            XCTAssertNil(HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(playlist: playlist, multivariantURL: multivariantURL))
+        }
+    }
+
+    /// Dolby Vision lists two primaries; only the first (the one the pin
+    /// plays) may stay, or AVPlayer could switch between them and restart
+    /// ffmpeg mid-stream.
+    func testDolbyVisionRewriteKeepsOnlyTheFirstPrimary() throws {
+        let playlist = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=20000000,VIDEO-RANGE=PQ,CODECS="dvh1.05.06,ec-3",RESOLUTION=3840x2160
+        main.m3u8?VideoCodec=hevc,h264&PlaySessionId=ps1&ApiKey=REDACTED&hevc-rangetype=DOVI
+        #EXT-X-STREAM-INF:BANDWIDTH=20000000,VIDEO-RANGE=PQ,CODECS="hvc1.2.4.L153.B0,ec-3",RESOLUTION=3840x2160
+        main.m3u8?VideoCodec=hevc,h264&PlaySessionId=ps1&ApiKey=REDACTED
+        #EXT-X-STREAM-INF:BANDWIDTH=20000000,VIDEO-RANGE=SDR,CODECS="avc1.424029,ec-3",RESOLUTION=3840x2160
+        main.m3u8?VideoCodec=h264&PlaySessionId=ps1&ApiKey=REDACTED&AllowVideoStreamCopy=false
+        #EXT-X-IMAGE-STREAM-INF:BANDWIDTH=6794,RESOLUTION=320x180,CODECS="jpeg",URI="Trickplay/320/tiles.m3u8?ApiKey=REDACTED"
+        """
+        let rewritten = try XCTUnwrap(HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(
+            playlist: playlist,
+            multivariantURL: multivariantURL
+        ))
+        let variants = HLSMultivariantPlaylist.variants(in: rewritten)
+        XCTAssertEqual(variants.count, 1)
+        XCTAssertTrue(variants[0].attributes.contains("dvh1.05.06"))
+        XCTAssertTrue(variants[0].uri.hasSuffix("hevc-rangetype=DOVI"))
+    }
+
+    /// Other URI-bearing tags are kept and made absolute (a relative URI
+    /// would otherwise resolve against the private scheme and never load);
+    /// one that points at a fallback is removed with it.
+    func testOtherTagURIsAreAbsolutizedAndFallbackTagsDropped() throws {
+        let playlist = """
+        #EXTM3U
+        #EXT-X-VERSION:7
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Main",URI="audio.m3u8?ApiKey=REDACTED"
+        #EXT-X-STREAM-INF:BANDWIDTH=1,VIDEO-RANGE=PQ,CODECS="hvc1.2.4.L150.B0",AUDIO="aud"
+        main.m3u8?VideoCodec=hevc&ApiKey=REDACTED
+        #EXT-X-STREAM-INF:BANDWIDTH=1,VIDEO-RANGE=SDR,CODECS="avc1.424029",AUDIO="aud"
+        main.m3u8?VideoCodec=h264&ApiKey=REDACTED&AllowVideoStreamCopy=false
+        #EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1,CODECS="avc1.424029",URI="iframes.m3u8?VideoCodec=h264&AllowVideoStreamCopy=false"
+        #EXT-X-IMAGE-STREAM-INF:BANDWIDTH=6794,RESOLUTION=320x180,CODECS="jpeg",URI="Trickplay/320/tiles.m3u8?ApiKey=REDACTED"
+        """
+        let rewritten = try XCTUnwrap(HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(
+            playlist: playlist,
+            multivariantURL: multivariantURL
+        ))
+        XCTAssertEqual(rewritten, """
+        #EXTM3U
+        #EXT-X-VERSION:7
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Main",URI="http://jellyfin.test:8096/videos/abc/audio.m3u8?ApiKey=REDACTED"
+        #EXT-X-STREAM-INF:BANDWIDTH=1,VIDEO-RANGE=PQ,CODECS="hvc1.2.4.L150.B0",AUDIO="aud"
+        http://jellyfin.test:8096/videos/abc/main.m3u8?VideoCodec=hevc&ApiKey=REDACTED
+        #EXT-X-IMAGE-STREAM-INF:BANDWIDTH=6794,RESOLUTION=320x180,CODECS="jpeg",URI="http://jellyfin.test:8096/videos/abc/Trickplay/320/tiles.m3u8?ApiKey=REDACTED"
+
+        """)
+    }
 }
