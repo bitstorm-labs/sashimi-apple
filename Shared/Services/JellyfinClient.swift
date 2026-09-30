@@ -1359,6 +1359,11 @@ actor JellyfinClient {
         /// because the master carried Jellyfin's HDR→SDR fallback-hack variants
         /// (see `HLSMultivariantPlaylist`). False means `url` is the master itself.
         let pinnedVariant: Bool
+        /// Only set alongside `pinnedVariant`: the master reduced to that same
+        /// variant while keeping its trickplay image stream (see
+        /// `HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams`,
+        /// #449). Nil when the master has no image stream to keep.
+        var pinnedMultivariantPlaylist: String?
     }
 
     /// Resolves a `transcodingUrl` to what AVPlayer should actually load.
@@ -1387,7 +1392,14 @@ actor JellyfinClient {
             }
             if let pinned = HLSMultivariantPlaylist.singlePrimaryVariantURL(playlist: playlist, multivariantURL: multivariantURL) {
                 logger.info("master playlist carries stream-copy fallback variants; pinning the primary variant")
-                return HLSStreamResolution(url: pinned, pinnedVariant: true)
+                return HLSStreamResolution(
+                    url: pinned,
+                    pinnedVariant: true,
+                    pinnedMultivariantPlaylist: HLSMultivariantPlaylist.primaryVariantPlaylistKeepingImageStreams(
+                        playlist: playlist,
+                        multivariantURL: multivariantURL
+                    )
+                )
             }
             return HLSStreamResolution(url: multivariantURL, pinnedVariant: false)
         } catch {

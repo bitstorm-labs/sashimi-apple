@@ -74,4 +74,91 @@ enum HLSMultivariantPlaylist {
         else { return nil }
         return URL(string: primary.uri, relativeTo: multivariantURL)?.absoluteURL
     }
+
+    /// The master reduced to the one variant `singlePrimaryVariantURL` pins,
+    /// with everything else it carries — above all the trickplay
+    /// `#EXT-X-IMAGE-STREAM-INF` — kept, and every URI made absolute. Nil when
+    /// the master should not be rewritten: no fallback hack to remove, no
+    /// primary to keep, or no image stream to keep (then the plain pin loses
+    /// nothing and stays the path).
+    ///
+    /// Why (#449): pinning AVPlayer to the primary's media playlist fixed the
+    /// #443 stall but dropped the scrub thumbnails, because Jellyfin
+    /// advertises its trickplay tiles only in the master and tvOS's
+    /// `AVPlayerViewController` has no API for supplying scrub images any
+    /// other way. A master whose only `#EXT-X-STREAM-INF` is the pinned
+    /// variant gives AVPlayer exactly one codec and one segment grid — the
+    /// same thing the pin gives it — plus the image stream.
+    ///
+    /// The result is served from memory through a custom URL scheme
+    /// (`HLSPlaylistResourceLoader`), so relative URIs would resolve against
+    /// that scheme; they are resolved against the real master URL here so
+    /// AVPlayer fetches the media playlist, segments and tiles over HTTP as
+    /// before. Any tag whose URI is a fallback (`AllowVideoStreamCopy=false`)
+    /// is dropped too, so no fallback is reachable from the result.
+    static func primaryVariantPlaylistKeepingImageStreams(playlist: String, multivariantURL: URL) -> String? {
+        let allVariants = variants(in: playlist)
+        guard allVariants.contains(where: \.isStreamCopyFallback),
+              let primary = allVariants.first(where: { !$0.isStreamCopyFallback })
+        else { return nil }
+
+        let lines = playlist.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard lines.first == "#EXTM3U",
+              lines.contains(where: { $0.hasPrefix("#EXT-X-IMAGE-STREAM-INF:") })
+        else { return nil }
+
+        var output: [String] = []
+        // A `#EXT-X-STREAM-INF` and any tags between it and its URI line,
+        // held until the URI decides whether the whole entry is kept.
+        var pendingVariant: [String]?
+        var keptPrimary = false
+        for line in lines {
+            if line.hasPrefix("#EXT-X-STREAM-INF:") {
+                pendingVariant = [line]
+            } else if var entry = pendingVariant {
+                if line.hasPrefix("#") || line.isEmpty {
+                    entry.append(line)
+                    pendingVariant = entry
+                    continue
+                }
+                pendingVariant = nil
+                guard !keptPrimary, line == primary.uri,
+                      let absolute = absoluteURI(line, relativeTo: multivariantURL)
+                else { continue }
+                keptPrimary = true
+                output.append(contentsOf: entry)
+                output.append(absolute)
+            } else if line.hasPrefix("#") {
+                guard let rewritten = absolutizingURIAttribute(in: line, relativeTo: multivariantURL) else { continue }
+                output.append(rewritten)
+            } else if line.isEmpty {
+                output.append(line)
+            }
+            // A bare URI line outside a variant entry is malformed in a
+            // multivariant playlist; it is dropped rather than guessed at.
+        }
+        guard keptPrimary else { return nil }
+        while output.last?.isEmpty == true { output.removeLast() }
+        return output.joined(separator: "\n") + "\n"
+    }
+
+    private static func absoluteURI(_ uri: String, relativeTo base: URL) -> String? {
+        guard uri.range(of: "AllowVideoStreamCopy=false", options: .caseInsensitive) == nil else { return nil }
+        return URL(string: uri, relativeTo: base)?.absoluteURL.absoluteString
+    }
+
+    /// A tag line with its `URI="…"` attribute (if any) made absolute, or nil
+    /// when the line must be dropped: the URI points at a fallback or cannot
+    /// be resolved.
+    private static func absolutizingURIAttribute(in line: String, relativeTo base: URL) -> String? {
+        let pattern = #"(?<=[:,])URI="([^"]*)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let whole = Range(match.range, in: line),
+              let value = Range(match.range(at: 1), in: line)
+        else { return line }
+        guard let absolute = absoluteURI(String(line[value]), relativeTo: base) else { return nil }
+        return line.replacingCharacters(in: whole, with: "URI=\"\(absolute)\"")
+    }
 }
