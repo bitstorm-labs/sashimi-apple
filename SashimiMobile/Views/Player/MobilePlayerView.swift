@@ -136,6 +136,9 @@ struct MobilePlayerView: View {
             }
         }
         .navigationBarHidden(true)
+        // The top band carries its own clock, so the system status bar stays
+        // hidden for the whole time the player is up, controls or not.
+        .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .task {
             // For online playback, add a timeout so we don't hang forever if unreachable
