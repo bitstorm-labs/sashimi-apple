@@ -14,6 +14,14 @@ extension Notification.Name {
 private struct PlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
     let showsPlaybackControls: Bool
+    /// Every tap on the video, observed WITHOUT consuming it: AVKit still shows
+    /// its own controls, and the app's top bar (captions, gear) comes back with
+    /// them. Before this, that bar auto-hid after a few seconds and nothing
+    /// brought it back while AVKit owned the taps, so subtitles and settings
+    /// were unreachable (iPad feedback: "only the playback speed").
+    var onTap: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onTap: onTap) }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
@@ -23,6 +31,10 @@ private struct PlayerViewController: UIViewControllerRepresentable {
         controller.entersFullScreenWhenPlaybackBegins = false
         // Tint the native transport controls with the brand accent (purple)
         controller.view.tintColor = UIColor(MobileColors.accent)
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        controller.view.addGestureRecognizer(tap)
         return controller
     }
 
@@ -31,6 +43,20 @@ private struct PlayerViewController: UIViewControllerRepresentable {
             controller.player = player
         }
         controller.showsPlaybackControls = showsPlaybackControls
+        context.coordinator.onTap = onTap
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onTap: () -> Void
+        init(onTap: @escaping () -> Void) { self.onTap = onTap }
+
+        @objc func tapped() { onTap() }
+
+        // Recognise alongside AVKit's own gestures, never instead of them.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
     }
 }
 
@@ -107,7 +133,8 @@ struct MobilePlayerView: View {
             if let player = viewModel.player {
                 PlayerViewController(
                     player: player,
-                    showsPlaybackControls: !usesEpisodeTransportControls
+                    showsPlaybackControls: !usesEpisodeTransportControls,
+                    onTap: revealOverlay
                 )
                     .ignoresSafeArea()
 
@@ -393,7 +420,10 @@ struct MobilePlayerView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 8)
+        // With AVKit's native controls on screen, its top row (Picture in
+        // Picture, AirPlay, volume) draws over the top of the video and covered
+        // this bar, captions and gear included (iPad feedback). Sit below it.
+        .padding(.top, usesEpisodeTransportControls ? 8 : 64)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
@@ -504,6 +534,15 @@ struct MobilePlayerView: View {
     }
 
     // MARK: - Helpers
+
+    /// Bring the app's top bar back (never hide it) and restart its timer.
+    private func revealOverlay() {
+        if !showCustomOverlay {
+            showCustomOverlay = true
+            Task { await viewModel.refreshStreamInfo() }
+        }
+        scheduleAutoHide()
+    }
 
     private func toggleOverlay() {
         showCustomOverlay.toggle()
