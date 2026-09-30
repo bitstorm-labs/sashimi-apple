@@ -108,6 +108,7 @@ struct ContentView: View {
                 .id(sessionManager.activeSessionIdentity)
                 .task {
                     await DownloadManager.shared.syncPendingProgress()
+                    await DownloadManager.shared.backfillAllSubtitles()
                 }
                 // Re-auth a saved server whose session expired: tapping it in
                 // the switcher raises reauthServer; present a prefilled login.
@@ -174,6 +175,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             Task { await PlaybackReportDelivery.shared.flush() }
+            // Downloads queued before the screen locked can finish without
+            // their subtitles; fetch what they miss while we're in front.
+            Task { await DownloadManager.shared.backfillAllSubtitles() }
             // Siri or Shortcuts may have written a route while Sashimi was
             // inactive in another process. Refresh before handling the active
             // scene so card taps work without requiring a cold launch.

@@ -56,6 +56,8 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // Pending image/subtitle downloads (non-background, fire-and-forget)
     private var pendingAssetTasks: [String: [Task<Void, Never>]] = [:]
+    /// Downloads whose subtitle files were confirmed complete this launch.
+    private var subtitlesVerified: Set<String> = []
 
     private let persistence = DownloadPersistence()
 
@@ -777,24 +779,45 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func downloadSubtitles(for item: BaseItemDto, server: ServerConfig, token: String) async {
+        // Runs on URLSession.shared, not the background session: it dies the
+        // moment iOS suspends the app. A download queued before the screen
+        // locks used to finish its video with no subtitles at all -- the
+        // player then showed a subtitle button with nothing in it. Ask for
+        // time to finish; backfillSubtitles repairs anything that still misses.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "download-subtitles")
+        defer {
+            if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+        }
+        _ = await fetchSubtitles(itemId: item.id, itemType: item.type, server: server, token: token, skipping: [])
+    }
+
+    /// Downloads the item's subtitle tracks, except `skipping` (stream indexes
+    /// already on disk). Returns what it wrote, or nil if the track list could
+    /// not be fetched or any track failed -- so a caller can try again later.
+    private func fetchSubtitles(
+        itemId: String,
+        itemType: ItemType?,
+        server: ServerConfig,
+        token: String,
+        skipping: Set<Int>
+    ) async -> [OfflineSubtitle]? {
         guard let client = try? await client(for: server.id),
               let playbackInfo = try? await client.getPlaybackInfo(
-                  itemId: item.id,
-                  itemType: item.type,
+                  itemId: itemId,
+                  itemType: itemType,
                   engine: .avFoundation,
                   maxBitrate: nil
               ) else {
-            return
+            return nil
         }
 
-        guard let mediaSource = playbackInfo.mediaSources?.first else { return }
-        let subtitleStreams = mediaSource.subtitleStreams
-
-        let itemId = item.id
+        guard let mediaSource = playbackInfo.mediaSources?.first else { return nil }
         try? DownloadFileManager.createSubtitlesDirectory(for: itemId, serverID: server.id)
 
-        for stream in subtitleStreams {
-            guard let index = stream.index,
+        var written: [OfflineSubtitle] = []
+        var complete = true
+        for stream in mediaSource.subtitleStreams {
+            guard let index = stream.index, !skipping.contains(index),
                   let language = stream.language ?? stream.displayTitle else {
                 continue
             }
@@ -815,21 +838,68 @@ final class DownloadManager: NSObject, ObservableObject {
                 language: language,
                 serverID: server.id
             )
+            let displayTitle = stream.displayTitle ?? language
 
             do {
-                let (tempURL, _) = try await URLSession.shared.download(for: request)
+                let (tempURL, response) = try await URLSession.shared.download(for: request)
+                // An image-based track (PGS) has no VTT form: the server
+                // answers 500, and saving that body gave a track with no cues.
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    continue
+                }
                 try DownloadFileManager.moveFile(from: tempURL, to: destination)
                 persistence.addSubtitle(
                     itemId: itemId,
                     serverID: server.id,
                     language: language,
-                    displayTitle: stream.displayTitle ?? language,
+                    displayTitle: displayTitle,
                     subtitleIndex: index,
                     fileName: fileName
                 )
+                written.append(OfflineSubtitle(
+                    index: index,
+                    language: language,
+                    displayTitle: displayTitle,
+                    fileURL: destination
+                ))
             } catch {
-                // Best-effort: skip failed subtitles
+                complete = false
             }
+        }
+        return complete ? written : nil
+    }
+
+    /// Fetches the subtitle files a finished download is missing -- those
+    /// lost when the app was suspended mid-fetch (see downloadSubtitles).
+    /// Checks each download once per launch once it has everything; returns
+    /// the item's full subtitle list when anything new arrived, else nil.
+    func backfillSubtitles(itemId: String, serverID: String?) async -> [OfflineSubtitle]? {
+        guard let record = downloadStatus(for: itemId, serverID: serverID), record.isComplete else { return nil }
+        let key = downloadKey(itemId: itemId, serverID: record.serverID)
+        guard !subtitlesVerified.contains(key),
+              let context = serverContext(for: record.serverID) else { return nil }
+
+        let existing = offlineSubtitles(for: itemId, serverID: record.serverID)
+        guard let added = await fetchSubtitles(
+            itemId: itemId,
+            itemType: ItemType(rawValue: record.itemTypeRaw),
+            server: context.server,
+            token: context.token,
+            skipping: Set(existing.map(\.index))
+        ) else { return nil }
+
+        subtitlesVerified.insert(key)
+        guard !added.isEmpty else { return nil }
+        return (existing + added).sorted { $0.index < $1.index }
+    }
+
+    /// Runs backfillSubtitles over every finished download, one at a time.
+    func backfillAllSubtitles() async {
+        guard let context = mainContext,
+              let items = try? context.fetch(FetchDescriptor<DownloadedItem>()) else { return }
+        for item in items where item.isComplete {
+            _ = await backfillSubtitles(itemId: item.itemId, serverID: item.serverID)
         }
     }
 }
