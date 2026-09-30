@@ -177,6 +177,14 @@ struct MobilePlayerView: View {
             viewModel.loadAllTracks()
             await viewModel.refreshStreamInfo()
             scheduleAutoHide()
+            // A download that lost its subtitles (fetched after the video,
+            // and cut off when the app was suspended) gets them now if the
+            // server is reachable, and the menu fills in.
+            if localFileURL != nil,
+               let subtitles = await DownloadManager.shared.backfillSubtitles(itemId: item.id, serverID: serverID) {
+                viewModel.offlineSubtitles = subtitles
+                viewModel.loadSubtitleTracks()
+            }
         }
         // Live channels keep the screen on through Up Next breaks (see
         // keepsScreenAwake); the system default returns when the player goes.
