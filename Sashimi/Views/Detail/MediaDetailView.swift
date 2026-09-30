@@ -28,11 +28,11 @@ struct MediaDetailView: View {
     @State var seriesCriticRating: Int?
     @State var nextEpisodeToPlay: BaseItemDto?
     @State var isLoadingEpisodes = false
-    @State var showingSeriesDetail: BaseItemDto?
-    @State var showingEpisodeDetail: BaseItemDto?
-    @State var showingPersonDetail: PersonInfo?
-    @State var pendingServerMedia: ServerMediaResult?
-    @State var selectedServerMedia: ServerMediaResult?
+    /// Series, episode, person and other-server pages are pushed onto the
+    /// tab's navigation path (issue #15) instead of stacking covers.
+    @EnvironmentObject var router: DetailRouter
+    /// The first load runs once per page. See the `.task` below.
+    @State var hasStartedLoading = false
     @State var showingFileInfo = false
     @State var showingDeleteConfirm = false
     @State var seasonWatchRequest: SeasonWatchRequest?
@@ -211,33 +211,14 @@ struct MediaDetailView: View {
                 }
             }
         }
-        .themeSong(for: item)
+        // No `.themeSong(for:)`: on tvOS the theme follows the navigation
+        // path (DetailRouter), not this page's appear/disappear.
         .fullScreenCover(isPresented: $showingPlayer) {
             PlayerView(
                 item: selectedEpisode ?? item,
                 serverID: serverID,
                 startFromBeginning: startFromBeginning
             )
-        }
-        .fullScreenCover(item: $showingSeriesDetail) { series in
-            MediaDetailView(item: series, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID)
-        }
-        .fullScreenCover(item: $showingEpisodeDetail) { episode in
-            MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID)
-        }
-        .fullScreenCover(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
-            PersonDetailView(
-                person: person,
-                excludingItemID: item.id,
-                excludingTitleKey: ServerMediaResultGrouping.titleKey(for: item),
-                originatingServerID: serverID ?? SessionManager.shared.activeServerId,
-                onSelectSource: queueServerMedia
-            )
-        }
-        .fullScreenCover(item: $selectedServerMedia) { source in
-            NavigationStack {
-                ServerScopedMediaDetailView(source: source)
-            }
         }
         .sheet(isPresented: $showingFullOverview) {
             ScrollView {
@@ -271,7 +252,14 @@ struct MediaDetailView: View {
             Task { await applySeasonWatch(request) }
         }
         .task {
-            await loadContent()
+            // Once per page, and detached from this view's appearance. A pushed
+            // page disappears when another is pushed over it, which cancels its
+            // `.task` (dropping a half-finished load) and re-runs it on the way
+            // back — and a reload rebuilds the season/episode strips under the
+            // card focus is returning to. Covers never did either.
+            guard !hasStartedLoading else { return }
+            hasStartedLoading = true
+            await Task { await loadContent() }.value
         }
         .onAppear {
             isWatched = item.userData?.played ?? false

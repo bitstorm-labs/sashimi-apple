@@ -62,7 +62,7 @@ extension MediaDetailView {
                             LazyHStack(spacing: 30) {
                                 ForEach(episodes) { episode in
                                     EpisodeCard(episode: episode, isCurrentEpisode: episode.id == nextEpisodeToPlay?.id, showEpisodeThumbnail: true) {
-                                        showingEpisodeDetail = episode
+                                        openDetail(episode)
                                     }
                                     .id("\(episode.id)-\(refreshID)")
                                 }
@@ -118,7 +118,7 @@ extension MediaDetailView {
                                     isCurrentEpisode: episode.id == item.id,
                                     showEpisodeThumbnail: true
                                 ) {
-                                    showingEpisodeDetail = episode
+                                    openDetail(episode)
                                 }
                                 .id(episode.id)
                             }

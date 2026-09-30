@@ -42,9 +42,8 @@ struct SashimiApp: App {
                 .toastOverlay()
         }
         // The TV button and other backgrounding transitions leave `.active`
-        // without the detail screen's `onDisappear` ever firing (it's a
-        // `fullScreenCover`), so the theme song must be stopped here rather
-        // than relying on the view hierarchy.
+        // without any detail page disappearing, so the theme song must be
+        // stopped here rather than relying on the view hierarchy.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
                 ThemeSongPlayer.shared.appDidBackground()
@@ -65,6 +64,9 @@ struct SashimiApp: App {
 
 struct ContentView: View {
     @EnvironmentObject private var sessionManager: SessionManager
+    /// The detail-page navigation path (issue #15). Owned here, above the tab
+    /// UI, so a deep link can push onto it.
+    @StateObject private var detailRouter = DetailRouter()
 
     // Destination resolved from a sashimi:// deep link (Top Shelf play/display actions)
     @State private var deepLinkDestination: DeepLinkDestination?
@@ -82,6 +84,7 @@ struct ContentView: View {
                 // view model reloads against the current server.
                 MainTabView()
                     .id(sessionManager.activeSessionIdentity)
+                    .environmentObject(detailRouter)
             } else {
                 ServerConnectionView(
                     prefillServerURL: sessionManager.reauthServer?.url,
@@ -105,14 +108,26 @@ struct ContentView: View {
                 pendingDeepLink = nil
                 deepLinkTask?.cancel()
                 deepLinkDestination = nil
+                detailRouter.externalRequest = nil
+                detailRouter.popToRoot()
             }
         }
+        // A server switch rebuilds the tab UI against another server; pages
+        // from the old one must not survive it.
+        .onChange(of: sessionManager.activeSessionIdentity) { _, _ in
+            detailRouter.popToRoot()
+        }
+        // Only playback is presented. A detail link is pushed onto the path
+        // instead (resolveDeepLink), like every other detail page.
         .fullScreenCover(item: $deepLinkDestination) { destination in
             switch destination {
             case .play(let item, let serverID):
                 PlayerView(item: item, serverID: serverID, startFromBeginning: false)
             case .detail(let item):
+                // Not produced on tvOS any more; kept exhaustive for the
+                // shared enum.
                 MediaDetailView(item: item)
+                    .environmentObject(detailRouter)
             }
         }
     }
@@ -146,7 +161,9 @@ struct ContentView: View {
                 case .play:
                     deepLinkDestination = .play(item, serverID: serverID)
                 case .item:
-                    deepLinkDestination = .detail(item)
+                    // Replaces the whole stack: the link names one title.
+                    deepLinkDestination = nil
+                    detailRouter.openExternally(.item(item))
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -172,6 +189,11 @@ private struct SidebarButtonStyle: ButtonStyle {
 
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
+    /// Detail pages push onto the current tab's stack; while any is pushed the
+    /// rail is hidden, so the page covers the screen as the old cover did.
+    @EnvironmentObject private var router: DetailRouter
+    /// A deep-linked page waiting for the tab switch that can show it.
+    @State private var pendingExternalRoute: DetailRoute?
 
     /// A destination in the rail. Libraries are dynamic, so this is an enum
     /// rather than a tab index.
@@ -215,8 +237,10 @@ struct MainTabView: View {
             // Content sits to the right of the slim rail and never moves —
             // the expanded panel overlays it. Kept bright/unblurred so the
             // previewed section reads clearly as you roam the rail.
+            // The rail inset is applied inside each tab's navigation stack
+            // (to its root only), so a pushed detail page runs full width.
             content
-                .padding(.leading, railWidth)
+                .environment(\.detailRootLeadingInset, railWidth)
                 // Content wins initial focus so the app opens with the rail
                 // resting (collapsed), not auto-expanded onto Home.
                 .prefersDefaultFocus(true, in: mainScope)
@@ -230,7 +254,7 @@ struct MainTabView: View {
             Color.clear
                 .frame(width: 6)
                 .frame(maxHeight: .infinity)
-                .focusable(didInitialHomeFocus && focusedNav == nil)
+                .focusable(didInitialHomeFocus && focusedNav == nil && router.isAtRoot)
                 .focusEffectDisabled()
                 .padding(.leading, railWidth)
                 // Its own focus section so it competes on equal footing with
@@ -239,12 +263,25 @@ struct MainTabView: View {
 
             sidebar
                 .onMoveCommand { _ in viewerNavigatedRail = true }
+                // Out of sight and out of the focus engine while a detail page
+                // is pushed: the page is full screen, and the rail is
+                // focus-driven — landing on it would swap the tab (and its
+                // stack) out from under the page.
+                .opacity(router.isAtRoot ? 1 : 0)
+                .disabled(!router.isAtRoot)
+                .animation(.easeInOut(duration: 0.2), value: router.isAtRoot)
         }
         .stationReminders()
         .ignoresSafeArea()
         .focusScope(mainScope)
         .onExitCommand(perform: exitCommandAction)
         .task { await loadLibraries() }
+        .onReceive(router.$externalRequest) { request in
+            guard let request else { return }
+            router.externalRequest = nil
+            showExternally(request)
+        }
+        .onChange(of: selection) { _, _ in selectionDidChange() }
         // Focus-driven: moving focus onto a nav item switches the content
         // behind the blur immediately — no click needed (Plex behavior).
         .onChange(of: focusedNav) { old, newValue in
@@ -304,11 +341,16 @@ struct MainTabView: View {
         case .home, .avatar:
             HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
         case .finTV:
+            // No detail stack: the guide's programme card is a leaf, and the
+            // guide is also laid over the player, where there is no stack.
             GuideView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+                .padding(.leading, railWidth)
         case .search:
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
+            // Settings keeps its own stack; its pages sit beside the rail.
             SettingsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+                .padding(.leading, railWidth)
         case .library(let id):
             if let lib = libraries.first(where: { $0.id == id }) {
                 LibraryDetailView(library: LibraryView_Model(from: lib))
@@ -562,6 +604,33 @@ struct MainTabView: View {
             return { selection = .home }
         }
         return nil
+    }
+}
+
+// MARK: - Detail path
+
+private extension MainTabView {
+    /// Show a deep-linked page as the only page on the stack, switching to Home
+    /// first when the current tab has no detail stack (Guide, Settings).
+    func showExternally(_ route: DetailRoute) {
+        switch selection {
+        case .home, .avatar, .search, .library:
+            router.path = [route]
+        case .finTV, .settings:
+            pendingExternalRoute = route
+            selection = .home
+        }
+    }
+
+    /// A tab's pages belong to that tab. Selection only changes at a root
+    /// today (the rail is disabled while a page is pushed), so the reset is a
+    /// guard; the hand-off is for a deep link that needed a tab switch first.
+    func selectionDidChange() {
+        router.popToRoot()
+        if let route = pendingExternalRoute {
+            pendingExternalRoute = nil
+            router.path = [route]
+        }
     }
 }
 

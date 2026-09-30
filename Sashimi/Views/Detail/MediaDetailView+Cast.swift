@@ -15,7 +15,7 @@ extension MediaDetailView {
                 LazyHStack(spacing: 24) {
                     ForEach(cast) { person in
                         CastCard(person: person, serverID: serverID) {
-                            showingPersonDetail = person
+                            openPerson(person)
                         }
                     }
                 }

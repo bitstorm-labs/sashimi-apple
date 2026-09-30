@@ -11,6 +11,10 @@ struct PersonDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = PersonFilmographyViewModel()
     @State private var selectedGroup: ServerMediaResultGroup?
+    /// A source picked in the server sheet, opened once the sheet is gone so
+    /// the push doesn't race the sheet's dismissal.
+    @State private var pendingSource: ServerMediaResult?
+    @State private var hasStartedLoading = false
 
     var body: some View {
         ScrollView {
@@ -23,14 +27,19 @@ struct PersonDetailView: View {
             .padding(.vertical, 40)
         }
         .background(SashimiTheme.background.ignoresSafeArea())
-        .sheet(item: $selectedGroup) { group in
+        .sheet(item: $selectedGroup, onDismiss: openPendingSource) { group in
             ServerMediaSourcePickerView(group: group) { source in
+                pendingSource = source
                 selectedGroup = nil
-                onSelectSource(source)
             }
         }
         .task {
-            await loadFilmography()
+            // Once per page: this page is pushed, so it disappears under the
+            // title opened from it and `.task` would reload (and rebuild the
+            // list focus is returning to) on the way back.
+            guard !hasStartedLoading else { return }
+            hasStartedLoading = true
+            await Task { await loadFilmography() }.value
         }
         .onExitCommand {
             dismiss()
@@ -160,6 +169,12 @@ struct PersonDetailView: View {
             excludingTitleKey: excludingTitleKey,
             isOffline: !NetworkMonitor.shared.isConnected
         )
+    }
+
+    private func openPendingSource() {
+        guard let source = pendingSource else { return }
+        pendingSource = nil
+        onSelectSource(source)
     }
 
     private func select(_ group: ServerMediaResultGroup) {

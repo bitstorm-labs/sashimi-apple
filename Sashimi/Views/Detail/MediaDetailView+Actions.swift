@@ -1,15 +1,19 @@
 import SwiftUI
 
 extension MediaDetailView {
-    func queueServerMedia(_ source: ServerMediaResult) {
-        pendingServerMedia = source
-        showingPersonDetail = nil
+    /// Push an episode (or any title on this page's server) onto the path.
+    func openDetail(_ target: BaseItemDto) {
+        router.push(.item(target, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID))
     }
 
-    func presentPendingServerMedia() {
-        guard let source = pendingServerMedia else { return }
-        pendingServerMedia = nil
-        selectedServerMedia = source
+    /// Push a cast/crew member's page. Picking a title there pushes that title
+    /// on top (DetailRouteView), so Menu returns to the person, then here.
+    func openPerson(_ person: PersonInfo) {
+        router.push(.person(person, PersonRouteContext(
+            excludingItemID: item.id,
+            excludingTitleKey: ServerMediaResultGrouping.titleKey(for: item),
+            originatingServerID: serverID ?? SessionManager.shared.activeServerId
+        )))
     }
 
     func deleteItem() async {
@@ -40,7 +44,7 @@ extension MediaDetailView {
         // Watching an episode changes which one is next, and whether the strip
         // should show a checkmark. loadContent() is bound to .task, which does
         // NOT re-run here: the player is a fullScreenCover, so it never removed
-        // this view and .task never re-fires. Without this the button still read
+        // this view, and the first-load guard on .task stops it re-firing anyway. Without this the button still read
         // "Play S1:E1" after finishing S1:E1, and pressing it replayed it.
         if isSeries || isEpisode {
             await loadContent()
@@ -284,7 +288,7 @@ extension MediaDetailView {
         Task {
             do {
                 let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
-                showingSeriesDetail = series
+                openDetail(series)
             } catch {
                 ToastManager.shared.show("Failed to load series")
             }

@@ -14,13 +14,13 @@ struct HomeView: View {
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
     @EnvironmentObject private var sessionManager: SessionManager
-    @State private var selectedItem: BaseItemDto?
+    /// Detail pages push onto this path (issue #15).
+    @EnvironmentObject private var router: DetailRouter
     /// Set when a channel is tuned to. Carries the item and the context that
     /// makes playback ephemeral, so the player opens directly — a channel has
     /// no resume position, and a detail screen would only offer choices that do
     /// not apply to one.
     @State private var tunedChannel: TunedChannel?
-    @State private var selectedItemIsYouTube: Bool = false
     @State private var refreshTimer: Timer?
     @State private var heroIndex: Int = 0
     @State private var playingItem: BaseItemDto?  // For immediate playback via Play button
@@ -35,7 +35,7 @@ struct HomeView: View {
     // Order libraries according to settings
 
     var body: some View {
-        NavigationStack {
+        DetailNavigationStack {
             ZStack(alignment: .topLeading) {
                 LinearGradient(
                     colors: [SashimiTheme.background, Color.black],
@@ -111,9 +111,6 @@ struct HomeView: View {
                 }
                 .ignoresSafeArea(edges: .horizontal)
             }
-            .fullScreenCover(item: $selectedItem) { item in
-                MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
-            }
             .fullScreenCover(item: $playingItem) { item in
                 PlayerView(item: item, startFromBeginning: false)
             }
@@ -145,8 +142,10 @@ struct HomeView: View {
                 tunedChannel = TunedChannel(item: item, context: tuned.context)
             }
             #endif
-            .onChange(of: selectedItem) { oldValue, newValue in
-                if oldValue != nil && newValue == nil {
+            // Back at Home's root from a detail page: refresh, as closing the
+            // detail cover used to.
+            .onChange(of: router.isAtRoot) { wasAtRoot, isAtRoot in
+                if !wasAtRoot && isAtRoot {
                     Task { await viewModel.refresh() }
                 }
             }
@@ -285,8 +284,7 @@ struct HomeView: View {
                             // Check if item comes from a library named YouTube
                             let libraryName = viewModel.continueWatchingLibraryNames[item.id] ?? ""
                             let isYouTube = libraryName.lowercased().contains("youtube")
-                            selectedItemIsYouTube = isYouTube
-                            selectedItem = item
+                            router.push(.item(item, forceYouTubeStyle: isYouTube))
                         },
                         onPlay: { item in
                             playingItem = item
@@ -298,8 +296,7 @@ struct HomeView: View {
         } else if let libraryId = config.libraryId,
                   let library = viewModel.libraries.first(where: { $0.id == libraryId }) {
             RecentlyAddedLibraryRow(library: library, onSelect: { item in
-                selectedItemIsYouTube = library.name.lowercased().contains("youtube")
-                selectedItem = item
+                router.push(.item(item, forceYouTubeStyle: library.name.lowercased().contains("youtube")))
             })
             .focusSection()
         }
@@ -308,15 +305,16 @@ struct HomeView: View {
     private func startAutoRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-            // Skip while something is presented over Home. The player and the
-            // detail view are fullScreenCovers, which do NOT remove the
-            // presenting view -- so .onDisappear never fires and this timer used
-            // to keep running for the entire duration of a movie, firing ~25
-            // requests every 30 seconds at the same server that is transcoding
-            // it. Each tick also republished every @Published on the view model,
-            // re-evaluating the whole LazyVStack behind the cover.
-            guard selectedItem == nil, playingItem == nil else { return }
-            Task {
+            // Skip while something is over Home. The player is a
+            // fullScreenCover, and detail pages push inside Home's own
+            // navigation stack; neither removes HomeView itself -- so
+            // .onDisappear never fires and this timer used to keep running for
+            // the entire duration of a movie, firing ~25 requests every 30
+            // seconds at the same server that is transcoding it. Each tick also
+            // republished every @Published on the view model, re-evaluating the
+            // whole LazyVStack behind it.
+            Task { @MainActor in
+                guard router.isAtRoot, playingItem == nil else { return }
                 await viewModel.refresh()
             }
         }

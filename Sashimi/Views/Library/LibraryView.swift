@@ -227,8 +227,9 @@ struct LibraryDetailView: View {
     /// Bumped whenever the sort/filter changes, so a page that was already in
     /// flight can tell it belongs to a superseded ordering.
     @State private var loadGeneration = 0
-    @State private var selectedItem: BaseItemDto?
-    @State private var selectedItemIsYouTube = false
+    @EnvironmentObject private var router: DetailRouter
+    /// The grid item whose detail page was pushed, refreshed on the way back.
+    @State private var openedItemID: String?
     @State private var totalCount = 0
     @State private var selectedLetter: String?
     @State private var sortOption: LibrarySortOption = .name
@@ -269,185 +270,190 @@ struct LibraryDetailView: View {
     @Namespace private var namespace
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Main content
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 30) {
-                        // Header with sort, filter options and count
-                        HStack(spacing: 16) {
-                            SortMenuButton(
-                                currentOption: sortOption,
-                                onSelect: { option in
-                                    if sortOption != option {
-                                        sortOption = option
+        // Lifecycle modifiers stay outside the stack; see DetailNavigationStack.
+        DetailNavigationStack {
+            HStack(spacing: 0) {
+                // Main content
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 30) {
+                            // Header with sort, filter options and count
+                            HStack(spacing: 16) {
+                                SortMenuButton(
+                                    currentOption: sortOption,
+                                    onSelect: { option in
+                                        if sortOption != option {
+                                            sortOption = option
+                                            Task { await reloadWithNewSort() }
+                                        }
+                                    }
+                                )
+
+                                SortOrderButton(
+                                    sortOrder: sortOrder,
+                                    onToggle: {
+                                        sortOrder = sortOrder == .ascending ? .descending : .ascending
                                         Task { await reloadWithNewSort() }
                                     }
-                                }
-                            )
+                                )
 
-                            SortOrderButton(
-                                sortOrder: sortOrder,
-                                onToggle: {
-                                    sortOrder = sortOrder == .ascending ? .descending : .ascending
-                                    Task { await reloadWithNewSort() }
-                                }
-                            )
+                                FilterMenuButton(
+                                    currentFilter: filterOption,
+                                    onSelect: { filter in
+                                        if filterOption != filter {
+                                            filterOption = filter
+                                            Task { await reloadWithNewSort() }
+                                        }
+                                    }
+                                )
 
-                            FilterMenuButton(
-                                currentFilter: filterOption,
-                                onSelect: { filter in
-                                    if filterOption != filter {
-                                        filterOption = filter
-                                        Task { await reloadWithNewSort() }
+                                if !isYouTubeLibrary {
+                                    ShuffleButton {
+                                        Task { await shufflePlay() }
                                     }
                                 }
-                            )
 
-                            if !isYouTubeLibrary {
-                                ShuffleButton {
-                                    Task { await shufflePlay() }
+                                Spacer()
+
+                                if totalCount > 0 {
+                                    Text("\(totalCount) items")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(SashimiTheme.textSecondary)
                                 }
                             }
+                            .padding(.horizontal, 50)
+                            .padding(.top, 40)
+                            // The pills are left-clustered; without a section, Up
+                            // from a right-hand grid column has nothing directly
+                            // above it and focus stays put.
+                            .focusSection()
 
-                            Spacer()
-
-                            if totalCount > 0 {
-                                Text("\(totalCount) items")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(SashimiTheme.textSecondary)
-                            }
-                        }
-                        .padding(.horizontal, 50)
-                        .padding(.top, 40)
-                        // The pills are left-clustered; without a section, Up
-                        // from a right-hand grid column has nothing directly
-                        // above it and focus stays put.
-                        .focusSection()
-
-                        if isLoading && items.isEmpty {
-                            ProgressView()
+                            if isLoading && items.isEmpty {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 100)
+                                    .transition(.opacity)
+                            } else if items.isEmpty {
+                                EmptyStateView(
+                                    icon: "film",
+                                    title: "No Items",
+                                    message: filterOption == .all ? "This library is empty" : "No items match this filter",
+                                    actionTitle: filterOption == .all ? nil : "Clear Filter",
+                                    action: filterOption == .all ? nil : {
+                                        filterOption = .all
+                                        Task { await reloadWithNewSort() }
+                                    }
+                                )
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 100)
-                                .transition(.opacity)
-                        } else if items.isEmpty {
-                            EmptyStateView(
-                                icon: "film",
-                                title: "No Items",
-                                message: filterOption == .all ? "This library is empty" : "No items match this filter",
-                                actionTitle: filterOption == .all ? nil : "Clear Filter",
-                                action: filterOption == .all ? nil : {
-                                    filterOption = .all
-                                    Task { await reloadWithNewSort() }
-                                }
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 100)
-                        } else {
-                            LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 40 : 60) {
-                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                    MediaPosterButton(item: item, libraryName: library.name, isCircular: isYouTubeLibrary) {
-                                        selectedItemIsYouTube = isYouTubeLibrary
-                                        selectedItem = item
-                                    }
-                                    .id(item.id)
-                                    .focused($focusedGridItem, equals: item.id)
-                                    .prefersDefaultFocus(index == 0, in: namespace)
-                                    .onAppear {
-                                        // Load more when approaching the end
-                                        if item.id == items.last?.id && hasMore && !isLoadingMore {
-                                            Task { await loadMoreItems() }
+                            } else {
+                                LazyVGrid(columns: gridColumns, spacing: isYouTubeLibrary ? 40 : 60) {
+                                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                        MediaPosterButton(item: item, libraryName: library.name, isCircular: isYouTubeLibrary) {
+                                            openDetail(item, isYouTube: isYouTubeLibrary)
+                                        }
+                                        .id(item.id)
+                                        .focused($focusedGridItem, equals: item.id)
+                                        .prefersDefaultFocus(index == 0, in: namespace)
+                                        .onAppear {
+                                            // Load more when approaching the end
+                                            if item.id == items.last?.id && hasMore && !isLoadingMore {
+                                                Task { await loadMoreItems() }
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            .padding(.horizontal, 60)
-                            .padding(.bottom, 60)
-                            // No blanket animation on items.count. An alphabet
-                            // jump can insert several thousand items in one go,
-                            // and SwiftUI must resolve the opacity+scale
-                            // transition for every inserted identity -- not just
-                            // the visible ones -- which froze the UI for
-                            // seconds. Paging in 50 at a time never needed an
-                            // animation to feel right anyway.
+                                .padding(.horizontal, 60)
+                                .padding(.bottom, 60)
+                                // No blanket animation on items.count. An alphabet
+                                // jump can insert several thousand items in one go,
+                                // and SwiftUI must resolve the opacity+scale
+                                // transition for every inserted identity -- not just
+                                // the visible ones -- which froze the UI for
+                                // seconds. Paging in 50 at a time never needed an
+                                // animation to feel right anyway.
 
-                            // Loading indicator for infinite scroll
-                            if isLoadingMore {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 20)
-                                    .transition(.opacity)
+                                // Loading indicator for infinite scroll
+                                if isLoadingMore {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 20)
+                                        .transition(.opacity)
+                                }
                             }
                         }
                     }
-                }
-                // Hover: scroll only if the letter is already loaded. Pressing
-                // is what may pull the rest of the library down.
-                .onChange(of: selectedLetter) { _, letter in
-                    if let letter = letter {
-                        scrollToLetter(letter, proxy: proxy)
+                    // Hover: scroll only if the letter is already loaded. Pressing
+                    // is what may pull the rest of the library down.
+                    .onChange(of: selectedLetter) { _, letter in
+                        if let letter = letter {
+                            scrollToLetter(letter, proxy: proxy)
+                        }
                     }
-                }
-                .onChange(of: committedLetter) { _, letter in
-                    if let letter = letter {
-                        jumpToLetter(letter, proxy: proxy)
+                    .onChange(of: committedLetter) { _, letter in
+                        if let letter = letter {
+                            jumpToLetter(letter, proxy: proxy)
+                        }
                     }
+                    .focusSection()
                 }
-                .focusSection()
-            }
 
-            // Alphabet fast scroll bar (right side, aligned with grid)
-            if !isLoading && !items.isEmpty {
-                ScrollView(showsIndicators: false) {
-                    AlphabetScrollBar(
-                        alphabet: alphabet,
-                        selectedLetter: $selectedLetter,
-                        committedLetter: $committedLetter
-                    )
-                }
-                .focusSection()
-                // No .onExitCommand here. It used to set focusedArea = .grid,
-                // which moved nothing -- focusedArea is never read, and it was
-                // bound to ScrollViews, which aren't focusable on tvOS -- while
-                // still CONSUMING the Menu press. So Menu was dead inside the
-                // A-Z bar and could not return the user to Home. Left already
-                // reaches the grid geometrically.
-                .padding(.top, 100)  // Align with grid (below header)
-                .padding(.trailing, 20)
-            }
-        }
-        .overlay {
-            if isJumping {
-                ZStack {
-                    Color.black.opacity(0.35).ignoresSafeArea()
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .tint(SashimiTheme.accent)
-                            .scaleEffect(1.4)
-                        Text("Jumping…")
-                            .font(Typography.body)
-                            .foregroundStyle(SashimiTheme.textSecondary)
+                // Alphabet fast scroll bar (right side, aligned with grid)
+                if !isLoading && !items.isEmpty {
+                    ScrollView(showsIndicators: false) {
+                        AlphabetScrollBar(
+                            alphabet: alphabet,
+                            selectedLetter: $selectedLetter,
+                            committedLetter: $committedLetter
+                        )
                     }
+                    .focusSection()
+                    // No .onExitCommand here. It used to set focusedArea = .grid,
+                    // which moved nothing -- focusedArea is never read, and it was
+                    // bound to ScrollViews, which aren't focusable on tvOS -- while
+                    // still CONSUMING the Menu press. So Menu was dead inside the
+                    // A-Z bar and could not return the user to Home. Left already
+                    // reaches the grid geometrically.
+                    .padding(.top, 100)  // Align with grid (below header)
+                    .padding(.trailing, 20)
                 }
-                .allowsHitTesting(false)
-                .transition(.opacity)
             }
+            .overlay {
+                if isJumping {
+                    ZStack {
+                        Color.black.opacity(0.35).ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .tint(SashimiTheme.accent)
+                                .scaleEffect(1.4)
+                            Text("Jumping…")
+                                .font(Typography.body)
+                                .foregroundStyle(SashimiTheme.textSecondary)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: isJumping)
+            .focusScope(namespace)
+            .ignoresSafeArea(edges: .bottom)
         }
-        .animation(.easeInOut(duration: 0.2), value: isJumping)
-        .focusScope(namespace)
-        .ignoresSafeArea(edges: .bottom)
         .task {
             await loadItems()
         }
-        .fullScreenCover(item: $selectedItem) { item in
-            MediaDetailView(item: item, forceYouTubeStyle: selectedItemIsYouTube)
+        .onChange(of: router.isAtRoot) { wasAtRoot, isAtRoot in
+            // Back at the grid: refresh only the item that was opened, not the
+            // whole grid.
+            guard !wasAtRoot, isAtRoot, let opened = openedItemID else { return }
+            openedItemID = nil
+            Task { await refreshItem(id: opened) }
         }
-        .onChange(of: selectedItem) { oldValue, newValue in
-            // Refresh only the item that was open, not the whole grid.
-            if let dismissed = oldValue, newValue == nil {
-                Task { await refreshItem(id: dismissed.id) }
-            }
-        }
+    }
+
+    private func openDetail(_ item: BaseItemDto, isYouTube: Bool) {
+        openedItemID = item.id
+        router.push(.item(item, forceYouTubeStyle: isYouTube))
     }
 
     /// Hover (focus moving through the A-Z bar): best-effort scroll for a
@@ -517,8 +523,7 @@ struct LibraryDetailView: View {
             mode: PlaybackSettings.shared.tvShuffleMode,
             source: JellyfinClient.shared
         ) {
-            selectedItemIsYouTube = false
-            selectedItem = item
+            openDetail(item, isYouTube: false)
         }
     }
 

@@ -24,10 +24,13 @@ struct ThemeSongTimings {
 
 /// Plays a series' theme song on the detail screen, once per visit to a show.
 ///
-/// This is app-level rather than per-view on purpose: detail screens are
-/// presented with `fullScreenCover`, so a parent view is never removed and its
-/// `onDisappear` never fires. Views report intent here; all decisions live in
-/// one place.
+/// This is app-level rather than per-view on purpose. On iOS detail screens
+/// are presented as covers/sheets, so a parent view is never removed and its
+/// `onDisappear` never fires; on tvOS detail pages are pushed, and a page that
+/// is pushed over disappears while its show is still being browsed. Neither
+/// lifecycle maps onto "one theme per visit to a show", so views (iOS) or the
+/// navigation path (tvOS, `DetailRouter`) report intent here and all
+/// decisions live in one place.
 ///
 /// Every failure path is silence. Background music is never worth an error.
 ///
@@ -162,6 +165,24 @@ final class ThemeSongPlayer: ObservableObject {
         switch visit.detailDismissed(seriesId: seriesId) {
         case .stop: stop(fadeOver: timings.fadeOutShowChange)
         case .start, .ignore: break
+        }
+    }
+
+    /// tvOS: the show that owns the navigation path is now `seriesId` (nil =
+    /// back at a tab's root). Driven by `DetailRouter` from the path itself
+    /// rather than from each page's appear/disappear, because a pushed-over
+    /// page disappears while its show is still being browsed.
+    func activeSeriesChanged(to seriesId: String?) {
+        switch visit.activate(seriesId: seriesId) {
+        case .start(let id):
+            // The visit is recorded either way, so turning the setting off
+            // mid-visit and back on does not replay the theme on this show.
+            guard PlaybackSettings.shared.playThemeSongs else { return }
+            scheduleStart(seriesId: id)
+        case .stop:
+            stop(fadeOver: timings.fadeOutShowChange)
+        case .ignore:
+            break
         }
     }
 
@@ -479,13 +500,7 @@ private struct ThemeSongModifier: ViewModifier {
 
     /// series -> its own id; season/episode -> the parent series. Anything else
     /// (movies, videos) has no key and never plays a theme.
-    private var seriesKey: String? {
-        switch item.type {
-        case .series: return item.id
-        case .season, .episode: return item.seriesId
-        default: return nil
-        }
-    }
+    private var seriesKey: String? { ThemeSongVisitState.seriesKey(for: item) }
 
     func body(content: Content) -> some View {
         content

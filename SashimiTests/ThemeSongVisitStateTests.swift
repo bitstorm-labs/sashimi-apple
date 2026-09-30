@@ -94,4 +94,47 @@ final class ThemeSongVisitStateTests: XCTestCase {
         XCTAssertEqual(s.showAppeared(seriesId: "S"), .ignore, "parent reappearing mid-pop must not read as a new visit")
         XCTAssertEqual(s.detailDismissed(seriesId: "S"), .ignore, "child disappearing after the parent already reappeared must not end the visit")
     }
+
+    // MARK: - activate(seriesId:) — the tvOS, path-driven entry point
+
+    func testActivateStartsOnceForTheSameShow() {
+        var s = ThemeSongVisitState()
+        XCTAssertEqual(s.activate(seriesId: "A"), .start(seriesId: "A"))
+        XCTAssertEqual(s.activate(seriesId: "A"), .ignore, "series -> episode of the same show")
+    }
+
+    func testActivateSwitchesShows() {
+        var s = ThemeSongVisitState()
+        _ = s.activate(seriesId: "A")
+        XCTAssertEqual(s.activate(seriesId: "B"), .start(seriesId: "B"))
+        XCTAssertEqual(s.currentSeriesId, "B")
+    }
+
+    func testActivateNilStopsOnlyWhenSomethingIsPlaying() {
+        var s = ThemeSongVisitState()
+        XCTAssertEqual(s.activate(seriesId: nil), .ignore, "a movie at the root never had a theme")
+        _ = s.activate(seriesId: "A")
+        XCTAssertEqual(s.activate(seriesId: nil), .stop)
+        XCTAssertNil(s.currentSeriesId)
+        XCTAssertEqual(s.activate(seriesId: "A"), .start(seriesId: "A"), "a later visit to the same show plays again")
+    }
+
+    func testSeriesKey() {
+        func item(_ type: ItemType, seriesId: String?) -> BaseItemDto {
+            BaseItemDto(
+                id: "x", name: "x", type: type,
+                seriesName: nil, seriesId: seriesId, seasonId: nil, parentId: nil,
+                indexNumber: nil, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
+                userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil, taglines: nil, people: nil,
+                criticRating: nil, premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil,
+                localTrailerCount: nil, mediaStreams: nil
+            )
+        }
+        XCTAssertEqual(ThemeSongVisitState.seriesKey(for: item(.series, seriesId: nil)), "x")
+        XCTAssertEqual(ThemeSongVisitState.seriesKey(for: item(.episode, seriesId: "S")), "S")
+        XCTAssertEqual(ThemeSongVisitState.seriesKey(for: item(.season, seriesId: "S")), "S")
+        XCTAssertNil(ThemeSongVisitState.seriesKey(for: item(.movie, seriesId: nil)))
+    }
 }
