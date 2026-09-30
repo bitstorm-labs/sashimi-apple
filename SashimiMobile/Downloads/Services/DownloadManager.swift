@@ -87,6 +87,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // Progress throttling
     private var pendingProgress: [String: Double] = [:]
+    // recordID -> (written, expected) bytes, for the global progress ring.
+    // Not published: activeDownloads republishes on the same timer.
+    private var byteCounts: [String: (written: Int64, expected: Int64)] = [:]
     private var lastProgressSave: [String: Date] = [:]
     private var progressTimer: Timer?
 
@@ -152,6 +155,19 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     // MARK: - Public API
+
+    /// Count and overall progress for the global download indicator.
+    var activitySnapshot: DownloadActivitySnapshot {
+        let active = activeDownloads.reduce(into: [String: DownloadItemProgress]()) { result, entry in
+            let bytes = byteCounts[entry.key]
+            result[entry.key] = DownloadItemProgress(
+                fraction: entry.value,
+                bytesWritten: bytes?.written ?? 0,
+                bytesExpected: bytes?.expected ?? 0
+            )
+        }
+        return DownloadActivitySnapshot(active: active, preparingKeys: preparingItems, queuedCount: queuedCount)
+    }
 
     func enqueueDownload(item: BaseItemDto, quality: DownloadQuality, serverID: String? = nil) {
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
@@ -379,6 +395,7 @@ final class DownloadManager: NSObject, ObservableObject {
         let key = downloadKey(itemId: itemId, serverID: serverID)
         preparingItems.insert(key)
         pendingProgress[key] = 0
+        byteCounts.removeValue(forKey: key)
         stateVersion += 1
         startProgressTimer()
 
@@ -443,6 +460,7 @@ final class DownloadManager: NSObject, ObservableObject {
         pendingAssetTasks.removeValue(forKey: key)
 
         pendingProgress.removeValue(forKey: key)
+        byteCounts.removeValue(forKey: key)
         activeDownloads.removeValue(forKey: key)
         preparingItems.remove(key)
         lastProgressSave.removeValue(forKey: key)
@@ -577,6 +595,7 @@ final class DownloadManager: NSObject, ObservableObject {
         currentDownloadItemId = nil
         currentDownloadServerID = nil
         pendingProgress.removeAll()
+        byteCounts.removeAll()
         preparingItems.removeAll()
         lastProgressSave.removeAll()
         stopProgressTimer()
@@ -848,6 +867,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 )
                 let key = self.downloadKey(itemId: itemId, serverID: serverID)
                 self.pendingProgress.removeValue(forKey: key)
+                self.byteCounts.removeValue(forKey: key)
                 self.activeDownloads.removeValue(forKey: key)
                 self.preparingItems.remove(key)
                 var map = self.taskIdMap
@@ -890,6 +910,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
             self.pendingProgress.removeValue(forKey: key)
+            self.byteCounts.removeValue(forKey: key)
             self.activeDownloads.removeValue(forKey: key)
             self.preparingItems.remove(key)
             self.lastProgressSave.removeValue(forKey: key)
@@ -926,6 +947,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
             // Update in-memory progress (published on timer)
             self.pendingProgress[key] = progress
+            self.byteCounts[key] = (totalBytesWritten, totalBytesExpectedToWrite)
 
             // Clear preparing state once any bytes flow
             if totalBytesWritten > 0 {
@@ -986,6 +1008,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 errorMessage: error.localizedDescription
             )
             self.pendingProgress.removeValue(forKey: key)
+            self.byteCounts.removeValue(forKey: key)
             self.activeDownloads.removeValue(forKey: key)
             self.preparingItems.remove(key)
 
