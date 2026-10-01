@@ -35,9 +35,6 @@ enum SidebarSelection: Hashable {
     }
 }
 
-// MainNavigationView hosts the sidebar + all tab destinations in one body; extracting subviews
-// would change view identity/state ownership, which is too risky for a lint-only pass.
-// swiftlint:disable:next type_body_length
 struct MainNavigationView: View {
     var searchRequest: SashimiIntentCoordinator.SearchRequest?
     var onSearchRequestConsumed: (UUID) -> Void = { _ in }
@@ -49,7 +46,7 @@ struct MainNavigationView: View {
     @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
-    /// Downloads opened from the header indicator or a download toast is a
+    /// Downloads opened from a download toast is a
     /// sheet over whatever is showing, so Done returns exactly there. Switching
     /// the section instead rebuilt the NavigationStack and left no way back to
     /// the screen the viewer came from (iPad feedback).
@@ -57,33 +54,28 @@ struct MainNavigationView: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     /// The Search tab's query. It lives here, not in MobileSearchView, because
-    /// the field that edits it is in `headerBar` (#126).
+    /// the field that edits it is in `searchHeaderBar` (#126).
     @State private var searchQuery = ""
     @State private var searchSubmitCount = 0
     @FocusState private var searchFieldFocused: Bool
-    /// Home reports when its hero is on screen. The hero then runs full-bleed
-    /// to the top of the screen behind a transparent header, as the Apple TV
-    /// hero does; everywhere else the header is the usual opaque strip.
-    @State private var homeHeroBehindHeader = false
-    @State private var headerHeight: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .leading) {
-            // Main content with custom header, laid out beside the collapsed
-            // rail. It never moves: the expanded rail is drawn over it.
+            // Main content, laid out beside the collapsed rail. It never
+            // moves: the expanded rail is drawn over it. Only Search has a
+            // header strip (its field); every other screen, pushed detail
+            // pages included, starts at the top safe area, and Home's hero
+            // runs full-bleed up behind the status bar.
             VStack(spacing: 0) {
-                headerBar
-                    // Drawn over the content, which slides up under it when
-                    // the hero runs behind it.
-                    .zIndex(1)
+                if showsHeaderSearch {
+                    searchHeaderBar
+                }
 
                 NavigationStack {
                     detailView
                         .navigationBarHidden(true)
                 }
                 .id("\(selection)-\(navigationResetId)")
-                .padding(.top, heroBehindHeader ? -headerHeight : 0)
-                .ignoresSafeArea(edges: heroBehindHeader ? .top : [])
             }
             .padding(.leading, SidebarRailMetrics.collapsedWidth)
 
@@ -101,6 +93,7 @@ struct MainNavigationView: View {
             SidebarRail(
                 libraries: libraries,
                 selection: selection,
+                downloadActivity: railDownloadActivity,
                 isExpanded: $railExpanded,
                 onSelect: select
             ) { expanded in
@@ -109,6 +102,19 @@ struct MainNavigationView: View {
         }
         .task {
             await loadLibraries()
+        }
+        .sheet(isPresented: $showAddServer) {
+            MobileAddServerSheet()
+        }
+        .sheet(isPresented: $showingDownloads) {
+            NavigationStack {
+                DownloadsListView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingDownloads = false }
+                        }
+                    }
+            }
         }
         .overlay(alignment: .top) {
             if let message = downloadManager.toastMessage {
@@ -157,10 +163,6 @@ struct MainNavigationView: View {
                 searchQuery = ""
             }
         }
-    }
-
-    private var heroBehindHeader: Bool {
-        homeHeroBehindHeader && selection == .home && networkMonitor.isConnected
     }
 
     private var showsHeaderSearch: Bool {
@@ -253,49 +255,18 @@ struct MainNavigationView: View {
         .accessibilityLabel("Account and servers")
     }
 
-    private var headerBar: some View {
-        HStack(alignment: .center) {
-            if showsHeaderSearch {
-                HeaderSearchField(
-                    text: $searchQuery,
-                    isFocused: $searchFieldFocused,
-                    onSubmit: { searchSubmitCount += 1 }
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, MobileSpacing.xs)
-            } else {
-                Spacer()
-            }
-
-            // Download activity indicator
-            if selection != .downloads {
-                downloadIndicator
-            }
-        }
-        // Hold the height so the content doesn't jump when the download
-        // indicator comes and goes.
+    /// The Search section's field (#126), the one screen with a header strip.
+    private var searchHeaderBar: some View {
+        HeaderSearchField(
+            text: $searchQuery,
+            isFocused: $searchFieldFocused,
+            onSubmit: { searchSubmitCount += 1 }
+        )
+        .frame(maxWidth: .infinity)
         .frame(minHeight: SidebarRailMetrics.barContentHeight)
-        .padding(.horizontal, MobileSpacing.md)
+        .padding(.horizontal, MobileSpacing.md + MobileSpacing.xs)
         .padding(.vertical, MobileSpacing.sm)
-        .onGeometryChange(for: CGFloat.self) { geometry in
-            geometry.size.height
-        } action: { height in
-            headerHeight = height
-        }
-        .background(heroBehindHeader ? Color.clear : MobileColors.background)
-        .sheet(isPresented: $showAddServer) {
-            MobileAddServerSheet()
-        }
-        .sheet(isPresented: $showingDownloads) {
-            NavigationStack {
-                DownloadsListView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showingDownloads = false }
-                        }
-                    }
-            }
-        }
+        .background(MobileColors.background)
     }
 
     /// The tvOS rail's avatar: the user's picture over an accent gradient,
@@ -333,10 +304,7 @@ struct MainNavigationView: View {
         } else {
             switch selection {
             case .home:
-                MobileHomeView(
-                    headerHeight: heroBehindHeader ? headerHeight : 0,
-                    onHeroBehindHeaderChange: { homeHeroBehindHeader = $0 }
-                )
+                MobileHomeView()
             case .finTV:
                 MobileGuideView()
             case .search:
@@ -372,51 +340,15 @@ struct MainNavigationView: View {
         navigationResetId += 1
     }
 
-    /// Global download activity: a progress ring with the active + queued
-    /// count while anything downloads, plus a failed badge. Hidden when idle.
-    @ViewBuilder
-    private var downloadIndicator: some View {
-        let activity = downloadManager.activitySnapshot
-        let failedCount = downloadFailedCount()
-        let speed = downloadManager.downloadSpeed
-
-        HStack(spacing: 6) {
-            if activity.isActive {
-                HStack(spacing: 6) {
-                    DownloadActivityRing(snapshot: activity)
-                    if !speed.isEmpty {
-                        Text(speed)
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .foregroundStyle(MobileColors.accent.opacity(0.8))
-                    }
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(MobileColors.accent.opacity(0.15))
-                .clipShape(Capsule())
-            }
-
-            if failedCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(MobileColors.error)
-                        .symbolEffect(.pulse)
-                    Text("\(failedCount)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MobileColors.error)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(MobileColors.error.opacity(0.15))
-                .clipShape(Capsule())
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { showingDownloads = true }
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens Downloads")
+    /// Global download activity for the rail's Downloads row: the progress
+    /// ring with the active + queued count while anything downloads, the
+    /// speed, and how many failed.
+    private var railDownloadActivity: RailDownloadActivity {
+        RailDownloadActivity(
+            snapshot: downloadManager.activitySnapshot,
+            speed: downloadManager.downloadSpeed,
+            failedCount: downloadFailedCount()
+        )
     }
 
     private func downloadFailedCount() -> Int {

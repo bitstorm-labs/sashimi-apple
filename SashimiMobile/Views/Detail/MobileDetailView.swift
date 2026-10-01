@@ -107,9 +107,12 @@ struct MobileDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MobileSpacing.lg) {
+            // Rhythm: xxl between sections (info, episodes, cast), each
+            // section's heading closer to its content (sm) than to the section
+            // above, so it reads as that content's title.
+            VStack(alignment: .leading, spacing: MobileSpacing.xxl) {
                 // Main content section with logo, title, info
-                VStack(alignment: .leading, spacing: MobileSpacing.md) {
+                VStack(alignment: .leading, spacing: MobileSpacing.xl) {
                     if isSeries {
                         seriesHeaderSection
                     } else if isSeason {
@@ -143,6 +146,10 @@ struct MobileDetailView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // The backdrop runs up behind the status bar and back button. Left to
+        // adapt, a bright backdrop flips them to dark glyphs on the dark page;
+        // keep them light.
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .background {
             // Background with backdrop image on the right
             GeometryReader { geometry in
@@ -180,6 +187,16 @@ struct MobileDetailView: View {
                             .padding(.trailing, 20)
                         }
                     }
+                    .frame(maxHeight: .infinity, alignment: .top)
+
+                    // Top scrim under the status bar and back button, which
+                    // the backdrop now reaches.
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.5), Color.clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 140)
                     .frame(maxHeight: .infinity, alignment: .top)
 
                     // Subtle gradient for text readability
@@ -389,6 +406,8 @@ struct MobileDetailView: View {
 
             // Action buttons
             seriesActionButtons
+                // A touch more air: the buttons are their own row under the metadata.
+                .padding(.top, MobileSpacing.xs)
         }
     }
 
@@ -416,6 +435,8 @@ struct MobileDetailView: View {
             .foregroundStyle(MobileColors.textSecondary)
 
             seriesActionButtons
+                // A touch more air: the buttons are their own row under the metadata.
+                .padding(.top, MobileSpacing.xs)
         }
     }
 
@@ -504,6 +525,8 @@ struct MobileDetailView: View {
 
             // Action buttons
             episodeActionButtons
+                // A touch more air: the buttons are their own row under the metadata.
+                .padding(.top, MobileSpacing.xs)
         }
     }
 
@@ -560,6 +583,8 @@ struct MobileDetailView: View {
             }
 
             movieActionButtons
+                // A touch more air: the buttons are their own row under the metadata.
+                .padding(.top, MobileSpacing.xs)
         }
     }
 
@@ -939,7 +964,8 @@ struct MobileDetailView: View {
     // MARK: - Seasons Section
 
     private var seasonsSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.md) {
+        // lg above the "Episodes" heading, sm below it (to the cards).
+        VStack(alignment: .leading, spacing: MobileSpacing.lg) {
             if !seasons.isEmpty {
                 // Season tabs
                 ScrollView(.horizontal, showsIndicators: false) {

@@ -13,8 +13,7 @@ enum SidebarRailMetrics {
     /// Width of every icon column, so the icons, the logo and the avatar share
     /// one vertical axis.
     static let iconWidth: CGFloat = 32
-    /// Minimum height of the header bar beside the rail, so the content doesn't
-    /// jump when the download indicator comes and goes.
+    /// Minimum height of the Search section's header strip (its field).
     static let barContentHeight: CGFloat = 40
     /// Size of the account avatar at the foot of the rail.
     static let avatarSize: CGFloat = 40
@@ -38,6 +37,27 @@ enum SidebarRailMetrics {
     static let animation = Animation.easeInOut(duration: 0.28)
 }
 
+/// What the rail's Downloads row shows about downloads in flight: the progress
+/// ring (with the active + queued count) in place of its icon while anything
+/// downloads, the speed beside the label when expanded, and a failed badge.
+struct RailDownloadActivity: Equatable {
+    var snapshot: DownloadActivitySnapshot = .idle
+    var speed: String = ""
+    var failedCount: Int = 0
+
+    /// VoiceOver value for the Downloads row; nil when idle.
+    var accessibilityValue: String? {
+        var parts: [String] = []
+        if snapshot.isActive {
+            parts.append("\(snapshot.activeCount) in progress")
+        }
+        if failedCount > 0 {
+            parts.append("\(failedCount) failed")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+}
+
 /// The iPad's navigation rail, drawn to match the Apple TV's: the sushi mark
 /// at the top, the destinations centred between it and the account avatar, the
 /// version underneath. It is a slim icon strip that is always on screen and
@@ -47,6 +67,8 @@ enum SidebarRailMetrics {
 struct SidebarRail<Footer: View>: View {
     let libraries: [JellyfinLibrary]
     let selection: SidebarSelection
+    /// Shown on the Downloads row (the iPad has no header indicator).
+    var downloadActivity = RailDownloadActivity()
     @Binding var isExpanded: Bool
     let onSelect: (SidebarSelection) -> Void
     /// Drawn at the foot of the rail, above the version (the account / server
@@ -185,8 +207,7 @@ struct SidebarRail<Footer: View>: View {
             onSelect(item)
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 22, weight: .semibold))
+                rowIcon(item)
                     .frame(width: SidebarRailMetrics.iconWidth)
                 if isExpanded {
                     Text(item.displayName)
@@ -194,6 +215,14 @@ struct SidebarRail<Footer: View>: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .transition(.opacity)
+                    if item == .downloads, downloadActivity.snapshot.isActive, !downloadActivity.speed.isEmpty {
+                        Text(downloadActivity.speed)
+                            .font(.system(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(MobileColors.accent.opacity(0.8))
+                            .lineLimit(1)
+                            .transition(.opacity)
+                    }
                 }
             }
             .padding(.vertical, 11)
@@ -203,7 +232,39 @@ struct SidebarRail<Footer: View>: View {
         .buttonStyle(RailButtonStyle(isSelected: isSelected))
         // Collapsed rows are icon-only; name them for VoiceOver either way.
         .accessibilityLabel(item.displayName)
+        .accessibilityValue(item == .downloads ? downloadActivity.accessibilityValue ?? "" : "")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// The row's symbol. Downloads swaps it for the activity ring while
+    /// anything downloads and badges it with the failed count.
+    @ViewBuilder
+    private func rowIcon(_ item: SidebarSelection) -> some View {
+        if item == .downloads {
+            Group {
+                if downloadActivity.snapshot.isActive {
+                    DownloadActivityRing(snapshot: downloadActivity.snapshot, diameter: 28, lineWidth: 3)
+                } else {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 22, weight: .semibold))
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if downloadActivity.failedCount > 0 {
+                    Text("\(downloadActivity.failedCount)")
+                        .font(.system(size: 11, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(MobileColors.error, in: Capsule())
+                        .offset(x: 8, y: -6)
+                }
+            }
+        } else {
+            Image(systemName: item.icon)
+                .font(.system(size: 22, weight: .semibold))
+        }
     }
 
     /// "v1.6.18", as the tvOS rail shows it: under the avatar in both states.
