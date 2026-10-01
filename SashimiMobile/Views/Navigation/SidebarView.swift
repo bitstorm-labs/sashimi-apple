@@ -61,6 +61,11 @@ struct MainNavigationView: View {
     @State private var searchQuery = ""
     @State private var searchSubmitCount = 0
     @FocusState private var searchFieldFocused: Bool
+    /// Home reports when its hero is on screen. The hero then runs full-bleed
+    /// to the top of the screen behind a transparent header, as the Apple TV
+    /// hero does; everywhere else the header is the usual opaque strip.
+    @State private var homeHeroBehindHeader = false
+    @State private var headerHeight: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -68,12 +73,17 @@ struct MainNavigationView: View {
             // rail. It never moves: the expanded rail is drawn over it.
             VStack(spacing: 0) {
                 headerBar
+                    // Drawn over the content, which slides up under it when
+                    // the hero runs behind it.
+                    .zIndex(1)
 
                 NavigationStack {
                     detailView
                         .navigationBarHidden(true)
                 }
                 .id("\(selection)-\(navigationResetId)")
+                .padding(.top, heroBehindHeader ? -headerHeight : 0)
+                .ignoresSafeArea(edges: heroBehindHeader ? .top : [])
             }
             .padding(.leading, SidebarRailMetrics.collapsedWidth)
 
@@ -147,6 +157,10 @@ struct MainNavigationView: View {
                 searchQuery = ""
             }
         }
+    }
+
+    private var heroBehindHeader: Bool {
+        homeHeroBehindHeader && selection == .home && networkMonitor.isConnected
     }
 
     private var showsHeaderSearch: Bool {
@@ -263,7 +277,12 @@ struct MainNavigationView: View {
         .frame(minHeight: SidebarRailMetrics.barContentHeight)
         .padding(.horizontal, MobileSpacing.md)
         .padding(.vertical, MobileSpacing.sm)
-        .background(MobileColors.background)
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.height
+        } action: { height in
+            headerHeight = height
+        }
+        .background(heroBehindHeader ? Color.clear : MobileColors.background)
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
         }
@@ -314,7 +333,10 @@ struct MainNavigationView: View {
         } else {
             switch selection {
             case .home:
-                MobileHomeView()
+                MobileHomeView(
+                    headerHeight: heroBehindHeader ? headerHeight : 0,
+                    onHeroBehindHeaderChange: { homeHeroBehindHeader = $0 }
+                )
             case .finTV:
                 MobileGuideView()
             case .search:
