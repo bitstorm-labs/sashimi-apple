@@ -102,6 +102,52 @@ final class HeroRotationTests: XCTestCase {
         XCTAssertNotEqual(a.id, b.id, "Slide ids collide, so the rotation would drop one")
     }
 
+    // MARK: - Building the rotation (shared by the tvOS and iPad heroes)
+
+    private func card(_ id: String, onAir: Bool, logo: String? = nil) -> ChannelCard {
+        let start = Date()
+        return ChannelCard(
+            channel: VirtualChannel(
+                id: id, name: "Channel \(id)", description: nil,
+                timeZoneId: "UTC", daypartCount: 1, logo: logo
+            ),
+            nowPlaying: onAir
+                ? ChannelNowPlaying(
+                    itemId: "item-\(id)", startPositionSeconds: 0,
+                    startUtc: start, endUtc: start.addingTimeInterval(600), nextItemId: nil
+                )
+                : nil,
+            item: onAir ? item("item-\(id)", type: .episode) : nil,
+            nextItem: nil
+        )
+    }
+
+    func testSlidesSpreadOnAirChannelsAndDropOffAirOnes() {
+        let library = (1...4).map { item("l\($0)") }
+        let slides = HeroRotation.slides(
+            libraryItems: library,
+            channels: [card("a", onAir: true, logo: "k"), card("off", onAir: false), card("b", onAir: true)]
+        )
+
+        XCTAssertEqual(
+            ids(slides),
+            ["item:l1", "item:l2", "channel:a", "item:l3", "item:l4", "channel:b"],
+            "An off-air channel has nothing to show and must not become a dead slide"
+        )
+        let stamp = slides[2].channel
+        XCTAssertEqual(stamp?.name, "Channel a")
+        XCTAssertEqual(stamp?.logo, "k")
+        XCTAssertNotNil(stamp?.endsAt, "The countdown needs the programme's end")
+    }
+
+    func testSlidesWithoutChannelsAreTheLibraryItemsInOrder() {
+        let library = (1...3).map { item("l\($0)") }
+        XCTAssertEqual(
+            ids(HeroRotation.slides(libraryItems: library, channels: [])),
+            ["item:l1", "item:l2", "item:l3"]
+        )
+    }
+
     // MARK: - Countdown
 
     func testTimeRemainingMatchesTheCardWording() {

@@ -42,6 +42,28 @@ struct HeroSlide: Identifiable, Equatable {
 
 /// How channel slides sit among the library ones.
 enum HeroRotation {
+    /// The hero rotation: what each library last added, with the channels that
+    /// are on air right now spread through it. Built the same way on tvOS and
+    /// iPad, so both heroes rotate through the same slides.
+    ///
+    /// An off-air channel is left out rather than shown as a dead slide — there
+    /// is nothing to put in the frame and nothing to watch.
+    static func slides(libraryItems: [BaseItemDto], channels: [ChannelCard]) -> [HeroSlide] {
+        let channelSlides: [HeroSlide] = channels.compactMap { card in
+            guard !card.isOffAir, let item = card.item else { return nil }
+            return HeroSlide(
+                item: item,
+                channel: HeroSlide.Stamp(
+                    id: card.channel.id,
+                    name: card.channel.name,
+                    endsAt: card.endsAt,
+                    logo: card.channel.logo
+                )
+            )
+        }
+        return interleave(base: libraryItems.map(HeroSlide.library), inserts: channelSlides)
+    }
+
     /// Spread `inserts` evenly through `base` rather than grouping them.
     ///
     /// Grouped, six channels at six seconds each is a half-minute of FinTV
