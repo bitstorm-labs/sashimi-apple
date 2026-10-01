@@ -202,7 +202,11 @@ struct HeroSection: View {
 
                     // Content overlay
                     VStack(alignment: .leading, spacing: 20 * scale) {
-                        Spacer()
+                        if let gap = layout.textTopGap {
+                            Color.clear.frame(height: gap * scale)
+                        } else {
+                            Spacer()
+                        }
 
                         // Channel slides say which channel before they say what
                         // is on: the programme is still the headline, because
@@ -435,6 +439,11 @@ struct HeroLayout {
     /// 16:9 backdrop needs to fill the hero's height (an iPad in portrait).
     /// Off on tvOS, whose 32:9 frame never needs it.
     var widensImageToFillHeight = false
+    /// Pin the text block this far (before scaling) below `topInset` instead
+    /// of centring it. tvOS centres it in a short 32:9 frame, which lands it
+    /// near the top; a taller iPad hero centres it visibly low, so the iPad
+    /// places it where the TV's ends up. nil centres (tvOS).
+    var textTopGap: CGFloat?
     /// The countdown colour on a channel slide (each target's theme accent).
     var accent: Color
 

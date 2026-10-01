@@ -334,8 +334,9 @@ private struct PadHeroMetrics {
         HeroLayout(
             scale: Self.scale,
             height: height,
-            topInset: topChrome,
+            topInset: safeTop,
             widensImageToFillHeight: true,
+            textTopGap: 40,
             accent: MobileColors.accent
         )
     }
