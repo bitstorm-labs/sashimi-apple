@@ -7,6 +7,7 @@ import NukeUI
 struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @State private var showingDeleteAll = false
     @State private var playingItem: BaseItemDto?
     @State private var playingServerID: String?
@@ -84,8 +85,8 @@ struct DownloadsListView: View {
                             .padding(.horizontal, MobileSpacing.md)
 
                         VStack(spacing: 1) {
-                            ForEach(completed, id: \.recordID) { item in
-                                completedDownloadRow(item)
+                            ForEach(Self.completedGroups(completed)) { group in
+                                completedGroupView(group)
                             }
                         }
                         .background(MobileColors.cardBackground)
@@ -236,6 +237,129 @@ struct DownloadsListView: View {
     }
 
     // MARK: - Completed Download Row
+
+    /// A show's finished episodes under one header, or a single movie.
+    private struct CompletedGroup: Identifiable {
+        let id: String
+        let items: [DownloadedItem]
+        var isShow: Bool { items.first?.seriesId != nil }
+    }
+
+    /// Groups episodes by show (per server), keeping the list's newest-first
+    /// order between groups and episode order within a show.
+    private static func completedGroups(_ completed: [DownloadedItem]) -> [CompletedGroup] {
+        var order: [String] = []
+        var byKey: [String: [DownloadedItem]] = [:]
+        for item in completed {
+            let key = item.seriesId.map { "\(item.serverID ?? "legacy"):series:\($0)" } ?? item.recordID
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(item)
+        }
+        return order.map { key in
+            let items = byKey[key] ?? []
+            let sorted = items.first?.seriesId == nil ? items : items.sorted {
+                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) < ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
+            }
+            return CompletedGroup(id: key, items: sorted)
+        }
+    }
+
+    @ViewBuilder
+    private func completedGroupView(_ group: CompletedGroup) -> some View {
+        if group.isShow, let first = group.items.first {
+            VStack(spacing: 0) {
+                showHeader(first, episodeCount: group.items.count)
+                ForEach(group.items, id: \.recordID) { item in
+                    episodeRow(item)
+                }
+            }
+        } else if let movie = group.items.first {
+            completedDownloadRow(movie)
+        }
+    }
+
+    /// The show's poster and name, with a way to its page: the seasons and
+    /// episodes that aren't downloaded live there (iPad feedback).
+    private func showHeader(_ episode: DownloadedItem, episodeCount: Int) -> some View {
+        HStack(spacing: MobileSpacing.md) {
+            posterImage(for: episode)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.seriesName ?? episode.name)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(1)
+                Text(episodeCount == 1 ? "1 episode" : "\(episodeCount) episodes")
+                    .font(MobileTypography.caption)
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
+
+            Spacer()
+
+            // The show page comes from the server; offline there is nothing to open.
+            if networkMonitor.isConnected {
+                NavigationLink {
+                    AdaptiveDetailView(item: episode.asSeriesDto, serverID: episode.serverID)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Go to show")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(MobileColors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(MobileSpacing.md)
+    }
+
+    private func episodeRow(_ item: DownloadedItem) -> some View {
+        HStack(spacing: MobileSpacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episodeLabel(item))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MobileColors.textPrimary)
+                    .lineLimit(1)
+                Text(item.formattedSize)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+
+            Spacer()
+
+            Button {
+                play(item)
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(MobileColors.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play \(item.displayTitle)")
+
+            Button {
+                Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
+            } label: {
+                Image(systemName: "trash.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(MobileColors.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(item.displayTitle)")
+        }
+        // Indented under the show's poster.
+        .padding(.leading, 60 + MobileSpacing.md * 2)
+        .padding(.trailing, MobileSpacing.md)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture { play(item) }
+    }
+
+    private func episodeLabel(_ item: DownloadedItem) -> String {
+        guard let season = item.seasonNumber, let episode = item.episodeNumber else { return item.name }
+        return "S\(season):E\(episode) · \(item.name)"
+    }
 
     private func completedDownloadRow(_ item: DownloadedItem) -> some View {
         HStack(spacing: MobileSpacing.md) {
