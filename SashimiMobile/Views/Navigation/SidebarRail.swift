@@ -32,25 +32,56 @@ struct SidebarRail<Footer: View>: View {
     /// told whether the rail is expanded so it can add a label.
     @ViewBuilder let footer: (_ isExpanded: Bool) -> Footer
 
+    /// Width of the widest row label, measured off-screen so it is known
+    /// before the rail expands.
+    @State private var labelColumnWidth: CGFloat = 0
+
+    /// Leading inset of every row's icon. Collapsed, it centres the icon in
+    /// the slim rail. Expanded, the icon + label rows form one block that is
+    /// centred in the panel: every row shares this inset, so the icons stay in
+    /// one column and the labels in another.
+    private var rowLeading: CGFloat {
+        guard isExpanded else { return MobileSpacing.md }
+        let block = SidebarRailMetrics.iconWidth + MobileSpacing.md + labelColumnWidth
+        return max(MobileSpacing.md, (SidebarRailMetrics.expandedWidth - block) / 2)
+    }
+
+    /// Every label a row can show; the widest one sets the block width.
+    private var rowLabels: [String] {
+        var labels = [SidebarSelection.home, .finTV, .search, .downloads, .settings].map(\.displayName)
+        labels += libraries.map(\.name)
+        return labels
+    }
+
+    /// Lays the row labels out invisibly at their natural width and reports the
+    /// widest through `RailLabelWidthKey`.
+    private var labelMeasurer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rowLabels.enumerated()), id: \.offset) { _, label in
+                Text(label)
+                    .font(MobileTypography.body)
+                    .fixedSize()
+            }
+        }
+        .fixedSize()
+        .hidden()
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: RailLabelWidthKey.self, value: geometry.size.width)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             toggleRow
 
-            // The section group sits vertically centred between ☰ and Settings,
-            // as on the tvOS rail, in both states so icons don't jump when the
-            // rail opens. It scrolls from the top when a long library list
-            // can't fit, so Settings and the account menu are never pushed off
-            // the bottom (the fault a user reported on Roku's rail).
-            GeometryReader { geometry in
-                ScrollView(.vertical, showsIndicators: false) {
-                    sectionList
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: geometry.size.height,
-                            alignment: .leading
-                        )
-                }
-                .scrollBounceBehavior(.basedOnSize)
+            // Everything between ☰ and Settings scrolls, so a long library
+            // list can't push Settings and the account menu off the bottom
+            // (the fault a user reported on Roku's rail).
+            ScrollView(.vertical, showsIndicators: false) {
+                sectionList
             }
             .frame(maxHeight: .infinity)
 
@@ -60,24 +91,30 @@ struct SidebarRail<Footer: View>: View {
             footer(isExpanded)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Centres the avatar on the icon column above it.
-                .padding(.horizontal, (SidebarRailMetrics.collapsedWidth - SidebarRailMetrics.avatarSize) / 2)
+                .padding(
+                    .leading,
+                    rowLeading + (SidebarRailMetrics.iconWidth - SidebarRailMetrics.avatarSize) / 2
+                )
+                .padding(.trailing, MobileSpacing.xs)
                 .padding(.top, MobileSpacing.sm)
                 .padding(.bottom, MobileSpacing.xs)
 
-            // Expanded only, but its line is reserved in both states: if it
-            // came and went, the space above would change height and the
-            // centred section icons would jump as the rail opens.
+            // Expanded only, but its line is reserved in both states so
+            // Settings and the avatar don't jump up as the rail opens.
             if let version = Self.versionLabel {
                 Text(version)
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textTertiary)
                     .lineLimit(1)
-                    .padding(.horizontal, MobileSpacing.md)
+                    .padding(.leading, rowLeading)
+                    .padding(.trailing, MobileSpacing.md)
                     .padding(.bottom, MobileSpacing.sm)
                     .opacity(isExpanded ? 1 : 0)
                     .accessibilityHidden(!isExpanded)
             }
         }
+        .background(labelMeasurer)
+        .onPreferenceChange(RailLabelWidthKey.self) { labelColumnWidth = $0 }
         .frame(
             width: isExpanded ? SidebarRailMetrics.expandedWidth : SidebarRailMetrics.collapsedWidth
         )
@@ -189,7 +226,10 @@ struct SidebarRail<Footer: View>: View {
             }
             .foregroundStyle(isSelected ? MobileColors.accent : MobileColors.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, MobileSpacing.md)
+            // Inset shared by every row (see `rowLeading`); the highlight band
+            // below still spans the full rail width.
+            .padding(.leading, rowLeading)
+            .padding(.trailing, MobileSpacing.md)
             .padding(.vertical, MobileSpacing.sm)
             .background(isSelected ? MobileColors.accent.opacity(0.15) : Color.clear)
             .contentShape(Rectangle())
@@ -206,5 +246,14 @@ struct SidebarRail<Footer: View>: View {
             .frame(height: 1)
             .padding(.horizontal, MobileSpacing.sm)
             .padding(.vertical, MobileSpacing.xs)
+    }
+}
+
+/// The widest row label in `SidebarRail`.
+private struct RailLabelWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
