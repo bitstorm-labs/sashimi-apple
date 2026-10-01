@@ -36,31 +36,21 @@ struct SidebarRail<Footer: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             toggleRow
 
-            // Everything between ☰ and Settings scrolls, so a long library
-            // list can't push Settings and the account menu off the bottom
-            // (the fault a user reported on Roku's rail).
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    row(.home)
-                    // The guide is iPad-only: three hours of grid wants a wide
-                    // screen, and the phone gets the channels row on Home.
-                    row(.finTV)
-
-                    divider
-
-                    ForEach(libraries) { library in
-                        row(.library(
-                            id: library.id,
-                            name: library.name,
-                            collectionType: library.collectionType
-                        ))
-                    }
-
-                    divider
-
-                    row(.search)
-                    row(.downloads)
+            // The section group sits vertically centred between ☰ and Settings,
+            // as on the tvOS rail, in both states so icons don't jump when the
+            // rail opens. It scrolls from the top when a long library list
+            // can't fit, so Settings and the account menu are never pushed off
+            // the bottom (the fault a user reported on Roku's rail).
+            GeometryReader { geometry in
+                ScrollView(.vertical, showsIndicators: false) {
+                    sectionList
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: geometry.size.height,
+                            alignment: .leading
+                        )
                 }
+                .scrollBounceBehavior(.basedOnSize)
             }
             .frame(maxHeight: .infinity)
 
@@ -71,7 +61,22 @@ struct SidebarRail<Footer: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Centres the avatar on the icon column above it.
                 .padding(.horizontal, (SidebarRailMetrics.collapsedWidth - SidebarRailMetrics.avatarSize) / 2)
-                .padding(.vertical, MobileSpacing.sm)
+                .padding(.top, MobileSpacing.sm)
+                .padding(.bottom, MobileSpacing.xs)
+
+            // Expanded only, but its line is reserved in both states: if it
+            // came and went, the space above would change height and the
+            // centred section icons would jump as the rail opens.
+            if let version = Self.versionLabel {
+                Text(version)
+                    .font(MobileTypography.caption)
+                    .foregroundStyle(MobileColors.textTertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, MobileSpacing.md)
+                    .padding(.bottom, MobileSpacing.sm)
+                    .opacity(isExpanded ? 1 : 0)
+                    .accessibilityHidden(!isExpanded)
+            }
         }
         .frame(
             width: isExpanded ? SidebarRailMetrics.expandedWidth : SidebarRailMetrics.collapsedWidth
@@ -90,6 +95,42 @@ struct SidebarRail<Footer: View>: View {
             .fill(MobileColors.cardBackground)
             .shadow(color: .black.opacity(isExpanded ? 0.4 : 0), radius: 12, x: 4)
             .ignoresSafeArea()
+        }
+    }
+
+    /// "Version 1.6.17 (1234)", read from the bundle as the Settings screen's
+    /// About section does. Shown only in the expanded rail.
+    private static var versionLabel: String? {
+        let info = Bundle.main.infoDictionary
+        guard let version = info?["CFBundleShortVersionString"] as? String else { return nil }
+        if let build = info?["CFBundleVersion"] as? String {
+            return "Version \(version) (\(build))"
+        }
+        return "Version \(version)"
+    }
+
+    /// Home, SashimiTV, the libraries, Search and Downloads.
+    private var sectionList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row(.home)
+            // The guide is iPad-only: three hours of grid wants a wide
+            // screen, and the phone gets the channels row on Home.
+            row(.finTV)
+
+            divider
+
+            ForEach(libraries) { library in
+                row(.library(
+                    id: library.id,
+                    name: library.name,
+                    collectionType: library.collectionType
+                ))
+            }
+
+            divider
+
+            row(.search)
+            row(.downloads)
         }
     }
 
