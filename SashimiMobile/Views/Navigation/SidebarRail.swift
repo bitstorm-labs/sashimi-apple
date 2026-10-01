@@ -1,207 +1,178 @@
 import SwiftUI
 
-/// Widths shared by the rail and the content beside it. Kept outside the
+/// Sizes shared by the rail and the content beside it. Kept outside the
 /// generic `SidebarRail` because generic types can't hold static stored
-/// properties.
+/// properties. They are the tvOS rail's (`MainTabView.sidebar`) scaled from a
+/// 1920pt ten-foot screen down to an iPad held in the hand.
 enum SidebarRailMetrics {
-    /// Width of every icon column, so the icons and the ☰ toggle line up on
-    /// one vertical axis in both states.
-    static let iconWidth: CGFloat = 24
     /// The always-visible rail. The content is laid out beside this width and
     /// never moves when the rail expands.
-    static let collapsedWidth: CGFloat = iconWidth + MobileSpacing.md * 2
+    static let collapsedWidth: CGFloat = 76
     /// The expanded rail, drawn over the (dimmed) content.
-    static let expandedWidth: CGFloat = 260
-    /// Minimum height of the header bar's content (the 40pt avatar used to set
-    /// it). The ☰ row uses the same height so it sits level with the header.
+    static let expandedWidth: CGFloat = 280
+    /// Width of every icon column, so the icons, the logo and the avatar share
+    /// one vertical axis.
+    static let iconWidth: CGFloat = 32
+    /// Minimum height of the header bar beside the rail, so the content doesn't
+    /// jump when the download indicator comes and goes.
     static let barContentHeight: CGFloat = 40
     /// Size of the account avatar at the foot of the rail.
     static let avatarSize: CGFloat = 40
+
+    /// Side insets of the rail's contents. Collapsed, they centre a 60pt
+    /// column; expanded, they match the tvOS panel's lopsided inset.
+    static let collapsedInset: CGFloat = 8
+    static let expandedLeadingInset: CGFloat = 16
+    static let expandedTrailingInset: CGFloat = 12
+    /// Extra inset of each row's icon when expanded. Chosen so the icon column
+    /// lines up under the centre of the 48pt expanded logo.
+    static let expandedRowInset: CGFloat = 8
+
+    static let logoCollapsed: CGFloat = 40
+    static let logoExpanded: CGFloat = 48
+
+    /// Jellyfin purple, sampled from the logo — the selected row's tint, as on
+    /// the tvOS rail.
+    static let selectedTint = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
+    /// The tvOS rail's expand/collapse animation.
+    static let animation = Animation.easeInOut(duration: 0.28)
 }
 
-/// The iPad's TV-style navigation rail: a slim icon-only strip that is always
-/// on screen, expanding over the content to icon + label when ☰ is tapped.
-/// Selection and collapse policy belong to the caller (`onSelect`), which
-/// owns the navigation state.
+/// The iPad's navigation rail, drawn to match the Apple TV's: the sushi mark
+/// at the top, the destinations centred between it and the account avatar, the
+/// version underneath. It is a slim icon strip that is always on screen and
+/// expands over the content to icon + label when the mark is tapped.
+/// Selection and collapse policy belong to the caller (`onSelect`), which owns
+/// the navigation state.
 struct SidebarRail<Footer: View>: View {
     let libraries: [JellyfinLibrary]
     let selection: SidebarSelection
     @Binding var isExpanded: Bool
     let onSelect: (SidebarSelection) -> Void
-    /// Drawn pinned to the foot of the rail (the account / server menu). It is
-    /// told whether the rail is expanded so it can add a label.
+    /// Drawn at the foot of the rail, above the version (the account / server
+    /// menu). It is told whether the rail is expanded so it can add a label.
     @ViewBuilder let footer: (_ isExpanded: Bool) -> Footer
 
-    /// Width of the widest row label, measured off-screen so it is known
-    /// before the rail expands.
-    @State private var labelColumnWidth: CGFloat = 0
-
-    /// Leading inset of every row's icon. Collapsed, it centres the icon in
-    /// the slim rail. Expanded, the icon + label rows form one block that is
-    /// centred in the panel: every row shares this inset, so the icons stay in
-    /// one column and the labels in another.
-    private var rowLeading: CGFloat {
-        guard isExpanded else { return MobileSpacing.md }
-        let block = SidebarRailMetrics.iconWidth + MobileSpacing.md + labelColumnWidth
-        return max(MobileSpacing.md, (SidebarRailMetrics.expandedWidth - block) / 2)
-    }
-
-    /// Every label a row can show; the widest one sets the block width.
-    private var rowLabels: [String] {
-        var labels = [SidebarSelection.home, .finTV, .search, .downloads, .settings].map(\.displayName)
-        labels += libraries.map(\.name)
-        return labels
-    }
-
-    /// Lays the row labels out invisibly at their natural width and reports the
-    /// widest through `RailLabelWidthKey`.
-    private var labelMeasurer: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rowLabels.enumerated()), id: \.offset) { _, label in
-                Text(label)
-                    .font(MobileTypography.body)
-                    .fixedSize()
-            }
-        }
-        .fixedSize()
-        .hidden()
-        .background {
-            GeometryReader { geometry in
-                Color.clear.preference(key: RailLabelWidthKey.self, value: geometry.size.width)
-            }
-        }
-        .accessibilityHidden(true)
-    }
+    /// The rail lists destinations in the order Home lists them.
+    @ObservedObject private var homeRows = HomeRowSettings.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            toggleRow
+            logoButton
 
-            // Everything between ☰ and Settings scrolls, so a long library
-            // list can't push Settings and the account menu off the bottom
-            // (the fault a user reported on Roku's rail).
-            ScrollView(.vertical, showsIndicators: false) {
-                sectionList
+            // Centred between the logo and the avatar when it fits, as on tvOS.
+            // A long library list scrolls instead: unlike the TV, a touch rail
+            // has no focus to drag through the rows as it scrolls.
+            GeometryReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(navItems, id: \.self) { item in
+                            row(item)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .frame(maxHeight: .infinity)
-
-            divider
-            row(.settings)
+            .padding(.vertical, 16)
 
             footer(isExpanded)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // Centres the avatar on the icon column above it.
-                .padding(
-                    .leading,
-                    rowLeading + (SidebarRailMetrics.iconWidth - SidebarRailMetrics.avatarSize) / 2
-                )
-                .padding(.trailing, MobileSpacing.xs)
-                .padding(.top, MobileSpacing.sm)
-                .padding(.bottom, MobileSpacing.xs)
+                .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
 
-            // Expanded only, but its line is reserved in both states so
-            // Settings and the avatar don't jump up as the rail opens.
-            if let version = Self.versionLabel {
-                Text(version)
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textTertiary)
-                    .lineLimit(1)
-                    .padding(.leading, rowLeading)
-                    .padding(.trailing, MobileSpacing.md)
-                    .padding(.bottom, MobileSpacing.sm)
-                    .opacity(isExpanded ? 1 : 0)
-                    .accessibilityHidden(!isExpanded)
-            }
+            versionLabel
         }
-        .background(labelMeasurer)
-        .onPreferenceChange(RailLabelWidthKey.self) { labelColumnWidth = $0 }
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .padding(
+            .leading,
+            isExpanded ? SidebarRailMetrics.expandedLeadingInset : SidebarRailMetrics.collapsedInset
+        )
+        .padding(
+            .trailing,
+            isExpanded ? SidebarRailMetrics.expandedTrailingInset : SidebarRailMetrics.collapsedInset
+        )
         .frame(
-            width: isExpanded ? SidebarRailMetrics.expandedWidth : SidebarRailMetrics.collapsedWidth
+            width: isExpanded ? SidebarRailMetrics.expandedWidth : SidebarRailMetrics.collapsedWidth,
+            alignment: .leading
         )
         .frame(maxHeight: .infinity, alignment: .top)
         // Labels fade in while the width is still animating; keep them inside
         // the rail rather than painting over the content.
         .clipped()
+        // Dim the contents while the rail rests, full when it is open. Applied
+        // before .background so only the foreground fades, not the rail.
+        .opacity(isExpanded ? 1 : 0.68)
         .background {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: isExpanded ? MobileCornerRadius.xl : 0,
-                topTrailingRadius: isExpanded ? MobileCornerRadius.xl : 0
+            LinearGradient(
+                colors: [MobileColors.background, Color.black],
+                startPoint: .top, endPoint: .bottom
             )
-            .fill(MobileColors.cardBackground)
-            .shadow(color: .black.opacity(isExpanded ? 0.4 : 0), radius: 12, x: 4)
+            .overlay(
+                LinearGradient(
+                    colors: [Color.black.opacity(isExpanded ? 0.35 : 0), Color.clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            )
             .ignoresSafeArea()
         }
-    }
-
-    /// "Version 1.6.17 (1234)", read from the bundle as the Settings screen's
-    /// About section does. Shown only in the expanded rail.
-    private static var versionLabel: String? {
-        let info = Bundle.main.infoDictionary
-        guard let version = info?["CFBundleShortVersionString"] as? String else { return nil }
-        if let build = info?["CFBundleVersion"] as? String {
-            return "Version \(version) (\(build))"
+        // Hairline right edge so the rail reads as a defined strip.
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 1)
+                .ignoresSafeArea()
         }
-        return "Version \(version)"
+        .animation(SidebarRailMetrics.animation, value: isExpanded)
     }
 
-    /// Home, SashimiTV, the libraries, Search and Downloads.
-    private var sectionList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            row(.home)
-            // The guide is iPad-only: three hours of grid wants a wide
-            // screen, and the phone gets the channels row on Home.
-            row(.finTV)
-
-            divider
-
-            ForEach(libraries) { library in
-                row(.library(
+    /// Home, then SashimiTV and the libraries in Home's row order, then Search,
+    /// Downloads (iPad only) and Settings.
+    private var navItems: [SidebarSelection] {
+        var items: [SidebarSelection] = [.home]
+        for destination in RailOrder.destinations(
+            rowConfigs: homeRows.rows,
+            libraryIds: libraries.map(\.id)
+        ) {
+            switch destination {
+            case .finTV:
+                items.append(.finTV)
+            case .library(let id):
+                guard let library = libraries.first(where: { $0.id == id }) else { continue }
+                items.append(.library(
                     id: library.id,
                     name: library.name,
                     collectionType: library.collectionType
                 ))
             }
-
-            divider
-
-            row(.search)
-            row(.downloads)
         }
+        items += [.search, .downloads, .settings]
+        return items
     }
 
-    private var toggleRow: some View {
+    /// The sushi mark, with the "Sashimi" wordmark beside it when expanded.
+    /// It is the rail's open/close control.
+    private var logoButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withAnimation(SidebarRailMetrics.animation) {
                 isExpanded.toggle()
             }
         } label: {
-            HStack(spacing: MobileSpacing.md) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 22))
-                    .frame(width: SidebarRailMetrics.iconWidth)
+            HStack(spacing: 10) {
+                let logoSize = isExpanded ? SidebarRailMetrics.logoExpanded : SidebarRailMetrics.logoCollapsed
+                Image("SidebarLogoMark")
+                    .resizable().scaledToFit()
+                    .frame(width: logoSize, height: logoSize)
                 if isExpanded {
-                    HStack(spacing: MobileSpacing.xs) {
-                        Image("SidebarLogo")
-                            .resizable().scaledToFit()
-                            .frame(width: 32, height: 32)
-                            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-                        Text("Sashimi")
-                            .font(.system(size: 20, weight: .bold))
-                            .lineLimit(1)
-                    }
-                    .transition(.opacity)
+                    Text("Sashimi")
+                        .font(.system(size: 24, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .transition(.opacity)
                 }
             }
-            .foregroundStyle(MobileColors.textPrimary)
-            .frame(
-                maxWidth: .infinity,
-                minHeight: SidebarRailMetrics.barContentHeight,
-                alignment: .leading
-            )
-            .padding(.horizontal, MobileSpacing.md)
-            .padding(.vertical, MobileSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
+            .frame(height: SidebarRailMetrics.logoExpanded)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -213,47 +184,60 @@ struct SidebarRail<Footer: View>: View {
         return Button {
             onSelect(item)
         } label: {
-            HStack(spacing: MobileSpacing.md) {
+            HStack(spacing: 14) {
                 Image(systemName: item.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: 22, weight: .semibold))
                     .frame(width: SidebarRailMetrics.iconWidth)
                 if isExpanded {
                     Text(item.displayName)
-                        .font(MobileTypography.body)
+                        .font(.system(size: 17, weight: .semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .transition(.opacity)
                 }
             }
-            .foregroundStyle(isSelected ? MobileColors.accent : MobileColors.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // Inset shared by every row (see `rowLeading`); the highlight band
-            // below still spans the full rail width.
-            .padding(.leading, rowLeading)
-            .padding(.trailing, MobileSpacing.md)
-            .padding(.vertical, MobileSpacing.sm)
-            .background(isSelected ? MobileColors.accent.opacity(0.15) : Color.clear)
-            .contentShape(Rectangle())
+            .padding(.vertical, 11)
+            .padding(.horizontal, isExpanded ? SidebarRailMetrics.expandedRowInset : 0)
+            .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RailButtonStyle(isSelected: isSelected))
         // Collapsed rows are icon-only; name them for VoiceOver either way.
         .accessibilityLabel(item.displayName)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var divider: some View {
-        Rectangle()
-            .fill(MobileColors.textTertiary.opacity(0.3))
-            .frame(height: 1)
-            .padding(.horizontal, MobileSpacing.sm)
-            .padding(.vertical, MobileSpacing.xs)
+    /// "v1.6.18", as the tvOS rail shows it: under the avatar in both states.
+    private var versionLabel: some View {
+        Text("v" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? ""))
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white.opacity(0.4))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
+            .padding(.top, 6)
+            .padding(.leading, isExpanded ? SidebarRailMetrics.expandedRowInset : 0)
     }
 }
 
-/// The widest row label in `SidebarRail`.
-private struct RailLabelWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
+/// The tvOS rail's row tint, with a press standing in for focus: pressed is
+/// white on the soft highlight tvOS draws under the focused row, selected is
+/// Jellyfin purple, anything else is dimmed white. No selection band.
+private struct RailButtonStyle: ButtonStyle {
+    let isSelected: Bool
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(tint(isPressed: configuration.isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.14 : 0))
+            )
+            .contentShape(Rectangle())
+    }
+
+    private func tint(isPressed: Bool) -> Color {
+        if isPressed { return .white }
+        if isSelected { return SidebarRailMetrics.selectedTint }
+        return .white.opacity(0.55)
     }
 }
