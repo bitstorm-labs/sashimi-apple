@@ -29,15 +29,8 @@ enum SidebarSelection: Hashable {
         case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
         case .library(_, let name, let collectionType):
-            // YouTube libraries report collectionType "tvshows"; match by name,
-            // same as the tvOS rail.
-            if name.lowercased().contains("youtube") { return "play.rectangle.fill" }
-            switch collectionType {
-            case "movies": return "film"
-            case "tvshows": return "tv"
-            case "music": return "music.note"
-            default: return "folder"
-            }
+            // Same symbols as the tvOS rail.
+            return RailOrder.libraryIcon(name: name, collectionType: collectionType)
         }
     }
 }
@@ -190,14 +183,15 @@ struct MainNavigationView: View {
     }
 
     private func collapseRail() {
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(SidebarRailMetrics.animation) {
             railExpanded = false
         }
     }
 
     /// Quick server switcher (iPad equivalent of the phone's logo-tap menu),
-    /// pinned to the foot of the rail. Shows the user's name beside the avatar
-    /// when the rail is expanded.
+    /// pinned to the foot of the rail and drawn like the tvOS rail's avatar:
+    /// the user's picture, with their name and "Switch server" beside it when
+    /// the rail is expanded.
     private func accountMenu(showsName: Bool) -> some View {
         Menu {
             ForEach(sessionManager.servers) { server in
@@ -218,17 +212,29 @@ struct MainNavigationView: View {
                 Label("Add Server…", systemImage: "plus")
             }
         } label: {
-            HStack(spacing: MobileSpacing.xs) {
+            HStack(spacing: 12) {
                 userAvatarView
-                    .frame(width: SidebarRailMetrics.avatarSize, height: SidebarRailMetrics.avatarSize)
-                if showsName, let user = sessionManager.currentUser {
-                    Text(user.name)
-                        .font(MobileTypography.body)
-                        .foregroundStyle(MobileColors.textPrimary)
-                        .lineLimit(1)
-                        .transition(.opacity)
+                if showsName {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(sessionManager.currentUser?.name ?? "Account")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("Switch server")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .lineLimit(1)
+                    .transition(.opacity)
                 }
             }
+            // Centres the avatar on the icon column of the rows above.
+            .padding(
+                .horizontal,
+                showsName ? (SidebarRailMetrics.iconWidth - SidebarRailMetrics.avatarSize) / 2
+                    + SidebarRailMetrics.expandedRowInset : 0
+            )
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("Account and servers")
     }
@@ -252,9 +258,8 @@ struct MainNavigationView: View {
                 downloadIndicator
             }
         }
-        // The hamburger and avatar that used to set this bar's height now
-        // live in the rail; hold the height so the content doesn't jump when
-        // the download indicator comes and goes.
+        // Hold the height so the content doesn't jump when the download
+        // indicator comes and goes.
         .frame(minHeight: SidebarRailMetrics.barContentHeight)
         .padding(.horizontal, MobileSpacing.md)
         .padding(.vertical, MobileSpacing.sm)
@@ -274,47 +279,32 @@ struct MainNavigationView: View {
         }
     }
 
-    @ViewBuilder
+    /// The tvOS rail's avatar: the user's picture over an accent gradient,
+    /// which shows (with a person glyph) until the picture loads or if it can't.
     private var userAvatarView: some View {
-        if let user = sessionManager.currentUser,
-           let avatarURL = userAvatarURL(for: user) {
-            LazyImage(url: avatarURL) { state in
-                if let image = state.image {
-                    image
-                        .resizable().scaledToFill()
-                } else if state.error != nil {
-                    defaultAvatarView(for: user)
-                } else {
-                    defaultAvatarView(for: user)
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [MobileColors.accent, MobileColors.accent.opacity(0.6)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+            Image(systemName: "person.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(.white)
+            if let userId = sessionManager.currentUser?.id,
+               let imageURL = JellyfinClient.shared.userImageURL(userId: userId) {
+                LazyImage(url: imageURL) { state in
+                    if let image = state.image {
+                        image.resizable().scaledToFill()
+                    }
                 }
+                .pipeline(SashimiImagePipeline.shared)
+                .clipShape(Circle())
             }
-            .frame(width: 40, height: 40)
-            .clipShape(Circle())
-        } else if let user = sessionManager.currentUser {
-            defaultAvatarView(for: user)
-        } else {
-            Image(systemName: "person.circle")
-                .font(.title2)
-                .foregroundStyle(MobileColors.textSecondary)
         }
-    }
-
-    private func defaultAvatarView(for user: UserDto) -> some View {
-        Circle()
-            .fill(MobileColors.accent)
-            .frame(width: 40, height: 40)
-            .overlay {
-                Text(String(user.name.prefix(1)).uppercased())
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-    }
-
-    private func userAvatarURL(for user: UserDto) -> URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else {
-            return nil
-        }
-        return URL(string: "\(serverURL)/Users/\(user.id)/Images/Primary?maxWidth=64")
+        .frame(width: SidebarRailMetrics.avatarSize, height: SidebarRailMetrics.avatarSize)
     }
 
     @ViewBuilder

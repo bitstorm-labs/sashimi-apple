@@ -602,18 +602,6 @@ private extension MainTabView {
     }
 
     private func libraryIcon(_ lib: JellyfinLibrary) -> String {
-        if lib.name.lowercased().contains("youtube") { return "play.rectangle.fill" }
-        switch lib.collectionType {
-        case "movies": return "film.stack"
-        case "tvshows": return "tv"
-        case "music": return "music.note"
-        case "musicvideos": return "music.note.tv"
-        case "books": return "books.vertical"
-        case "photos", "homevideos": return "photo.stack"
-        case "playlists": return "list.and.film"
-        case "boxsets": return "square.stack.3d.up.fill"
-        case "livetv": return "dot.radiowaves.left.and.right"
-        default: return "rectangle.stack"
-        }
+        RailOrder.libraryIcon(name: lib.name, collectionType: lib.collectionType)
     }
 }
