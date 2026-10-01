@@ -1428,6 +1428,7 @@ struct MobileEpisodeCard: View {
                     }
                 }
                 .frame(width: 180, height: 100)
+                .offlineIndicator(itemId: episode.id, serverID: serverID)
                 .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
                 .overlay(
                     RoundedRectangle(cornerRadius: MobileCornerRadius.small)
