@@ -1021,6 +1021,7 @@ struct PhoneDetailView: View {
                             }
                         }
                         .frame(width: 120, height: 68)
+                        .offlineIndicator(itemId: episode.id, serverID: serverID, size: 14)
                         .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
                         .overlay(
                             RoundedRectangle(cornerRadius: MobileCornerRadius.small)
