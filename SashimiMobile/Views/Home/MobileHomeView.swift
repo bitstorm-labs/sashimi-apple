@@ -1,25 +1,76 @@
 import SwiftUI
 
 struct MobileHomeView: View {
+    /// Height of the header strip MainNavigationView draws over Home's top
+    /// edge while the hero runs behind it (0 when it doesn't).
+    var headerHeight: CGFloat = 0
+    /// Told whether the hero is on screen at the top of Home, so the header can
+    /// turn transparent and the hero run full-bleed to the top as on tvOS.
+    var onHeroBehindHeaderChange: (Bool) -> Void = { _ in }
+
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var rowSettings = HomeRowSettings.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
+    @State private var heroIndex = 0
+    /// The fixed hero wallpaper dims to black as the rows scroll up over it.
+    @State private var heroScrollFade: Double = 0
+    /// Opened by tapping the hero.
+    @State private var heroDestination: BaseItemDto?
+    /// A finger is on the hero: hold the rotation. GestureState so a drag the
+    /// scroll view takes over (and so never "ends") still resets it.
+    @GestureState private var isTouchingHero = false
+
+    /// The same rotation the Apple TV hero shows (`HeroRotation.slides`).
+    private var heroSlides: [HeroSlide] {
+        HeroRotation.slides(libraryItems: viewModel.heroItems, channels: channelsViewModel.cards)
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
-                if viewModel.isLoading && viewModel.continueWatchingItems.isEmpty {
-                    loadingView
-                } else {
-                    contentView
+        GeometryReader { proxy in
+            let hero = PadHeroMetrics(proxy: proxy, headerHeight: headerHeight)
+            let slides = heroSlides
+
+            ZStack(alignment: .topLeading) {
+                // The tvOS Home page: theme background fading to black.
+                LinearGradient(
+                    colors: [MobileColors.background, Color.black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                // Fixed hero wallpaper pinned to the top, BEHIND the scrolling
+                // rows, as on tvOS (HomeView). Full-bleed up behind the status
+                // bar and the (transparent) header strip.
+                if !slides.isEmpty {
+                    heroBackdrop(slides: slides, metrics: hero)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: MobileSpacing.xl) {
+                        if !slides.isEmpty {
+                            heroRevealSpacer(metrics: hero)
+                        }
+
+                        LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
+                            if viewModel.isLoading && viewModel.continueWatchingItems.isEmpty {
+                                loadingView
+                            } else {
+                                contentView
+                            }
+                        }
+                    }
+                    .padding(.top, slides.isEmpty ? MobileSpacing.md : 0)
+                    .padding(.bottom, MobileSpacing.md)
+                }
+                .refreshable {
+                    await viewModel.loadContent()
                 }
             }
-            .padding(.vertical, MobileSpacing.md)
         }
-        .background(MobileColors.background)
-        .refreshable {
-            await viewModel.loadContent()
+        .navigationDestination(item: $heroDestination) { item in
+            AdaptiveDetailView(item: item, libraryName: viewModel.heroItemLibraryNames[item.id])
         }
         .task {
             rowSettings.use(serverID: SessionManager.shared.activeServerId)
@@ -41,10 +92,18 @@ struct MobileHomeView: View {
             }
         }
         .onAppear {
+            onHeroBehindHeaderChange(!heroSlides.isEmpty)
             // Refresh when navigating back to home (e.g. after watching something)
             if !viewModel.continueWatchingItems.isEmpty || !viewModel.libraries.isEmpty {
                 Task { await viewModel.loadContent() }
             }
+        }
+        .onDisappear {
+            // A pushed detail screen gets the normal, opaque header back.
+            onHeroBehindHeaderChange(false)
+        }
+        .onChange(of: heroSlides.isEmpty) { _, isEmpty in
+            onHeroBehindHeaderChange(!isEmpty)
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
@@ -54,6 +113,94 @@ struct MobileHomeView: View {
         }
         .onChange(of: viewModel.libraries) { _, libraries in
             rowSettings.updateLibraries(libraries)
+        }
+    }
+
+    // MARK: - Hero
+
+    private func heroBackdrop(slides: [HeroSlide], metrics: PadHeroMetrics) -> some View {
+        HeroSection(
+            slides: slides,
+            libraryNames: viewModel.heroItemLibraryNames,
+            currentIndex: $heroIndex,
+            layout: metrics.layout,
+            serverID: SessionManager.shared.activeServerId,
+            isPaused: isTouchingHero
+        )
+        .overlay(Color.black.opacity(heroScrollFade))
+        .frame(maxWidth: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        // The touch surface is the reveal spacer in front of the hero; VoiceOver
+        // reaches the hero itself, so the same actions live here.
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { openCurrentHeroSlide() }
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: showHeroSlide(offset: 1)
+            case .decrement: showHeroSlide(offset: -1)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Clear spacer revealing the fixed hero above the first row (a touch less
+    /// than the hero, so the first row overlaps its faded bottom edge, as on
+    /// tvOS). It sits in front of the hero, so it is also the hero's touch
+    /// surface: tap opens the slide, a horizontal swipe changes it.
+    private func heroRevealSpacer(metrics: PadHeroMetrics) -> some View {
+        Color.clear
+            .frame(height: metrics.revealHeight)
+            .contentShape(Rectangle())
+            .onTapGesture { openCurrentHeroSlide() }
+            .simultaneousGesture(heroSwipe)
+            // As on tvOS: at the top the hero is lit; once the rows move up
+            // over it, it eases to black. Not a fade that tracks the finger:
+            // half-dimmed, the hero's title shows through the row headers
+            // sliding over it.
+            .onGeometryChange(for: Bool.self) { geometry in
+                geometry.frame(in: .scrollView).minY < -8
+            } action: { scrolled in
+                withAnimation(.easeOut(duration: 0.3)) {
+                    heroScrollFade = scrolled ? 1 : 0
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var heroSwipe: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .updating($isTouchingHero) { _, touching, _ in
+                touching = true
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                // Horizontal and deliberate; anything else was a scroll.
+                guard abs(horizontal) > 50,
+                      abs(horizontal) > abs(value.translation.height) * 1.5 else { return }
+                showHeroSlide(offset: horizontal < 0 ? 1 : -1)
+            }
+    }
+
+    private func showHeroSlide(offset: Int) {
+        let count = heroSlides.count
+        guard count > 1 else { return }
+        let current = min(heroIndex, count - 1)
+        withAnimation(.easeInOut(duration: 0.6)) {
+            heroIndex = ((current + offset) % count + count) % count
+        }
+    }
+
+    /// A library slide opens its detail, as a card does. A channel slide tunes
+    /// in, as its SashimiTV card does: it is what is on air, not a title page.
+    private func openCurrentHeroSlide() {
+        let slides = heroSlides
+        guard !slides.isEmpty else { return }
+        let slide = slides[min(heroIndex, slides.count - 1)]
+        if let stamp = slide.channel,
+           let card = channelsViewModel.cards.first(where: { $0.channel.id == stamp.id }) {
+            tuneToChannel(card)
+        } else {
+            heroDestination = slide.item
         }
     }
 
@@ -151,5 +298,45 @@ struct MobileHomeView: View {
             guard !Task.isCancelled else { break }
             await channelsViewModel.load()
         }
+    }
+}
+
+/// The tvOS hero's frame fitted to an iPad, portrait or landscape.
+private struct PadHeroMetrics {
+    /// tvOS sizes scaled the way the rest of the iPad UI scales them
+    /// (`MobileTypography`: 28 -> 17, 24 -> 15, 40 -> 22).
+    static let scale: CGFloat = 0.6
+    /// The tvOS hero is 32:9 of a 1800pt content column: 506pt of a 1080pt
+    /// screen. The iPad hero takes the same share of its screen's height.
+    static let screenShare: CGFloat = (1800.0 * 9 / 32) / 1080
+
+    let height: CGFloat
+    let safeTop: CGFloat
+    let topChrome: CGFloat
+
+    init(proxy: GeometryProxy, headerHeight: CGFloat) {
+        safeTop = proxy.safeAreaInsets.top
+        topChrome = safeTop + headerHeight
+        let screenHeight = proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
+        // Capped at 16:9 of the width: any taller and a backdrop (fitted, never
+        // cropped, as on tvOS) could no longer fill it top to bottom. That cap
+        // is what applies in portrait; landscape gets the full share.
+        height = min(screenHeight * Self.screenShare, proxy.size.width * 9 / 16)
+    }
+
+    /// The scroll content starts below the safe area while the hero starts at
+    /// the very top, hence `safeTop`; 48 is the tvOS overlap.
+    var revealHeight: CGFloat {
+        max(0, height - safeTop - 48 * Self.scale)
+    }
+
+    var layout: HeroLayout {
+        HeroLayout(
+            scale: Self.scale,
+            height: height,
+            topInset: topChrome,
+            widensImageToFillHeight: true,
+            accent: MobileColors.accent
+        )
     }
 }
