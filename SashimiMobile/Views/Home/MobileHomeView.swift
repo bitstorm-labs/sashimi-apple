@@ -1,13 +1,6 @@
 import SwiftUI
 
 struct MobileHomeView: View {
-    /// Height of the header strip MainNavigationView draws over Home's top
-    /// edge while the hero runs behind it (0 when it doesn't).
-    var headerHeight: CGFloat = 0
-    /// Told whether the hero is on screen at the top of Home, so the header can
-    /// turn transparent and the hero run full-bleed to the top as on tvOS.
-    var onHeroBehindHeaderChange: (Bool) -> Void = { _ in }
-
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var rowSettings = HomeRowSettings.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
@@ -28,7 +21,7 @@ struct MobileHomeView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let hero = PadHeroMetrics(proxy: proxy, headerHeight: headerHeight)
+            let hero = PadHeroMetrics(proxy: proxy)
             let slides = heroSlides
 
             ZStack(alignment: .topLeading) {
@@ -42,7 +35,7 @@ struct MobileHomeView: View {
 
                 // Fixed hero wallpaper pinned to the top, BEHIND the scrolling
                 // rows, as on tvOS (HomeView). Full-bleed up behind the status
-                // bar and the (transparent) header strip.
+                // bar.
                 if !slides.isEmpty {
                     heroBackdrop(slides: slides, metrics: hero)
                 }
@@ -92,18 +85,10 @@ struct MobileHomeView: View {
             }
         }
         .onAppear {
-            onHeroBehindHeaderChange(!heroSlides.isEmpty)
             // Refresh when navigating back to home (e.g. after watching something)
             if !viewModel.continueWatchingItems.isEmpty || !viewModel.libraries.isEmpty {
                 Task { await viewModel.loadContent() }
             }
-        }
-        .onDisappear {
-            // A pushed detail screen gets the normal, opaque header back.
-            onHeroBehindHeaderChange(false)
-        }
-        .onChange(of: heroSlides.isEmpty) { _, isEmpty in
-            onHeroBehindHeaderChange(!isEmpty)
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
@@ -312,11 +297,9 @@ private struct PadHeroMetrics {
 
     let height: CGFloat
     let safeTop: CGFloat
-    let topChrome: CGFloat
 
-    init(proxy: GeometryProxy, headerHeight: CGFloat) {
+    init(proxy: GeometryProxy) {
         safeTop = proxy.safeAreaInsets.top
-        topChrome = safeTop + headerHeight
         let screenHeight = proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
         // Capped at 16:9 of the width: any taller and a backdrop (fitted, never
         // cropped, as on tvOS) could no longer fill it top to bottom. That cap

@@ -45,6 +45,8 @@ enum MobileAnimation {
 // MARK: - Spacing (iPad-appropriate)
 
 enum MobileSpacing {
+    /// 32pt - Between the major sections of a long page (iPad detail)
+    static let xxl: CGFloat = 32
     /// 24pt - Extra large spacing (screen edges, major sections)
     static let xl: CGFloat = 24
     /// 20pt - Large spacing (between sections)
