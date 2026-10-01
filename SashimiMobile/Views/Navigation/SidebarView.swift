@@ -49,9 +49,10 @@ struct MainNavigationView: View {
     var searchRequest: SashimiIntentCoordinator.SearchRequest?
     var onSearchRequestConsumed: (UUID) -> Void = { _ in }
     @State private var selection: SidebarSelection = .home
-    @State private var sidebarVisible = false
+    /// The rail is always on screen; this is whether it is expanded to
+    /// icon + label over the content.
+    @State private var railExpanded = false
     @State private var libraries: [JellyfinLibrary] = []
-    @State private var sidebarWidth: CGFloat = 200
     @State private var navigationResetId: Int = 0
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
@@ -69,47 +70,38 @@ struct MainNavigationView: View {
     @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                // Main content with custom header
-                VStack(spacing: 0) {
-                    // Custom header bar
-                    headerBar
+        ZStack(alignment: .leading) {
+            // Main content with custom header, laid out beside the collapsed
+            // rail. It never moves: the expanded rail is drawn over it.
+            VStack(spacing: 0) {
+                headerBar
 
-                    // Content area
-                    NavigationStack {
-                        detailView
-                            .navigationBarHidden(true)
-                    }
-                    .id("\(selection)-\(navigationResetId)")
+                NavigationStack {
+                    detailView
+                        .navigationBarHidden(true)
                 }
-                .frame(width: geometry.size.width)
-                .offset(x: sidebarVisible ? sidebarWidth : 0)
+                .id("\(selection)-\(navigationResetId)")
+            }
+            .padding(.leading, SidebarRailMetrics.collapsedWidth)
 
-                // Dimming overlay when sidebar is open
-                if sidebarVisible {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .offset(x: sidebarWidth)
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                sidebarVisible = false
-                            }
-                        }
-                }
+            // Dims the content while the rail is expanded; tapping it collapses.
+            if railExpanded {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { collapseRail() }
+                    .transition(.opacity)
+                    .accessibilityLabel("Close menu")
+                    .accessibilityAddTraits(.isButton)
+            }
 
-                // Sidebar
-                sidebarContent
-                    .fixedSize(horizontal: true, vertical: false)
-                    .background(GeometryReader { sidebarGeo in
-                        Color.clear.onAppear {
-                            sidebarWidth = sidebarGeo.size.width
-                        }
-                        .onChange(of: sidebarGeo.size.width) { _, newWidth in
-                            sidebarWidth = newWidth
-                        }
-                    })
-                    .offset(x: sidebarVisible ? 0 : -sidebarWidth)
+            SidebarRail(
+                libraries: libraries,
+                selection: selection,
+                isExpanded: $railExpanded,
+                onSelect: select
+            ) { expanded in
+                accountMenu(showsName: expanded)
             }
         }
         .task {
@@ -180,128 +172,69 @@ struct MainNavigationView: View {
         }
     }
 
-    private var sidebarContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Logo at very top
-            HStack {
-                Image("SidebarLogo")
-                    .resizable().scaledToFit()
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                Text("Sashimi")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(MobileColors.textPrimary)
+    /// A rail tap: switch section, or start the current one over when it is
+    /// tapped again. Either way the rail collapses back to its icon strip.
+    private func select(_ item: SidebarSelection) {
+        if selection == item {
+            navigationResetId += 1
+            if item == .search {
+                // Re-selecting Search starts over, as the rebuilt view did
+                // when it owned the query.
+                searchQuery = ""
+                focusSearchFieldIfTyping()
             }
-            .padding(.horizontal, MobileSpacing.md)
-            .padding(.top, MobileSpacing.md)
-            .padding(.bottom, MobileSpacing.md)
-
-            // Everything between the logo and Settings scrolls. With enough
-            // libraries the trailing Spacer collapsed and Settings was pushed
-            // off the bottom of the sidebar — the same fault a user reported
-            // on Roku's rail. The logo and Settings stay pinned either side.
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    sidebarRow(item: .home)
-
-                    // The guide is iPad-only: three hours of grid wants a wide
-                    // screen, and the phone gets the channels row on Home.
-                    sidebarRow(item: .finTV)
-
-                    Rectangle()
-                        .fill(MobileColors.textTertiary.opacity(0.3))
-                        .frame(height: 1)
-                        .padding(.horizontal, MobileSpacing.md)
-                        .padding(.vertical, MobileSpacing.xs)
-
-                    ForEach(libraries) { library in
-                        sidebarRow(item: .library(
-                            id: library.id,
-                            name: library.name,
-                            collectionType: library.collectionType
-                        ))
-                    }
-
-                    Rectangle()
-                        .fill(MobileColors.textTertiary.opacity(0.3))
-                        .frame(height: 1)
-                        .padding(.horizontal, MobileSpacing.md)
-                        .padding(.vertical, MobileSpacing.xs)
-
-                    sidebarRow(item: .search)
-                    sidebarRow(item: .downloads)
-                }
-            }
-            // Takes the space between logo and Settings, so Settings is pinned
-            // to the foot rather than riding up under the last library.
-            .frame(maxHeight: .infinity)
-
-            // Settings at bottom
-            Rectangle()
-                .fill(MobileColors.textTertiary.opacity(0.3))
-                .frame(height: 1)
-                .padding(.horizontal, MobileSpacing.md)
-
-            sidebarRow(item: .settings)
-                .padding(.bottom, MobileSpacing.md)
+        } else {
+            selection = item
         }
-        .frame(maxHeight: .infinity)
-        .background(MobileColors.cardBackground.ignoresSafeArea())
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: MobileCornerRadius.xl,
-                topTrailingRadius: MobileCornerRadius.xl
-            )
-        )
+        collapseRail()
     }
 
-    private func sidebarRow(item: SidebarSelection) -> some View {
-        Button {
-            if selection == item {
-                navigationResetId += 1
-                if item == .search {
-                    // Re-selecting Search starts over, as the rebuilt view did
-                    // when it owned the query.
-                    searchQuery = ""
-                    focusSearchFieldIfTyping()
+    private func collapseRail() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            railExpanded = false
+        }
+    }
+
+    /// Quick server switcher (iPad equivalent of the phone's logo-tap menu),
+    /// pinned to the foot of the rail. Shows the user's name beside the avatar
+    /// when the rail is expanded.
+    private func accountMenu(showsName: Bool) -> some View {
+        Menu {
+            ForEach(sessionManager.servers) { server in
+                Button {
+                    Task { await sessionManager.switchServer(to: server.id) }
+                } label: {
+                    if server.id == sessionManager.activeServerId {
+                        Label(server.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(server.displayName)
+                    }
                 }
-            } else {
-                selection = item
             }
-            withAnimation(.easeInOut(duration: 0.25)) {
-                sidebarVisible = false
+            Divider()
+            Button {
+                showAddServer = true
+            } label: {
+                Label("Add Server…", systemImage: "plus")
             }
         } label: {
-            HStack(spacing: MobileSpacing.md) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 20))
-                    .frame(width: 24)
-                Text(item.displayName)
-                    .font(MobileTypography.body)
+            HStack(spacing: MobileSpacing.xs) {
+                userAvatarView
+                    .frame(width: SidebarRailMetrics.avatarSize, height: SidebarRailMetrics.avatarSize)
+                if showsName, let user = sessionManager.currentUser {
+                    Text(user.name)
+                        .font(MobileTypography.body)
+                        .foregroundStyle(MobileColors.textPrimary)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
             }
-            .foregroundStyle(selection == item ? MobileColors.accent : MobileColors.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, MobileSpacing.md)
-            .padding(.vertical, MobileSpacing.sm)
-            .background(selection == item ? MobileColors.accent.opacity(0.15) : Color.clear)
         }
-        .buttonStyle(.plain)
+        .accessibilityLabel("Account and servers")
     }
 
     private var headerBar: some View {
         HStack(alignment: .center) {
-            // Hamburger menu
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 24))
-                .foregroundColor(MobileColors.textPrimary)
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        sidebarVisible.toggle()
-                    }
-                }
-
             if showsHeaderSearch {
                 HeaderSearchField(
                     text: $searchQuery,
@@ -318,31 +251,11 @@ struct MainNavigationView: View {
             if selection != .downloads {
                 downloadIndicator
             }
-
-            // Quick server switcher (iPad equivalent of the phone's logo-tap
-            // menu) — the avatar was previously display-only.
-            Menu {
-                ForEach(sessionManager.servers) { server in
-                    Button {
-                        Task { await sessionManager.switchServer(to: server.id) }
-                    } label: {
-                        if server.id == sessionManager.activeServerId {
-                            Label(server.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(server.displayName)
-                        }
-                    }
-                }
-                Divider()
-                Button {
-                    showAddServer = true
-                } label: {
-                    Label("Add Server…", systemImage: "plus")
-                }
-            } label: {
-                userAvatarView
-            }
         }
+        // The hamburger and avatar that used to set this bar's height now
+        // live in the rail; hold the height so the content doesn't jump when
+        // the download indicator comes and goes.
+        .frame(minHeight: SidebarRailMetrics.barContentHeight)
         .padding(.horizontal, MobileSpacing.md)
         .padding(.vertical, MobileSpacing.sm)
         .background(MobileColors.background)
