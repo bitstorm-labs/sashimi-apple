@@ -63,9 +63,9 @@ struct MainNavigationView: View {
         ZStack(alignment: .leading) {
             // Main content, laid out beside the collapsed rail. It never
             // moves: the expanded rail is drawn over it. Only Search has a
-            // header strip (its field); every other screen, pushed detail
-            // pages included, starts at the top safe area, and Home's hero
-            // runs full-bleed up behind the status bar.
+            // header strip (its field). Everything stops at the status bar:
+            // clipped to the safe area, so full-bleed backdrops and scrolled
+            // rows don't run up behind the clock and battery.
             VStack(spacing: 0) {
                 if showsHeaderSearch {
                     searchHeaderBar
@@ -77,6 +77,8 @@ struct MainNavigationView: View {
                 }
                 .id("\(selection)-\(navigationResetId)")
             }
+            // Top edge only: lists still scroll under the home indicator.
+            .mask(Rectangle().ignoresSafeArea(edges: .bottom))
             .padding(.leading, SidebarRailMetrics.collapsedWidth)
 
             // Dims the content while the rail is expanded; tapping it collapses.
@@ -100,6 +102,8 @@ struct MainNavigationView: View {
                 accountMenu(showsName: expanded)
             }
         }
+        // Behind the status bar, now that the content stops below it.
+        .background(MobileColors.background.ignoresSafeArea())
         .task {
             await loadLibraries()
         }

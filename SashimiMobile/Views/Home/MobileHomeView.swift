@@ -34,8 +34,8 @@ struct MobileHomeView: View {
                 .ignoresSafeArea()
 
                 // Fixed hero wallpaper pinned to the top, BEHIND the scrolling
-                // rows, as on tvOS (HomeView). Full-bleed up behind the status
-                // bar.
+                // rows, as on tvOS (HomeView). It starts below the status bar,
+                // like the rest of the iPad UI.
                 if !slides.isEmpty {
                     heroBackdrop(slides: slides, metrics: hero)
                 }
@@ -114,7 +114,6 @@ struct MobileHomeView: View {
         )
         .overlay(Color.black.opacity(heroScrollFade))
         .frame(maxWidth: .infinity, alignment: .top)
-        .ignoresSafeArea(edges: .top)
         // The touch surface is the reveal spacer in front of the hero; VoiceOver
         // reaches the hero itself, so the same actions live here.
         .accessibilityAddTraits(.isButton)
@@ -296,10 +295,8 @@ private struct PadHeroMetrics {
     static let screenShare: CGFloat = (1800.0 * 9 / 32) / 1080
 
     let height: CGFloat
-    let safeTop: CGFloat
 
     init(proxy: GeometryProxy) {
-        safeTop = proxy.safeAreaInsets.top
         let screenHeight = proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
         // Capped at 16:9 of the width: any taller and a backdrop (fitted, never
         // cropped, as on tvOS) could no longer fill it top to bottom. That cap
@@ -307,17 +304,17 @@ private struct PadHeroMetrics {
         height = min(screenHeight * Self.screenShare, proxy.size.width * 9 / 16)
     }
 
-    /// The scroll content starts below the safe area while the hero starts at
-    /// the very top, hence `safeTop`; 48 is the tvOS overlap.
+    /// The scroll content and the hero both start below the status bar; 48 is
+    /// the tvOS overlap.
     var revealHeight: CGFloat {
-        max(0, height - safeTop - 48 * Self.scale)
+        max(0, height - 48 * Self.scale)
     }
 
     var layout: HeroLayout {
         HeroLayout(
             scale: Self.scale,
             height: height,
-            topInset: safeTop,
+            topInset: 0,
             widensImageToFillHeight: true,
             textTopGap: 40,
             accent: MobileColors.accent
