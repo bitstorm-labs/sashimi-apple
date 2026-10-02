@@ -316,6 +316,8 @@ struct DownloadsListView: View {
 
     private func episodeRow(_ item: DownloadedItem) -> some View {
         HStack(spacing: MobileSpacing.md) {
+            episodeThumbnail(for: item)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(episodeLabel(item))
                     .font(.system(size: 15, weight: .medium))
@@ -348,12 +350,35 @@ struct DownloadsListView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Delete \(item.displayTitle)")
         }
-        // Indented under the show's poster.
-        .padding(.leading, 60 + MobileSpacing.md * 2)
+        // Thumbnails line up with the show's poster above them.
+        .padding(.leading, MobileSpacing.md)
         .padding(.trailing, MobileSpacing.md)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture { play(item) }
+    }
+
+    /// The episode's own still, so a show's downloads are told apart at a
+    /// glance. The file saved with the download is preferred (it works
+    /// offline); the server copy covers downloads whose image never arrived.
+    private func episodeThumbnail(for item: DownloadedItem) -> some View {
+        let url = OfflineImageHelper.thumbnailURL(for: item.itemId, serverID: item.serverID)
+            ?? serverImageURL(itemId: item.itemId, serverID: item.serverID, maxWidth: 320)
+        return Group {
+            if let url {
+                LazyImage(request: SashimiImagePipeline.request(url: url, serverID: item.serverID)) { state in
+                    if let image = state.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Rectangle().fill(MobileColors.background)
+                    }
+                }
+            } else {
+                Rectangle().fill(MobileColors.background)
+            }
+        }
+        .frame(width: 112, height: 63)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func episodeLabel(_ item: DownloadedItem) -> String {
@@ -492,18 +517,21 @@ struct DownloadsListView: View {
     }
 
     private func serverPosterURL(for item: DownloadedItem) -> URL? {
+        // For episodes, use the series poster if available
+        serverImageURL(itemId: item.seriesId ?? item.itemId, serverID: item.serverID, maxWidth: 200)
+    }
+
+    private func serverImageURL(itemId: String, serverID: String?, maxWidth: Int) -> URL? {
         let serverURL: URL?
-        if let serverID = item.serverID {
+        if let serverID {
             serverURL = SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
         } else {
             serverURL = SessionManager.shared.serverURL
         }
         guard let serverURL else { return nil }
-        // For episodes, use the series poster if available
-        let imageItemId = item.seriesId ?? item.itemId
         return serverURL
-            .appendingPathComponent("Items/\(imageItemId)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "200")])
+            .appendingPathComponent("Items/\(itemId)/Images/Primary")
+            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "\(maxWidth)")])
     }
 
     // MARK: - Helpers
