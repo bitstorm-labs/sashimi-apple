@@ -20,6 +20,16 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Compact form for row captions ("720p · 1.1 GB").
+    var shortLabel: String {
+        switch self {
+        case .original: return "Original"
+        case .high: return "1080p"
+        case .medium: return "720p"
+        case .low: return "480p"
+        }
+    }
+
     var subtitle: String {
         switch self {
         case .original: return "Largest file size"
@@ -149,8 +159,13 @@ final class DownloadedItem {
         return name
     }
 
+    /// Bytes on disk: the final size once known, else what has arrived.
+    var sizeBytes: Int64 {
+        totalBytes > 0 ? totalBytes : downloadedBytes
+    }
+
     var formattedSize: String {
-        ByteCountFormatter.string(fromByteCount: totalBytes > 0 ? totalBytes : downloadedBytes, countStyle: .file)
+        ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
     }
 
     var isComplete: Bool {

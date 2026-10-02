@@ -29,6 +29,9 @@ struct MobilePlayerView: View {
     @State private var isScrubbing = false
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
+    /// A downloaded item that played to its end. Acted on (Delete downloads
+    /// after watching) only once the player is gone, never mid-playback.
+    @State private var finishedDownloadItemID: String?
 
     init(
         item: BaseItemDto,
@@ -197,8 +200,15 @@ struct MobilePlayerView: View {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             let stopTask = viewModel.beginStop(reason: .viewDisappeared)
+            let finishedDownload = finishedDownloadItemID
             Task {
                 await stopTask.value
+                if let finishedDownload {
+                    await DownloadManager.shared.handleOfflinePlaybackFinished(
+                        itemId: finishedDownload,
+                        serverID: serverID
+                    )
+                }
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
@@ -244,6 +254,8 @@ struct MobilePlayerView: View {
             }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
+            // Captured now: the item is cleared when playback is torn down.
+            finishedDownloadItemID = ended && localFileURL != nil ? displayedItem.id : nil
             if ended && (!playbackSettings.showEpisodeNavigationControls ||
                          !viewModel.transitionState.isEpisodeNavigationAvailable) {
                 dismiss()
