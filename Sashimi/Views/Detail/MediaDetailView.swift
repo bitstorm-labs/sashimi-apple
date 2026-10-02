@@ -41,6 +41,9 @@ struct MediaDetailView: View {
     @State var isRefreshing = false
     @State var refreshID = UUID()
     @FocusState var isMoreButtonFocused: Bool
+    /// Add to Channel, for the active server's administrators.
+    @State var channelTarget: ChannelTarget?
+    @ObservedObject var session = SessionManager.shared
 
     var isSeries: Bool { item.type == .series }
     var isEpisode: Bool { item.type == .episode }
@@ -238,6 +241,9 @@ struct MediaDetailView: View {
             NavigationStack {
                 ServerScopedMediaDetailView(source: source)
             }
+        }
+        .fullScreenCover(item: $channelTarget) { target in
+            AddToChannelView(target: target)
         }
         .sheet(isPresented: $showingFullOverview) {
             ScrollView {

@@ -48,6 +48,8 @@ struct PhoneDetailView: View {
     @State private var isRefreshing = false
     @State private var adminError: String?
     @State private var seasonWatchRequest: SeasonWatchRequest?
+    @State private var channelTarget: ChannelTarget?
+    @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
 
@@ -143,6 +145,9 @@ struct PhoneDetailView: View {
                 ServerScopedMediaDetailView(source: source)
             }
         }
+        .sheet(item: $channelTarget) { target in
+            MobileAddToChannelSheet(target: target)
+        }
         .task {
             if NetworkMonitor.shared.isConnected,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
@@ -217,6 +222,15 @@ struct PhoneDetailView: View {
     /// File Info / Refresh Metadata / Delete — online only.
     @ViewBuilder
     private var adminMenuItems: some View {
+        // Administrators of the active server: put this title (an episode's
+        // or season's series) on a SashimiTV channel.
+        if session.canManageChannels(serverID: serverID), let target = ChannelTarget(item: item) {
+            Button {
+                channelTarget = target
+            } label: {
+                Label("Add to Channel…", systemImage: "rectangle.stack.badge.plus")
+            }
+        }
         Button {
             showingFileInfo = true
         } label: {
