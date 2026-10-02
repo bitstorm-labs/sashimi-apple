@@ -685,6 +685,7 @@ actor JellyfinClient {
         body: Data? = nil,
         isAuthRequest: Bool = false,
         isSignInStep: Bool = false,
+        surfacesProblemDetails: Bool = false,
         retryCount: Int = 0
     ) async throws -> Data {
         guard let serverURL else {
@@ -748,10 +749,13 @@ actor JellyfinClient {
             if (500...599).contains(httpResponse.statusCode) && isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
-                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
+                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, surfacesProblemDetails: surfacesProblemDetails, retryCount: retryCount + 1)
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
+                if surfacesProblemDetails, let message = ProblemDetails.message(in: data) {
+                    throw JellyfinError.serverMessage(statusCode: httpResponse.statusCode, message: message)
+                }
                 throw JellyfinError.httpError(statusCode: httpResponse.statusCode)
             }
 
@@ -765,7 +769,7 @@ actor JellyfinClient {
             if isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
                 try await Task.sleep(for: .seconds(delay))
-                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, retryCount: retryCount + 1)
+                return try await self.request(path: path, method: method, queryItems: queryItems, body: body, isAuthRequest: isAuthRequest, surfacesProblemDetails: surfacesProblemDetails, retryCount: retryCount + 1)
             }
             throw JellyfinError.networkError(error)
         }
@@ -1853,6 +1857,96 @@ actor JellyfinClient {
         return try decoder.decode(ChannelNowPlaying.self, from: data)
     }
 
+    /// A logo the plugin ships, by key — for the logo picker, where there is
+    /// no channel yet to ask for its logo.
+    func channelLogoURL(key: String, mono: Bool = false) -> URL? {
+        guard let serverURL,
+              var components = URLComponents(
+                url: serverURL.appendingPathComponent("/VirtualChannels/Logos/\(key)"),
+                resolvingAgainstBaseURL: false
+              ) else { return nil }
+        components.queryItems = mono ? [URLQueryItem(name: "style", value: "mono")] : nil
+        return components.url
+    }
+
+    // MARK: - Channel management (admin)
+
+    /// The user in full, including the policy that says whether they
+    /// administer the server.
+    func getUser(userId: String) async throws -> UserDto {
+        let data = try await request(path: "/Users/\(userId)")
+        return try JSONDecoder().decode(UserDto.self, from: data)
+    }
+
+    /// One management call. The plugin explains a refusal in a ProblemDetails
+    /// `detail` ("A channel needs a name", "… comes from a rule"), which is
+    /// worth more to an admin than a status code, so it is surfaced.
+    private func manage<Body: Encodable>(
+        _ path: String,
+        method: String = "GET",
+        queryItems: [URLQueryItem]? = nil,
+        body: Body? = String?.none
+    ) async throws -> Data {
+        try await request(
+            path: path,
+            method: method,
+            queryItems: queryItems,
+            body: try body.map { try JSONEncoder().encode($0) },
+            surfacesProblemDetails: true
+        )
+    }
+
+    func getManagedChannels() async throws -> [ManagedChannel] {
+        try JSONDecoder().decode([ManagedChannel].self, from: await manage("/VirtualChannels/Manage"))
+    }
+
+    func getChannelMembership(itemId: String) async throws -> [ChannelMembership] {
+        let data = try await manage(
+            "/VirtualChannels/Manage/Membership",
+            queryItems: [URLQueryItem(name: "itemId", value: itemId)]
+        )
+        return try JSONDecoder().decode([ChannelMembership].self, from: data)
+    }
+
+    func getChannelLogoKeys() async throws -> [String] {
+        try JSONDecoder().decode([String].self, from: await manage("/VirtualChannels/Logos"))
+    }
+
+    func createManagedChannel(_ body: CreateManagedChannelRequest) async throws -> ManagedChannel {
+        let data = try await manage("/VirtualChannels/Manage", method: "POST", body: body)
+        return try JSONDecoder().decode(ManagedChannel.self, from: data)
+    }
+
+    func updateManagedChannel(channelId: String, _ body: UpdateManagedChannelRequest) async throws -> ManagedChannel {
+        let data = try await manage("/VirtualChannels/Manage/\(channelId)", method: "PATCH", body: body)
+        return try JSONDecoder().decode(ManagedChannel.self, from: data)
+    }
+
+    func deleteManagedChannel(channelId: String) async throws {
+        _ = try await manage("/VirtualChannels/Manage/\(channelId)", method: "DELETE")
+    }
+
+    func addItemToChannel(channelId: String, itemId: String, daypartIndex: Int?) async throws -> ManagedChannel {
+        let data = try await manage(
+            "/VirtualChannels/Manage/\(channelId)/Items",
+            method: "POST",
+            body: AddChannelItemRequest(itemId: itemId, daypartIndex: daypartIndex)
+        )
+        return try JSONDecoder().decode(ManagedChannel.self, from: data)
+    }
+
+    /// For a film the plugin ignores `daypartIndex` (the managed collection
+    /// belongs to the whole channel); for a series, nil removes it from every
+    /// daypart.
+    func removeItemFromChannel(channelId: String, itemId: String, daypartIndex: Int?) async throws -> ManagedChannel {
+        let data = try await manage(
+            "/VirtualChannels/Manage/\(channelId)/Items/\(itemId)",
+            method: "DELETE",
+            queryItems: daypartIndex.map { [URLQueryItem(name: "daypartIndex", value: String($0))] }
+        )
+        return try JSONDecoder().decode(ManagedChannel.self, from: data)
+    }
+
     /// Intro Skipper plugin ≤ 11: `/Episode/{itemId}/IntroSkipperSegments`
     /// Response: {"Introduction": {"Start": 0, "End": 90}, "Credits": {"Start": 1200, "End": 1300}}
     /// A 404 means the route is gone (plugin 12+ or not installed) — that is
@@ -2146,9 +2240,15 @@ enum JellyfinError: LocalizedError {
     case sessionExpired
     case networkError(Error)
     case nonPlayableItem(ItemType)
+    /// A non-2xx answer whose ProblemDetails body explained itself. Only
+    /// requests that opt in (`surfacesProblemDetails`) produce it, so every
+    /// existing `httpError` match is unaffected.
+    case serverMessage(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
+        case .serverMessage(_, let message):
+            return message
         case .notConfigured:
             return "Not connected to a server. Please sign in."
         case .nonPlayableItem(let type):

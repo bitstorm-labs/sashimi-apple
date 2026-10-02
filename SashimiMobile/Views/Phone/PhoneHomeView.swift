@@ -5,6 +5,7 @@ struct PhoneHomeView: View {
     @StateObject private var rowSettings = HomeRowSettings.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
+    @State private var showManageChannels = false
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
 
@@ -86,6 +87,10 @@ struct PhoneHomeView: View {
                 Task { await channelsViewModel.load() }
             }
         }
+        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView() }
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
+            Task { await channelsViewModel.load() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
                 try? await Task.sleep(for: .seconds(0.5))
@@ -130,7 +135,11 @@ struct PhoneHomeView: View {
 
         case .builtIn(.channels):
             if !channelsViewModel.cards.isEmpty {
-                MobileChannelsRow(cards: channelsViewModel.cards, cardWidth: PhoneSizing.channelCardWidth) { card in
+                MobileChannelsRow(
+                    cards: channelsViewModel.cards,
+                    cardWidth: PhoneSizing.channelCardWidth,
+                    onManage: sessionManager.canManageChannels(serverID: nil) ? { showManageChannels = true } : nil
+                ) { card in
                     tuneToChannel(card)
                 }
             }

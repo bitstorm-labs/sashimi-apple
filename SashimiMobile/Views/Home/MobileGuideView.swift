@@ -21,7 +21,9 @@ struct MobileGuideView: View {
     @State private var scrollTarget: Date?
     @State private var minute = Date()
     @State private var showReminders = false
+    @State private var showManageChannels = false
     @ObservedObject private var reminders = StationReminders.shared
+    @ObservedObject private var session = SessionManager.shared
 
     /// Wide enough that a half-hour programme can show a title.
     private let pointsPerMinute: CGFloat = 6
@@ -65,6 +67,12 @@ struct MobileGuideView: View {
             MobilePlayerView(item: tuned.item, channelContext: tuned.context)
         }
         .sheet(isPresented: $showReminders) { MobileRemindersList() }
+        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView() }
+        // A change made from this device redraws the grid now rather than at
+        // the next quarter-hour refresh.
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
+            Task { await viewModel.load() }
+        }
         .sheet(item: $selected) { selection in
             MobileGuideDetailSheet(row: selection.row, entry: selection.entry)
         }
@@ -83,6 +91,14 @@ struct MobileGuideView: View {
                 }
                 .tint(MobileColors.accent)
                 .accessibilityLabel("Reminders")
+            }
+            if session.canManageChannels(serverID: nil) {
+                Button { showManageChannels = true } label: {
+                    Label("Manage", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .tint(MobileColors.accent)
+                .accessibilityLabel("Manage Channels")
             }
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 Text(ClockTime.dateTime(context.date))

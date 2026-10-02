@@ -32,12 +32,34 @@ struct UserDto: Codable, Identifiable {
     let name: String
     let serverID: String?
     let primaryImageTag: String?
+    /// Present on `/Users/{id}`; absent from the trimmed user an
+    /// authentication result or a restored session carries.
+    var policy: UserPolicy?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
         case name = "Name"
         case serverID = "ServerId"
         case primaryImageTag = "PrimaryImageTag"
+        case policy = "Policy"
+    }
+}
+
+/// The slice of Jellyfin's `UserPolicy` the app acts on.
+struct UserPolicy: Codable, Equatable {
+    let isAdministrator: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case isAdministrator = "IsAdministrator"
+    }
+
+    init(isAdministrator: Bool) {
+        self.isAdministrator = isAdministrator
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isAdministrator = try container.decodeIfPresent(Bool.self, forKey: .isAdministrator) ?? false
     }
 }
 

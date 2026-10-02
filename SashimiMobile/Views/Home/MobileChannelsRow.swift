@@ -11,14 +11,28 @@ import NukeUI
 struct MobileChannelsRow: View {
     let cards: [ChannelCard]
     var cardWidth: CGFloat = 300
+    /// Administrators get Manage beside the title — the iPhone has no guide
+    /// screen, so this is where its channel management starts.
+    var onManage: (() -> Void)?
     let onTune: (ChannelCard) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("SashimiTV")
-                .font(.title2.bold())
-                .foregroundStyle(MobileColors.textPrimary)
-                .padding(.horizontal, MobileSpacing.md)
+            HStack(alignment: .firstTextBaseline) {
+                Text("SashimiTV")
+                    .font(.title2.bold())
+                    .foregroundStyle(MobileColors.textPrimary)
+                Spacer()
+                if let onManage {
+                    Button(action: onManage) {
+                        Label("Manage", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .tint(MobileColors.accent)
+                    .accessibilityLabel("Manage Channels")
+                }
+            }
+            .padding(.horizontal, MobileSpacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: MobileSpacing.md) {

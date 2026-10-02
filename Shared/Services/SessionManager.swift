@@ -179,6 +179,10 @@ final class SessionManager: ObservableObject {
 
     @Published private(set) var isAuthenticated = false
     @Published private(set) var currentUser: UserDto?
+    /// The signed-in user administers the active server. False until the
+    /// server has said so — admin-only UI (channel management) stays hidden
+    /// while it is being asked, and on any failure to ask.
+    @Published private(set) var isAdministrator = false
     @Published private(set) var serverURL: URL?
     @Published private(set) var servers: [ServerConfig] = []
     @Published private(set) var activeServerId: String?
@@ -219,6 +223,10 @@ final class SessionManager: ObservableObject {
     /// temporarily use another saved server without changing app chrome.
     private var configuredServerID: String?
     private var clientScopeStack = ServerClientScopeStack()
+    /// Bumped on every activation and sign-out, so a policy lookup that
+    /// returns after the user switched servers cannot grant the new server's
+    /// session the old one's admin rights.
+    private var policyGeneration = 0
 
     var activeServer: ServerConfig? {
         servers.first(where: { $0.id == activeServerId })
@@ -543,6 +551,28 @@ final class SessionManager: ObservableObject {
         self.serverURL = server.url
         self.currentUser = UserDto(id: server.userId, name: server.username, serverID: nil, primaryImageTag: nil)
         self.isAuthenticated = true
+        refreshAdministratorFlag(for: server)
+    }
+
+    /// Ask the server whether this user administers it. Runs on every
+    /// activation — sign-in, session restore, server switch — through a
+    /// client bound to that server, so a temporary server scope elsewhere in
+    /// the app cannot answer for the wrong one.
+    private func refreshAdministratorFlag(for server: ServerConfig) {
+        policyGeneration += 1
+        let generation = policyGeneration
+        isAdministrator = false
+        guard let client = makeClient(for: server.id) else { return }
+        Task { @MainActor [weak self] in
+            let user = try? await client.getUser(userId: server.userId)
+            guard let self, self.policyGeneration == generation else { return }
+            self.isAdministrator = user?.policy?.isAdministrator ?? false
+        }
+    }
+
+    private func clearAdministratorFlag() {
+        policyGeneration += 1
+        isAdministrator = false
     }
 
     // MARK: - Add / switch / remove
@@ -764,6 +794,7 @@ final class SessionManager: ObservableObject {
                 await clientConfigurationMutex.unlock()
                 self.serverURL = nil
                 self.currentUser = nil
+                clearAdministratorFlag()
                 self.logoutReason = .userInitiated
                 self.isAuthenticated = false
             }
@@ -792,6 +823,7 @@ final class SessionManager: ObservableObject {
     func logout(reason: LogoutReason = .userInitiated) {
         self.serverURL = nil
         self.currentUser = nil
+        clearAdministratorFlag()
         self.logoutReason = reason
         self.reauthServer = nil
         self.isAuthenticated = false

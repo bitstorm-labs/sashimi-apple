@@ -191,6 +191,9 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
             Task { await viewModel.refresh() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
+            Task { await channelsViewModel.load() }
+        }
     }
 
     /// Keep the FinTV row honest while Home is on screen.

@@ -30,6 +30,8 @@ struct GuideView: View {
     /// opens; jumping turns each row to the page holding that instant.
     @State private var jump: String?
     @State private var showReminders = false
+    @State private var showManageChannels = false
+    @ObservedObject private var session = SessionManager.shared
     @ObservedObject private var reminders = StationReminders.shared
     /// Bumped every minute so "min left" and the Now highlight stay honest
     /// without refetching a week of guide.
@@ -70,6 +72,15 @@ struct GuideView: View {
                     .focusable()
                     .focusEffectDisabled()
                     .defaultFocus(in: focusNamespace)
+            } else if viewModel.rows.isEmpty && canManageChannels && !viewModel.loadFailed {
+                // An administrator with no channels yet gets the way to make
+                // one — which is also the focusable view the screen needs.
+                emptyState
+                GuideChip(label: "Manage Channels", systemImage: "slider.horizontal.3", selected: false) {
+                    showManageChannels = true
+                }
+                .padding(.horizontal, 80).padding(.top, 30)
+                .defaultFocus(in: focusNamespace)
             } else if viewModel.rows.isEmpty {
                 // Same reasoning: an empty or failed guide is plain text, and
                 // without somewhere for focus to rest it bounces to the rail.
@@ -123,9 +134,22 @@ struct GuideView: View {
         .fullScreenCover(isPresented: $showReminders) {
             RemindersListView()
         }
+        .fullScreenCover(isPresented: $showManageChannels) {
+            ManageChannelsView()
+        }
+        // A channel created, renamed or re-stocked from this device: redraw
+        // now rather than at the next quarter-hour refresh.
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
+            Task { await viewModel.load() }
+        }
         .fullScreenCover(item: $selected) { selection in
             GuideDetailView(row: selection.row, entry: selection.entry)
         }
+    }
+
+    /// Not over a playing channel: the overlay guide is for changing channel.
+    private var canManageChannels: Bool {
+        onTuneStation == nil && session.canManageChannels(serverID: nil)
     }
 
     private var header: some View {
@@ -190,6 +214,11 @@ struct GuideView: View {
             if !reminders.reminders.isEmpty {
                 GuideChip(label: "Reminders · \(reminders.reminders.count)", systemImage: "bell.fill", selected: false) {
                     showReminders = true
+                }
+            }
+            if canManageChannels {
+                GuideChip(label: "Manage Channels", systemImage: "slider.horizontal.3", selected: false) {
+                    showManageChannels = true
                 }
             }
             Spacer(minLength: 0)

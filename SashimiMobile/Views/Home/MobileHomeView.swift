@@ -90,6 +90,9 @@ struct MobileHomeView: View {
                 Task { await viewModel.loadContent() }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
+            Task { await channelsViewModel.load() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
                 try? await Task.sleep(for: .seconds(0.5))
