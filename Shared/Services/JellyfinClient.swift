@@ -1817,6 +1817,31 @@ actor JellyfinClient {
         return try JSONDecoder().decode(BaseItemDto.self, from: data)
     }
 
+    /// The current user's watch state for specific items in one request.
+    /// Downloads use this to show fresh watched/progress marks without a
+    /// request per item; only UserData is asked for.
+    func getUserData(itemIds: [String]) async throws -> [String: UserItemDataDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+        guard !itemIds.isEmpty else { return [:] }
+
+        let data = try await request(
+            path: "/Users/\(userId)/Items",
+            queryItems: [
+                URLQueryItem(name: "Ids", value: itemIds.joined(separator: ",")),
+                URLQueryItem(name: "Fields", value: "UserData"),
+                URLQueryItem(name: "EnableImages", value: "false")
+            ]
+        )
+        let response = try JSONDecoder().decode(ItemsResponse.self, from: data)
+        var result: [String: UserItemDataDto] = [:]
+        for item in response.items {
+            if let userData = item.userData {
+                result[item.id] = userData
+            }
+        }
+        return result
+    }
+
     /// Local trailer items (from Trailarr etc.) that Jellyfin exposes as
     /// playable Trailer items. The endpoint returns a JSON array directly.
     func getLocalTrailers(itemId: String) async throws -> [BaseItemDto] {

@@ -15,6 +15,7 @@ struct MobileSettingsView: View {
         ("fi", "Finnish")
     ]
     @State private var showingDeleteAllDownloads = false
+    @AppStorage(DownloadWatchPolicy.deleteAfterWatchingKey) private var deleteDownloadsAfterWatching = false
     @State private var showAddServer = false
     @State private var serverBeingEdited: ServerConfig?
 
@@ -144,15 +145,20 @@ struct MobileSettingsView: View {
             }
 
             // Downloads Section
-            Section("Downloads") {
+            Section {
                 LabeledContent("Storage Used", value: DownloadFileManager.formattedTotalSize())
                 LabeledContent("Available Space", value: ByteCountFormatter.string(
                     fromByteCount: DownloadFileManager.availableDiskSpace(),
                     countStyle: .file
                 ))
+                Toggle("Delete Downloads After Watching", isOn: $deleteDownloadsAfterWatching)
                 Button("Delete All Downloads", role: .destructive) {
                     showingDeleteAllDownloads = true
                 }
+            } header: {
+                Text("Downloads")
+            } footer: {
+                Text("A download is removed once it has played to the end. Its watched state still reaches the server.")
             }
 
             // About Section

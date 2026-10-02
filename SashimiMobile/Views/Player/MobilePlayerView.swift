@@ -29,6 +29,9 @@ struct MobilePlayerView: View {
     @State private var isScrubbing = false
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
+    /// Downloaded items that played to their end. Acted on (Delete downloads
+    /// after watching) only once the player is gone, never mid-playback.
+    @State private var finishedDownloadItemIDs: [String] = []
 
     init(
         item: BaseItemDto,
@@ -203,8 +206,15 @@ struct MobilePlayerView: View {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             let stopTask = viewModel.beginStop(reason: .viewDisappeared)
+            let finishedDownloads = finishedDownloadItemIDs
             Task {
                 await stopTask.value
+                for itemId in finishedDownloads {
+                    await DownloadManager.shared.handleOfflinePlaybackFinished(
+                        itemId: itemId,
+                        serverID: serverID
+                    )
+                }
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
@@ -250,6 +260,12 @@ struct MobilePlayerView: View {
             }
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
+            // Captured now: the item is cleared when playback is torn down.
+            // Offline autoplay can finish several downloads in one sitting,
+            // so every one is remembered, not just the last.
+            if ended, localFileURL != nil, !finishedDownloadItemIDs.contains(displayedItem.id) {
+                finishedDownloadItemIDs.append(displayedItem.id)
+            }
             // Offline with no further download there is no end card to show
             // (the series may well go on), so close as before.
             if ended && (!playbackSettings.showEpisodeNavigationControls ||
