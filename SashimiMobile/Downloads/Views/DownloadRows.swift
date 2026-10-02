@@ -37,9 +37,55 @@ extension DownloadedItem {
         DownloadWatchCandidate(recordID: recordID, sizeBytes: sizeBytes, isComplete: isComplete)
     }
 
-    /// "720p · 1.1 GB"
-    var qualityAndSize: String {
-        "\(downloadQuality.shortLabel) · \(formattedSize)"
+    /// "42 min" or "1h 38m", as on the detail pages.
+    var runtimeLabel: String? {
+        guard let ticks = runTimeTicks, ticks > 0 else { return nil }
+        let seconds = ticks / 10_000_000
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
+    }
+}
+
+/// "[720p]  42 min · TMDb 7.6 · 777 MB": the quality as the poster cards'
+/// chip, then runtime, community rating (when known) and size.
+struct DownloadMetadataLine: View {
+    let item: DownloadedItem
+    let communityRating: Double?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            QualityBadge(
+                label: item.downloadQuality.shortLabel,
+                fontSize: 10,
+                horizontalPadding: 5,
+                verticalPadding: 2,
+                cornerRadius: 4
+            )
+
+            HStack(spacing: 4) {
+                if let runtime = item.runtimeLabel {
+                    Text(runtime)
+                    separator
+                }
+                if let communityRating, communityRating > 0 {
+                    Image("TMDBLogo")
+                        .resizable().scaledToFit()
+                        .frame(height: 10)
+                        .accessibilityLabel("TMDb")
+                    Text(String(format: "%.1f", communityRating))
+                    separator
+                }
+                Text(item.formattedSize)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(MobileColors.textTertiary)
+            .lineLimit(1)
+        }
+    }
+
+    private var separator: some View {
+        Text("·").accessibilityHidden(true)
     }
 }
 
@@ -177,6 +223,8 @@ struct CompletedDownloadRow: View {
     let item: DownloadedItem
     let isEpisode: Bool
     let watchState: DownloadWatchState
+    /// Cached from the server; nil when unknown or ratings are hidden.
+    var communityRating: Double?
     let isEditing: Bool
     let isSelected: Bool
     let onPlay: () -> Void
@@ -208,9 +256,7 @@ struct CompletedDownloadRow: View {
                         .lineLimit(1)
                 }
 
-                Text(item.qualityAndSize)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MobileColors.textTertiary)
+                DownloadMetadataLine(item: item, communityRating: communityRating)
             }
 
             Spacer(minLength: 0)
@@ -313,6 +359,10 @@ struct ActiveDownloadRow: View {
     let item: DownloadedItem
     let isPreparing: Bool
     let progress: Double?
+    /// Set while downloads can't use the current network (offline, or
+    /// cellular with "Download over Cellular" off): the row says so instead
+    /// of looking stuck.
+    var waitReason: DownloadWaitReason?
     let onCancel: () -> Void
 
     var body: some View {
@@ -350,7 +400,14 @@ struct ActiveDownloadRow: View {
 
     @ViewBuilder
     private var status: some View {
-        if isPreparing {
+        if let waitReason {
+            HStack(spacing: 6) {
+                Image(systemName: waitReason == .offline ? "wifi.slash" : "wifi")
+                Text(waitReason.activeLabel)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(MobileColors.textSecondary)
+        } else if isPreparing {
             HStack(spacing: 6) {
                 ProgressView()
                     .scaleEffect(0.6)
@@ -380,6 +437,8 @@ struct ActiveDownloadRow: View {
 
 struct FailedDownloadRow: View {
     let item: DownloadedItem
+    /// "Retrying in 5 min" while an automatic retry is scheduled.
+    var retryNote: String?
     let onRetry: () -> Void
     let onDelete: () -> Void
 
@@ -397,6 +456,16 @@ struct FailedDownloadRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(MobileColors.error)
                     .lineLimit(1)
+
+                if let retryNote {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.arrow.circlepath")
+                        Text(retryNote)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(MobileColors.textSecondary)
+                    .lineLimit(1)
+                }
             }
 
             Spacer()

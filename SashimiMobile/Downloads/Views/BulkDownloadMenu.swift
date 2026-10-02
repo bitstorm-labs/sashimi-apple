@@ -229,7 +229,12 @@ struct BulkDownloadMenu: View {
     private func applyKeepNext(_ count: Int, quality: DownloadQuality?, serverID: String, seriesId: String) {
         keepNextStore.set(count: count, quality: quality, serverID: serverID, seriesId: seriesId)
         if count > 0 {
+            let waitsForWiFi = DownloadNetworkPolicy.waitReason(
+                allowCellular: DownloadNetworkPolicy.allowsCellular,
+                network: .current
+            ) == .cellular
             downloadManager.toastMessage = "Keeping the next \(count == 1 ? "episode" : "\(count) episodes") downloaded"
+                + (waitsForWiFi ? " on Wi-Fi" : "")
             KeepNextEpisodesService.shared.scheduleSync(after: .zero)
         }
     }

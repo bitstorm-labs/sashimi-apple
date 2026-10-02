@@ -85,6 +85,11 @@ struct PhoneTabView: View {
             .tag(PhoneTab.settings)
         }
         .tint(MobileColors.accent)
+        // The iPad's sidebar has always shown these; the phone had nowhere
+        // to say "Will download on Wi-Fi".
+        .downloadToast {
+            selectedTab = .downloads
+        }
         .onAppear {
             applySearchRequest()
         }

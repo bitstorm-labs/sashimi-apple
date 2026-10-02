@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftData
 import UIKit
@@ -107,17 +108,38 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Offline progress is being reported (see `syncPendingProgress`).
     private var isSyncingProgress = false
 
+    /// Automatic retries of failed downloads (see DownloadRetryPolicy).
+    let retryStore = DownloadRetryStore()
+    private var retryTimer: Task<Void, Never>?
+    /// Retries started but not yet back in the queue (the item is refetched
+    /// first), so overlapping evaluations don't start one twice.
+    private var retriesInFlight: Set<String> = []
+    /// The download being started or run, kept so a task that has to be
+    /// recreated (network setting changed) needn't refetch its item.
+    private var currentQueued: QueuedDownload?
+    private var cancellables: Set<AnyCancellable> = []
+
     override private init() {
         super.init()
 
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
         config.sessionSendsLaunchEvents = true
         config.isDiscretionary = false
+        // Stays true: "Download over Cellular" is applied to each request
+        // (DownloadNetworkPolicy), and false here would override it.
         config.allowsCellularAccess = true
         backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
 
         // Reconnect any in-flight downloads from previous launch
         reconnectTasks()
+
+        NetworkMonitor.shared.downloadStatusPublisher
+            .dropFirst()
+            .sink { [weak self] _ in self?.downloadConditionsChanged() }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in self?.evaluateRetries() }
+            .store(in: &cancellables)
     }
 
     func setModelContainer(_ container: ModelContainer) {
@@ -173,13 +195,37 @@ final class DownloadManager: NSObject, ObservableObject {
         return DownloadActivitySnapshot(active: active, preparingKeys: preparingItems, queuedCount: queuedCount)
     }
 
+    /// A new download (the user's, or keep-next's). Starts with a clean
+    /// automatic-retry count.
     func enqueueDownload(item: BaseItemDto, quality: DownloadQuality, serverID: String? = nil) {
         let resolvedServerID = serverID ?? SessionManager.shared.activeServerId
-        guard insertQueuedRecord(item: item, quality: quality, serverID: resolvedServerID) else { return }
-        downloadQueue.append(QueuedDownload(item: item, quality: quality, serverID: resolvedServerID))
+        guard enqueue(item: item, quality: quality, serverID: resolvedServerID) else { return }
+        retryStore.clear(itemId: item.id, serverID: resolvedServerID)
+        announceIfWaitingForNetwork(count: 1)
+    }
+
+    private func enqueue(item: BaseItemDto, quality: DownloadQuality, serverID: String?) -> Bool {
+        guard insertQueuedRecord(item: item, quality: quality, serverID: serverID) else { return false }
+        downloadQueue.append(QueuedDownload(item: item, quality: quality, serverID: serverID))
         stateVersion += 1
         if currentDownloadItemId == nil {
             startNextDownload()
+        }
+        return true
+    }
+
+    /// Queued while downloads can't use this network: say so, or a tap on
+    /// Download looks like it did nothing.
+    private func announceIfWaitingForNetwork(count: Int) {
+        let reason = DownloadNetworkPolicy.waitReason(
+            allowCellular: DownloadNetworkPolicy.allowsCellular,
+            network: .current
+        )
+        let subject = count == 1 ? "Will download" : "\(count) episodes will download"
+        switch reason {
+        case .cellular: toastMessage = "\(subject) on Wi-Fi"
+        case .lowDataMode: toastMessage = "\(subject) when Low Data Mode is off"
+        case .offline, nil: break
         }
     }
 
@@ -243,6 +289,7 @@ final class DownloadManager: NSObject, ObservableObject {
         guard !downloadQueue.isEmpty else {
             currentDownloadItemId = nil
             currentDownloadServerID = nil
+            currentQueued = nil
             stopProgressTimer()
             downloadSpeed = ""
             endPreparation()
@@ -262,13 +309,12 @@ final class DownloadManager: NSObject, ObservableObject {
         // Check disk space
         let availableSpace = DownloadFileManager.availableDiskSpace()
         if availableSpace < 500 * 1024 * 1024 {
-            persistence.updateStatus(
+            markFailed(
                 itemId: itemId,
                 serverID: serverID,
-                status: .failed,
-                errorMessage: "Not enough disk space. Available: \(ByteCountFormatter.string(fromByteCount: availableSpace, countStyle: .file))"
+                message: "Not enough disk space. Available: \(ByteCountFormatter.string(fromByteCount: availableSpace, countStyle: .file))",
+                kind: .permanent
             )
-            stateVersion += 1
             startNextDownload()
             return
         }
@@ -278,6 +324,7 @@ final class DownloadManager: NSObject, ObservableObject {
         // the (only-for-.original) compatibility check below.
         currentDownloadItemId = itemId
         currentDownloadServerID = serverID
+        currentQueued = queued
         beginPreparation(key: downloadKey(itemId: itemId, serverID: serverID))
 
         // Resolve the effective quality — for `.original`, verify the raw source
@@ -352,31 +399,26 @@ final class DownloadManager: NSObject, ObservableObject {
                   quality: quality,
                   serverURL: context.server.url
               ),
-              let downloadRequest = DownloadURLBuilder.authorizedRequest(
+              var downloadRequest = DownloadURLBuilder.authorizedRequest(
                   for: downloadURL,
                   accessToken: context.token
               ) else {
-            persistence.updateStatus(
-                itemId: itemId,
-                serverID: serverID,
-                status: .failed,
-                errorMessage: "Could not build download URL"
-            )
-            stateVersion += 1
+            // No server or token for it: retrying can't help until sign-in.
+            markFailed(itemId: itemId, serverID: serverID, message: "Could not build download URL", kind: .permanent)
             startNextDownload()
             return
         }
+        DownloadNetworkPolicy.apply(to: &downloadRequest, allowCellular: DownloadNetworkPolicy.allowsCellular)
 
         do {
             try DownloadFileManager.createItemDirectory(for: itemId, serverID: serverID)
         } catch {
-            persistence.updateStatus(
+            markFailed(
                 itemId: itemId,
                 serverID: serverID,
-                status: .failed,
-                errorMessage: "Could not create directory: \(error.localizedDescription)"
+                message: "Could not create directory: \(error.localizedDescription)",
+                kind: DownloadRetryPolicy.classify(error: error)
             )
-            stateVersion += 1
             startNextDownload()
             return
         }
@@ -485,6 +527,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func deleteDownload(itemId: String, serverID: String? = nil) async {
         await cancelDownload(itemId: itemId, serverID: serverID)
+        retryStore.clear(itemId: itemId, serverID: serverID)
         stateVersion += 1
     }
 
@@ -494,6 +537,7 @@ final class DownloadManager: NSObject, ObservableObject {
         guard !items.isEmpty else { return }
         for item in items {
             await cancelDownload(itemId: item.itemId, serverID: item.serverID)
+            retryStore.clear(itemId: item.itemId, serverID: item.serverID)
         }
         stateVersion += 1
         toastMessage = "Deleted \(items.count) download\(items.count == 1 ? "" : "s")"
@@ -536,24 +580,179 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    func retryDownload(itemId: String, serverID: String? = nil) async {
+    /// Restarts a download from scratch. `userInitiated` (a Retry tap) also
+    /// resets the automatic-retry count; the automatic retries and the
+    /// relaunch requeue pass false so the count survives them.
+    func retryDownload(itemId: String, serverID: String? = nil, userInitiated: Bool = true) async {
         let record = downloadStatus(for: itemId, serverID: serverID)
         let resolvedServerID = serverID ?? record?.serverID
         guard let quality = persistence.fetchQuality(itemId: itemId, serverID: resolvedServerID) else { return }
+        if userInitiated {
+            retryStore.clear(itemId: itemId, serverID: resolvedServerID)
+        }
 
-        guard let client = try? await client(for: resolvedServerID),
-              let freshItem = try? await client.getItem(itemId: itemId) else {
-            persistence.updateStatus(
+        let freshItem: BaseItemDto
+        do {
+            freshItem = try await client(for: resolvedServerID).getItem(itemId: itemId)
+        } catch {
+            markFailed(
                 itemId: itemId,
                 serverID: resolvedServerID,
-                status: .failed,
-                errorMessage: "Could not fetch item info"
+                message: "Could not fetch item info",
+                kind: DownloadRetryPolicy.classify(error: error)
             )
             return
         }
 
         await cancelDownload(itemId: itemId, serverID: resolvedServerID)
-        enqueueDownload(item: freshItem, quality: quality, serverID: resolvedServerID)
+        guard enqueue(item: freshItem, quality: quality, serverID: resolvedServerID) else { return }
+        if userInitiated {
+            announceIfWaitingForNetwork(count: 1)
+        }
+    }
+
+    // MARK: - Failure and automatic retry
+
+    /// Marks a download failed and, for a transient failure, schedules its
+    /// next automatic retry.
+    private func markFailed(itemId: String, serverID: String?, message: String, kind: DownloadFailureKind) {
+        persistence.updateStatus(itemId: itemId, serverID: serverID, status: .failed, errorMessage: message)
+        retryStore.recordFailure(itemId: itemId, serverID: serverID, kind: kind)
+        stateVersion += 1
+        evaluateRetries()
+    }
+
+    /// The failed row's retry note: "Retrying in 5 min", "Will retry on
+    /// Wi-Fi", or nil when no automatic retry is coming.
+    func retryLabel(for item: DownloadedItem, now: Date, waitReason: DownloadWaitReason?) -> String? {
+        guard item.status == .failed,
+              let next = retryStore.entry(itemId: item.itemId, serverID: item.serverID)?.nextRetryAt else { return nil }
+        return DownloadRetryPolicy.label(nextRetryAt: next, now: now, waitReason: waitReason)
+    }
+
+    /// Fires the retries that are due (when downloads may use the network)
+    /// and sets a timer for the next one. Runs on every failure, network
+    /// change, setting change and return to the foreground; a suspended app
+    /// catches up when it is next opened.
+    func evaluateRetries() {
+        retryTimer?.cancel()
+        retryTimer = nil
+        let now = Date()
+
+        for entry in retryStore.entries.values {
+            guard let record = mainRecord(itemId: entry.itemId, serverID: entry.serverID) else {
+                // Deleted (or never re-created): nothing left to retry.
+                retryStore.clear(itemId: entry.itemId, serverID: entry.serverID)
+                continue
+            }
+            if record.status == .completed {
+                retryStore.clear(itemId: entry.itemId, serverID: entry.serverID)
+            }
+        }
+
+        let canDownload = DownloadNetworkPolicy.canDownloadNow(
+            allowCellular: DownloadNetworkPolicy.allowsCellular,
+            network: .current
+        )
+        if canDownload {
+            // A retry in flight keeps its entry (its record is queued or
+            // downloading, not failed) until it completes or fails again.
+            let due = retryStore.due(at: now).filter {
+                !retriesInFlight.contains(downloadKey(itemId: $0.itemId, serverID: $0.serverID))
+                    && mainRecord(itemId: $0.itemId, serverID: $0.serverID)?.status == .failed
+            }
+            due.forEach { retriesInFlight.insert(downloadKey(itemId: $0.itemId, serverID: $0.serverID)) }
+            if !due.isEmpty {
+                Task {
+                    for entry in due {
+                        await retryDownload(itemId: entry.itemId, serverID: entry.serverID, userInitiated: false)
+                        retriesInFlight.remove(downloadKey(itemId: entry.itemId, serverID: entry.serverID))
+                    }
+                }
+            }
+        }
+
+        if let next = retryStore.nextRetryDate(after: now) {
+            let wait = next.timeIntervalSince(now) + 1
+            retryTimer = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(wait))
+                guard !Task.isCancelled else { return }
+                self?.evaluateRetries()
+            }
+        }
+    }
+
+    // MARK: - Network setting
+
+    /// "Download over Cellular" was toggled.
+    func downloadNetworkSettingChanged() {
+        downloadConditionsChanged()
+        KeepNextEpisodesService.shared.scheduleSync()
+    }
+
+    private func downloadConditionsChanged() {
+        stateVersion += 1
+        evaluateRetries()
+        Task { await reconcileTaskNetworkAccess() }
+    }
+
+    /// A task keeps the network access it was created with; recreate any
+    /// whose access no longer matches the setting on the current network
+    /// (see DownloadNetworkPolicy.shouldRestartTask).
+    private func reconcileTaskNetworkAccess() async {
+        let allowCellular = DownloadNetworkPolicy.allowsCellular
+        let network = DownloadNetworkStatus.current
+        for task in await backgroundSession.allTasks {
+            let key = taskKey(task.taskIdentifier)
+            guard task.state == .running || task.state == .suspended,
+                  let itemId = taskIdMap[key],
+                  DownloadNetworkPolicy.shouldRestartTask(
+                      taskAllowsCellular: task.originalRequest?.allowsCellularAccess ?? true,
+                      allowCellular: allowCellular,
+                      network: network
+                  ) else { continue }
+            await restartTask(task, itemId: itemId, serverID: taskServerMap[key])
+        }
+    }
+
+    /// Cancels a task and puts its item back at the front of the queue,
+    /// keeping its record, so the next task picks up the current setting.
+    private func restartTask(_ task: URLSessionTask, itemId: String, serverID: String?) async {
+        let item: BaseItemDto
+        if let queued = currentQueued, queued.item.id == itemId, queued.serverID == serverID {
+            item = queued.item
+        } else if let fetched = try? await client(for: serverID).getItem(itemId: itemId) {
+            item = fetched // Reconnected after a relaunch: the item wasn't kept.
+        } else {
+            return
+        }
+        let key = taskKey(task.taskIdentifier)
+        guard taskIdMap[key] == itemId else { return } // Finished or cancelled meanwhile.
+
+        task.cancel()
+        var map = taskIdMap
+        map.removeValue(forKey: key)
+        taskIdMap = map
+        var serverMap = taskServerMap
+        serverMap.removeValue(forKey: key)
+        taskServerMap = serverMap
+
+        let recordKey = downloadKey(itemId: itemId, serverID: serverID)
+        pendingProgress.removeValue(forKey: recordKey)
+        byteCounts.removeValue(forKey: recordKey)
+        activeDownloads.removeValue(forKey: recordKey)
+        preparingItems.remove(recordKey)
+        lastProgressSave.removeValue(forKey: recordKey)
+
+        let quality = persistence.fetchQuality(itemId: itemId, serverID: serverID) ?? .high
+        persistence.updateStatus(itemId: itemId, serverID: serverID, status: .queued)
+        downloadQueue.insert(QueuedDownload(item: item, quality: quality, serverID: serverID), at: 0)
+        stateVersion += 1
+        if currentDownloadItemId == itemId && currentDownloadServerID == serverID {
+            dequeueNext()
+        } else if currentDownloadItemId == nil {
+            startNextDownload()
+        }
     }
 
     func downloadStatus(for itemId: String, serverID: String? = nil) -> DownloadedItem? {
@@ -647,9 +846,11 @@ final class DownloadManager: NSObject, ObservableObject {
         }
         let insertedCount = inserted.count
         guard insertedCount > 0 else { return }
+        inserted.forEach { retryStore.clear(itemId: $0.id, serverID: serverID) }
 
         stateVersion += 1
         toastMessage = "Downloading \(insertedCount) episode\(insertedCount == 1 ? "" : "s")..."
+        announceIfWaitingForNetwork(count: insertedCount)
 
         if currentDownloadItemId == nil {
             startNextDownload()
@@ -669,6 +870,8 @@ final class DownloadManager: NSObject, ObservableObject {
         downloadQueue.removeAll()
         currentDownloadItemId = nil
         currentDownloadServerID = nil
+        currentQueued = nil
+        retryStore.clearAll()
         pendingProgress.removeAll()
         byteCounts.removeAll()
         preparingItems.removeAll()
@@ -758,14 +961,16 @@ final class DownloadManager: NSObject, ObservableObject {
             } else {
                 item.status = .failed
                 item.errorMessage = "Download interrupted. Tap retry to restart."
+                retryStore.recordFailure(itemId: item.itemId, serverID: item.serverID, kind: .transient)
             }
         }
         try? context.save()
         stateVersion += 1
+        evaluateRetries()
         guard !requeue.isEmpty else { return }
         Task {
             for entry in requeue {
-                await retryDownload(itemId: entry.itemId, serverID: entry.serverID)
+                await retryDownload(itemId: entry.itemId, serverID: entry.serverID, userInitiated: false)
             }
         }
     }
@@ -1002,11 +1207,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
         // item COMPLETED — a broken file masquerading as a finished download.
         if let http = downloadTask.response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             Task { @MainActor in
-                self.persistence.updateStatus(
+                self.markFailed(
                     itemId: itemId,
                     serverID: serverID,
-                    status: .failed,
-                    errorMessage: "Server returned HTTP \(http.statusCode)"
+                    message: "Server returned HTTP \(http.statusCode)",
+                    kind: DownloadRetryPolicy.classify(httpStatusCode: http.statusCode)
                 )
                 let key = self.downloadKey(itemId: itemId, serverID: serverID)
                 self.pendingProgress.removeValue(forKey: key)
@@ -1036,13 +1241,14 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
         Task { @MainActor in
             if let moveError {
-                self.persistence.updateStatus(
+                self.markFailed(
                     itemId: itemId,
                     serverID: serverID,
-                    status: .failed,
-                    errorMessage: "File move failed: \(moveError.localizedDescription)"
+                    message: "File move failed: \(moveError.localizedDescription)",
+                    kind: DownloadRetryPolicy.classify(error: moveError)
                 )
             } else {
+                self.retryStore.clear(itemId: itemId, serverID: serverID)
                 self.persistence.markCompleted(
                     itemId: itemId,
                     serverID: serverID,
@@ -1145,11 +1351,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
             guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
             let serverID = self.taskServerMap[self.taskKey(taskId)]
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
-            self.persistence.updateStatus(
+            self.markFailed(
                 itemId: itemId,
                 serverID: serverID,
-                status: .failed,
-                errorMessage: error.localizedDescription
+                message: error.localizedDescription,
+                kind: DownloadRetryPolicy.classify(error: error)
             )
             self.pendingProgress.removeValue(forKey: key)
             self.byteCounts.removeValue(forKey: key)
