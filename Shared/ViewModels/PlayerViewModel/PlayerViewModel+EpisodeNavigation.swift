@@ -18,7 +18,7 @@ extension PlayerViewModel {
         transitionState.previousEpisode = nil
         transitionState.nextEpisode = nil
         transitionState.endCard = nil
-        guard item.type == .episode, !isOfflinePlayback else {
+        guard item.type == .episode, !isOfflinePlayback || offlineEpisodeSource != nil else {
             transitionState.lookupStatus = .notApplicable
             return
         }
@@ -31,6 +31,10 @@ extension PlayerViewModel {
     private func refreshEpisodeNavigation(for item: BaseItemDto) async {
         guard item.type == .episode else {
             transitionState.lookupStatus = .notApplicable
+            return
+        }
+        if isOfflinePlayback {
+            refreshOfflineEpisodeNavigation(for: item)
             return
         }
         guard let seasonId = item.seasonId, let currentIndex = item.indexNumber else {
@@ -87,6 +91,27 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("outcome", "request-failed")
             ] + PlayerDiagnostics.fields(for: error))
         }
+    }
+
+    /// Local-file playback navigates among the downloads: no server, and only
+    /// episodes that can actually play from here.
+    private func refreshOfflineEpisodeNavigation(for item: BaseItemDto) {
+        guard let offlineEpisodeSource else {
+            transitionState.lookupStatus = .notApplicable
+            return
+        }
+        let adjacent = offlineEpisodeSource.adjacentEpisodes(to: item)
+        guard currentItem?.id == item.id else { return }
+        transitionState.previousEpisode = adjacent.previous
+        transitionState.nextEpisode = adjacent.next
+        transitionState.lookupStatus = (adjacent.previous != nil || adjacent.next != nil) ? .available : .unavailable
+        diag(.navigationLookup, [
+            PlayerDiagnostics.field("item", item.id),
+            PlayerDiagnostics.field("previous", adjacent.previous?.id),
+            PlayerDiagnostics.field("next", adjacent.next?.id),
+            PlayerDiagnostics.field("offline", true),
+            PlayerDiagnostics.field("outcome", adjacent.next == nil ? "no-successor" : "available")
+        ])
     }
 
     func waitForEpisodeNavigation(for item: BaseItemDto) async {

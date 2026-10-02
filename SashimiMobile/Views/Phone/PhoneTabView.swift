@@ -18,7 +18,7 @@ struct PhoneTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
-                if networkMonitor.isConnected {
+                if networkMonitor.isOnline {
                     PhoneHomeView()
                 } else {
                     OfflineHomeView()
@@ -29,16 +29,23 @@ struct PhoneTabView: View {
             }
             .tag(PhoneTab.home)
 
-            if networkMonitor.isConnected {
-                NavigationStack {
+            // The tabs stay put offline (a tab bar that rearranges itself as
+            // the connection comes and goes loses the viewer's place); what
+            // needs the server says so instead.
+            NavigationStack {
+                if networkMonitor.isOnline {
                     PhoneLibrariesTab()
+                } else {
+                    OfflineUnavailableView(title: "Libraries")
                 }
-                .tabItem {
-                    Label("Libraries", systemImage: "folder")
-                }
-                .tag(PhoneTab.libraries)
+            }
+            .tabItem {
+                Label("Libraries", systemImage: "folder")
+            }
+            .tag(PhoneTab.libraries)
 
-                NavigationStack {
+            NavigationStack {
+                if networkMonitor.isOnline {
                     MobileSearchView(
                         initialQuery: searchRequest?.query,
                         onInitialQueryConsumed: {
@@ -47,12 +54,14 @@ struct PhoneTabView: View {
                             }
                         }
                     )
+                } else {
+                    OfflineUnavailableView(title: "Search")
                 }
-                .tabItem {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-                .tag(PhoneTab.search)
             }
+            .tabItem {
+                Label("Search", systemImage: "magnifyingglass")
+            }
+            .tag(PhoneTab.search)
 
             NavigationStack {
                 DownloadsListView()
@@ -85,7 +94,7 @@ struct PhoneTabView: View {
     }
 
     private func applySearchRequest() {
-        guard searchRequest != nil, networkMonitor.isConnected else { return }
+        guard searchRequest != nil, networkMonitor.isOnline else { return }
         selectedTab = .search
     }
 }

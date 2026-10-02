@@ -69,6 +69,8 @@ struct SidebarRail<Footer: View>: View {
     let selection: SidebarSelection
     /// Shown on the Downloads row (the iPad has no header indicator).
     var downloadActivity = RailDownloadActivity()
+    /// No server: sections that need it are dimmed and can't be selected.
+    var isOffline = false
     @Binding var isExpanded: Bool
     let onSelect: (SidebarSelection) -> Void
     /// Drawn at the foot of the rail, above the version (the account / server
@@ -203,6 +205,7 @@ struct SidebarRail<Footer: View>: View {
 
     private func row(_ item: SidebarSelection) -> some View {
         let isSelected = selection == item
+        let isAvailable = !isOffline || item.isAvailableOffline
         return Button {
             onSelect(item)
         } label: {
@@ -230,9 +233,12 @@ struct SidebarRail<Footer: View>: View {
             .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
         }
         .buttonStyle(RailButtonStyle(isSelected: isSelected))
+        .disabled(!isAvailable)
+        .opacity(isAvailable ? 1 : 0.35)
         // Collapsed rows are icon-only; name them for VoiceOver either way.
         .accessibilityLabel(item.displayName)
         .accessibilityValue(item == .downloads ? downloadActivity.accessibilityValue ?? "" : "")
+        .accessibilityHint(isAvailable ? "" : "Unavailable offline")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
