@@ -15,6 +15,10 @@ final class NetworkMonitor: ObservableObject {
 
     /// The device has a satisfied network path. Says nothing about the server.
     @Published var isConnected = true
+    /// Cellular or a personal hotspot (mobile downloads honour this).
+    @Published private(set) var isExpensive = false
+    /// Low Data Mode.
+    @Published private(set) var isConstrained = false
     /// The active server answered its most recent probes (see
     /// `ServerReachabilityTracker` for the hysteresis).
     @Published private(set) var isServerReachable = true
@@ -48,8 +52,10 @@ final class NetworkMonitor: ObservableObject {
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
+            let expensive = path.isExpensive
+            let constrained = path.isConstrained
             Task { @MainActor [weak self] in
-                self?.pathDidChange(satisfied: satisfied)
+                self?.pathDidChange(satisfied: satisfied, expensive: expensive, constrained: constrained)
             }
         }
         monitor.start(queue: monitorQueue)
@@ -105,7 +111,11 @@ final class NetworkMonitor: ObservableObject {
         requestProbe()
     }
 
-    private func pathDidChange(satisfied: Bool) {
+    private func pathDidChange(satisfied: Bool, expensive: Bool, constrained: Bool) {
+        // Only what changed, expense first: a subscriber woken by
+        // isConnected then already sees the new path's cost.
+        if isExpensive != expensive { isExpensive = expensive }
+        if isConstrained != constrained { isConstrained = constrained }
         isConnected = satisfied
         // Any path change (regained, Wi-Fi to cellular) can change whether
         // the server is reachable. Losing the path drops the in-flight probe

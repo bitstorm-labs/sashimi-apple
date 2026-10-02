@@ -3,9 +3,9 @@ import os
 
 private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "DownloadWatchState")
 
-/// The server's watched/progress state for downloaded items, fetched in one
-/// batch per server and cached in UserDefaults so the Downloads screen keeps
-/// its marks offline. Kept out of the SwiftData download model on purpose:
+/// The server's watched/progress state and community rating for downloaded
+/// items, fetched in one batch per server and cached in UserDefaults so the
+/// Downloads screen keeps its marks offline. Kept out of the SwiftData download model on purpose:
 /// it is a disposable cache, and the store needs no schema change.
 @MainActor
 final class DownloadWatchStateStore: ObservableObject {
@@ -54,10 +54,14 @@ final class DownloadWatchStateStore: ObservableObject {
             for start in stride(from: 0, to: refs.count, by: Self.batchSize) {
                 let batch = Array(refs[start..<min(start + Self.batchSize, refs.count)])
                 do {
-                    let userData = try await client.getUserData(itemIds: batch.map(\.itemID))
+                    let fetched = try await client.getItemsWithUserData(itemIds: batch.map(\.itemID))
+                    let byID = Dictionary(fetched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                     for ref in batch {
-                        if let data = userData[ref.itemID] {
-                            updated[ref.recordID] = ServerWatchState(userData: data)
+                        if let item = byID[ref.itemID], let data = item.userData {
+                            updated[ref.recordID] = ServerWatchState(
+                                userData: data,
+                                communityRating: item.communityRating
+                            )
                         }
                     }
                 } catch {
