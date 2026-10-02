@@ -29,6 +29,7 @@ struct SashimiMobileApp: App {
         }
         self.modelContainer = container
         DownloadManager.shared.setModelContainer(container)
+        KeepNextEpisodesService.shared.start()
         SashimiImagePipeline.configureCaches()
         SashimiImagePipeline.install()
 #if compiler(>=6.4)

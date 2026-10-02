@@ -269,6 +269,10 @@ struct DownloadShowHeader: View {
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textSecondary)
 
+                if !isEditing, let seriesId = episode.seriesId {
+                    KeepNextEpisodesHeaderControl(serverID: episode.serverID, seriesId: seriesId)
+                }
+
                 if watchedCount > 0 && !isEditing {
                     Button(action: onRemoveWatched) {
                         HStack(spacing: 5) {
