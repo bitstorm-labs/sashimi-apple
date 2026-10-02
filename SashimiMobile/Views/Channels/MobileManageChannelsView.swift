@@ -41,6 +41,7 @@ struct MobileManageChannelsView: View {
                     }
                 }
             }
+            .channelScreenStyle()
             .navigationTitle("Manage Channels")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -52,6 +53,7 @@ struct MobileManageChannelsView: View {
         }
         .task { await model.loadChannels() }
         .channelErrorAlert(model)
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -116,6 +118,7 @@ struct MobileChannelDetailView: View {
                 }
             }
         }
+        .channelScreenStyle()
         .navigationTitle(channel?.name ?? "Channel")
         .navigationBarTitleDisplayMode(.inline)
         .task {

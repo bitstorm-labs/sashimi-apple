@@ -33,6 +33,7 @@ struct MobileNewChannelForm: View {
                 }
             }
         }
+        .channelScreenStyle()
         .navigationTitle("New Channel")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

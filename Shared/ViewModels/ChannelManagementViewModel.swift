@@ -89,8 +89,12 @@ final class ChannelManagementViewModel: ObservableObject {
         do {
             async let channelList = client.getManagedChannels()
             async let membershipList = client.getChannelMembership(itemId: itemId)
-            channels = try await channelList
-            memberships = try await membershipList
+            // Both or neither: channels shown before their memberships arrive
+            // (or when membership fails) read as "on no channel", and adding
+            // from that would act on a wrong picture.
+            let (fetchedChannels, fetchedMemberships) = try await (channelList, membershipList)
+            channels = fetchedChannels
+            memberships = fetchedMemberships
         } catch {
             loadFailed = true
             errorMessage = Self.message(for: error, loading: true)

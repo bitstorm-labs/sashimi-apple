@@ -257,6 +257,7 @@ final class ChannelManagementViewModelTests: XCTestCase {
         var channels: [ManagedChannel]
         var added: Set<String> = []  // "channel#daypart#item"
         var failNext: Error?
+        var failMembership: Error?
         private(set) var calls: [String] = []
 
         init(channels: [ManagedChannel]) { self.channels = channels }
@@ -276,6 +277,7 @@ final class ChannelManagementViewModelTests: XCTestCase {
 
         func getChannelMembership(itemId: String) async throws -> [ChannelMembership] {
             calls.append("membership \(itemId)")
+            if let failMembership { throw failMembership }
             return channels.flatMap { channel in
                 channel.dayparts.map { daypart in
                     let isAdded = added.contains("\(channel.id)#\(daypart.index)#\(itemId)")
@@ -367,6 +369,20 @@ final class ChannelManagementViewModelTests: XCTestCase {
 
         XCTAssertTrue(client.calls.contains("remove s \(item) 1"))
         XCTAssertEqual(model.menuEntries.first?.dayparts.last?.state, ChannelMembershipState.none)
+    }
+
+    func testAFailedMembershipShowsAnErrorNotUncheckedChannels() async {
+        // Channels listed without their memberships read as "on no channel";
+        // the menu must show the failure instead of a wrong set of checkmarks.
+        let client = StubClient(channels: [ChannelFixtures.plain("c", name: "Cartoons")])
+        client.added = ["c#0#\(item)"]
+        client.failMembership = JellyfinError.httpError(statusCode: 500)
+        let model = makeModel(client)
+
+        await model.loadMenu(itemId: item)
+
+        XCTAssertTrue(model.loadFailed)
+        XCTAssertTrue(model.menuEntries.isEmpty, "no unchecked rows for a title that is in fact on the channel")
     }
 
     func testARuleSourcedCheckmarkDoesNothing() async {

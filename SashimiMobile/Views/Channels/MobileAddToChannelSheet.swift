@@ -52,6 +52,7 @@ struct MobileAddToChannelSheet: View {
                 }
             }
             .disabled(model.isWorking)
+            .channelScreenStyle()
             .navigationTitle("Add to Channel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -65,6 +66,7 @@ struct MobileAddToChannelSheet: View {
             Task { await model.apply(option, itemId: target.itemId) }
         }
         .channelErrorAlert(model)
+        .preferredColorScheme(.dark)
     }
 
     private func daypartList(channelId: String) -> some View {
@@ -80,6 +82,7 @@ struct MobileAddToChannelSheet: View {
             }
         }
         .disabled(model.isWorking)
+        .channelScreenStyle()
         .navigationTitle(entry?.channel.name ?? "Channel")
     }
 
@@ -161,6 +164,14 @@ struct MobileChannelLoadState: View {
 }
 
 extension View {
+    /// The app is dark throughout; a system list in a sheet otherwise follows
+    /// the device's appearance and renders white over the dark UI.
+    func channelScreenStyle() -> some View {
+        scrollContentBackground(.hidden)
+            .background(MobileColors.background)
+            .environment(\.colorScheme, .dark)
+    }
+
     /// Ask before removing the last title from a channel nothing else feeds.
     func channelRemovalConfirmation(
         _ pending: Binding<ChannelMenuOption?>,
