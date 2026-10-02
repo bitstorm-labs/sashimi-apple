@@ -16,6 +16,10 @@ struct BulkDownloadMenu: View {
     var compact = false
 
     @ObservedObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var keepNextStore = KeepNextEpisodesStore.shared
+    /// "Keep next N" waiting on a quality choice (the show has no downloads
+    /// to take the quality from).
+    @State private var pendingKeepNextCount: Int?
     @State private var candidates: [BaseItemDto] = []
     @State private var showingQuality = false
     @State private var pendingBatch: PendingBatch?
@@ -50,9 +54,16 @@ struct BulkDownloadMenu: View {
             ForEach(availableQualities) { quality in
                 Button("\(quality.displayName) \u{2014} \(quality.subtitle)") { chooseQuality(quality) }
             }
-            Button("Cancel", role: .cancel) { candidates = [] }
+            Button("Cancel", role: .cancel) {
+                candidates = []
+                pendingKeepNextCount = nil
+            }
         } message: {
-            Text("\(candidates.count) episode\(candidates.count == 1 ? "" : "s")")
+            if let count = pendingKeepNextCount {
+                Text("Keep the next \(count == 1 ? "episode" : "\(count) episodes") downloaded")
+            } else {
+                Text("\(candidates.count) episode\(candidates.count == 1 ? "" : "s")")
+            }
         }
         .alert(
             pendingBatch?.title ?? "",
@@ -85,6 +96,19 @@ struct BulkDownloadMenu: View {
             Section("Series") {
                 Button(BulkDownloadScope.seriesUnwatched.title) { begin(.seriesUnwatched) }
                 Button(BulkDownloadScope.series.title) { begin(.series) }
+            }
+            if let seriesId, let keepNextServerID {
+                Section {
+                    Menu {
+                        KeepNextEpisodesPicker(
+                            selection: keepNextStore.count(serverID: keepNextServerID, seriesId: seriesId)
+                        ) { count in
+                            setKeepNext(count, serverID: keepNextServerID, seriesId: seriesId)
+                        }
+                    } label: {
+                        Label(keepNextMenuTitle(seriesId: seriesId), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
             }
         }
         if !seasonEpisodes.isEmpty {
@@ -147,6 +171,11 @@ struct BulkDownloadMenu: View {
     }
 
     private func chooseQuality(_ quality: DownloadQuality) {
+        if let count = pendingKeepNextCount, let seriesId, let keepNextServerID {
+            pendingKeepNextCount = nil
+            applyKeepNext(count, quality: quality, serverID: keepNextServerID, seriesId: seriesId)
+            return
+        }
         guard BulkDownloadPlanner.needsConfirmation(count: candidates.count) else {
             enqueue(quality)
             return
@@ -164,6 +193,45 @@ struct BulkDownloadMenu: View {
     private func enqueue(_ quality: DownloadQuality) {
         downloadManager.downloadSeason(episodes: candidates, quality: quality, serverID: serverID)
         candidates = []
+    }
+
+    // MARK: - Keep next episodes
+
+    /// Settings are per server; a nil serverID means the active one, as it
+    /// does for the downloads this menu queues.
+    private var keepNextServerID: String? {
+        serverID ?? SessionManager.shared.activeServerId
+    }
+
+    private func keepNextMenuTitle(seriesId: String) -> String {
+        let count = keepNextStore.count(serverID: keepNextServerID, seriesId: seriesId)
+        return count > 0 ? "Keep Next Episodes Downloaded: \(count)" : "Keep Next Episodes Downloaded"
+    }
+
+    /// Changing the count or turning it off needs no quality. Turning it on
+    /// takes the quality of the show's latest download, or asks for one.
+    private func setKeepNext(_ count: Int, serverID: String, seriesId: String) {
+        if count == 0 || keepNextStore.setting(serverID: serverID, seriesId: seriesId) != nil {
+            applyKeepNext(count, quality: nil, serverID: serverID, seriesId: seriesId)
+        } else if let quality = downloadManager.latestQuality(seriesId: seriesId, serverID: serverID) {
+            applyKeepNext(count, quality: quality, serverID: serverID, seriesId: seriesId)
+        } else {
+            candidates = []
+            pendingKeepNextCount = count
+            Task {
+                // Let the dismissing menu finish before presenting the dialog.
+                try? await Task.sleep(for: .milliseconds(300))
+                showingQuality = true
+            }
+        }
+    }
+
+    private func applyKeepNext(_ count: Int, quality: DownloadQuality?, serverID: String, seriesId: String) {
+        keepNextStore.set(count: count, quality: quality, serverID: serverID, seriesId: seriesId)
+        if count > 0 {
+            downloadManager.toastMessage = "Keeping the next \(count == 1 ? "episode" : "\(count) episodes") downloaded"
+            KeepNextEpisodesService.shared.scheduleSync(after: .zero)
+        }
     }
 
     private func refreshOriginalAllowed() async {

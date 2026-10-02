@@ -1024,6 +1024,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     videoFileName: "video.\(ext)",
                     totalBytes: DownloadFileManager.itemSize(for: itemId, serverID: serverID)
                 )
+                NotificationCenter.default.post(name: .downloadDidComplete, object: nil)
             }
 
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
