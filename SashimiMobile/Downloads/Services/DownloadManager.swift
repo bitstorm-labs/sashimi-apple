@@ -486,6 +486,54 @@ final class DownloadManager: NSObject, ObservableObject {
         stateVersion += 1
     }
 
+    /// Deletes several completed downloads at once (Remove watched, Edit-mode
+    /// delete) with one state bump and one toast.
+    func deleteDownloads(_ items: [(itemId: String, serverID: String?)]) async {
+        guard !items.isEmpty else { return }
+        for item in items {
+            await cancelDownload(itemId: item.itemId, serverID: item.serverID)
+        }
+        stateVersion += 1
+        toastMessage = "Deleted \(items.count) download\(items.count == 1 ? "" : "s")"
+    }
+
+    /// Called once the player is gone after a downloaded item played to its
+    /// end. With "Delete downloads after watching" on, the completion is handed
+    /// to the durable report queue (so the server still learns it was watched
+    /// after the local record is gone) and the download is deleted.
+    func handleOfflinePlaybackFinished(itemId: String, serverID: String?) async {
+        let record = downloadStatus(for: itemId, serverID: serverID)
+        let enabled = UserDefaults.standard.bool(forKey: DownloadWatchPolicy.deleteAfterWatchingKey)
+        guard DownloadWatchPolicy.shouldAutoDelete(
+            settingEnabled: enabled,
+            isCompletedDownload: record?.isComplete == true,
+            playedToEnd: true
+        ), let record else { return }
+
+        let recordServerID = record.serverID
+        let resolvedServerID = recordServerID ?? serverID ?? SessionManager.shared.activeServerId
+        let name = record.displayTitle
+        // Persisted before the delete; sent after it, so an unreachable server
+        // never holds the delete up. The queue retries on the next launch.
+        let report = resolvedServerID.map {
+            PlaybackReportDelivery.shared.enqueue(PendingPlaybackReport(
+                serverID: $0,
+                itemID: itemId,
+                playSessionID: nil,
+                kind: .completion,
+                positionTicks: record.runTimeTicks ?? record.lastPlaybackPositionTicks
+            ))
+        }
+
+        await cancelDownload(itemId: itemId, serverID: recordServerID)
+        stateVersion += 1
+        toastMessage = "Deleted \(name) after watching"
+
+        if let report, let client = SessionManager.shared.makeClient(for: report.serverID) {
+            Task { await PlaybackReportDelivery.shared.deliver(report, using: client) }
+        }
+    }
+
     func retryDownload(itemId: String, serverID: String? = nil) async {
         let record = downloadStatus(for: itemId, serverID: serverID)
         let resolvedServerID = serverID ?? record?.serverID

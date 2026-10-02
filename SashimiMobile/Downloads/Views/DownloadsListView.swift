@@ -1,16 +1,41 @@
 import SwiftUI
 import SwiftData
-import NukeUI
 
-// The list owns row, state, and empty-state presentation in one cohesive view.
+// The list owns sections, selection, confirmations and the actions behind
+// them; the rows themselves live in DownloadRows.swift.
 // swiftlint:disable type_body_length
 struct DownloadsListView: View {
     @Query(sort: \DownloadedItem.dateAdded, order: .reverse) private var downloads: [DownloadedItem]
     @ObservedObject private var downloadManager = DownloadManager.shared
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    @ObservedObject private var watchStore = DownloadWatchStateStore.shared
     @State private var showingDeleteAll = false
     @State private var playingItem: BaseItemDto?
     @State private var playingServerID: String?
+    @State private var showRoute: ShowRoute?
+    @State private var isEditing = false
+    @State private var selection: Set<String> = []
+    @State private var pendingRemoval: RemovalRequest?
+
+    /// Destination of a show header's "Go to show". A button plus
+    /// navigationDestination rather than a NavigationLink: inside a List a
+    /// link takes over the whole row (and adds a second chevron).
+    private struct ShowRoute: Hashable, Identifiable {
+        let item: BaseItemDto
+        let serverID: String?
+        var id: String { "\(serverID ?? "legacy"):\(item.id)" }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+
+    /// A deletion that needs confirming: Remove watched, or Edit mode's Delete.
+    private struct RemovalRequest: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let confirmLabel: String
+        let items: [(itemId: String, serverID: String?)]
+    }
 
     var body: some View {
         Group {
@@ -20,14 +45,46 @@ struct DownloadsListView: View {
                 downloadsList
             }
         }
+        .background(MobileColors.background)
         .navigationTitle("Downloads")
+        .navigationDestination(item: $showRoute) { route in
+            AdaptiveDetailView(item: route.item, serverID: route.serverID)
+        }
         .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAll) {
             Button("Delete All", role: .destructive) {
-                Task { await downloadManager.deleteAllDownloads() }
+                Task {
+                    await downloadManager.deleteAllDownloads()
+                    // Leaves no rows, so no selection to keep.
+                    endEditing()
+                }
             }
         } message: {
             Text("This will remove all downloaded files from your device. This cannot be undone.")
+        }
+        .confirmationDialog(
+            pendingRemoval?.title ?? "",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { request in
+            Button(request.confirmLabel, role: .destructive) {
+                delete(request.items)
+            }
+        } message: { request in
+            Text(request.message)
+        }
+        .task(id: completedKey) { await refreshWatchState() }
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
+            Task { await refreshWatchState() }
+        }
+        .onChange(of: completedKey) { _, _ in
+            // Rows that went away (deleted elsewhere) leave the selection.
+            selection.formIntersection(Set(completedItems.map(\.recordID)))
+            if completedItems.isEmpty { endEditing() }
         }
     }
 
@@ -48,111 +105,191 @@ struct DownloadsListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Derived state
+
+    private var completedItems: [DownloadedItem] {
+        downloads.filter(\.isComplete)
+    }
+
+    private var completedKey: String {
+        completedItems.map(\.recordID).joined(separator: ",")
+    }
+
+    private var watchStates: [String: DownloadWatchState] {
+        var states: [String: DownloadWatchState] = [:]
+        for item in completedItems {
+            states[item.recordID] = DownloadWatchPolicy.resolve(
+                server: watchStore.serverStates[item.recordID],
+                runTimeTicks: item.runTimeTicks,
+                localPositionTicks: item.lastPlaybackPositionTicks,
+                localNeedsSync: item.needsProgressSync
+            )
+        }
+        return states
+    }
+
+    private func watchedItems(in items: [DownloadedItem], states: [String: DownloadWatchState]) -> [DownloadedItem] {
+        let targets = Set(DownloadWatchPolicy.watchedTargets(items.map(\.watchCandidate), states: states).map(\.recordID))
+        return items.filter { targets.contains($0.recordID) }
+    }
+
+    private static func bytesText(_ items: [DownloadedItem]) -> String {
+        ByteCountFormatter.string(
+            fromByteCount: DownloadWatchPolicy.totalBytes(items.map(\.watchCandidate)),
+            countStyle: .file
+        )
+    }
+
+    // MARK: - List
+
     private var downloadsList: some View {
-        ScrollView {
-            VStack(spacing: MobileSpacing.lg) {
-                // Storage bar
-                storageSection
-                    .padding(.horizontal, MobileSpacing.md)
+        let states = watchStates
+        let completed = completedItems
+        let active = downloads.filter { isActive($0) }.sorted { $0.dateAdded < $1.dateAdded }
+        let failed = downloads.filter { $0.status == .failed }
 
-                // Active downloads
-                let active = downloads.filter { isActive($0) }.sorted { $0.dateAdded < $1.dateAdded }
-                if !active.isEmpty {
-                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                        Text("Active")
-                            .font(MobileTypography.headline)
-                            .foregroundStyle(MobileColors.textPrimary)
-                            .padding(.horizontal, MobileSpacing.md)
+        return List {
+            Section {
+                storageSection(allWatched: watchedItems(in: completed, states: states))
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
 
-                        VStack(spacing: 1) {
-                            ForEach(active, id: \.recordID) { item in
-                                activeDownloadRow(item)
+            if !active.isEmpty {
+                Section {
+                    ForEach(active, id: \.recordID) { item in
+                        ActiveDownloadRow(
+                            item: item,
+                            isPreparing: downloadManager.preparingItems.contains(item.recordID),
+                            progress: downloadManager.activeDownloads[item.recordID],
+                            onCancel: {
+                                Task { await downloadManager.cancelDownload(itemId: item.itemId, serverID: item.serverID) }
+                            }
+                        )
+                        .cardRow()
+                    }
+                } header: {
+                    sectionHeader("Active")
+                }
+            }
+
+            if !completed.isEmpty {
+                Section {
+                    ForEach(DownloadGroup.groups(completed)) { group in
+                        completedGroupRows(group, states: states)
+                    }
+                } header: {
+                    sectionHeader("Completed") {
+                        Button(isEditing ? "Done" : "Edit") {
+                            withAnimation {
+                                if isEditing {
+                                    endEditing()
+                                } else {
+                                    isEditing = true
+                                }
                             }
                         }
-                        .background(MobileColors.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-                        .padding(.horizontal, MobileSpacing.md)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(MobileColors.accent)
                     }
                 }
+            }
 
-                // Completed downloads
-                let completed = downloads.filter { $0.isComplete }
-                if !completed.isEmpty {
-                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                        Text("Completed")
-                            .font(MobileTypography.headline)
-                            .foregroundStyle(MobileColors.textPrimary)
-                            .padding(.horizontal, MobileSpacing.md)
-
-                        VStack(spacing: 1) {
-                            ForEach(Self.completedGroups(completed)) { group in
-                                completedGroupView(group)
-                            }
+            if !failed.isEmpty {
+                Section {
+                    ForEach(failed, id: \.recordID) { item in
+                        FailedDownloadRow(
+                            item: item,
+                            onRetry: { Task { await downloadManager.retryDownload(itemId: item.itemId, serverID: item.serverID) } },
+                            onDelete: { Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) } }
+                        )
+                        .cardRow()
+                    }
+                } header: {
+                    sectionHeader("Failed") {
+                        Button("Retry All") {
+                            Task { await downloadManager.restartAllFailed() }
                         }
-                        .background(MobileColors.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-                        .padding(.horizontal, MobileSpacing.md)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(MobileColors.accent)
                     }
                 }
+            }
 
-                // Failed downloads
-                let failed = downloads.filter { $0.status == .failed }
-                if !failed.isEmpty {
-                    VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                        HStack {
-                            Text("Failed")
-                                .font(MobileTypography.headline)
-                                .foregroundStyle(MobileColors.textPrimary)
-                            Spacer()
-                            Button("Retry All") {
-                                Task { await downloadManager.restartAllFailed() }
-                            }
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(MobileColors.accent)
-                        }
-                        .padding(.horizontal, MobileSpacing.md)
-
-                        VStack(spacing: 1) {
-                            ForEach(failed, id: \.recordID) { item in
-                                failedDownloadRow(item)
-                            }
-                        }
-                        .background(MobileColors.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-                        .padding(.horizontal, MobileSpacing.md)
-                    }
-                }
-
-                // Delete all
-                if !downloads.isEmpty {
+            if !isEditing {
+                Section {
                     Button(role: .destructive) {
                         showingDeleteAll = true
                     } label: {
                         Text("Delete All Downloads")
                             .font(MobileTypography.body)
+                            .foregroundStyle(MobileColors.error)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(MobileColors.cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
                     }
-                    .padding(.horizontal, MobileSpacing.md)
+                    .buttonStyle(.plain)
+                    .cardRow()
                 }
-
-                Spacer().frame(height: 40)
             }
-            .padding(.top, MobileSpacing.md)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 0)
+        .listSectionSpacing(MobileSpacing.md)
         .frame(maxWidth: 700)
         .frame(maxWidth: .infinity)
+        .safeAreaInset(edge: .bottom) {
+            if isEditing {
+                editBar(completed: completed)
+            }
+        }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        sectionHeader(title) { EmptyView() }
+    }
+
+    private func sectionHeader<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack {
+            Text(title)
+                .font(MobileTypography.headline)
+                .foregroundStyle(MobileColors.textPrimary)
+            Spacer()
+            trailing()
+        }
+        .textCase(nil)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Storage
 
-    private var storageSection: some View {
-        let completedCount = downloads.filter { $0.isComplete }.count
+    private func storageSection(allWatched: [DownloadedItem]) -> some View {
+        let completedCount = completedItems.count
 
-        return HStack {
-            Spacer()
+        return HStack(alignment: .center) {
+            if !allWatched.isEmpty && !isEditing {
+                Button {
+                    requestRemoval(
+                        of: allWatched,
+                        title: "Remove all watched downloads?",
+                        what: "watched download"
+                    )
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                        Text("Remove all watched (\(Self.bytesText(allWatched)))")
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(MobileColors.error.opacity(0.9))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(MobileColors.cardBackground, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: MobileSpacing.sm)
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(ByteCountFormatter.string(fromByteCount: DownloadFileManager.availableDiskSpace(), countStyle: .file)) available")
@@ -169,272 +306,156 @@ struct DownloadsListView: View {
                 .font(.system(size: 18))
                 .foregroundStyle(MobileColors.textTertiary)
         }
-        .padding(MobileSpacing.md)
+        .padding(.vertical, MobileSpacing.xs)
     }
 
-    // MARK: - Active Download Row
-
-    private func activeDownloadRow(_ item: DownloadedItem) -> some View {
-        let isPreparing = downloadManager.preparingItems.contains(item.recordID)
-        let isDownloading = downloadManager.activeDownloads[item.recordID] != nil && !isPreparing
-        let progress = downloadManager.activeDownloads[item.recordID] ?? 0
-
-        return HStack(spacing: MobileSpacing.md) {
-            posterImage(for: item)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayTitle)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-
-                if item.seriesName != nil {
-                    Text(item.name)
-                        .font(MobileTypography.caption)
-                        .foregroundStyle(MobileColors.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            if isPreparing {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                    Text("Preparing...")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MobileColors.textSecondary)
-                }
-            } else if isDownloading && progress < 0 {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                    Text("Downloading...")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MobileColors.accent)
-                }
-            } else if isDownloading {
-                Text("\(Int(progress * 100))%")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(MobileColors.accent)
-            } else {
-                Text("Queued")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-
-            Button {
-                Task { await downloadManager.cancelDownload(itemId: item.itemId, serverID: item.serverID) }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(MobileSpacing.md)
-    }
-
-    // MARK: - Completed Download Row
-
-    /// A show's finished episodes under one header, or a single movie.
-    private struct CompletedGroup: Identifiable {
-        let id: String
-        let items: [DownloadedItem]
-        var isShow: Bool { items.first?.seriesId != nil }
-    }
-
-    /// Groups episodes by show (per server), keeping the list's newest-first
-    /// order between groups and episode order within a show.
-    private static func completedGroups(_ completed: [DownloadedItem]) -> [CompletedGroup] {
-        var order: [String] = []
-        var byKey: [String: [DownloadedItem]] = [:]
-        for item in completed {
-            let key = item.seriesId.map { "\(item.serverID ?? "legacy"):series:\($0)" } ?? item.recordID
-            if byKey[key] == nil { order.append(key) }
-            byKey[key, default: []].append(item)
-        }
-        return order.map { key in
-            let items = byKey[key] ?? []
-            let sorted = items.first?.seriesId == nil ? items : items.sorted {
-                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) < ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
-            }
-            return CompletedGroup(id: key, items: sorted)
-        }
-    }
+    // MARK: - Completed
 
     @ViewBuilder
-    private func completedGroupView(_ group: CompletedGroup) -> some View {
+    private func completedGroupRows(_ group: DownloadGroup, states: [String: DownloadWatchState]) -> some View {
         if group.isShow, let first = group.items.first {
-            VStack(spacing: 0) {
-                showHeader(first, episodeCount: group.items.count)
-                ForEach(group.items, id: \.recordID) { item in
-                    episodeRow(item)
+            let watched = watchedItems(in: group.items, states: states)
+            DownloadShowHeader(
+                episode: first,
+                episodeCount: group.items.count,
+                watchedCount: watched.count,
+                watchedBytes: DownloadWatchPolicy.totalBytes(watched.map(\.watchCandidate)),
+                showsGoToShow: networkMonitor.isConnected,
+                isEditing: isEditing,
+                allSelected: group.items.allSatisfy { selection.contains($0.recordID) },
+                onGoToShow: { showRoute = ShowRoute(item: first.asSeriesDto, serverID: first.serverID) },
+                onRemoveWatched: {
+                    requestRemoval(
+                        of: watched,
+                        title: "Remove watched episodes of \(first.seriesName ?? first.name)?",
+                        what: "watched episode"
+                    )
                 }
+            )
+            .onTapGesture {
+                guard isEditing else { return }
+                toggleGroup(group)
+            }
+            .cardRow()
+
+            ForEach(group.items, id: \.recordID) { item in
+                completedRow(item, isEpisode: true, states: states)
             }
         } else if let movie = group.items.first {
-            completedDownloadRow(movie)
+            completedRow(movie, isEpisode: false, states: states)
         }
     }
 
-    /// The show's poster and name, with a way to its page: the seasons and
-    /// episodes that aren't downloaded live there (iPad feedback).
-    private func showHeader(_ episode: DownloadedItem, episodeCount: Int) -> some View {
-        HStack(spacing: MobileSpacing.md) {
-            posterImage(for: episode)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(episode.seriesName ?? episode.name)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-                Text(episodeCount == 1 ? "1 episode" : "\(episodeCount) episodes")
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textSecondary)
-            }
-
-            Spacer()
-
-            // The show page comes from the server; offline there is nothing to open.
-            if networkMonitor.isConnected {
-                NavigationLink {
-                    AdaptiveDetailView(item: episode.asSeriesDto, serverID: episode.serverID)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Go to show")
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(MobileColors.accent)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(MobileSpacing.md)
-    }
-
-    private func episodeRow(_ item: DownloadedItem) -> some View {
-        HStack(spacing: MobileSpacing.md) {
-            episodeThumbnail(for: item)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(episodeLabel(item))
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-                Text(item.formattedSize)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-
-            Spacer()
-
-            Button {
-                play(item)
-            } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(MobileColors.accent)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Play \(item.displayTitle)")
-
-            Button {
-                Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
-            } label: {
-                Image(systemName: "trash.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete \(item.displayTitle)")
-        }
-        // Thumbnails line up with the show's poster above them.
-        .padding(.leading, MobileSpacing.md)
-        .padding(.trailing, MobileSpacing.md)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-        .onTapGesture { play(item) }
-    }
-
-    /// The episode's own still, so a show's downloads are told apart at a
-    /// glance. The file saved with the download is preferred (it works
-    /// offline); the server copy covers downloads whose image never arrived.
-    private func episodeThumbnail(for item: DownloadedItem) -> some View {
-        let url = OfflineImageHelper.thumbnailURL(for: item.itemId, serverID: item.serverID)
-            ?? serverImageURL(itemId: item.itemId, serverID: item.serverID, maxWidth: 320)
-        return Group {
-            if let url {
-                LazyImage(request: SashimiImagePipeline.request(url: url, serverID: item.serverID)) { state in
-                    if let image = state.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Rectangle().fill(MobileColors.background)
-                    }
-                }
+    private func completedRow(_ item: DownloadedItem, isEpisode: Bool, states: [String: DownloadWatchState]) -> some View {
+        CompletedDownloadRow(
+            item: item,
+            isEpisode: isEpisode,
+            watchState: states[item.recordID] ?? .unwatched,
+            isEditing: isEditing,
+            isSelected: selection.contains(item.recordID),
+            onPlay: { play(item) }
+        )
+        // The whole row plays; the play button keeps its own tap.
+        .onTapGesture {
+            if isEditing {
+                toggle(item.recordID)
             } else {
-                Rectangle().fill(MobileColors.background)
+                play(item)
             }
         }
-        .frame(width: 112, height: 63)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func episodeLabel(_ item: DownloadedItem) -> String {
-        guard let season = item.seasonNumber, let episode = item.episodeNumber else { return item.name }
-        return "S\(season):E\(episode) · \(item.name)"
-    }
-
-    private func completedDownloadRow(_ item: DownloadedItem) -> some View {
-        HStack(spacing: MobileSpacing.md) {
-            posterImage(for: item)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayTitle)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-
-                if item.seriesName != nil {
-                    Text(item.name)
-                        .font(MobileTypography.caption)
-                        .foregroundStyle(MobileColors.textSecondary)
-                        .lineLimit(1)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if !isEditing {
+                Button(role: .destructive) {
+                    let target = (itemId: item.itemId, serverID: item.serverID)
+                    Task { await downloadManager.deleteDownload(itemId: target.itemId, serverID: target.serverID) }
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
-
-                Text(item.formattedSize)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MobileColors.textTertiary)
             }
+        }
+        .cardRow()
+    }
+
+    // MARK: - Edit mode
+
+    private func editBar(completed: [DownloadedItem]) -> some View {
+        let selected = completed.filter { selection.contains($0.recordID) }
+        let allSelected = !completed.isEmpty && selected.count == completed.count
+
+        return HStack {
+            Button(allSelected ? "Deselect All" : "Select All") {
+                selection = allSelected ? [] : Set(completed.map(\.recordID))
+            }
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(MobileColors.accent)
 
             Spacer()
 
-            // Downloads are for watching: play right here, from the local file,
-            // instead of leaving to search for the title (iPad feedback).
-            Button {
-                play(item)
+            Button(role: .destructive) {
+                requestRemoval(of: selected, title: "Delete selected downloads?", what: "download")
             } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(MobileColors.accent)
+                Text(selected.isEmpty ? "Delete" : "Delete \(selected.count) (\(Self.bytesText(selected)))")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(selected.isEmpty ? MobileColors.textTertiary : .white)
+                    .padding(.horizontal, MobileSpacing.md)
+                    .padding(.vertical, 10)
+                    .background(selected.isEmpty ? MobileColors.cardBackground : MobileColors.error, in: Capsule())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Play \(item.displayTitle)")
-
-            Button {
-                Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
-            } label: {
-                Image(systemName: "trash.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-            .buttonStyle(.plain)
+            .disabled(selected.isEmpty)
         }
-        .padding(MobileSpacing.md)
-        // The whole row plays; the play and delete buttons keep their own taps.
-        .contentShape(Rectangle())
-        .onTapGesture { play(item) }
+        .padding(.horizontal, MobileSpacing.md)
+        .padding(.vertical, MobileSpacing.sm)
+        .frame(maxWidth: 700)
+        .frame(maxWidth: .infinity)
+        .background(MobileColors.cardBackground.opacity(0.97).ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+        }
+    }
+
+    private func toggle(_ recordID: String) {
+        if selection.contains(recordID) {
+            selection.remove(recordID)
+        } else {
+            selection.insert(recordID)
+        }
+    }
+
+    private func toggleGroup(_ group: DownloadGroup) {
+        let ids = Set(group.items.map(\.recordID))
+        if ids.isSubset(of: selection) {
+            selection.subtract(ids)
+        } else {
+            selection.formUnion(ids)
+        }
+    }
+
+    private func endEditing() {
+        isEditing = false
+        selection = []
+    }
+
+    // MARK: - Actions
+
+    private func requestRemoval(of items: [DownloadedItem], title: String, what: String) {
+        guard !items.isEmpty else { return }
+        let count = items.count
+        let noun = count == 1 ? what : "\(what)s"
+        pendingRemoval = RemovalRequest(
+            title: title,
+            message: "\(count) \(noun) will be removed from this device, freeing \(Self.bytesText(items)).",
+            confirmLabel: "Delete \(count) \(noun)",
+            items: items.map { (itemId: $0.itemId, serverID: $0.serverID) }
+        )
+    }
+
+    private func delete(_ items: [(itemId: String, serverID: String?)]) {
+        pendingRemoval = nil
+        Task {
+            await downloadManager.deleteDownloads(items)
+            endEditing()
+        }
     }
 
     private func play(_ item: DownloadedItem) {
@@ -443,103 +464,27 @@ struct DownloadsListView: View {
         playingItem = item.asBaseItemDto
     }
 
-    // MARK: - Failed Download Row
-
-    private func failedDownloadRow(_ item: DownloadedItem) -> some View {
-        HStack(spacing: MobileSpacing.md) {
-            posterImage(for: item)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayTitle)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MobileColors.textPrimary)
-                    .lineLimit(1)
-
-                Text(item.errorMessage ?? "Download failed")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MobileColors.error)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            HStack(spacing: 12) {
-                Button {
-                    Task { await downloadManager.retryDownload(itemId: item.itemId, serverID: item.serverID) }
-                } label: {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(MobileColors.accent)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
-                } label: {
-                    Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(MobileColors.textTertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(MobileSpacing.md)
+    private func refreshWatchState() async {
+        guard networkMonitor.isConnected else { return }
+        await watchStore.refresh(completedItems.map {
+            DownloadWatchStateStore.ItemRef(recordID: $0.recordID, itemID: $0.itemId, serverID: $0.serverID)
+        })
     }
-
-    // MARK: - Poster Image
-
-    @ViewBuilder
-    private func posterImage(for item: DownloadedItem) -> some View {
-        if let serverURL = serverPosterURL(for: item) {
-            LazyImage(request: SashimiImagePipeline.request(url: serverURL, serverID: item.serverID)) { state in
-                if let image = state.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    posterPlaceholder
-                }
-            }
-            .frame(width: 60, height: 90)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-        } else {
-            posterPlaceholder
-        }
-    }
-
-    private var posterPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(MobileColors.background)
-            .frame(width: 60, height: 90)
-            .overlay {
-                Image(systemName: "film")
-                    .font(.system(size: 16))
-                    .foregroundStyle(MobileColors.textTertiary)
-            }
-    }
-
-    private func serverPosterURL(for item: DownloadedItem) -> URL? {
-        // For episodes, use the series poster if available
-        serverImageURL(itemId: item.seriesId ?? item.itemId, serverID: item.serverID, maxWidth: 200)
-    }
-
-    private func serverImageURL(itemId: String, serverID: String?, maxWidth: Int) -> URL? {
-        let serverURL: URL?
-        if let serverID {
-            serverURL = SessionManager.shared.servers.first(where: { $0.id == serverID })?.url
-        } else {
-            serverURL = SessionManager.shared.serverURL
-        }
-        guard let serverURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(itemId)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "\(maxWidth)")])
-    }
-
-    // MARK: - Helpers
 
     private func isActive(_ item: DownloadedItem) -> Bool {
         if downloadManager.preparingItems.contains(item.recordID) { return true }
         if downloadManager.activeDownloads[item.recordID] != nil { return true }
         let status = item.status
         return status == .queued || status == .downloading || status == .preparing
+    }
+}
+
+private extension View {
+    /// A row on the dark card background, edge to edge, without the system
+    /// separators (the cards read as one surface, as before the List).
+    func cardRow() -> some View {
+        listRowInsets(EdgeInsets())
+            .listRowBackground(MobileColors.cardBackground)
+            .listRowSeparator(.hidden)
     }
 }
