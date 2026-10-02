@@ -6,15 +6,21 @@ import Foundation
 struct ServerWatchState: Codable, Hashable, Sendable {
     let played: Bool
     let positionTicks: Int64
+    /// The item's community (TMDb) rating, fetched in the same request and
+    /// cached alongside so the Downloads row can show it offline. Optional,
+    /// so caches written before it existed still decode.
+    var communityRating: Double?
 
-    init(played: Bool, positionTicks: Int64) {
+    init(played: Bool, positionTicks: Int64, communityRating: Double? = nil) {
         self.played = played
         self.positionTicks = positionTicks
+        self.communityRating = communityRating
     }
 
-    init(userData: UserItemDataDto?) {
+    init(userData: UserItemDataDto?, communityRating: Double? = nil) {
         self.played = userData?.played ?? false
         self.positionTicks = userData?.playbackPositionTicks ?? 0
+        self.communityRating = communityRating
     }
 }
 

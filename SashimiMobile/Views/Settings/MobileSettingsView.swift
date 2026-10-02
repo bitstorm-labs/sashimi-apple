@@ -16,6 +16,7 @@ struct MobileSettingsView: View {
     ]
     @State private var showingDeleteAllDownloads = false
     @AppStorage(DownloadWatchPolicy.deleteAfterWatchingKey) private var deleteDownloadsAfterWatching = false
+    @AppStorage(DownloadNetworkPolicy.allowCellularKey) private var downloadOverCellular = false
     @State private var showAddServer = false
     @State private var serverBeingEdited: ServerConfig?
 
@@ -151,6 +152,10 @@ struct MobileSettingsView: View {
                     fromByteCount: DownloadFileManager.availableDiskSpace(),
                     countStyle: .file
                 ))
+                Toggle("Download over Cellular", isOn: $downloadOverCellular)
+                    .onChange(of: downloadOverCellular) { _, _ in
+                        DownloadManager.shared.downloadNetworkSettingChanged()
+                    }
                 Toggle("Delete Downloads After Watching", isOn: $deleteDownloadsAfterWatching)
                 Button("Delete All Downloads", role: .destructive) {
                     showingDeleteAllDownloads = true
@@ -158,7 +163,11 @@ struct MobileSettingsView: View {
             } header: {
                 Text("Downloads")
             } footer: {
-                Text("A download is removed once it has played to the end. Its watched state still reaches the server.")
+                Text(
+                    "With Download over Cellular off, downloads wait for Wi-Fi that isn't a hotspot or in Low Data Mode. "
+                        + "Delete After Watching removes a download once it has played to the end; "
+                        + "its watched state still reaches the server."
+                )
             }
 
             // About Section

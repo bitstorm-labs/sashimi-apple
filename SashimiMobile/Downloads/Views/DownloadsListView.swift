@@ -16,6 +16,20 @@ struct DownloadsListView: View {
     @State private var isEditing = false
     @State private var selection: Set<String> = []
     @State private var pendingRemoval: RemovalRequest?
+    @AppStorage(DownloadNetworkPolicy.allowCellularKey) private var downloadOverCellular = false
+    @AppStorage("showReviewRatings") private var showReviewRatings = true
+
+    /// Why downloads can't move right now, if they can't.
+    private var waitReason: DownloadWaitReason? {
+        DownloadNetworkPolicy.waitReason(
+            allowCellular: downloadOverCellular,
+            network: DownloadNetworkStatus(
+                isConnected: networkMonitor.isConnected,
+                isExpensive: networkMonitor.isExpensive,
+                isConstrained: networkMonitor.isConstrained
+            )
+        )
+    }
 
     /// Destination of a show header's "Go to show". A button plus
     /// navigationDestination rather than a NavigationLink: inside a List a
@@ -163,6 +177,7 @@ struct DownloadsListView: View {
                             item: item,
                             isPreparing: downloadManager.preparingItems.contains(item.recordID),
                             progress: downloadManager.activeDownloads[item.recordID],
+                            waitReason: waitReason,
                             onCancel: {
                                 Task { await downloadManager.cancelDownload(itemId: item.itemId, serverID: item.serverID) }
                             }
@@ -199,11 +214,23 @@ struct DownloadsListView: View {
             if !failed.isEmpty {
                 Section {
                     ForEach(failed, id: \.recordID) { item in
-                        FailedDownloadRow(
-                            item: item,
-                            onRetry: { Task { await downloadManager.retryDownload(itemId: item.itemId, serverID: item.serverID) } },
-                            onDelete: { Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) } }
-                        )
+                        // Ticks so the countdown stays current while the list is open.
+                        TimelineView(.periodic(from: .now, by: 15)) { context in
+                            FailedDownloadRow(
+                                item: item,
+                                retryNote: downloadManager.retryLabel(
+                                    for: item,
+                                    now: context.date,
+                                    waitReason: waitReason
+                                ),
+                                onRetry: {
+                                    Task { await downloadManager.retryDownload(itemId: item.itemId, serverID: item.serverID) }
+                                },
+                                onDelete: {
+                                    Task { await downloadManager.deleteDownload(itemId: item.itemId, serverID: item.serverID) }
+                                }
+                            )
+                        }
                         .cardRow()
                     }
                 } header: {
@@ -351,6 +378,7 @@ struct DownloadsListView: View {
             item: item,
             isEpisode: isEpisode,
             watchState: states[item.recordID] ?? .unwatched,
+            communityRating: showReviewRatings ? watchStore.serverStates[item.recordID]?.communityRating : nil,
             isEditing: isEditing,
             isSelected: selection.contains(item.recordID),
             onPlay: { play(item) }

@@ -12,8 +12,11 @@ extension Notification.Name {
 /// Keeps each opted-in show's next episodes downloaded: deletes the episodes
 /// watched since they were downloaded and queues the next unwatched ones
 /// through DownloadManager. Runs, debounced, when the app becomes active,
-/// when the network comes back, after playback stops and after a download
-/// completes; never offline and never while something is playing.
+/// when the network comes back (or Wi-Fi does, with "Download over
+/// Cellular" off), after playback stops and after a download completes;
+/// never offline and never while something is playing. On a network the
+/// download setting rules out it still clears watched episodes but queues
+/// nothing, and catches up once downloads may run.
 @MainActor
 final class KeepNextEpisodesService {
     static let shared = KeepNextEpisodesService()
@@ -39,7 +42,8 @@ final class KeepNextEpisodesService {
                 Task { @MainActor in self?.scheduleSync() }
             })
         }
-        NetworkMonitor.shared.$isConnected
+        NetworkMonitor.shared.downloadStatusPublisher
+            .map { DownloadNetworkPolicy.canDownloadNow(allowCellular: DownloadNetworkPolicy.allowsCellular, network: $0) }
             .removeDuplicates()
             .filter { $0 }
             .sink { [weak self] _ in self?.scheduleSync() }
@@ -72,7 +76,11 @@ final class KeepNextEpisodesService {
         for setting in store.activeSettings {
             // Re-checked per show: playback or a lost connection mid-run stops it.
             guard NetworkMonitor.shared.isConnected, !Self.isPlaybackActive else { return }
-            await sync(setting)
+            let mayEnqueue = DownloadNetworkPolicy.canDownloadNow(
+                allowCellular: DownloadNetworkPolicy.allowsCellular,
+                network: .current
+            )
+            await sync(setting, mayEnqueue: mayEnqueue)
         }
     }
 
@@ -83,7 +91,7 @@ final class KeepNextEpisodesService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo != nil
     }
 
-    private func sync(_ setting: KeepNextEpisodesSetting) async {
+    private func sync(_ setting: KeepNextEpisodesSetting, mayEnqueue: Bool) async {
         guard let client = SessionManager.shared.makeClient(for: setting.serverID),
               let serverEpisodes = try? await client.getEpisodes(seriesId: setting.seriesId),
               // The setting may have changed while the episodes loaded.
@@ -101,6 +109,9 @@ final class KeepNextEpisodesService {
         for itemId in plan.delete {
             await manager.deleteDownload(itemId: itemId, serverID: setting.serverID)
         }
+        // Wi-Fi only and not on Wi-Fi: don't even queue; the network
+        // subscription in start() runs the sync again once downloads may.
+        guard mayEnqueue else { return }
         let byID = Dictionary(serverEpisodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for itemId in plan.enqueue {
             guard let episode = byID[itemId] else { continue }
