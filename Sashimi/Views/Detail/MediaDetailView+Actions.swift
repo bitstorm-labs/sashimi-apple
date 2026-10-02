@@ -196,6 +196,17 @@ extension MediaDetailView {
                 }
             }
 
+            // Admins: put this title (an episode's series) on a SashimiTV channel.
+            if session.canManageChannels(serverID: serverID), let target = ChannelTarget(item: item) {
+                ActionButton(
+                    title: "Add to Channel",
+                    icon: "rectangle.stack.badge.plus",
+                    isPrimary: false
+                ) {
+                    channelTarget = target
+                }
+            }
+
             Menu {
                 Button {
                     Task { await toggleFavorite() }
