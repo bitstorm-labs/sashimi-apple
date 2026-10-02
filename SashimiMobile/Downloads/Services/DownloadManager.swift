@@ -104,6 +104,8 @@ final class DownloadManager: NSObject, ObservableObject {
 
     // Toast notification
     @Published var toastMessage: String?
+    /// Offline progress is being reported (see `syncPendingProgress`).
+    private var isSyncingProgress = false
 
     override private init() {
         super.init()
@@ -545,10 +547,21 @@ final class DownloadManager: NSObject, ObservableObject {
     // MARK: - Offline Progress Tracking
 
     func savePlaybackPosition(itemId: String, serverID: String? = nil, positionTicks: Int64) {
-        persistence.savePlaybackPosition(itemId: itemId, serverID: serverID, positionTicks: positionTicks)
+        persistence.savePlaybackPosition(
+            itemId: itemId,
+            serverID: serverID,
+            positionTicks: positionTicks,
+            didSave: Self.noteOfflineProgressChanged
+        )
     }
 
+    /// Reports positions saved while offline. Runs at launch and whenever the
+    /// app comes back online; overlapping calls (a reconnect during the launch
+    /// sync) are dropped so no position is reported twice.
     func syncPendingProgress() async {
+        guard !isSyncingProgress else { return }
+        isSyncingProgress = true
+        defer { isSyncingProgress = false }
         let pendingItems = persistence.fetchPendingSync()
         for item in pendingItems {
             do {
@@ -557,10 +570,22 @@ final class DownloadManager: NSObject, ObservableObject {
                     itemId: item.itemID,
                     positionTicks: item.positionTicks
                 )
-                persistence.clearSyncFlag(itemId: item.itemID, serverID: item.serverID)
+                persistence.clearSyncFlag(
+                    itemId: item.itemID,
+                    serverID: item.serverID,
+                    didSave: Self.noteOfflineProgressChanged
+                )
             } catch {
-                // Server unreachable — will retry next launch
+                // Server unreachable — retried on the next launch or reconnect
             }
+        }
+    }
+
+    /// A saved or synced offline position changes what the offline screens
+    /// show (progress, watched, the sync badge); bump the state they observe.
+    nonisolated private static func noteOfflineProgressChanged() {
+        Task { @MainActor in
+            DownloadManager.shared.stateVersion += 1
         }
     }
 

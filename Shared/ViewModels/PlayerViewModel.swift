@@ -252,6 +252,11 @@ final class PlayerViewModel: ObservableObject {
     /// because the download store lives in the app target and this view model
     /// is shared. Empty for online playback.
     var offlineSubtitles: [OfflineSubtitle] = []
+    /// Episode navigation for local-file playback: previous / next among the
+    /// downloads, so a downloaded episode rolls into the next downloaded one.
+    /// Injected by the iOS player (the download store lives in the app
+    /// target); nil keeps local playback without episode navigation.
+    var offlineEpisodeSource: (any OfflineEpisodeSource)?
 
     // Media source info for subtitle/audio selection
     var currentMediaSource: MediaSourceInfo?

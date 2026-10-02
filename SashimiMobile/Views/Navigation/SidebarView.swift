@@ -21,6 +21,15 @@ enum SidebarSelection: Hashable {
         }
     }
 
+    /// Sections that work without the server: Home (as the offline Home),
+    /// Downloads and Settings.
+    var isAvailableOffline: Bool {
+        switch self {
+        case .home, .downloads, .settings: return true
+        case .finTV, .search, .library: return false
+        }
+    }
+
     var icon: String {
         switch self {
         case .home: return "house"
@@ -96,6 +105,7 @@ struct MainNavigationView: View {
                 libraries: libraries,
                 selection: selection,
                 downloadActivity: railDownloadActivity,
+                isOffline: !networkMonitor.isOnline,
                 isExpanded: $railExpanded,
                 onSelect: select
             ) { expanded in
@@ -153,9 +163,22 @@ struct MainNavigationView: View {
         .animation(.easeInOut, value: downloadManager.toastMessage)
         .onAppear {
             applySearchRequest()
+            if !networkMonitor.isOnline {
+                leaveUnavailableSection()
+            }
         }
         .onChange(of: searchRequest?.id) { _, _ in
             applySearchRequest()
+        }
+        .onChange(of: networkMonitor.isOnline) { _, isOnline in
+            if isOnline {
+                // Launched offline, the rail has no libraries yet.
+                if libraries.isEmpty {
+                    Task { await loadLibraries() }
+                }
+            } else {
+                leaveUnavailableSection()
+            }
         }
         .onChange(of: selection) { _, newSelection in
             if newSelection == .search {
@@ -170,7 +193,14 @@ struct MainNavigationView: View {
     }
 
     private var showsHeaderSearch: Bool {
-        selection == .search && networkMonitor.isConnected
+        selection == .search && networkMonitor.isOnline
+    }
+
+    /// The connection dropped while on a section that needs the server:
+    /// Home (now the offline Home) is where the downloads are.
+    private func leaveUnavailableSection() {
+        guard !selection.isAvailableOffline else { return }
+        selection = .home
     }
 
     /// Opening Search by hand puts the caret in the field. A Siri/App Intents
@@ -188,6 +218,7 @@ struct MainNavigationView: View {
     /// A rail tap: switch section, or start the current one over when it is
     /// tapped again. Either way the rail collapses back to its icon strip.
     private func select(_ item: SidebarSelection) {
+        guard networkMonitor.isOnline || item.isAvailableOffline else { return }
         if selection == item {
             navigationResetId += 1
             if item == .search {
@@ -303,7 +334,10 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        if !networkMonitor.isConnected && selection != .downloads && selection != .settings {
+        // Offline, Home is the downloads. A section that needs the server is
+        // switched to Home as the connection drops; until that lands it shows
+        // the same thing rather than a screen of failed requests.
+        if !networkMonitor.isOnline && (selection == .home || !selection.isAvailableOffline) {
             OfflineHomeView()
         } else {
             switch selection {
@@ -337,7 +371,7 @@ struct MainNavigationView: View {
     }
 
     private func applySearchRequest() {
-        guard searchRequest != nil else { return }
+        guard searchRequest != nil, networkMonitor.isOnline else { return }
         if selection != .search {
             selection = .search
         }
