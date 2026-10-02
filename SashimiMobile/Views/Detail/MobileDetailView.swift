@@ -43,6 +43,8 @@ struct MobileDetailView: View {
     @State private var isRefreshing = false
     @State private var adminError: String?
     @State private var seasonWatchRequest: SeasonWatchRequest?
+    @State private var channelTarget: ChannelTarget?
+    @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
 
@@ -238,6 +240,9 @@ struct MobileDetailView: View {
                 ServerScopedMediaDetailView(source: source)
             }
         }
+        .sheet(item: $channelTarget) { target in
+            MobileAddToChannelSheet(target: target)
+        }
         .task {
             if NetworkMonitor.shared.isConnected,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
@@ -321,6 +326,26 @@ struct MobileDetailView: View {
         }
         .buttonStyle(.bordered)
         .tint(.white)
+    }
+
+    /// Add to Channel — the active server's administrators only, online, for
+    /// titles a channel can air (an episode or season adds its series).
+    @ViewBuilder
+    private var addToChannelButton: some View {
+        if NetworkMonitor.shared.isConnected,
+           session.canManageChannels(serverID: serverID),
+           let target = ChannelTarget(item: item) {
+            Button {
+                channelTarget = target
+            } label: {
+                Image(systemName: "rectangle.stack.badge.plus")
+                    .font(.system(size: 20))
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
+            .accessibilityLabel("Add to Channel")
+        }
     }
 
     private func refreshMetadata() async {
@@ -829,6 +854,8 @@ struct MobileDetailView: View {
                 )
             }
 
+            addToChannelButton
+
             if NetworkMonitor.shared.isConnected {
                 adminMenu
             }
@@ -882,6 +909,8 @@ struct MobileDetailView: View {
                 .tint(.white)
             }
 
+            addToChannelButton
+
             if NetworkMonitor.shared.isConnected {
                 adminMenu
             }
@@ -930,6 +959,7 @@ struct MobileDetailView: View {
 
             if NetworkMonitor.shared.isConnected {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
+                addToChannelButton
                 adminMenu
             }
 
