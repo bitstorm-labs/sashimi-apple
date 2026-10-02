@@ -58,6 +58,13 @@ struct MobilePlayerEndCard: View {
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.75))
                     .multilineTextAlignment(.center)
+                if let nextEpisodeText {
+                    Text(nextEpisodeText)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
                 if let metadataText {
                     Text(metadataText)
                         .font(.caption)
@@ -94,6 +101,15 @@ struct MobilePlayerEndCard: View {
         case .lookupFailed: return "The next episode could not be loaded. Try again later or replay this episode."
         case nil: return ""
         }
+    }
+
+    /// "Up next: S1:E3 · Title" when there is a next episode to play.
+    private var nextEpisodeText: String? {
+        guard state.endCard == .nextEpisode, let next = state.nextEpisode else { return nil }
+        if let season = next.parentIndexNumber, let episode = next.indexNumber {
+            return "Up next: S\(season):E\(episode) · \(next.name)"
+        }
+        return "Up next: \(next.name)"
     }
 
     private var metadataText: String? {

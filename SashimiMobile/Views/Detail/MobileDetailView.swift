@@ -244,7 +244,7 @@ struct MobileDetailView: View {
             MobileAddToChannelSheet(target: target)
         }
         .task {
-            if NetworkMonitor.shared.isConnected,
+            if NetworkMonitor.shared.isOnline,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
                 item = freshItem
                 isWatched = freshItem.userData?.played ?? false
@@ -332,7 +332,7 @@ struct MobileDetailView: View {
     /// titles a channel can air (an episode or season adds its series).
     @ViewBuilder
     private var addToChannelButton: some View {
-        if NetworkMonitor.shared.isConnected,
+        if NetworkMonitor.shared.isOnline,
            session.canManageChannels(serverID: serverID),
            let target = ChannelTarget(item: item) {
             Button {
@@ -845,7 +845,7 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isConnected {
+            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isOnline {
                 BulkDownloadMenu(
                     seasonEpisodes: episodes,
                     seasonName: selectedSeason?.name,
@@ -856,7 +856,7 @@ struct MobileDetailView: View {
 
             addToChannelButton
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 adminMenu
             }
 
@@ -890,11 +890,11 @@ struct MobileDetailView: View {
 
             watchedButton
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
             }
 
-            if NetworkMonitor.shared.isConnected, isEpisode, item.seriesId != nil {
+            if NetworkMonitor.shared.isOnline, isEpisode, item.seriesId != nil {
                 NavigationLink {
                     if let seriesItem = navigateToSeriesItem {
                         AdaptiveDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
@@ -911,7 +911,7 @@ struct MobileDetailView: View {
 
             addToChannelButton
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 adminMenu
             }
 
@@ -957,7 +957,7 @@ struct MobileDetailView: View {
                 .tint(.white)
             }
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
                 addToChannelButton
                 adminMenu
@@ -1093,7 +1093,7 @@ struct MobileDetailView: View {
             await loadEpisodeContent()
         }
 
-        guard NetworkMonitor.shared.isConnected else { return }
+        guard NetworkMonitor.shared.isOnline else { return }
 
         if !isSeries && !isSeason {
             await loadMediaInfo()
@@ -1114,7 +1114,7 @@ struct MobileDetailView: View {
     }
 
     private func loadSeriesContent() async {
-        guard NetworkMonitor.shared.isConnected else {
+        guard NetworkMonitor.shared.isOnline else {
             await loadOfflineSeriesContent()
             return
         }
@@ -1221,7 +1221,7 @@ struct MobileDetailView: View {
 
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
-        if NetworkMonitor.shared.isConnected {
+        if NetworkMonitor.shared.isOnline {
             do {
                 episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
                 isLoadingEpisodes = false
@@ -1334,7 +1334,7 @@ struct MobileDetailView: View {
 
     private var backdropImageURL: URL? {
         // Offline: use local files
-        if !NetworkMonitor.shared.isConnected {
+        if !NetworkMonitor.shared.isOnline {
             // For series, check first downloaded episode's backdrop
             if isSeries {
                 let downloaded = offlineEpisodes(for: item.id)
@@ -1382,7 +1382,7 @@ struct MobileDetailView: View {
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
-        guard NetworkMonitor.shared.isConnected else { return nil }
+        guard NetworkMonitor.shared.isOnline else { return nil }
         guard let serverURL = detailServerURL else { return nil }
         return serverURL
             .appendingPathComponent("Items/\(itemId)/Images/Primary")
@@ -1417,10 +1417,13 @@ struct MobileEpisodeCard: View {
     var isCurrentEpisode: Bool = false
     var isYouTube: Bool = false
     var serverID: String?
+    /// The episode's still from its download (offline show page); replaces
+    /// the server image.
+    var artwork: Image?
     let action: () -> Void
 
     private var imageURL: URL? {
-        if !NetworkMonitor.shared.isConnected {
+        if !NetworkMonitor.shared.isOnline {
             return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
         let serverURL: URL?
@@ -1440,7 +1443,10 @@ struct MobileEpisodeCard: View {
             VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                 ZStack(alignment: .bottomLeading) {
                     // Thumbnail
-                    if let url = imageURL {
+                    if let artwork {
+                        artwork
+                            .resizable().scaledToFill()
+                    } else if let url = imageURL {
                         LazyImage(request: SashimiImagePipeline.request(url: url, serverID: serverID)) { state in
                             if let image = state.image {
                                 image

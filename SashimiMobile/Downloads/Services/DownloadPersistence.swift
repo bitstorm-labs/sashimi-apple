@@ -175,13 +175,21 @@ final class DownloadPersistence {
 
     // MARK: - Offline Progress (async writes, sync reads)
 
-    func savePlaybackPosition(itemId: String, serverID: String? = nil, positionTicks: Int64) {
+    /// `didSave` runs on the persistence queue once the position is stored,
+    /// so the offline screens can re-read it (they fetch on their own context).
+    func savePlaybackPosition(
+        itemId: String,
+        serverID: String? = nil,
+        positionTicks: Int64,
+        didSave: (@Sendable () -> Void)? = nil
+    ) {
         queue.async { [weak self] in
             guard let self, let context = self.modelContext,
                   let record = self.record(itemId: itemId, serverID: serverID, in: context) else { return }
             record.lastPlaybackPositionTicks = positionTicks
             record.needsProgressSync = true
             try? context.save()
+            didSave?()
         }
     }
 
@@ -199,12 +207,13 @@ final class DownloadPersistence {
         }
     }
 
-    func clearSyncFlag(itemId: String, serverID: String? = nil) {
+    func clearSyncFlag(itemId: String, serverID: String? = nil, didSave: (@Sendable () -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self, let context = self.modelContext,
                   let record = self.record(itemId: itemId, serverID: serverID, in: context) else { return }
             record.needsProgressSync = false
             try? context.save()
+            didSave?()
         }
     }
 

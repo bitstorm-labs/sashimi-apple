@@ -107,6 +107,11 @@ struct ContentView: View {
                 }
                 .id(sessionManager.activeSessionIdentity)
                 .task {
+                    // Re-runs on a server switch (the id above), which starts
+                    // the verdict over for the new server.
+                    networkMonitor.startServerProbing {
+                        await JellyfinClient.shared.probeReachability()
+                    }
                     await DownloadManager.shared.syncPendingProgress()
                     await DownloadManager.shared.backfillAllSubtitles()
                 }
@@ -174,6 +179,8 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            // The server may have come or gone while the app was away.
+            networkMonitor.requestProbe()
             Task { await PlaybackReportDelivery.shared.flush() }
             // Downloads queued before the screen locked can finish without
             // their subtitles; fetch what they miss while we're in front.
@@ -184,9 +191,13 @@ struct ContentView: View {
             intentCoordinator.reloadPersistedRoute()
             handleIntentRoute(intentCoordinator.route)
         }
-        .onChange(of: networkMonitor.isConnected) { _, isConnected in
-            guard isConnected else { return }
+        // Back online (network regained, or the server answering again):
+        // deliver what was saved offline. The offline screens refresh as the
+        // sync clears each item's pending flag.
+        .onChange(of: networkMonitor.isOnline) { _, isOnline in
+            guard isOnline else { return }
             Task { await PlaybackReportDelivery.shared.flush() }
+            Task { await DownloadManager.shared.syncPendingProgress() }
         }
         .onChange(of: intentPlaybackEntity) { oldEntity, newEntity in
             guard newEntity == nil, let oldEntity else { return }

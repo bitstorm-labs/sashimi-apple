@@ -29,9 +29,9 @@ struct MobilePlayerView: View {
     @State private var isScrubbing = false
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
-    /// A downloaded item that played to its end. Acted on (Delete downloads
+    /// Downloaded items that played to their end. Acted on (Delete downloads
     /// after watching) only once the player is gone, never mid-playback.
-    @State private var finishedDownloadItemID: String?
+    @State private var finishedDownloadItemIDs: [String] = []
 
     init(
         item: BaseItemDto,
@@ -157,6 +157,9 @@ struct MobilePlayerView: View {
                 timeoutTask.cancel()
                 await viewModel.announceStation()
             } else {
+                // A download rolls into the next downloaded episode of its
+                // show, with the same Up Next / end card as online.
+                viewModel.offlineEpisodeSource = DownloadedEpisodeSource(serverID: serverID)
                 await viewModel.loadMedia(
                     item: item,
                     localFileURL: localFileURL,
@@ -166,8 +169,11 @@ struct MobilePlayerView: View {
                 // Goes through the view model rather than seeking directly: the
                 // resume position is applied when the item reports .readyToPlay,
                 // so a seek issued here would be overwritten a moment later.
+                // A position past the played line starts over instead of
+                // resuming in the credits.
                 if let offlineTicks = DownloadManager.shared.offlinePlaybackPosition(for: item.id, serverID: serverID),
-                   offlineTicks > 0 {
+                   offlineTicks > 0,
+                   !OfflinePlaybackRules.isPlayed(positionTicks: offlineTicks, runTimeTicks: item.runTimeTicks) {
                     let serverTicks = item.userData?.playbackPositionTicks ?? 0
                     if offlineTicks > serverTicks {
                         viewModel.overrideResumePosition(ticks: offlineTicks)
@@ -200,12 +206,12 @@ struct MobilePlayerView: View {
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
             let stopTask = viewModel.beginStop(reason: .viewDisappeared)
-            let finishedDownload = finishedDownloadItemID
+            let finishedDownloads = finishedDownloadItemIDs
             Task {
                 await stopTask.value
-                if let finishedDownload {
+                for itemId in finishedDownloads {
                     await DownloadManager.shared.handleOfflinePlaybackFinished(
-                        itemId: finishedDownload,
+                        itemId: itemId,
                         serverID: serverID
                     )
                 }
@@ -255,9 +261,16 @@ struct MobilePlayerView: View {
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             // Captured now: the item is cleared when playback is torn down.
-            finishedDownloadItemID = ended && localFileURL != nil ? displayedItem.id : nil
+            // Offline autoplay can finish several downloads in one sitting,
+            // so every one is remembered, not just the last.
+            if ended, localFileURL != nil, !finishedDownloadItemIDs.contains(displayedItem.id) {
+                finishedDownloadItemIDs.append(displayedItem.id)
+            }
+            // Offline with no further download there is no end card to show
+            // (the series may well go on), so close as before.
             if ended && (!playbackSettings.showEpisodeNavigationControls ||
-                         !viewModel.transitionState.isEpisodeNavigationAvailable) {
+                         !viewModel.transitionState.isEpisodeNavigationAvailable ||
+                         (viewModel.isOfflinePlayback && viewModel.transitionState.endCard == nil)) {
                 dismiss()
             }
         }
@@ -341,7 +354,10 @@ struct MobilePlayerView: View {
     /// last call before the player is torn down wins, and it no-ops once the
     /// player is gone.
     private func saveOfflinePositionIfNeeded() {
-        guard localFileURL != nil, let currentTime = viewModel.player?.currentTime() else { return }
+        // A natural end already saved the item as finished; the stopped
+        // player's clock must not overwrite that.
+        guard localFileURL != nil, !viewModel.playbackEnded,
+              let currentTime = viewModel.player?.currentTime() else { return }
         let ticks = Int64(currentTime.seconds * 10_000_000)
         DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
     }

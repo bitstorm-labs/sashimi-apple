@@ -189,6 +189,8 @@ struct MobileRecentlyAddedCard: View {
     let badgeCount: Int?
     var serverURL: URL?
     var serverID: String?
+    /// Artwork already on the device (offline Home); replaces the server image.
+    var artwork: Image?
 
     @AppStorage("showQualityBadges") private var showQualityBadges = true
     @AppStorage("showReviewRatings") private var showReviewRatings = true
@@ -321,7 +323,10 @@ struct MobileRecentlyAddedCard: View {
 
     private var posterImage: some View {
         Group {
-            if imageRequest != nil {
+            if let artwork {
+                artwork
+                    .resizable().scaledToFill()
+            } else if imageRequest != nil {
                 LazyImage(request: imageRequest) { state in
                     if let image = state.image {
                         image

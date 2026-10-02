@@ -289,7 +289,7 @@ struct MobileHomeView: View {
 }
 
 /// The tvOS hero's frame fitted to an iPad, portrait or landscape.
-private struct PadHeroMetrics {
+struct PadHeroMetrics {
     /// tvOS sizes scaled the way the rest of the iPad UI scales them
     /// (`MobileTypography`: 28 -> 17, 24 -> 15, 40 -> 22).
     static let scale: CGFloat = 0.6

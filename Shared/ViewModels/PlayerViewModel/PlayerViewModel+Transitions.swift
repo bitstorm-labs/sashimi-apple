@@ -20,6 +20,12 @@ extension PlayerViewModel {
         await waitForEpisodeNavigation(for: item)
         guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return true }
 
+        // Offline, "no next" only means nothing further is downloaded — not
+        // that the series is over — so end as before rather than claim it.
+        if isOfflinePlayback && transitionState.nextEpisode == nil {
+            return false
+        }
+
         switch transitionState.lookupStatus {
         case .available where transitionState.nextEpisode != nil:
             if playbackSettings.autoPlayNextEpisode {
@@ -54,18 +60,25 @@ extension PlayerViewModel {
         progressReportTask?.cancel()
 
         if let item = currentItem {
+            let duration = player?.currentItem?.duration.seconds ?? 0
+            let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
+            let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
+            let endTicks = Int64(max(0.0, endSeconds) * 10_000_000)
             if !isOfflinePlayback {
                 // Stopped + mark-played form one durable completion event. The
                 // delivery layer persists the phase between the two requests so a
                 // retry never loses completion or repeats a successful first phase.
-                let duration = player?.currentItem?.duration.seconds ?? 0
-                let currentSeconds = player?.currentItem?.currentTime().seconds ?? 0
-                let endSeconds = duration.isFinite && duration > 0 ? duration : currentSeconds
                 await playbackReporter.completed(
                     itemID: item.id,
-                    positionTicks: Int64(max(0.0, endSeconds) * 10_000_000),
+                    positionTicks: endTicks,
                     playSessionID: playSessionId
                 )
+            } else if let offlineEpisodeSource {
+                // Saved before the next download starts: the player that
+                // knows the finished position is about to be replaced. At
+                // least the runtime: it played to the end, so it counts as
+                // played even if the file runs a little short of the metadata.
+                offlineEpisodeSource.recordPosition(max(endTicks, item.runTimeTicks ?? 0), for: item)
             }
 
             guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
@@ -82,7 +95,7 @@ extension PlayerViewModel {
             // Lookup happens after completion is recorded. This ordering keeps
             // autoplay from starting a new server session before Jellyfin has
             // received the completed position and played marker.
-            if item.type == .episode, !isOfflinePlayback {
+            if item.type == .episode, !isOfflinePlayback || offlineEpisodeSource != nil {
                 if await advanceToNextEpisode(after: item, attempt: attempt) { return }
             } else if item.type == .video,
                       playbackSettings.autoPlayNextEpisode,
@@ -216,17 +229,42 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("item", item.id),
             PlayerDiagnostics.field("automatic", automatic)
         ])
+        // Read before loading: loadMedia resets it for the incoming item.
+        let wasOffline = isOfflinePlayback
         if !automatic {
             // A manual skip is a stop, not a completion. This flushes the
             // outgoing position through #428's lifecycle without markPlayed.
-            await reportCurrentPlaybackStoppedForTransition()
+            if wasOffline {
+                recordOfflinePositionForTransition()
+            } else {
+                await reportCurrentPlaybackStoppedForTransition()
+            }
         }
         guard playbackAttempt == attempt, !Task.isCancelled else { return }
         playbackEnded = false
         if let transitionLoader {
             await transitionLoader.load(item: item, startFromBeginning: startFromBeginning)
+        } else if wasOffline, let media = offlineEpisodeSource?.media(for: item) {
+            // Stay on the downloads: the local file, its subtitles and the
+            // locally saved resume point, with no server round trip.
+            await loadMedia(
+                item: media.item,
+                startFromBeginning: startFromBeginning,
+                localFileURL: media.fileURL,
+                offlineSubtitles: media.subtitles
+            )
         } else {
             await loadMedia(item: item, startFromBeginning: startFromBeginning)
         }
+    }
+
+    /// The offline counterpart of the manual-skip stop report: keep the
+    /// outgoing download's position before its player is replaced.
+    private func recordOfflinePositionForTransition() {
+        guard let item = currentItem,
+              let offlineEpisodeSource,
+              let seconds = player?.currentItem?.currentTime().seconds,
+              seconds.isFinite, seconds > 0 else { return }
+        offlineEpisodeSource.recordPosition(Int64(seconds * 10_000_000), for: item)
     }
 }

@@ -170,7 +170,7 @@ struct PersonDetailView: View {
             originatingServerID: serverID,
             excludingItemID: excludingItemID,
             excludingTitleKey: excludingTitleKey,
-            isOffline: !NetworkMonitor.shared.isConnected
+            isOffline: !NetworkMonitor.shared.isOnline
         )
     }
 

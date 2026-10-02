@@ -440,6 +440,9 @@ actor JellyfinClient {
     /// Short-budget session for sign-in requests only (#476); see
     /// `SignInNetworking`.
     private let signInSession: URLSession
+    /// Session for reachability probes: never waits for connectivity (the
+    /// API session does, which turns a dead server into a two-minute hang).
+    private lazy var probeSession: URLSession = Self.makeProbeSession(delegate: certificateDelegate)
     private let maxRetries = 3
     private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "JellyfinClient")
 
@@ -499,6 +502,15 @@ actor JellyfinClient {
             delegate: delegate,
             delegateQueue: nil
         )
+    }
+
+    private static func makeProbeSession(delegate: CertificateValidationDelegate) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = ServerReachabilityTracker.probeTimeout
+        config.timeoutIntervalForResource = ServerReachabilityTracker.probeTimeout + 1
+        config.waitsForConnectivity = false
+        config.urlCache = nil
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
 
     private init(scopedServerURL: URL?, accessToken: String?, userId: String?) {
@@ -745,6 +757,10 @@ actor JellyfinClient {
                 throw JellyfinError.sessionExpired
             }
 
+            // A gateway error is a proxy saying Jellyfin is gone; let the
+            // network monitor probe while this request retries.
+            noteFailureIfUnreachable(statusCode: httpResponse.statusCode)
+
             // Retry on 5xx server errors
             if (500...599).contains(httpResponse.statusCode) && isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
@@ -765,6 +781,9 @@ actor JellyfinClient {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // Probe in parallel with the retries below: they can take a
+            // minute against a dead server, the probe a few seconds.
+            noteFailureIfUnreachable(error)
             // Retry on network errors (URLError)
             if isRetryable && retryCount < maxRetries {
                 let delay = pow(2.0, Double(retryCount))
@@ -1559,6 +1578,57 @@ actor JellyfinClient {
     func getPublicSystemInfo() async throws -> PublicSystemInfo {
         let data = try await request(path: "/System/Info/Public", isSignInStep: true)
         return try JSONDecoder().decode(PublicSystemInfo.self, from: data)
+    }
+
+    /// Whether the configured server answers at all: an unauthenticated
+    /// `GET /System/Info/Public` on a short-timeout session that does not wait
+    /// for connectivity. Any response short of a 5xx counts (a reverse proxy
+    /// with Jellyfin down answers 502/503/504). With no server configured
+    /// there is nothing to be unreachable, so that reports true.
+    func probeReachability() async -> Bool {
+        guard let serverURL else { return true }
+        var request = URLRequest(url: serverURL.appendingPathComponent("/System/Info/Public"))
+        request.timeoutInterval = ServerReachabilityTracker.probeTimeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (_, response) = try await probeSession.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return http.statusCode < 500
+        } catch {
+            return false
+        }
+    }
+
+    /// Transport failures (and gateway errors) that suggest the server itself
+    /// is gone, as opposed to a bad request or a permissions answer.
+    static func indicatesServerUnreachable(_ error: Error) -> Bool {
+        if let jellyfinError = error as? JellyfinError,
+           case .httpError(let statusCode) = jellyfinError {
+            return [502, 503, 504].contains(statusCode)
+        }
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+             .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Tells the network monitor a request to this client's server failed in
+    /// a way that suggests the server is unreachable, so it can probe.
+    private func noteFailureIfUnreachable(statusCode: Int) {
+        guard (502...504).contains(statusCode) else { return }
+        noteFailureIfUnreachable(JellyfinError.httpError(statusCode: statusCode))
+    }
+
+    private func noteFailureIfUnreachable(_ error: Error) {
+        guard Self.indicatesServerUnreachable(error) else { return }
+        let failedServerURL = serverURL
+        Task { @MainActor in
+            NetworkMonitor.shared.noteServerRequestFailure(serverURL: failedServerURL)
+        }
     }
 
     func getOwnSession() async throws -> SessionInfoDto? {

@@ -13,6 +13,10 @@ struct HeroSection: View {
     /// True while the viewer is touching the hero (iPad), so it never rotates
     /// out from under a finger. Releasing restarts the full slide interval.
     var isPaused = false
+    /// Artwork already on the device for a slide (the iPad's offline Home,
+    /// built from downloads). When it returns an image the slide shows that
+    /// instead of requesting server artwork; nil everywhere else.
+    var localBackdrop: ((BaseItemDto) -> Image?)?
 
     @State private var autoAdvanceTimer: Timer?
 
@@ -138,20 +142,7 @@ struct HeroSection: View {
                     // mid-hero. Image-relative, the ramp always covers the edge.
                     HStack(spacing: 0) {
                         Spacer()
-                        SmartPosterImage(
-                            itemIds: heroFallbackIds,
-                            // 1920, not 3840. tvOS lays out in a 1920x1080 space
-                            // and this slot renders ~910x512pt, so a 4K request
-                            // was a 33 MB RGBA decode (3840*2160*4) for an image
-                            // that is downsampled on sight. Jellyfin treats
-                            // maxWidth as a cap, so any item with 4K artwork
-                            // really did return 4K -- and the hero rotates every
-                            // 6 seconds.
-                            maxWidth: 1920,
-                            imageTypes: heroImageTypes,
-                            contentMode: .fit,
-                            serverID: serverID
-                        )
+                        heroImage
                         .mask(
                             LinearGradient(
                                 stops: [
@@ -419,6 +410,36 @@ struct HeroSection: View {
         let season = item.parentIndexNumber ?? 1
         let episode = item.indexNumber ?? 1
         return "S\(season) E\(episode) • \(item.name)"
+    }
+}
+
+// MARK: - Backdrop
+
+extension HeroSection {
+    /// The slide's backdrop: local artwork when the caller has it, otherwise
+    /// the server's, by the same fallback chain as always.
+    @ViewBuilder
+    private var heroImage: some View {
+        if let local = localBackdrop?(currentItem) {
+            local
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } else {
+            SmartPosterImage(
+                itemIds: heroFallbackIds,
+                // 1920, not 3840. tvOS lays out in a 1920x1080 space
+                // and this slot renders ~910x512pt, so a 4K request
+                // was a 33 MB RGBA decode (3840*2160*4) for an image
+                // that is downsampled on sight. Jellyfin treats
+                // maxWidth as a cap, so any item with 4K artwork
+                // really did return 4K -- and the hero rotates every
+                // 6 seconds.
+                maxWidth: 1920,
+                imageTypes: heroImageTypes,
+                contentMode: .fit,
+                serverID: serverID
+            )
+        }
     }
 }
 
