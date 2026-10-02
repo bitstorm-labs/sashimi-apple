@@ -1038,23 +1038,42 @@ struct MobileDetailView: View {
                         .foregroundStyle(MobileColors.textPrimary)
                         .padding(.horizontal, MobileSpacing.md)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: MobileSpacing.md) {
-                            ForEach(episodes) { episode in
-                                MobileEpisodeCard(
-                                    episode: episode,
-                                    isCurrentEpisode: episode.id == currentEpisodeId,
-                                    isYouTube: isYouTubeStyle,
-                                    serverID: serverID
-                                ) {
-                                    showingEpisodeDetail = episode
+                    // Opens on the current episode (next up, or the one this
+                    // page is for), as the tvOS and Roku rows do — the row
+                    // used to sit at E1 however far into a season you were.
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: MobileSpacing.md) {
+                                ForEach(episodes) { episode in
+                                    MobileEpisodeCard(
+                                        episode: episode,
+                                        isCurrentEpisode: episode.id == currentEpisodeId,
+                                        isYouTube: isYouTubeStyle,
+                                        serverID: serverID
+                                    ) {
+                                        showingEpisodeDetail = episode
+                                    }
+                                    .id(episode.id)
                                 }
                             }
+                            .padding(.horizontal, MobileSpacing.md)
                         }
-                        .padding(.horizontal, MobileSpacing.md)
+                        .onAppear { scrollToCurrentEpisode(proxy) }
+                        .onChange(of: episodes.map(\.id)) { _, _ in scrollToCurrentEpisode(proxy) }
+                        .onChange(of: currentEpisodeId) { _, _ in scrollToCurrentEpisode(proxy) }
                     }
                 }
             }
+        }
+    }
+
+    /// Brings the current episode to the front of the row, if it is in the
+    /// season being shown (another season's tab shows that season from E1).
+    private func scrollToCurrentEpisode(_ proxy: ScrollViewProxy) {
+        guard let id = currentEpisodeId, episodes.contains(where: { $0.id == id }) else { return }
+        // After layout: a LazyHStack has no frame for the card on the first pass.
+        DispatchQueue.main.async {
+            proxy.scrollTo(id, anchor: .leading)
         }
     }
 
