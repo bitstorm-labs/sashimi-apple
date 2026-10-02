@@ -1,407 +1,309 @@
 import SwiftUI
-import SwiftData
-import NukeUI
 
+/// Home while the server can't be used: the downloads, laid out like the
+/// online Home (the iPad's hero and rows, the iPhone's header and rows) with
+/// the same cards, so going offline changes what is listed, not the app.
 struct OfflineHomeView: View {
-    @Query(
-        filter: #Predicate<DownloadedItem> { $0.statusRaw == "completed" },
-        sort: \DownloadedItem.dateCompleted,
-        order: .reverse
-    ) private var downloads: [DownloadedItem]
+    @StateObject private var library = OfflineLibrary()
+    @ObservedObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
     @State private var playingItem: BaseItemDto?
     @State private var playingServerID: String?
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var openedShow: OfflineShowRoute?
+    @State private var heroIndex = 0
+    /// The fixed hero wallpaper dims to black as the rows scroll up over it.
+    @State private var heroScrollFade: Double = 0
+    @GestureState private var isTouchingHero = false
 
-    private var continueWatchingItems: [DownloadedItem] {
-        downloads.filter { $0.lastPlaybackPositionTicks > 0 }
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    private var movieItems: [DownloadedItem] {
-        downloads.filter { $0.itemType == .movie }
-    }
-
-    private struct SeriesGroup {
-        let name: String
-        let representative: DownloadedItem
-        let episodes: [DownloadedItem]
-    }
-
-    private var seriesGroups: [SeriesGroup] {
-        let episodes = downloads.filter { $0.itemType == .episode }
-        let grouped = Dictionary(grouping: episodes) { $0.seriesName ?? "Unknown" }
-        return grouped.keys.sorted().compactMap { name in
-            guard let eps = grouped[name], let first = eps.first else { return nil }
-            let sorted = eps.sorted {
-                ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) <
-                    ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
-            }
-            return SeriesGroup(name: name, representative: first, episodes: sorted)
-        }
+    private var continueWatchingWidth: CGFloat {
+        isPad ? 280 : PhoneSizing.continueWatchingWidth
     }
 
     private var posterWidth: CGFloat {
-        sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
+        isPad ? MobileSizing.posterWidth : PhoneSizing.posterWidth
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileSpacing.xl) {
-                offlineBanner
+        Group {
+            if isPad {
+                padLayout
+            } else {
+                phoneLayout
+            }
+        }
+        .navigationDestination(item: $openedShow) { route in
+            OfflineShowView(showKey: route.key)
+        }
+        .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
+        .onAppear { library.reload() }
+        .onChange(of: downloadManager.stateVersion) { _, _ in
+            library.reload()
+        }
+    }
 
-                if downloads.isEmpty {
-                    emptyState
-                } else {
-                    // Continue Watching
-                    if !continueWatchingItems.isEmpty {
-                        continueWatchingSection
-                    }
+    // MARK: - iPad (MobileHomeView's layout)
 
-                    // Movies
-                    if !movieItems.isEmpty {
-                        movieSection
-                    }
+    private var padLayout: some View {
+        GeometryReader { proxy in
+            let hero = PadHeroMetrics(proxy: proxy)
+            let slides = library.heroEntries.map { HeroSlide.library($0.item) }
 
-                    // TV Shows
-                    if !seriesGroups.isEmpty {
-                        tvShowsSection
-                    }
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    colors: [MobileColors.background, Color.black],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                if !slides.isEmpty {
+                    HeroSection(
+                        slides: slides,
+                        libraryNames: [:],
+                        currentIndex: $heroIndex,
+                        layout: hero.layout,
+                        isPaused: isTouchingHero,
+                        localBackdrop: heroBackdrop
+                    )
+                    .overlay(Color.black.opacity(heroScrollFade))
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { openHeroSlide() }
                 }
 
-                Spacer().frame(height: 40)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: MobileSpacing.xl) {
+                        if !slides.isEmpty {
+                            heroRevealSpacer(height: hero.revealHeight)
+                        }
+                        rows
+                    }
+                    .padding(.top, slides.isEmpty ? MobileSpacing.md : 0)
+                    .padding(.bottom, MobileSpacing.md)
+                }
+                .refreshable { refresh() }
             }
-            .padding(.vertical, MobileSpacing.md)
+        }
+    }
+
+    private func heroBackdrop(for item: BaseItemDto) -> Image? {
+        library.heroEntries.first { $0.itemId == item.id }.flatMap(OfflineArtwork.landscape(for:))
+    }
+
+    /// The online Home's reveal spacer: a clear band over the fixed hero that
+    /// is also its touch surface (tap opens, swipe changes slide).
+    private func heroRevealSpacer(height: CGFloat) -> some View {
+        Color.clear
+            .frame(height: height)
+            .contentShape(Rectangle())
+            .onTapGesture { openHeroSlide() }
+            .simultaneousGesture(heroSwipe)
+            .onGeometryChange(for: Bool.self) { geometry in
+                geometry.frame(in: .scrollView).minY < -8
+            } action: { scrolled in
+                withAnimation(.easeOut(duration: 0.3)) {
+                    heroScrollFade = scrolled ? 1 : 0
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var heroSwipe: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .updating($isTouchingHero) { _, touching, _ in
+                touching = true
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                guard abs(horizontal) > 50,
+                      abs(horizontal) > abs(value.translation.height) * 1.5 else { return }
+                let count = library.heroEntries.count
+                guard count > 1 else { return }
+                let step = horizontal < 0 ? 1 : -1
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    heroIndex = ((min(heroIndex, count - 1) + step) % count + count) % count
+                }
+            }
+    }
+
+    private func openHeroSlide() {
+        let entries = library.heroEntries
+        guard !entries.isEmpty else { return }
+        open(entries[min(heroIndex, entries.count - 1)])
+    }
+
+    // MARK: - iPhone (PhoneHomeView's layout)
+
+    private var phoneLayout: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: MobileSpacing.lg) {
+                rows
+            }
+            .padding(.vertical, MobileSpacing.sm)
         }
         .background(MobileColors.background)
-        .navigationTitle("Downloads")
-        .fullScreenPlayer(item: $playingItem, serverID: playingServerID)
-    }
-
-    // MARK: - Continue Watching
-
-    private var continueWatchingSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Continue Watching")
-                .font(MobileTypography.headline)
-                .foregroundStyle(MobileColors.textPrimary)
-                .padding(.horizontal, MobileSpacing.md)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: MobileSpacing.md) {
-                    ForEach(continueWatchingItems, id: \.recordID) { item in
-                        Button {
-                            ThemeSongPlayer.shared.stopForPlayback()
-                            playingItem = item.asBaseItemDto
-                            playingServerID = item.serverID
-                        } label: {
-                            offlineContinueCard(item)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, MobileSpacing.md)
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: 8) {
+                Image("SidebarLogo")
+                    .resizable().scaledToFit()
+                    .frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                Text("Sashimi")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(MobileColors.textPrimary)
+                Spacer()
             }
+            .padding(.horizontal, MobileSpacing.md)
+            .padding(.vertical, MobileSpacing.xs)
+            .background(MobileColors.background)
         }
+        .refreshable { refresh() }
     }
 
-    private func offlineContinueCard(_ item: DownloadedItem) -> some View {
-        let width: CGFloat = sizeClass == .compact ? PhoneSizing.continueWatchingWidth : 280
-        let height = width * (9 / 16)
-
-        return VStack(alignment: .leading, spacing: MobileSpacing.xs) {
-            ZStack(alignment: .bottom) {
-                localImage(
-                    itemId: item.itemId,
-                    serverID: item.serverID,
-                    fileNames: ["backdrop.jpg", "poster.jpg"]
-                )
-                    .frame(width: width, height: height)
-                    .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
-
-                // Progress overlay
-                if let total = item.runTimeTicks, total > 0 {
-                    VStack(alignment: .leading, spacing: 6) {
-                        let remaining = total - item.lastPlaybackPositionTicks
-                        let minutes = remaining / 10_000_000 / 60
-
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(MobileColors.accent)
-                            Text("\(minutes)m left")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(MobileColors.textSecondary)
-                        }
-
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(MobileColors.progressBackground)
-                                Capsule()
-                                    .fill(MobileColors.accent)
-                                    .frame(width: geo.size.width * CGFloat(item.lastPlaybackPositionTicks) / CGFloat(total))
-                            }
-                        }
-                        .frame(height: 4)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-                    .frame(width: width, alignment: .leading)
-                    .background(
-                        LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 60)
-                            .frame(maxHeight: .infinity, alignment: .bottom)
-                    )
-                }
-            }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.large))
-
-            Text(item.displayTitle)
-                .font(MobileTypography.title)
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-                .frame(width: width, alignment: .leading)
-
-            if item.seriesName != nil {
-                Text(item.name)
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textSecondary)
-                    .lineLimit(1)
-                    .frame(width: width, alignment: .leading)
-            }
-        }
-    }
-
-    // MARK: - Movies
-
-    private var movieSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("Movies")
-                .font(MobileTypography.headline)
-                .foregroundStyle(MobileColors.textPrimary)
-                .padding(.horizontal, MobileSpacing.md)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: MobileSpacing.sm) {
-                    ForEach(movieItems, id: \.recordID) { item in
-                        Button {
-                            ThemeSongPlayer.shared.stopForPlayback()
-                            playingItem = item.asBaseItemDto
-                            playingServerID = item.serverID
-                        } label: {
-                            offlinePosterCard(item: item)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, MobileSpacing.md)
-            }
-        }
-    }
-
-    // MARK: - TV Shows (one card per series, navigates to detail)
-
-    private var tvShowsSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text("TV Shows")
-                .font(MobileTypography.headline)
-                .foregroundStyle(MobileColors.textPrimary)
-                .padding(.horizontal, MobileSpacing.md)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: MobileSpacing.sm) {
-                    ForEach(seriesGroups, id: \.name) { group in
-                        NavigationLink {
-                            AdaptiveDetailView(
-                                item: group.representative.asSeriesDto
-                            )
-                        } label: {
-                            offlineSeriesCard(group: group)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, MobileSpacing.md)
-            }
-        }
-    }
-
-    private func offlineSeriesCard(group: SeriesGroup) -> some View {
-        let height = posterWidth * (1 / PosterAspectRatio.portrait)
-
-        return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-            ZStack(alignment: .topTrailing) {
-                // Use series_poster.jpg if available, fall back to episode poster
-                localImage(
-                    itemId: group.representative.itemId,
-                    serverID: group.representative.serverID,
-                    fileNames: ["series_poster.jpg", "poster.jpg"]
-                )
-                    .frame(width: posterWidth, height: height)
-                    .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-
-                Text("\(group.episodes.count)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(MobileColors.accent)
-                    .clipShape(Capsule())
-                    .padding(6)
-            }
-
-            Text(group.name)
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-                .frame(width: posterWidth, alignment: .leading)
-        }
-    }
-
-    // MARK: - Poster Card
-
-    private func offlinePosterCard(item: DownloadedItem) -> some View {
-        let height = posterWidth * (1 / PosterAspectRatio.portrait)
-
-        return VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-            localImage(itemId: item.itemId, serverID: item.serverID, fileNames: ["poster.jpg"])
-                .frame(width: posterWidth, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-
-            Text(item.name)
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textPrimary)
-                .lineLimit(1)
-                .frame(width: posterWidth, alignment: .leading)
-        }
-    }
-
-    // MARK: - Local Image Helper (UIImage for reliable file:// loading)
+    // MARK: - Rows
 
     @ViewBuilder
-    private func localImage(itemId: String, serverID: String?, fileNames: [String]) -> some View {
-        if let uiImage = loadLocalImage(itemId: itemId, serverID: serverID, fileNames: fileNames) {
-            Image(uiImage: uiImage)
-                .resizable().scaledToFill()
+    private var rows: some View {
+        OfflineStatusBanner()
+            .padding(.horizontal, MobileSpacing.md)
+
+        if library.entries.isEmpty {
+            ContentUnavailableView(
+                "No Downloads",
+                systemImage: "arrow.down.circle",
+                description: Text("Download movies and episodes while online to watch them here.")
+            )
+            .frame(maxWidth: .infinity, minHeight: 300)
         } else {
-            Rectangle()
-                .fill(MobileColors.cardBackground)
-                .overlay {
-                    Image(systemName: "film")
-                        .font(.title2)
-                        .foregroundStyle(MobileColors.textTertiary)
-                }
+            landscapeRow("Continue Watching", entries: library.continueWatching)
+            landscapeRow("Next Up", entries: library.nextUp)
+            moviesRow
+            showsRow
         }
     }
 
-    private func loadLocalImage(itemId: String, serverID: String?, fileNames: [String]) -> UIImage? {
-        let dir = DownloadFileManager.itemDirectory(for: itemId, serverID: serverID)
-        for fileName in fileNames {
-            let path = dir.appendingPathComponent(fileName).path
-            if let image = UIImage(contentsOfFile: path) {
-                return image
+    /// Continue Watching and Next Up use the online Continue Watching card.
+    @ViewBuilder
+    private func landscapeRow(_ title: String, entries: [OfflineEntry]) -> some View {
+        if !entries.isEmpty {
+            row(title) {
+                LazyHStack(spacing: MobileSpacing.md) {
+                    ForEach(entries) { entry in
+                        Button {
+                            open(entry)
+                        } label: {
+                            MobileContinueWatchingCard(
+                                item: entry.item,
+                                width: continueWatchingWidth,
+                                artwork: OfflineArtwork.landscape(for: entry)
+                            )
+                            .pendingSyncBadge(entry.needsSync)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
-        return nil
     }
 
-    // MARK: - Offline Banner
-
-    private var offlineBanner: some View {
-        HStack(spacing: MobileSpacing.sm) {
-            Image(systemName: "wifi.slash")
-                .font(.system(size: 14))
-            Text("You're offline. Showing downloaded content.")
-                .font(MobileTypography.caption)
+    @ViewBuilder
+    private var moviesRow: some View {
+        let movies = library.movies
+        if !movies.isEmpty {
+            row("Movies") {
+                LazyHStack(spacing: MobileSpacing.sm) {
+                    ForEach(movies) { entry in
+                        Button {
+                            play(entry)
+                        } label: {
+                            MobileRecentlyAddedCard(
+                                item: entry.item,
+                                width: posterWidth,
+                                libraryName: nil,
+                                isCircular: false,
+                                isLandscape: false,
+                                badgeCount: nil,
+                                artwork: OfflineArtwork.poster(for: entry)
+                            )
+                            .pendingSyncBadge(entry.needsSync)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
-        .foregroundStyle(MobileColors.warning)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(MobileSpacing.md)
-        .background(MobileColors.warning.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-        .padding(.horizontal, MobileSpacing.md)
     }
 
-    // MARK: - Empty State
+    @ViewBuilder
+    private var showsRow: some View {
+        let shows = library.shows
+        if !shows.isEmpty {
+            row("TV Shows") {
+                LazyHStack(spacing: MobileSpacing.sm) {
+                    ForEach(shows) { show in
+                        Button {
+                            openedShow = OfflineShowRoute(key: show.id)
+                        } label: {
+                            MobileRecentlyAddedCard(
+                                item: show.seriesItem,
+                                width: posterWidth,
+                                libraryName: nil,
+                                isCircular: false,
+                                isLandscape: false,
+                                // The online card's "N new": unwatched episodes
+                                // that are here to watch.
+                                badgeCount: show.unplayedCount > 0 ? show.unplayedCount : nil,
+                                artwork: show.artworkEntry.flatMap(OfflineArtwork.poster(for:))
+                            )
+                            .pendingSyncBadge(show.needsSync)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
 
-    private var emptyState: some View {
-        VStack(spacing: MobileSpacing.md) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 48))
-                .foregroundStyle(MobileColors.textTertiary)
-            Text("No Downloads")
+    /// The online rows' frame: headline title over a horizontal strip.
+    private func row<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text(title)
                 .font(MobileTypography.headline)
                 .foregroundStyle(MobileColors.textPrimary)
-            Text("Download movies and episodes while online to watch them offline.")
-                .font(MobileTypography.body)
-                .foregroundStyle(MobileColors.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
+                .padding(.horizontal, MobileSpacing.md)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                content()
+                    .padding(.horizontal, MobileSpacing.md)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 300)
-    }
-}
-
-// MARK: - DownloadedItem → BaseItemDto
-
-extension DownloadedItem {
-    /// Create a series-type DTO from an episode (for navigating to series detail offline)
-    var asSeriesDto: BaseItemDto {
-        BaseItemDto(
-            id: seriesId ?? itemId,
-            name: seriesName ?? name,
-            type: .series,
-            seriesName: nil, seriesId: nil, seasonId: nil, parentId: nil,
-            indexNumber: nil, parentIndexNumber: nil, overview: nil, runTimeTicks: nil,
-            userData: nil, imageTags: nil, backdropImageTags: nil, parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
-            communityRating: nil, officialRating: nil, genres: nil, taglines: nil,
-            people: nil, criticRating: nil, premiereDate: nil, chapters: nil,
-            path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
-        )
     }
 
-    var asBaseItemDto: BaseItemDto {
-        BaseItemDto(
-            id: itemId,
-            name: name,
-            type: itemType,
-            seriesName: seriesName,
-            seriesId: seriesId,
-            seasonId: seasonId,
-            parentId: nil,
-            indexNumber: episodeNumber,
-            parentIndexNumber: seasonNumber,
-            overview: overview,
-            runTimeTicks: runTimeTicks,
-            userData: lastPlaybackPositionTicks > 0
-                ? UserItemDataDto(
-                    playbackPositionTicks: lastPlaybackPositionTicks,
-                    playCount: 0,
-                    isFavorite: false,
-                    played: false,
-                    lastPlayedDate: nil,
-                    unplayedItemCount: nil
-                )
-                : nil,
-            imageTags: nil,
-            backdropImageTags: nil,
-            parentBackdropImageTags: nil,
-            primaryImageAspectRatio: nil,
-            mediaType: nil,
-            libraryName: nil,
-            productionYear: productionYear,
-            communityRating: nil,
-            officialRating: nil,
-            genres: nil,
-            taglines: nil,
-            people: nil,
-            criticRating: nil,
-            premiereDate: nil,
-            chapters: nil,
-            path: nil,
-            remoteTrailers: nil,
-            localTrailerCount: nil,
-            mediaStreams: nil
-        )
+    // MARK: - Actions
+
+    /// An episode opens its show (the offline stand-in for the detail page);
+    /// a movie, which has no offline page, plays.
+    private func open(_ entry: OfflineEntry) {
+        if entry.itemType == .episode {
+            openedShow = OfflineShowRoute(key: entry.seriesKey)
+        } else {
+            play(entry)
+        }
+    }
+
+    private func play(_ entry: OfflineEntry) {
+        ThemeSongPlayer.shared.stopForPlayback()
+        playingServerID = entry.serverID
+        playingItem = entry.item
+    }
+
+    private func refresh() {
+        networkMonitor.requestProbe()
+        library.reload()
     }
 }

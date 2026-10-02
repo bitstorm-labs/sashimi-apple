@@ -149,7 +149,7 @@ struct PhoneDetailView: View {
             MobileAddToChannelSheet(target: target)
         }
         .task {
-            if NetworkMonitor.shared.isConnected,
+            if NetworkMonitor.shared.isOnline,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
                 item = freshItem
                 isWatched = freshItem.userData?.played ?? false
@@ -776,7 +776,7 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isConnected {
+            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isOnline {
                 BulkDownloadMenu(
                     seasonEpisodes: episodes,
                     seasonName: selectedSeason?.name,
@@ -786,7 +786,7 @@ struct PhoneDetailView: View {
                 )
             }
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 overflowMenu {
                     if let nextEp = nextEpisodeToPlay,
                        (nextEp.userData?.playbackPositionTicks ?? 0) > 0 {
@@ -826,7 +826,7 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
 
                 overflowMenu {
@@ -868,7 +868,7 @@ struct PhoneDetailView: View {
 
             watchedButton
 
-            if NetworkMonitor.shared.isConnected {
+            if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
 
                 overflowMenu {
@@ -1106,7 +1106,7 @@ struct PhoneDetailView: View {
             await loadEpisodeContent()
         }
 
-        guard NetworkMonitor.shared.isConnected else { return }
+        guard NetworkMonitor.shared.isOnline else { return }
 
         if !isSeries && !isSeason {
             await loadMediaInfo()
@@ -1127,7 +1127,7 @@ struct PhoneDetailView: View {
     }
 
     private func loadSeriesContent() async {
-        guard NetworkMonitor.shared.isConnected else {
+        guard NetworkMonitor.shared.isOnline else {
             await loadOfflineSeriesContent()
             return
         }
@@ -1228,7 +1228,7 @@ struct PhoneDetailView: View {
 
     private func loadEpisodesForSeason(seriesId: String, season: BaseItemDto) async {
         isLoadingEpisodes = true
-        if NetworkMonitor.shared.isConnected {
+        if NetworkMonitor.shared.isOnline {
             do {
                 episodes = try await JellyfinClient.shared.getEpisodes(seriesId: seriesId, seasonId: season.id)
                 isLoadingEpisodes = false
@@ -1339,7 +1339,7 @@ struct PhoneDetailView: View {
     // MARK: - URLs
 
     private var backdropImageURL: URL? {
-        if !NetworkMonitor.shared.isConnected {
+        if !NetworkMonitor.shared.isOnline {
             if isSeries {
                 let downloaded = offlineEpisodes(for: item.id)
                 if let firstEp = downloaded.first {
@@ -1382,7 +1382,7 @@ struct PhoneDetailView: View {
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
-        if !NetworkMonitor.shared.isConnected {
+        if !NetworkMonitor.shared.isOnline {
             return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
         guard let serverURL = detailServerURL else { return nil }

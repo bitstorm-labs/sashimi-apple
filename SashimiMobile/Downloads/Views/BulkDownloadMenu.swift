@@ -236,7 +236,7 @@ struct BulkDownloadMenu: View {
 
     private func refreshOriginalAllowed() async {
         originalAllowed = false
-        guard NetworkMonitor.shared.isConnected, let first = seasonEpisodes.first else { return }
+        guard NetworkMonitor.shared.isOnline, let first = seasonEpisodes.first else { return }
         do {
             let info = try await JellyfinClient.shared.getPlaybackInfo(
                 itemId: first.id, itemType: first.type, engine: .avFoundation

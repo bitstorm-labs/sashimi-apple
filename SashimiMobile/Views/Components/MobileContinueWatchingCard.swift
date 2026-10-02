@@ -7,15 +7,19 @@ struct MobileContinueWatchingCard: View {
     let item: BaseItemDto
     let libraryName: String?
     let width: CGFloat
+    /// Artwork already on the device (offline Home); replaces the server image.
+    let artwork: Image?
 
     init(
         item: BaseItemDto,
         libraryName: String? = nil,
-        width: CGFloat = 280
+        width: CGFloat = 280,
+        artwork: Image? = nil
     ) {
         self.item = item
         self.libraryName = libraryName
         self.width = width
+        self.artwork = artwork
     }
 
     // Check if this is YouTube content
@@ -186,7 +190,10 @@ struct MobileContinueWatchingCard: View {
 
     private var backdropImage: some View {
         Group {
-            if let url = imageURL {
+            if let artwork {
+                artwork
+                    .resizable().scaledToFill()
+            } else if let url = imageURL {
                 LazyImage(url: url) { state in
                     if let image = state.image {
                         image
