@@ -28,7 +28,7 @@ final class PlayerViewModelTests: XCTestCase {
 
     func testQualityOptionAllCases() {
         let allCases = QualityOption.allCases
-        XCTAssertEqual(allCases.count, 4)
+        XCTAssertEqual(allCases.count, 7)
         XCTAssertTrue(allCases.contains(.auto))
         XCTAssertTrue(allCases.contains(.quality1080p))
         XCTAssertTrue(allCases.contains(.quality720p))

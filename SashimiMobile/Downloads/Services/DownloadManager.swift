@@ -409,6 +409,9 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
         DownloadNetworkPolicy.apply(to: &downloadRequest, allowCellular: DownloadNetworkPolicy.allowsCellular)
+        if quality != .original {
+            DownloadEncodingAudit.markEncodedWithVideoBitrate(recordID: downloadKey(itemId: itemId, serverID: serverID))
+        }
 
         do {
             try DownloadFileManager.createItemDirectory(for: itemId, serverID: serverID)
@@ -513,6 +516,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         try? DownloadFileManager.deleteItemDirectory(for: itemId, serverID: serverID)
         deleteRecordFromMainContext(itemId: itemId, serverID: serverID)
+        DownloadEncodingAudit.forget(recordID: key)
 
         // Manage queue
         if itemId == currentDownloadItemId
@@ -609,6 +613,28 @@ final class DownloadManager: NSObject, ObservableObject {
         if userInitiated {
             announceIfWaitingForNetwork(count: 1)
         }
+    }
+
+    /// Whether a completed download was made by the pre-fix transcode URL
+    /// (1 kbps video) and should be downloaded again.
+    func needsRedownload(_ item: DownloadedItem, fixedRecordIDs: Set<String> = DownloadEncodingAudit.fixedRecordIDs()) -> Bool {
+        DownloadEncodingAudit.needsRedownload(
+            quality: item.downloadQuality,
+            isComplete: item.isComplete,
+            recordID: item.recordID,
+            fixedRecordIDs: fixedRecordIDs
+        )
+    }
+
+    /// Replaces unwatchable pre-fix downloads: each is deleted and queued
+    /// again at its own quality (retryDownload only deletes once the item's
+    /// metadata has been fetched, so offline nothing is lost).
+    func redownload(_ items: [(itemId: String, serverID: String?)]) async {
+        guard !items.isEmpty else { return }
+        for item in items {
+            await retryDownload(itemId: item.itemId, serverID: item.serverID, userInitiated: true)
+        }
+        toastMessage = items.count == 1 ? "Downloading again" : "Downloading \(items.count) items again"
     }
 
     // MARK: - Failure and automatic retry

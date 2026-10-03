@@ -24,6 +24,11 @@ extension PlayerViewModel {
             sessionOverride: maxBitrate ?? selectedQuality.maxBitrate,
             settingsMaxBitrate: playbackSettings.maxBitrate
         )
+        // The session tier's width travels with its bitrate (the next episode
+        // after a pick or a step-down loads through here with no explicit
+        // width; the two 720p/480p tiers differ only in bitrate, so a width
+        // derived from the bitrate alone would not match the tier).
+        let maxWidth = maxWidth ?? selectedQuality.maxWidth
 
         // The cap in force, and whether it came from a real measurement or a
         // default (the #341/#342 Auto-cap work). An unexplained transcode is
@@ -75,6 +80,7 @@ extension PlayerViewModel {
         // 1080p the link comfortably holds. A copyable source never reaches here
         // (no transcodingUrl, or cap >= source), so a wired/fast client keeps
         // native 4K; explicit quality picks and forceTranscode are untouched.
+        var requestedBitrateCap: Int?
         if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
            let source = playbackInfo.mediaSources?.first,
            source.transcodingUrl?.isEmpty == false,
@@ -87,6 +93,7 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("retryWidth", override.maxWidth),
                 PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
             ])
+            requestedBitrateCap = override.maxBitrate
             playbackInfo = try await client.getPlaybackInfo(
                 itemId: item.id,
                 itemType: item.type,
@@ -99,6 +106,8 @@ extension PlayerViewModel {
             )
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         }
+
+        activeBitrateCap = requestedBitrateCap ?? effectiveBitrate ?? bandwidth.cap
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             diagFailure(.playbackInfoResponse, [

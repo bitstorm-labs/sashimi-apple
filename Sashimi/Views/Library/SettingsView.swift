@@ -806,6 +806,10 @@ struct VideoQualitySettingsView: View {
         (label: "1080p - 20 Mbps", value: 20_000_000),
         (label: "720p - 8 Mbps", value: 8_000_000),
         (label: "480p - 3 Mbps", value: 3_000_000),
+        // Low bandwidth: for connections that cannot sustain 3 Mbps.
+        (label: "720p - 2 Mbps", value: 2_000_000),
+        (label: "480p - 1 Mbps", value: 1_000_000),
+        (label: "360p - 720 kbps", value: 720_000),
     ]
 
     var body: some View {

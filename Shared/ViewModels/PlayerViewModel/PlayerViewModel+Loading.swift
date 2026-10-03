@@ -24,6 +24,8 @@ extension PlayerViewModel {
         // Fresh item, fresh recovery budget; a watchdog armed for the old
         // player must not fire into the new one.
         recoveryAttempts = 0
+        qualityStepDowns = 0
+        activeBitrateCap = nil
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
         resetTransitionState(for: item)

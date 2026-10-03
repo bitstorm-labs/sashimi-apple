@@ -20,7 +20,7 @@ struct MobilePlayerLoadingView: View {
             VStack(spacing: 16) {
                 if viewModel.isLoading {
                     ProgressView().scaleEffect(1.5)
-                    Text("Loading...").foregroundStyle(.white)
+                    Text(viewModel.playbackNotice ?? "Loading...").foregroundStyle(.white)
                 } else if let errorMessage = viewModel.errorMessage {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.largeTitle)

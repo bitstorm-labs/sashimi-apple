@@ -73,6 +73,7 @@ extension PlayerViewModel {
         subtitleLoadTask?.cancel()
         navigationTask?.cancel()
         navigationTask = nil
+        clearPlaybackNotice()
         cleanupSegmentTracking()
         subtitleManager.clear()
         // The session is over — the persisted playbackSettings carry the

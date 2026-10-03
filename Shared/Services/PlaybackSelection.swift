@@ -29,12 +29,18 @@ enum PlaybackSelection {
     static let unmeasuredLocalBitrateCap = 100_000_000
 
     /// Cap on "Auto" with no measurement and a server reached over the
-    /// internet, where guessing high really can stall playback.
-    static let unmeasuredRemoteBitrateCap = 20_000_000
+    /// internet, where guessing high really can stall playback. 4 Mbps (480p),
+    /// not the old 20: a remote iPad whose probe had not landed was handed
+    /// 7-10 Mbps streams its connection could not sustain, and they stalled
+    /// and restarted over and over. A measurement, once it lands, raises it.
+    static let unmeasuredRemoteBitrateCap = 4_000_000
 
     /// Clamp applied to a measured link. The floor keeps a badly timed probe
-    /// (a probe that raced a buffering stream) from pinning quality to nothing.
-    static let minimumMeasuredBitrateCap = 3_000_000
+    /// (a probe that raced a buffering stream) from pinning quality to
+    /// nothing — but it must still sit below what a genuinely slow link can
+    /// carry. The old 3 Mbps floor meant a 1.5 Mbps connection was asked for
+    /// twice its capacity; 720 kbps matches the lowest quality tier.
+    static let minimumMeasuredBitrateCap = QualityOption.floorBitrate
     static let maximumMeasuredBitrateCap = 100_000_000
 
     /// Fraction of the measured bandwidth to request, leaving headroom for
@@ -62,6 +68,7 @@ enum PlaybackSelection {
     /// above 25 Mbps, where 4K is plausible and nothing should be downscaled.
     static func autoMaxWidth(forBitrateCap cap: Int) -> Int? {
         switch cap {
+        case ..<1_000_000: return 640
         case ..<6_000_000: return 854
         case ..<12_000_000: return 1280
         case ..<25_000_000: return 1920
@@ -111,7 +118,20 @@ enum PlaybackSelection {
             // not downscaled), just cap the transcode bitrate.
             return (maxWidth: 3840, maxBitrate: min(ceiling, smooth4KBitrate))
         }
-        return (maxWidth: 1920, maxBitrate: min(ceiling, 8_000_000))
+        let bitrate = min(ceiling, 8_000_000)
+        // A genuinely slow link must not be asked for a 1080p encode at
+        // 2 Mbps: below 6 Mbps take the width the bitrate can carry.
+        let width = bitrate >= 6_000_000 ? 1920 : (autoMaxWidth(forBitrateCap: bitrate) ?? 1920)
+        return (maxWidth: width, maxBitrate: bitrate)
+    }
+
+    /// Viewer-facing bitrate: "20 Mbps", "9.5 Mbps", "720 kbps".
+    static func bitrateLabel(_ bitsPerSecond: Int) -> String {
+        guard bitsPerSecond >= 1_000_000 else {
+            return "\(max(bitsPerSecond, 0) / 1000) kbps"
+        }
+        let mbps = (Double(bitsPerSecond) / 1_000_000 * 10).rounded() / 10
+        return mbps == mbps.rounded() ? "\(Int(mbps)) Mbps" : "\(mbps) Mbps"
     }
 
     /// Whether the server is reached over the local network. This is what

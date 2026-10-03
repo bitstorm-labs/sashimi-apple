@@ -97,15 +97,28 @@ struct MobilePlayerPillRow: View {
 
     private func qualityPill(_ showsTitle: Bool) -> some View {
         Menu {
-            ForEach(QualityOption.allCases) { quality in
-                checkButton(quality.displayName, isOn: viewModel.selectedQuality == quality) {
-                    Task { await viewModel.changeQuality(quality) }
+            Section("Now: \(viewModel.qualityStatusLabel)") {
+                ForEach(QualityOption.standardTiers) { quality in
+                    qualityButton(quality)
+                }
+            }
+            Section("Low bandwidth") {
+                ForEach(QualityOption.lowBandwidthTiers) { quality in
+                    qualityButton(quality)
                 }
             }
         } label: {
-            PlayerPillLabel(title: "Quality", systemImage: "gearshape", showsTitle: showsTitle)
+            // The pill names the quality in force, so a pick visibly lands.
+            PlayerPillLabel(title: viewModel.qualityStatusLabel, systemImage: "gearshape", showsTitle: showsTitle)
         }
         .accessibilityLabel("Quality")
+        .accessibilityValue(viewModel.qualityStatusLabel)
+    }
+
+    private func qualityButton(_ quality: QualityOption) -> some View {
+        checkButton(quality.menuTitle, isOn: viewModel.selectedQuality == quality) {
+            Task { await viewModel.changeQuality(quality) }
+        }
     }
 
     // MARK: Speed
