@@ -34,48 +34,6 @@ struct SubtitleTrackOption: Identifiable, Hashable {
     }
 }
 
-enum QualityOption: String, CaseIterable, Identifiable {
-    case auto = "auto"
-    case quality1080p = "1080"
-    case quality720p = "720"
-    case quality480p = "480"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .auto: return "Auto"
-        case .quality1080p: return "1080p"
-        case .quality720p: return "720p"
-        case .quality480p: return "480p"
-        }
-    }
-
-    var maxBitrate: Int? {
-        switch self {
-        case .auto: return nil  // No limit
-        case .quality1080p: return 20_000_000  // 20 Mbps
-        case .quality720p: return 8_000_000   // 8 Mbps
-        case .quality480p: return 4_000_000   // 4 Mbps
-        }
-    }
-
-    /// Pixel width cap for the tier.
-    ///
-    /// The bitrate cap alone does not change resolution: a 1080p source already
-    /// under the cap is simply passed through, so picking "720p" on a 7 Mbps
-    /// 1080p file produced a 1080p stream and the OSD correctly kept saying
-    /// 1080p. The width is what actually makes the tier mean what it says.
-    var maxWidth: Int? {
-        switch self {
-        case .auto: return nil
-        case .quality1080p: return 1920
-        case .quality720p: return 1280
-        case .quality480p: return 854
-        }
-    }
-}
-
 @MainActor
 final class PlayerViewModel: ObservableObject {
     typealias RecoverySetup = @MainActor (BaseItemDto, Int?, Int?, Bool) async throws -> Void
@@ -193,6 +151,15 @@ final class PlayerViewModel: ObservableObject {
     var pendingResumeTicks: Int64 = 0
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
+    /// The bitrate cap the current stream was requested with (the tier's, a
+    /// Settings cap, or Auto's measured/default cap). Drives the quality label
+    /// and is where Auto's step-down starts from.
+    @Published var activeBitrateCap: Int?
+    /// A brief player message: "Switching to 480p · 4 Mbps…" while a quality
+    /// change rebuilds, "Lowering quality for your connection" after a
+    /// bandwidth step-down. Shown by both player surfaces.
+    @Published var playbackNotice: String?
+    var playbackNoticeTask: Task<Void, Never>?
     @Published var videoResolution: String?
     @Published var streamInfo: StreamInfo?
 
@@ -229,12 +196,16 @@ final class PlayerViewModel: ObservableObject {
 
     // MARK: Recovery (official-client error fallback)
 
-    /// How many recovery rebuilds this item has burned. Two attempts max —
+    /// How many same-quality recovery rebuilds this item has burned. Two max —
     /// first forces a transcode (fresh session at the current position, video
     /// copy still allowed), the second additionally disallows video stream
     /// copy (a genuine re-encode, the last resort). Mirrors jellyfin-web's
     /// onPlaybackError escalation. Reset per item in loadMedia.
     var recoveryAttempts = 0
+    /// Bandwidth step-downs taken this item (see PlaybackRecoveryPlan). They
+    /// don't spend the rebuild budget: each one lowers the bitrate, so they
+    /// end at the 720 kbps floor. Reset per item in loadMedia.
+    var qualityStepDowns = 0
     /// Re-entrancy guard: a failed item can fire status + error-log + stall
     /// notifications for the same underlying failure in one runloop.
     var isRecovering = false
@@ -245,7 +216,8 @@ final class PlayerViewModel: ObservableObject {
 
     /// Whether the error/stall fallback can still fire for this item.
     var canAttemptRecovery: Bool {
-        !transitionState.isTransitioning && !isRecovering && !isOfflinePlayback && recoveryAttempts < 2 && currentItem != nil
+        !transitionState.isTransitioning && !isRecovering && !isOfflinePlayback && currentItem != nil
+            && recoveryDecision(isStall: false) != .giveUp
     }
 
     /// Subtitles that came down with a download. Injected by the iOS player,

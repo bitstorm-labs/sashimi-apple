@@ -161,6 +161,8 @@ struct DownloadsListView: View {
         let completed = completedItems
         let active = downloads.filter { isActive($0) }.sorted { $0.dateAdded < $1.dateAdded }
         let failed = downloads.filter { $0.status == .failed }
+        let fixedRecordIDs = DownloadEncodingAudit.fixedRecordIDs()
+        let lowQuality = completed.filter { downloadManager.needsRedownload($0, fixedRecordIDs: fixedRecordIDs) }
 
         return List {
             Section {
@@ -168,6 +170,13 @@ struct DownloadsListView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+            }
+
+            if !lowQuality.isEmpty, !isEditing {
+                Section {
+                    lowQualityBanner(lowQuality)
+                        .cardRow()
+                }
             }
 
             if !active.isEmpty {
@@ -192,7 +201,7 @@ struct DownloadsListView: View {
             if !completed.isEmpty {
                 Section {
                     ForEach(DownloadGroup.groups(completed)) { group in
-                        completedGroupRows(group, states: states)
+                        completedGroupRows(group, states: states, lowQualityIDs: Set(lowQuality.map(\.recordID)))
                     }
                 } header: {
                     sectionHeader("Completed") {
@@ -339,7 +348,11 @@ struct DownloadsListView: View {
     // MARK: - Completed
 
     @ViewBuilder
-    private func completedGroupRows(_ group: DownloadGroup, states: [String: DownloadWatchState]) -> some View {
+    private func completedGroupRows(
+        _ group: DownloadGroup,
+        states: [String: DownloadWatchState],
+        lowQualityIDs: Set<String>
+    ) -> some View {
         if group.isShow, let first = group.items.first {
             let watched = watchedItems(in: group.items, states: states)
             DownloadShowHeader(
@@ -366,14 +379,19 @@ struct DownloadsListView: View {
             .cardRow()
 
             ForEach(group.items, id: \.recordID) { item in
-                completedRow(item, isEpisode: true, states: states)
+                completedRow(item, isEpisode: true, states: states, needsRedownload: lowQualityIDs.contains(item.recordID))
             }
         } else if let movie = group.items.first {
-            completedRow(movie, isEpisode: false, states: states)
+            completedRow(movie, isEpisode: false, states: states, needsRedownload: lowQualityIDs.contains(movie.recordID))
         }
     }
 
-    private func completedRow(_ item: DownloadedItem, isEpisode: Bool, states: [String: DownloadWatchState]) -> some View {
+    private func completedRow(
+        _ item: DownloadedItem,
+        isEpisode: Bool,
+        states: [String: DownloadWatchState],
+        needsRedownload: Bool
+    ) -> some View {
         CompletedDownloadRow(
             item: item,
             isEpisode: isEpisode,
@@ -381,6 +399,11 @@ struct DownloadsListView: View {
             communityRating: showReviewRatings ? watchStore.serverStates[item.recordID]?.communityRating : nil,
             isEditing: isEditing,
             isSelected: selection.contains(item.recordID),
+            needsRedownload: needsRedownload,
+            onRedownload: {
+                let target = (itemId: item.itemId, serverID: item.serverID)
+                Task { await downloadManager.redownload([target]) }
+            },
             onPlay: { play(item) }
         )
         // The whole row plays; the play button keeps its own tap.
@@ -402,6 +425,35 @@ struct DownloadsListView: View {
             }
         }
         .cardRow()
+    }
+
+    // MARK: - Low-quality downloads
+
+    /// Downloads made before the transcode fix were encoded at 1 kbps. Say
+    /// so once, above the list, with one tap to replace them all.
+    private func lowQualityBanner(_ items: [DownloadedItem]) -> some View {
+        HStack(alignment: .center, spacing: MobileSpacing.md) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(items.count) download\(items.count == 1 ? " was" : "s were") saved at very low quality")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(MobileColors.textPrimary)
+                Text("An earlier version requested the wrong bitrate. Re-download to get a watchable file.")
+                    .font(MobileTypography.caption)
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Button(items.count == 1 ? "Re-download" : "Re-download All") {
+                let targets = items.map { (itemId: $0.itemId, serverID: $0.serverID) }
+                Task { await downloadManager.redownload(targets) }
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(MobileColors.accent)
+            .buttonStyle(.plain)
+        }
+        .padding(MobileSpacing.md)
     }
 
     // MARK: - Edit mode

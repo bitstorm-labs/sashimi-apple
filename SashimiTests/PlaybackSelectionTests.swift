@@ -68,6 +68,20 @@ final class PlaybackSelectionTests: XCTestCase {
         )
     }
 
+    func testUnmeasuredRemoteDefaultIsA480pBitrate() {
+        // #586: the old 20 Mbps remote guess handed a slow remote iPad 7-10
+        // Mbps streams that stalled and restarted.
+        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false), 4_000_000)
+        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true), 100_000_000)
+    }
+
+    func testMeasuredSlowLinkIsNotRaisedToThreeMbps() {
+        // A 1.5 Mbps link was asked for 3 Mbps (the old floor): twice what it
+        // can carry. It now gets its measurement with headroom.
+        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: 1_500_000, isLocalServer: false), 1_275_000)
+        XCTAssertEqual(PlaybackSelection.minimumMeasuredBitrateCap, 720_000)
+    }
+
     func testMeasuredBitrateKeepsHeadroom() {
         XCTAssertEqual(
             PlaybackSelection.autoBitrateCap(measuredBitrate: 40_000_000, isLocalServer: true),
@@ -116,6 +130,8 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 20_000_000), 1920)
         XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 8_000_000), 1280)
         XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 3_000_000), 854)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 2_000_000), 854)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: 720_000), 640)
     }
 
     // MARK: - constrainedAutoOverride
@@ -143,6 +159,40 @@ final class PlaybackSelectionTests: XCTestCase {
         let override = PlaybackSelection.constrainedAutoOverride(cap: 9_000_000, sourceBitrate: 40_000_000, isWired: false)
         XCTAssertEqual(override?.maxWidth, 1920)
         XCTAssertEqual(override?.maxBitrate, 8_000_000)
+    }
+
+    func testVerySlowLinkIsNotAskedForA1080pEncode() {
+        // 1080p at 2 Mbps is a blocky picture; take the width the bitrate carries.
+        let override = PlaybackSelection.constrainedAutoOverride(cap: 2_000_000, sourceBitrate: 10_000_000, isWired: false)
+        XCTAssertEqual(override?.maxWidth, 854)
+        XCTAssertEqual(override?.maxBitrate, 2_000_000)
+        let floor = PlaybackSelection.constrainedAutoOverride(cap: 720_000, sourceBitrate: 10_000_000, isWired: false)
+        XCTAssertEqual(floor?.maxWidth, 640)
+    }
+
+    // MARK: - autoReencodeOverride (audit F6)
+
+    func testReencodeForCodecReasonsGetsTheWidthTheCapCarries() {
+        // An AV1 4K source under a 4 Mbps remote cap: the cap covers the
+        // bitrate, but the video is re-encoded — at 854, not at 4K.
+        let override = PlaybackSelection.autoReencodeOverride(
+            cap: 4_000_000, sourceWidth: 3840, transcodeReasons: ["VideoCodecNotSupported"])
+        XCTAssertEqual(override?.maxWidth, 854)
+        XCTAssertEqual(override?.maxBitrate, 4_000_000)
+    }
+
+    func testRemuxKeepsTheSourceResolution() {
+        // Container/audio-only reasons copy the video: no width condition, or
+        // a 4K HEVC MKV that fits the link would be needlessly re-encoded.
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 20_000_000, sourceWidth: 3840, transcodeReasons: ["ContainerNotSupported", "AudioCodecNotSupported"]))
+    }
+
+    func testFastCapNeedsNoDownscale() {
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 40_000_000, sourceWidth: 3840, transcodeReasons: ["VideoCodecNotSupported"]))
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 4_000_000, sourceWidth: 640, transcodeReasons: ["VideoCodecNotSupported"]))
     }
 
     func testWirelessNeverCopiesHeavy4KEvenWhenProbeReadsHigh() {

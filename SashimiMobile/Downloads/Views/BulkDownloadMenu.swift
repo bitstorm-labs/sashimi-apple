@@ -247,7 +247,7 @@ struct BulkDownloadMenu: View {
                 itemId: first.id, itemType: first.type, engine: .avFoundation
             )
             originalAllowed = info.mediaSources?.first
-                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
+                .map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false
         } catch {
             originalAllowed = false
         }

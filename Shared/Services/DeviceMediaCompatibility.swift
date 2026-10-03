@@ -77,6 +77,29 @@ enum DeviceMediaCompatibility {
         guard !containers.isEmpty,
               containers.allSatisfy({ directPlayContainers.contains($0) }) else { return false }
 
+        return hasPlayableStreams(source, deviceSupportsDolbyVision: deviceSupportsDolbyVision)
+    }
+
+    /// True when an "Original" download can be a stream-copy REMUX into mp4
+    /// (DownloadURLBuilder.originalDownloadURL): the codecs AVPlayer decodes,
+    /// in any container. The container is irrelevant because the server
+    /// rewrites it — Jellyfin copies the video/audio when the source codec is
+    /// in the requested VideoCodec/AudioCodec lists. Requiring an mp4/mov
+    /// container here (as `canDirectPlayOnDevice` does) meant every MKV
+    /// "Original" silently became a High (1080p H.264) re-encode — the exact
+    /// files the remux exists for. Same codec and Dolby Vision gates as
+    /// direct play, so DTS/TrueHD-only audio or a P5 DV stream on a non-DV
+    /// device still fall back to a transcoded tier.
+    static func canRemuxForDownload(
+        _ source: MediaSourceInfo,
+        deviceSupportsDolbyVision: Bool = DeviceMediaCompatibility.deviceSupportsDolbyVision
+    ) -> Bool {
+        hasPlayableStreams(source, deviceSupportsDolbyVision: deviceSupportsDolbyVision)
+    }
+
+    /// At least one decodable video stream (with the DV P5 gate) and at least
+    /// one decodable audio stream. Fails closed on missing data.
+    private static func hasPlayableStreams(_ source: MediaSourceInfo, deviceSupportsDolbyVision: Bool) -> Bool {
         guard let streams = source.mediaStreams, !streams.isEmpty else { return false }
 
         let hasCompatibleVideo = streams
@@ -92,14 +115,11 @@ enum DeviceMediaCompatibility {
             }
         guard hasCompatibleVideo else { return false }
 
-        let hasCompatibleAudio = streams
+        return streams
             .filter { $0.type == "Audio" }
             .contains { stream in
                 guard let codec = stream.codec, !codec.isEmpty else { return false }
                 return directPlayAudioCodecs.contains(canonicalCodec(codec))
             }
-        guard hasCompatibleAudio else { return false }
-
-        return true
     }
 }

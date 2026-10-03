@@ -11,15 +11,45 @@ extension PlayerViewModel {
     /// second disallows it (genuine re-encode — the last resort, and the
     /// escalation jellyfin-web uses). Two attempts per item, then the error
     /// surfaces normally.
-    func attemptPlaybackRecovery(reason: String, itemID: String, attempt: Int) async { // swiftlint:disable:this function_body_length
+    ///
+    /// When the link is the problem (the access log shows segments arriving
+    /// slower than the stream needs, or a fresh session stalled again) the
+    /// rebuild instead steps DOWN a quality tier, as far as the 720 kbps
+    /// floor — see PlaybackRecoveryPlan.
+    func attemptPlaybackRecovery(reason: String, itemID: String, attempt: Int) async { // swiftlint:disable:this function_body_length cyclomatic_complexity
         let sourceGeneration = PlaybackGeneration(itemID: itemID, attempt: attempt)
         guard isCurrentPlaybackGeneration(sourceGeneration),
               !transitionState.isTransitioning,
               !isRecovering,
               !isOfflinePlayback,
-              recoveryAttempts < 2,
               let item = currentItem,
               item.id == itemID else { return }
+        // Read before teardown: the access log goes with the player.
+        let throughput = currentThroughput()
+        let streamBitrate = currentStreamBitrate(throughput: throughput)
+        let decision = PlaybackRecoveryPlan.decide(
+            isStall: reason == Self.stallRecoveryReason,
+            rebuildAttempts: recoveryAttempts,
+            currentBitrate: streamBitrate,
+            throughput: throughput
+        )
+
+        let recoveryQuality: QualityOption
+        let allowVideoStreamCopy: Bool
+        switch decision {
+        case .giveUp:
+            return
+        case .rebuild(let allowCopy):
+            recoveryAttempts += 1
+            recoveryQuality = selectedQuality
+            allowVideoStreamCopy = allowCopy
+        case .stepDown(let lower):
+            qualityStepDowns += 1
+            recoveryQuality = lower
+            // A real encode at the lower bitrate: a copy of a source that is
+            // already under the new cap would be the same stream that stalled.
+            allowVideoStreamCopy = false
+        }
 
         transitionState.isTransitioning = true
         isRecovering = true
@@ -27,8 +57,11 @@ extension PlayerViewModel {
             isRecovering = false
             finishTransition()
         }
-        recoveryAttempts += 1
-        let recoveryNumber = recoveryAttempts
+        let recoveryNumber = recoveryAttempts + qualityStepDowns
+        if case .stepDown(let lower) = decision {
+            selectedQuality = lower
+            showPlaybackNotice("Lowering quality for your connection", duration: nil)
+        }
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
 
@@ -49,7 +82,11 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("phase", "recovery"),
             PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
             PlayerDiagnostics.field("trigger", reason),
-            PlayerDiagnostics.field("allowVideoStreamCopy", recoveryNumber < 2),
+            PlayerDiagnostics.field("allowVideoStreamCopy", allowVideoStreamCopy),
+            PlayerDiagnostics.field("decision", Self.diagnosticName(decision)),
+            PlayerDiagnostics.field("streamBitrate", streamBitrate),
+            PlayerDiagnostics.field("observedBitrate", throughput.map { Int($0.observedBitrate) }),
+            PlayerDiagnostics.field("indicatedBitrate", throughput.map { Int($0.indicatedBitrate) }),
             PlayerDiagnostics.field("positionSeconds", Double(positionTicks) / 10_000_000)
         ])
 
@@ -80,14 +117,14 @@ extension PlayerViewModel {
 
         do {
             if let recoverySetup {
-                try await recoverySetup(item, selectedQuality.maxBitrate, selectedQuality.maxWidth, recoveryNumber < 2)
+                try await recoverySetup(item, recoveryQuality.maxBitrate, recoveryQuality.maxWidth, allowVideoStreamCopy)
             } else {
                 try await setupPlayer(
                     for: item,
-                    maxBitrate: selectedQuality.maxBitrate,
-                    maxWidth: selectedQuality.maxWidth,
+                    maxBitrate: recoveryQuality.maxBitrate,
+                    maxWidth: recoveryQuality.maxWidth,
                     forceTranscode: true,
-                    allowVideoStreamCopy: recoveryNumber < 2,
+                    allowVideoStreamCopy: allowVideoStreamCopy,
                     expectedPlaybackGeneration: recoveryGeneration
                 )
             }
@@ -110,8 +147,13 @@ extension PlayerViewModel {
             startProgressReporting()
             setupSegmentTracking()
             logAndPlay(positionTicks: positionTicks)
+            if case .stepDown = decision {
+                showPlaybackNotice("Lowering quality for your connection · \(recoveryQuality.menuTitle)")
+            }
+            scheduleStreamInfoRefresh(for: recoveryGeneration)
         } catch {
             guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
+            clearPlaybackNotice()
             diagFailure(.loadFailed, [
                 PlayerDiagnostics.field("phase", "recovery"),
                 PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
@@ -120,6 +162,47 @@ extension PlayerViewModel {
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
+        }
+    }
+
+    static let stallRecoveryReason = "stall-watchdog"
+
+    /// What recovery would do now for a non-stall failure (item/decoder
+    /// error). `canAttemptRecovery` uses it so an error is surfaced exactly
+    /// when recovery has nothing left to try.
+    func recoveryDecision(isStall: Bool) -> PlaybackRecoveryPlan.Decision {
+        let throughput = currentThroughput()
+        return PlaybackRecoveryPlan.decide(
+            isStall: isStall,
+            rebuildAttempts: recoveryAttempts,
+            currentBitrate: currentStreamBitrate(throughput: throughput),
+            throughput: throughput
+        )
+    }
+
+    /// AVPlayer's latest access-log reading for the current item, if any.
+    func currentThroughput() -> PlaybackRecoveryPlan.Throughput? {
+        guard let event = player?.currentItem?.accessLog()?.events.last else { return nil }
+        return PlaybackRecoveryPlan.Throughput(
+            observedBitrate: event.observedBitrate,
+            indicatedBitrate: event.indicatedBitrate
+        )
+    }
+
+    /// The bitrate being streamed: the tier's cap (or Auto's requested cap),
+    /// lowered to the variant's own bitrate when the access log knows it — a
+    /// direct-played 9.5 Mbps file under a 100 Mbps Auto cap steps down from
+    /// 9.5, not from 100.
+    func currentStreamBitrate(throughput: PlaybackRecoveryPlan.Throughput?) -> Int? {
+        let indicated = throughput.map { Int($0.indicatedBitrate) }.flatMap { $0 > 0 ? $0 : nil }
+        return [selectedQuality.maxBitrate ?? activeBitrateCap, indicated].compactMap { $0 }.min()
+    }
+
+    private static func diagnosticName(_ decision: PlaybackRecoveryPlan.Decision) -> String {
+        switch decision {
+        case .rebuild(let allowCopy): return allowCopy ? "rebuild-copy" : "rebuild-encode"
+        case .stepDown(let lower): return "step-down-\(lower.rawValue)"
+        case .giveUp: return "give-up"
         }
     }
 
@@ -147,7 +230,7 @@ extension PlayerViewModel {
             let now = player.currentTime().seconds
             guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
             self.stallWatchdogTask = nil
-            Task { await self.attemptPlaybackRecovery(reason: "stall-watchdog", itemID: generation.itemID, attempt: generation.attempt) }
+            Task { await self.attemptPlaybackRecovery(reason: Self.stallRecoveryReason, itemID: generation.itemID, attempt: generation.attempt) }
         }
     }
 

@@ -215,7 +215,7 @@ struct DownloadButton: View {
                 info = try await JellyfinClient.shared.getPlaybackInfo(itemId: item.id, itemType: item.type, engine: .avFoundation)
             }
             let compatible = info.mediaSources?.first
-                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
+                .map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false
             originalAllowed = compatible ? .yes : .no
         } catch {
             originalAllowed = .no

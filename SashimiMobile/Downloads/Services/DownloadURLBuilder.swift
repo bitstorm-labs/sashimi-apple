@@ -58,30 +58,44 @@ enum DownloadURLBuilder {
         return components?.url
     }
 
-    /// Build URL for downloading video at a specific bitrate (transcoded to mp4)
+    /// Build URL for downloading video transcoded to an h264/aac mp4 at a
+    /// quality tier.
+    ///
+    /// Every encoder input is spelled out with the progressive endpoint's own
+    /// parameter names (Jellyfin VideosController.GetVideoStream):
+    /// VideoBitRate/AudioBitRate set the encode, MaxWidth/MaxHeight the frame,
+    /// AudioChannels/MaxAudioChannels the downmix. MaxStreamingBitrate is NOT
+    /// one of them — sending only that left the server with no video bitrate,
+    /// and it encoded at 1 kbps and 416 px (see DownloadQuality.videoBitrate).
     static func transcodedDownloadURL(
         itemId: String,
-        maxBitrate: Int,
-        maxWidth: Int? = nil,
+        quality: DownloadQuality,
         serverURL: URL? = nil
     ) -> URL? {
-        guard let baseURL = resolvedServerURL(serverURL) else { return nil }
+        guard let baseURL = resolvedServerURL(serverURL),
+              let videoBitrate = quality.videoBitrate,
+              let audioBitrate = quality.audioBitrate else { return nil }
 
         var components = URLComponents(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         components?.path += "/Videos/\(itemId)/stream.mp4"
         var query = [
             URLQueryItem(name: "MediaSourceId", value: itemId),
-            URLQueryItem(name: "MaxStreamingBitrate", value: "\(maxBitrate)"),
             URLQueryItem(name: "VideoCodec", value: "h264"),
             URLQueryItem(name: "AudioCodec", value: "aac"),
             URLQueryItem(name: "Container", value: "mp4"),
+            URLQueryItem(name: "VideoBitRate", value: "\(videoBitrate)"),
+            URLQueryItem(name: "AudioBitRate", value: "\(audioBitrate)"),
             URLQueryItem(name: "DeviceId", value: deviceId)
         ]
-        // A bitrate cap alone leaves the server encoding at native resolution,
-        // so "Low (480p)" produced a blocky 4K file rather than a small 480p
-        // one -- slower to produce and worse looking at the same size.
-        if let maxWidth {
+        if let maxWidth = quality.maxWidth {
             query.append(URLQueryItem(name: "MaxWidth", value: "\(maxWidth)"))
+        }
+        if let maxHeight = quality.maxHeight {
+            query.append(URLQueryItem(name: "MaxHeight", value: "\(maxHeight)"))
+        }
+        if let channels = quality.audioChannels {
+            query.append(URLQueryItem(name: "AudioChannels", value: "\(channels)"))
+            query.append(URLQueryItem(name: "MaxAudioChannels", value: "\(channels)"))
         }
         components?.queryItems = query
         return components?.url
@@ -89,15 +103,10 @@ enum DownloadURLBuilder {
 
     /// Build download URL based on quality selection
     static func downloadURL(itemId: String, quality: DownloadQuality, serverURL: URL? = nil) -> URL? {
-        if let maxBitrate = quality.maxBitrate {
-            return transcodedDownloadURL(
-                itemId: itemId,
-                maxBitrate: maxBitrate,
-                maxWidth: quality.maxWidth,
-                serverURL: serverURL
-            )
+        guard quality != .original else {
+            return originalDownloadURL(itemId: itemId, serverURL: serverURL)
         }
-        return originalDownloadURL(itemId: itemId, serverURL: serverURL)
+        return transcodedDownloadURL(itemId: itemId, quality: quality, serverURL: serverURL)
     }
 
     // MARK: - Subtitle URLs
