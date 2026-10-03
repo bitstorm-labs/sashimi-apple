@@ -30,6 +30,9 @@ extension PlayerViewModel {
         // Update quality setting
         selectedQuality = quality
         let attempt = playbackAttempt
+        // Visible confirmation: the rebuild takes seconds and, without this,
+        // nothing on screen said the pick had registered.
+        showPlaybackNotice("Switching to \(quality.menuTitle)…", duration: nil)
 
         // Stop current playback
         diag(.teardown, [
@@ -70,6 +73,7 @@ extension PlayerViewModel {
             try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, maxWidth: quality.maxWidth, forceTranscode: quality != .auto)
             guard playbackAttempt == attempt, !Task.isCancelled else { return }
             isLoading = false
+            showPlaybackNotice("Quality: \(qualityStatusLabel)")
             updateNowPlayingInfo(item: item)
 
             // Seek to saved position. A bare pre-ready seek is silently dropped
@@ -115,7 +119,9 @@ extension PlayerViewModel {
             startProgressReporting()
             setupSegmentTracking()
             logAndPlay(positionTicks: positionTicks)
+            scheduleStreamInfoRefresh(for: PlaybackGeneration(itemID: item.id, attempt: attempt))
         } catch {
+            clearPlaybackNotice()
             diagFailure(.loadFailed, [
                 PlayerDiagnostics.field("phase", "quality-change"),
                 PlayerDiagnostics.field("item", item.id)
@@ -123,6 +129,48 @@ extension PlayerViewModel {
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
+        }
+    }
+}
+
+extension PlayerViewModel {
+    /// The quality actually in force, for the player's Quality control and
+    /// stream chip: "720p · 2 Mbps", or "Auto · 4 Mbps" when Auto is running
+    /// under a cap below the unlimited ceiling (plain "Auto" otherwise).
+    var qualityStatusLabel: String {
+        if selectedQuality != .auto { return selectedQuality.menuTitle }
+        guard let activeBitrateCap,
+              activeBitrateCap < PlaybackSelection.maximumMeasuredBitrateCap else { return "Auto" }
+        return "Auto · \(PlaybackSelection.bitrateLabel(activeBitrateCap))"
+    }
+
+    /// Shows a brief player message. `duration: nil` keeps it up until it is
+    /// replaced or cleared (used while a rebuild is in flight).
+    func showPlaybackNotice(_ text: String, duration: Duration? = .seconds(4)) {
+        playbackNoticeTask?.cancel()
+        playbackNotice = text
+        guard let duration else { return }
+        playbackNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled, let self, self.playbackNotice == text else { return }
+            self.playbackNotice = nil
+        }
+    }
+
+    func clearPlaybackNotice() {
+        playbackNoticeTask?.cancel()
+        playbackNoticeTask = nil
+        playbackNotice = nil
+    }
+
+    /// Refreshes the stream chip once the rebuilt session has registered with
+    /// the server. Otherwise the chip kept describing the stream that was
+    /// just replaced, which read as "the quality change did nothing".
+    func scheduleStreamInfoRefresh(for generation: PlaybackGeneration) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, self.isCurrentPlaybackGeneration(generation) else { return }
+            await self.refreshStreamInfo()
         }
     }
 }

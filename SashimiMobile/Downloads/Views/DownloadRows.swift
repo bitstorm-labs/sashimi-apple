@@ -227,6 +227,9 @@ struct CompletedDownloadRow: View {
     var communityRating: Double?
     let isEditing: Bool
     let isSelected: Bool
+    /// Made by the pre-fix transcode URL (1 kbps video): offer to replace it.
+    var needsRedownload = false
+    var onRedownload: () -> Void = {}
     let onPlay: () -> Void
 
     var body: some View {
@@ -257,6 +260,10 @@ struct CompletedDownloadRow: View {
                 }
 
                 DownloadMetadataLine(item: item, communityRating: communityRating)
+
+                if needsRedownload, !isEditing {
+                    LowQualityDownloadBadge(onRedownload: onRedownload)
+                }
             }
 
             Spacer(minLength: 0)
@@ -281,6 +288,28 @@ struct CompletedDownloadRow: View {
     private var episodeLabel: String {
         guard let season = item.seasonNumber, let episode = item.episodeNumber else { return item.name }
         return "S\(season):E\(episode) · \(item.name)"
+    }
+}
+
+/// "Low quality file · Re-download": on downloads made before the transcode
+/// fix, whose video was encoded at 1 kbps and cannot be watched.
+struct LowQualityDownloadBadge: View {
+    let onRedownload: () -> Void
+
+    var body: some View {
+        Button(action: onRedownload) {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text("Low quality file · Re-download")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.orange.opacity(0.15), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Low quality file. Re-download")
     }
 }
 

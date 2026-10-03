@@ -54,7 +54,7 @@ extension PlayerViewModel {
                 }
                 if let codec = info.videoCodec { parts.append(codec.uppercased()) }
                 if let bitrate = info.bitrate, bitrate > 0 {
-                    parts.append("\(Int(round(Double(bitrate) / 1_000_000))) Mbps")
+                    parts.append(PlaybackSelection.bitrateLabel(bitrate))
                 } else if let source = sourceBitrateDetail {
                     // TranscodingInfo omitted the target bitrate — show source
                     parts.append(source)
@@ -82,7 +82,7 @@ extension PlayerViewModel {
         let bps = (currentMediaSource?.bitrate).flatMap { $0 > 0 ? $0 : nil }
             ?? currentMediaSource?.mediaStreams?.first(where: { $0.type == "Video" })?.bitRate
         guard let bps, bps > 0 else { return nil }
-        return "\(Int(round(Double(bps) / 1_000_000))) Mbps"
+        return PlaybackSelection.bitrateLabel(bps)
     }
 
     private static func resolutionLabel(width: Int, height: Int) -> String {

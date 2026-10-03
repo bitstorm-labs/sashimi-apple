@@ -111,6 +111,10 @@ struct MobilePlayerView: View {
                     overlay
                 }
 
+                if !viewModel.isLoading, let notice = viewModel.playbackNotice {
+                    PlaybackNoticeBanner(text: notice)
+                }
+
                 if let banner = viewModel.stationBanner {
                     VStack {
                         Spacer()
@@ -138,6 +142,7 @@ struct MobilePlayerView: View {
                 )
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.playbackNotice)
         .navigationBarHidden(true)
         // The top band carries its own clock, so the system status bar stays
         // hidden for the whole time the player is up, controls or not.

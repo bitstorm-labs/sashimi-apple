@@ -42,7 +42,14 @@ struct PlayerView: View {
             Color.black.ignoresSafeArea()
 
             if viewModel.isLoading {
-                ProgressView().scaleEffect(1.5)
+                VStack(spacing: 28) {
+                    ProgressView().scaleEffect(1.5)
+                    if let notice = viewModel.playbackNotice {
+                        Text(notice)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                }
             } else if viewModel.error != nil || viewModel.errorMessage != nil {
                 errorView
             } else if let player = viewModel.player {
@@ -75,8 +82,16 @@ struct PlayerView: View {
                     .ignoresSafeArea()
                     .zIndex(10)
             }
+
+            // "Lowering quality for your connection", "Quality: 480p · 4 Mbps":
+            // over the picture, so it shows without bringing up the controls.
+            if !viewModel.isLoading, viewModel.player != nil, let notice = viewModel.playbackNotice {
+                PlaybackNoticeBanner(text: notice)
+                    .zIndex(11)
+            }
         }
         .animation(.easeInOut(duration: 0.5), value: viewModel.upNext)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.playbackNotice)
         .task {
             // One `view.task` line per presentation. Two lines with different
             // `view` tags for the same item means SwiftUI rebuilt the player;

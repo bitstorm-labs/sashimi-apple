@@ -24,11 +24,22 @@ extension PlayerViewModel {
             sessionOverride: maxBitrate ?? selectedQuality.maxBitrate,
             settingsMaxBitrate: playbackSettings.maxBitrate
         )
+        // The session tier's width travels with its bitrate (the next episode
+        // after a pick or a step-down loads through here with no explicit
+        // width; the two 720p/480p tiers differ only in bitrate, so a width
+        // derived from the bitrate alone would not match the tier).
+        let maxWidth = maxWidth ?? selectedQuality.maxWidth
 
         // The cap in force, and whether it came from a real measurement or a
         // default (the #341/#342 Auto-cap work). An unexplained transcode is
         // almost always this value, and it was previously only visible in the
         // JellyfinClient log, disconnected from the play attempt it belonged to.
+        if effectiveBitrate == nil {
+            // Auto on a remote server whose probe hasn't landed: wait briefly
+            // rather than lock the session to the unmeasured default. A later
+            // item or quality change reads the measured cap either way.
+            await client.waitForBandwidthMeasurement(upTo: .milliseconds(1500))
+        }
         let bandwidth = await client.bandwidthStatus
         try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         diag(.playbackInfoRequest, [
@@ -75,10 +86,16 @@ extension PlayerViewModel {
         // 1080p the link comfortably holds. A copyable source never reaches here
         // (no transcodingUrl, or cap >= source), so a wired/fast client keeps
         // native 4K; explicit quality picks and forceTranscode are untouched.
+        var requestedBitrateCap: Int?
         if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
            let source = playbackInfo.mediaSources?.first,
            source.transcodingUrl?.isEmpty == false,
-           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired) {
+           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired)
+            ?? PlaybackSelection.autoReencodeOverride(
+                cap: bandwidth.cap,
+                sourceWidth: source.mediaStreams?.first(where: { $0.type == "Video" })?.width,
+                transcodeReasons: source.transcodeReasons
+            ) {
             diag(.playbackInfoRequest, [
                 PlayerDiagnostics.field("phase", "constrained-retry"),
                 PlayerDiagnostics.field("sourceBitrate", source.bitrate),
@@ -87,6 +104,7 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("retryWidth", override.maxWidth),
                 PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
             ])
+            requestedBitrateCap = override.maxBitrate
             playbackInfo = try await client.getPlaybackInfo(
                 itemId: item.id,
                 itemType: item.type,
@@ -99,6 +117,8 @@ extension PlayerViewModel {
             )
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         }
+
+        activeBitrateCap = requestedBitrateCap ?? effectiveBitrate ?? bandwidth.cap
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             diagFailure(.playbackInfoResponse, [

@@ -48,10 +48,10 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Pixel width cap matching displayName. Sent alongside MaxStreamingBitrate:
-    /// a bitrate cap alone leaves the server encoding at native resolution, so
-    /// "Low (480p)" produced a blocky 4K file rather than a small 480p one.
-    /// `.original` is a stream copy, so it has no cap.
+    /// Pixel width cap matching displayName. A bitrate alone leaves the server
+    /// encoding at native resolution, so "Low (480p)" produced a blocky 4K
+    /// file rather than a small 480p one. `.original` is a stream copy, so it
+    /// has no cap.
     var maxWidth: Int? {
         switch self {
         case .original: return nil
@@ -59,6 +59,50 @@ enum DownloadQuality: String, Codable, CaseIterable, Identifiable {
         case .medium: return 1280
         case .low: return 854
         }
+    }
+
+    /// Pixel height cap, paired with `maxWidth` so a 4:3 or portrait source
+    /// is bounded too (the width alone lets a 4:3 "480p" come out 640 tall).
+    var maxHeight: Int? {
+        switch self {
+        case .original: return nil
+        case .high: return 1080
+        case .medium: return 720
+        case .low: return 480
+        }
+    }
+
+    /// Audio share of the tier's bitrate. Stereo for medium/low (a 5.1 track
+    /// on a phone is downmixed anyway, and stereo spends the bits better);
+    /// high keeps up to 5.1.
+    var audioBitrate: Int? {
+        switch self {
+        case .original: return nil
+        case .high: return 384_000
+        case .medium: return 192_000
+        case .low: return 128_000
+        }
+    }
+
+    var audioChannels: Int? {
+        switch self {
+        case .original: return nil
+        case .high: return 6
+        case .medium, .low: return 2
+        }
+    }
+
+    /// The video encoder's target: the tier's total minus the audio share.
+    ///
+    /// This is the parameter that actually sets the encode bitrate. Jellyfin's
+    /// progressive /Videos/{id}/stream endpoint has no MaxStreamingBitrate
+    /// parameter (that is a PlaybackInfo/HLS concept), so the old URL carried
+    /// no video bitrate at all; the server then fell back to its minimum and
+    /// encoded every Medium/Low/High download at `-b:v 1000` (1 kbps) and
+    /// 416 px wide. The server still caps this at the source's own bitrate.
+    var videoBitrate: Int? {
+        guard let maxBitrate, let audioBitrate else { return nil }
+        return maxBitrate - audioBitrate
     }
 
     /// Resolves the quality that should actually be downloaded given whether the

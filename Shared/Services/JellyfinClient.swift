@@ -628,6 +628,26 @@ actor JellyfinClient {
         bandwidthProbeTask = Task { await self.runBandwidthProbes() }
     }
 
+    /// Gives an in-flight probe a short window to land before an Auto
+    /// PlaybackInfo request on a REMOTE server. Without it, pressing play
+    /// within the first seconds after launch (Continue Watching is right
+    /// there) locked the whole episode to the unmeasured remote default —
+    /// now 4 Mbps, so a fast remote link would have been stuck at 480p.
+    /// Local servers already default high, so they never wait.
+    func waitForBandwidthMeasurement(upTo timeout: Duration) async {
+        guard measuredBitrate == nil,
+              !PlaybackSelection.isLocalServer(serverURL),
+              let probe = bandwidthProbeTask else { return }
+        await withTaskGroup(of: Void.self) { group in
+            // Cancelling the group never cancels the probe itself: it is an
+            // unstructured task we only observe.
+            group.addTask { await probe.value }
+            group.addTask { try? await Task.sleep(for: timeout) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
     private func runBandwidthProbes() async {
         if await measureBandwidth() { return }
         for delay in Self.bandwidthProbeBackoff {
@@ -1299,9 +1319,20 @@ actor JellyfinClient {
 
         // A bitrate cap with no width condition makes the server re-encode at
         // the source resolution, so a capped 4K stream was re-encoded at full
-        // 4K — the most expensive way to reach the ceiling. When the caller
-        // picked no tier, derive a width the cap can actually carry.
-        let effectiveMaxWidth = maxWidth ?? PlaybackSelection.autoMaxWidth(forBitrateCap: streamingBitrate)
+        // 4K — the most expensive way to reach the ceiling. An explicit cap
+        // with no tier width (the Settings cap) derives a width the cap can
+        // carry.
+        //
+        // Auto (no explicit cap) sends NO width on this first request: the
+        // width condition is also evaluated for direct play, so it forced a
+        // 4K source that fits under the cap (a 15 Mbps web-DL on a 20 Mbps
+        // link) to transcode to 1080p, while a heavier 4K source got a 4K
+        // transcode from the player's second pass. The bitrate cap decides
+        // direct play; when the server does re-encode, the player's second
+        // pass (constrainedAutoOverride / autoReencodeOverride) supplies the
+        // width.
+        let effectiveMaxWidth = maxWidth
+            ?? (maxBitrate == nil ? nil : PlaybackSelection.autoMaxWidth(forBitrateCap: streamingBitrate))
 
         if maxBitrate == nil { logAutoBitrateCap(width: effectiveMaxWidth) }
 

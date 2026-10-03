@@ -142,6 +142,9 @@ struct MobileSettingsView: View {
                     Text("1080p (20 Mbps)").tag(20_000_000)
                     Text("720p (8 Mbps)").tag(8_000_000)
                     Text("480p (3 Mbps)").tag(3_000_000)
+                    Text("720p (2 Mbps)").tag(2_000_000)
+                    Text("480p (1 Mbps)").tag(1_000_000)
+                    Text("360p (720 kbps)").tag(720_000)
                 }
             }
 

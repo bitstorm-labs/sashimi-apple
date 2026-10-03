@@ -48,19 +48,26 @@ extension TVPlayerView {
             menus.append(subtitleMenu)
         }
 
-        // Quality menu
-        let qualityActions = QualityOption.allCases.map { quality in
-            UIAction(
-                title: quality.displayName,
-                state: viewModel.selectedQuality == quality ? .on : .off
-            ) { _ in
-                Task { await viewModel.changeQuality(quality) }
+        // Quality menu. The subtitle names what is playing now ("Auto ·
+        // 4 Mbps", "720p · 2 Mbps"), so a pick visibly takes effect.
+        let qualityActions = { (tiers: [QualityOption]) in
+            tiers.map { quality in
+                UIAction(
+                    title: quality.menuTitle,
+                    state: viewModel.selectedQuality == quality ? .on : .off
+                ) { _ in
+                    Task { await viewModel.changeQuality(quality) }
+                }
             }
         }
         let qualityMenu = UIMenu(
             title: "Quality",
+            subtitle: viewModel.qualityStatusLabel,
             image: UIImage(systemName: "gearshape"),
-            children: qualityActions
+            children: [
+                UIMenu(options: .displayInline, children: qualityActions(QualityOption.standardTiers)),
+                UIMenu(title: "Low bandwidth", options: .displayInline, children: qualityActions(QualityOption.lowBandwidthTiers))
+            ]
         )
         menus.append(qualityMenu)
 
