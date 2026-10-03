@@ -99,3 +99,28 @@ final class DownloadEncodingAuditTests: XCTestCase {
         XCTAssertTrue(DownloadEncodingAudit.fixedRecordIDs(defaults: defaults).isEmpty)
     }
 }
+
+/// Audit F2: "Original" of an MKV used to degrade to High because the
+/// compatibility gate demanded an mp4/mov container, so the stream-copy remux
+/// it was written for never ran.
+final class OriginalDownloadQualityTests: XCTestCase {
+    private func source(container: String, video: String, audio: String) throws -> MediaSourceInfo {
+        let json = """
+        {"Id": "s1", "Container": "\(container)", "MediaStreams": [
+            {"Type": "Video", "Codec": "\(video)"}, {"Type": "Audio", "Codec": "\(audio)"}]}
+        """
+        return try JSONDecoder().decode(MediaSourceInfo.self, from: Data(json.utf8))
+    }
+
+    func testH264AacMkvStaysOriginal() throws {
+        let mkv = try source(container: "mkv", video: "h264", audio: "aac")
+        let compatible = DeviceMediaCompatibility.canRemuxForDownload(mkv, deviceSupportsDolbyVision: false)
+        XCTAssertEqual(DownloadQuality.effectiveQuality(requested: .original, sourceIsCompatible: compatible), .original)
+    }
+
+    func testUndecodableMkvStillDegradesToHigh() throws {
+        let mkv = try source(container: "mkv", video: "av1", audio: "aac")
+        let compatible = DeviceMediaCompatibility.canRemuxForDownload(mkv, deviceSupportsDolbyVision: false)
+        XCTAssertEqual(DownloadQuality.effectiveQuality(requested: .original, sourceIsCompatible: compatible), .high)
+    }
+}

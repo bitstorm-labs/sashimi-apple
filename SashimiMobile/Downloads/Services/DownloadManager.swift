@@ -359,7 +359,7 @@ final class DownloadManager: NSObject, ObservableObject {
             let client = try await client(for: serverID)
             let info = try await client.getPlaybackInfo(itemId: itemId, engine: .avFoundation)
             compatible = info.mediaSources?.first
-                .map { DeviceMediaCompatibility.canDirectPlayOnDevice($0) } ?? false
+                .map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false
         } catch {
             compatible = false // fail closed
         }

@@ -170,6 +170,31 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertEqual(floor?.maxWidth, 640)
     }
 
+    // MARK: - autoReencodeOverride (audit F6)
+
+    func testReencodeForCodecReasonsGetsTheWidthTheCapCarries() {
+        // An AV1 4K source under a 4 Mbps remote cap: the cap covers the
+        // bitrate, but the video is re-encoded — at 854, not at 4K.
+        let override = PlaybackSelection.autoReencodeOverride(
+            cap: 4_000_000, sourceWidth: 3840, transcodeReasons: ["VideoCodecNotSupported"])
+        XCTAssertEqual(override?.maxWidth, 854)
+        XCTAssertEqual(override?.maxBitrate, 4_000_000)
+    }
+
+    func testRemuxKeepsTheSourceResolution() {
+        // Container/audio-only reasons copy the video: no width condition, or
+        // a 4K HEVC MKV that fits the link would be needlessly re-encoded.
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 20_000_000, sourceWidth: 3840, transcodeReasons: ["ContainerNotSupported", "AudioCodecNotSupported"]))
+    }
+
+    func testFastCapNeedsNoDownscale() {
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 40_000_000, sourceWidth: 3840, transcodeReasons: ["VideoCodecNotSupported"]))
+        XCTAssertNil(PlaybackSelection.autoReencodeOverride(
+            cap: 4_000_000, sourceWidth: 640, transcodeReasons: ["VideoCodecNotSupported"]))
+    }
+
     func testWirelessNeverCopiesHeavy4KEvenWhenProbeReadsHigh() {
         // The Living Room bug: the burst probe over-reads Wi-Fi's peak (here
         // 90 Mbps) above the 68.8 Mbps source, so the old rule (cap >= source)

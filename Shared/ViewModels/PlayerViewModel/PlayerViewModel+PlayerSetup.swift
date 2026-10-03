@@ -34,6 +34,12 @@ extension PlayerViewModel {
         // default (the #341/#342 Auto-cap work). An unexplained transcode is
         // almost always this value, and it was previously only visible in the
         // JellyfinClient log, disconnected from the play attempt it belonged to.
+        if effectiveBitrate == nil {
+            // Auto on a remote server whose probe hasn't landed: wait briefly
+            // rather than lock the session to the unmeasured default. A later
+            // item or quality change reads the measured cap either way.
+            await client.waitForBandwidthMeasurement(upTo: .milliseconds(1500))
+        }
         let bandwidth = await client.bandwidthStatus
         try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         diag(.playbackInfoRequest, [
@@ -84,7 +90,12 @@ extension PlayerViewModel {
         if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
            let source = playbackInfo.mediaSources?.first,
            source.transcodingUrl?.isEmpty == false,
-           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired) {
+           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired)
+            ?? PlaybackSelection.autoReencodeOverride(
+                cap: bandwidth.cap,
+                sourceWidth: source.mediaStreams?.first(where: { $0.type == "Video" })?.width,
+                transcodeReasons: source.transcodeReasons
+            ) {
             diag(.playbackInfoRequest, [
                 PlayerDiagnostics.field("phase", "constrained-retry"),
                 PlayerDiagnostics.field("sourceBitrate", source.bitrate),

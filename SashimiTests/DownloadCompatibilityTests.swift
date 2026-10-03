@@ -169,4 +169,32 @@ final class DownloadCompatibilityTests: XCTestCase {
             container: "mp4", videoCodecs: ["h264"], audioCodecs: ["aac"], videoRangeType: "DOVI")
         XCTAssertFalse(DeviceMediaCompatibility.canDirectPlayOnDevice(source, deviceSupportsDolbyVision: false))
     }
+
+    // MARK: - Original download remux (audit F2)
+
+    // The remux rewrites the container, so an h264/aac MKV can be an
+    // "Original" download even though it can't direct-play as a raw file.
+    func testMkvWithPlayableCodecsCanBeRemuxedForDownload() throws {
+        let source = try makeSource(container: "mkv", videoCodec: "h264", audioCodec: "aac")
+        XCTAssertFalse(DeviceMediaCompatibility.canDirectPlayOnDevice(source, deviceSupportsDolbyVision: true))
+        XCTAssertTrue(DeviceMediaCompatibility.canRemuxForDownload(source, deviceSupportsDolbyVision: true))
+        let hevc = try makeSource(container: "mkv", videoCodec: "hevc", audioCodec: "eac3")
+        XCTAssertTrue(DeviceMediaCompatibility.canRemuxForDownload(hevc, deviceSupportsDolbyVision: true))
+    }
+
+    func testRemuxStillNeedsDecodableCodecs() throws {
+        let dtsOnly = try makeSource(container: "mkv", videoCodec: "hevc", audioCodec: "dts")
+        XCTAssertFalse(DeviceMediaCompatibility.canRemuxForDownload(dtsOnly, deviceSupportsDolbyVision: true))
+        let av1 = try makeSource(container: "mkv", videoCodec: "av1", audioCodec: "aac")
+        XCTAssertFalse(DeviceMediaCompatibility.canRemuxForDownload(av1, deviceSupportsDolbyVision: true))
+        let profile5 = try makeMultiStreamSource(
+            container: "mkv", videoCodecs: ["hevc"], audioCodecs: ["aac"], videoRangeType: "DOVI")
+        XCTAssertFalse(DeviceMediaCompatibility.canRemuxForDownload(profile5, deviceSupportsDolbyVision: false))
+    }
+
+    func testRemuxAcceptsATrueHDPrimaryWithACompatibilityTrack() throws {
+        let source = try makeMultiStreamSource(
+            container: "mkv", videoCodecs: ["hevc"], audioCodecs: ["truehd", "ac3"], videoRangeType: "HDR10")
+        XCTAssertTrue(DeviceMediaCompatibility.canRemuxForDownload(source, deviceSupportsDolbyVision: false))
+    }
 }

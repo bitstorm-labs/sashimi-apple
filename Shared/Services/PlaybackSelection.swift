@@ -125,6 +125,32 @@ enum PlaybackSelection {
         return (maxWidth: width, maxBitrate: bitrate)
     }
 
+    /// Second-pass override for Auto when the server re-encodes the video for
+    /// a reason other than the source exceeding the link (codec, profile,
+    /// range...): `constrainedAutoOverride` returns nil there because the cap
+    /// covers the source bitrate, and the first request carries no width, so
+    /// the re-encode would run at the source resolution — a 4K encode at a
+    /// remote link's few Mbps. Re-request at the width the cap carries.
+    /// Nil when the video is only remuxed (copied), when the cap needs no
+    /// downscale, or when the source is already that narrow.
+    static func autoReencodeOverride(cap: Int, sourceWidth: Int?, transcodeReasons: [String]?) -> (maxWidth: Int, maxBitrate: Int)? {
+        guard reencodesVideo(transcodeReasons),
+              let width = autoMaxWidth(forBitrateCap: cap),
+              let sourceWidth, sourceWidth > width else { return nil }
+        return (maxWidth: width, maxBitrate: cap)
+    }
+
+    /// Whether the server's transcode reasons mean the VIDEO is re-encoded
+    /// (as opposed to a container remux / audio-only conversion, where the
+    /// video is copied and a width condition would force a needless encode).
+    static func reencodesVideo(_ reasons: [String]?) -> Bool {
+        (reasons ?? []).contains { reason in
+            reason.hasPrefix("Video") || reason == "ContainerBitrateExceedsLimit"
+                || reason == "InterlacedVideoNotSupported" || reason == "AnamorphicVideoNotSupported"
+                || reason == "RefFramesNotSupported" || reason == "DirectPlayError"
+        }
+    }
+
     /// Viewer-facing bitrate: "20 Mbps", "9.5 Mbps", "720 kbps".
     static func bitrateLabel(_ bitsPerSecond: Int) -> String {
         guard bitsPerSecond >= 1_000_000 else {
