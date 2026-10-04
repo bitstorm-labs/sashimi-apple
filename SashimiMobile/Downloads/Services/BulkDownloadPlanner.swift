@@ -102,14 +102,14 @@ enum BulkDownloadPlanner {
         count > confirmationThreshold
     }
 
-    /// Size estimate from runtime x the quality's bitrate cap. Nil for
-    /// Original (no cap to estimate from) or when no episode has a runtime.
+    /// Size estimate from runtime x the quality's bitrate (the same rule the
+    /// progress indicator uses, DownloadSizeEstimate). Nil for Original (no
+    /// bitrate to estimate from here) or when no episode has a runtime.
     static func estimatedBytes(for episodes: [BaseItemDto], quality: DownloadQuality) -> Int64? {
-        guard let bitrate = quality.maxBitrate else { return nil }
-        let ticks = episodes.compactMap(\.runTimeTicks).filter { $0 > 0 }
-        guard !ticks.isEmpty else { return nil }
-        let seconds = Double(ticks.reduce(0, +)) / 10_000_000
-        return Int64(seconds * Double(bitrate) / 8)
+        let sizes = episodes.compactMap {
+            DownloadSizeEstimate.expectedBytes(quality: quality, runTimeTicks: $0.runTimeTicks)
+        }
+        return sizes.isEmpty ? nil : sizes.reduce(0, +)
     }
 
     /// "Download 24 episodes (~18 GB)?", or without the size when unknown.

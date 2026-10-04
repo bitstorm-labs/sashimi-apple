@@ -15,7 +15,12 @@ final class DownloadManager: NSObject, ObservableObject {
     nonisolated private static let taskMapKey = "downloadTaskMap"
     nonisolated private static let taskServerMapKey = "downloadTaskServerMap"
 
-    @Published var activeDownloads: [String: Double] = [:] // recordID -> progress
+    /// recordID -> shown fraction (0...0.99), or negative when there is
+    /// neither a Content-Length nor anything to estimate a total from.
+    @Published var activeDownloads: [String: Double] = [:]
+    /// recordID -> bytes, total (exact or estimated), speed and time left.
+    /// Republished with `activeDownloads` on the progress timer.
+    @Published private(set) var progressDetails: [String: DownloadProgressDetail] = [:]
     @Published var stateVersion: Int = 0 // bumped on any download state change
     @Published var downloadSpeed: String = "" // human-readable bandwidth
 
@@ -96,9 +101,11 @@ final class DownloadManager: NSObject, ObservableObject {
     private var lastProgressSave: [String: Date] = [:]
     private var progressTimer: Timer?
 
-    // Bandwidth tracking
-    private var lastBytesWritten: Int64 = 0
-    private var lastSpeedCheck: Date = .distantPast
+    // Smoothed speed per record, sampled on the progress timer.
+    private var speedTrackers: [String: DownloadSpeedTracker] = [:]
+    /// What each record's size estimate is derived from; mirrored in
+    /// UserDefaults (DownloadEstimateStore) so it survives a relaunch.
+    private var estimateInputs: [String: DownloadEstimateInput] = [:]
 
     // In-memory preparing state (items waiting for first bytes from server)
     @Published var preparingItems: Set<String> = []
@@ -144,11 +151,17 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
-        self.cachedContext = ModelContext(container)
+        // The container's own main context, i.e. the one the views' @Query
+        // observes. A separate ModelContext(container) here meant a newly
+        // queued record reached the Downloads list only if and when SwiftData
+        // merged that sibling context's save into the main one; an insert
+        // into the observed context itself needs no merge.
+        self.cachedContext = container.mainContext
         persistence.setModelContainer(container)
     }
 
-    /// Reusable main-actor context for reads. Avoids creating throwaway ModelContexts per call.
+    /// The main-actor context for reads and for the writes the UI must see
+    /// at once (new and deleted records).
     private var mainContext: ModelContext? {
         cachedContext
     }
@@ -177,7 +190,77 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func publishProgress() {
         guard !pendingProgress.isEmpty else { return }
-        activeDownloads = pendingProgress
+        let now = Date().timeIntervalSinceReferenceDate
+        var details: [String: DownloadProgressDetail] = [:]
+        var fractions: [String: Double] = [:]
+        for key in pendingProgress.keys {
+            speedTrackers[key, default: DownloadSpeedTracker()]
+                .record(totalBytes: byteCounts[key]?.written ?? 0, at: now)
+            let detail = progressDetail(for: key)
+            details[key] = detail
+            fractions[key] = detail.display.fraction ?? -1
+        }
+        progressDetails = details
+        activeDownloads = fractions
+
+        let current = currentDownloadItemId.map { downloadKey(itemId: $0, serverID: currentDownloadServerID) }
+        let speed = current.flatMap { details[$0]?.bytesPerSecond }.map(DownloadProgressText.speed) ?? ""
+        if downloadSpeed != speed { downloadSpeed = speed }
+    }
+
+    /// Bytes, total and speed for one in-flight download. The total is the
+    /// server's Content-Length when it sent one, else the estimate.
+    private func progressDetail(for key: String) -> DownloadProgressDetail {
+        let bytes = byteCounts[key]
+        return DownloadProgressDetail.make(
+            receivedBytes: bytes?.written ?? 0,
+            exactTotalBytes: bytes?.expected,
+            estimatedTotalBytes: estimateInput(for: key).flatMap(DownloadSizeEstimate.expectedBytes(for:)),
+            bytesPerSecond: speedTrackers[key]?.bytesPerSecond
+        )
+    }
+
+    private func estimateInput(for key: String) -> DownloadEstimateInput? {
+        if let cached = estimateInputs[key] { return cached }
+        // After a relaunch: the task kept running, the memory didn't.
+        guard let stored = DownloadEstimateStore.input(recordID: key) else { return nil }
+        estimateInputs[key] = stored
+        return stored
+    }
+
+    private func updateEstimateInput(for key: String, _ change: (inout DownloadEstimateInput) -> Void) {
+        var input = estimateInput(for: key) ?? DownloadEstimateInput()
+        change(&input)
+        estimateInputs[key] = input
+        DownloadEstimateStore.set(input, recordID: key)
+    }
+
+    /// The source's bitrates, from playback info that is fetched anyway (the
+    /// Original compatibility check, the subtitle list): the server caps a
+    /// transcode's video at the source's, and an Original is the source.
+    private func noteSource(_ source: MediaSourceInfo, for key: String) {
+        let video = source.mediaStreams?.first { $0.type == "Video" }?.bitRate
+        guard source.bitrate != nil || video != nil else { return }
+        updateEstimateInput(for: key) { input in
+            input.sourceBitrate = source.bitrate ?? input.sourceBitrate
+            input.sourceVideoBitrate = video ?? input.sourceVideoBitrate
+        }
+    }
+
+    private func forgetEstimate(for key: String) {
+        estimateInputs.removeValue(forKey: key)
+        DownloadEstimateStore.forget(recordID: key)
+    }
+
+    /// Drops every piece of in-flight progress state for a record.
+    private func clearProgress(for key: String) {
+        pendingProgress.removeValue(forKey: key)
+        byteCounts.removeValue(forKey: key)
+        activeDownloads.removeValue(forKey: key)
+        progressDetails.removeValue(forKey: key)
+        speedTrackers.removeValue(forKey: key)
+        preparingItems.remove(key)
+        lastProgressSave.removeValue(forKey: key)
     }
 
     // MARK: - Public API
@@ -185,11 +268,13 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Count and overall progress for the global download indicator.
     var activitySnapshot: DownloadActivitySnapshot {
         let active = activeDownloads.reduce(into: [String: DownloadItemProgress]()) { result, entry in
-            let bytes = byteCounts[entry.key]
+            // The shown total, so an estimated-size download counts toward
+            // the ring the same way an exact one does.
+            let display = progressDetails[entry.key]?.display
             result[entry.key] = DownloadItemProgress(
                 fraction: entry.value,
-                bytesWritten: bytes?.written ?? 0,
-                bytesExpected: bytes?.expected ?? 0
+                bytesWritten: display?.receivedBytes ?? 0,
+                bytesExpected: display?.totalBytes ?? 0
             )
         }
         return DownloadActivitySnapshot(active: active, preparingKeys: preparingItems, queuedCount: queuedCount)
@@ -296,10 +381,6 @@ final class DownloadManager: NSObject, ObservableObject {
             return
         }
 
-        // Reset speed tracking for new download
-        lastBytesWritten = 0
-        lastSpeedCheck = .distantPast
-
         let queued = downloadQueue.removeFirst()
         let item = queued.item
         let quality = queued.quality
@@ -358,6 +439,9 @@ final class DownloadManager: NSObject, ObservableObject {
             // downloaded under a VLC profile would be one AVPlayer can't open.
             let client = try await client(for: serverID)
             let info = try await client.getPlaybackInfo(itemId: itemId, engine: .avFoundation)
+            if let source = info.mediaSources?.first {
+                noteSource(source, for: downloadKey(itemId: itemId, serverID: serverID))
+            }
             compatible = info.mediaSources?.first
                 .map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false
         } catch {
@@ -445,6 +529,11 @@ final class DownloadManager: NSObject, ObservableObject {
         preparingItems.insert(key)
         pendingProgress[key] = 0
         byteCounts.removeValue(forKey: key)
+        speedTrackers.removeValue(forKey: key)
+        updateEstimateInput(for: key) { input in
+            input.quality = quality.rawValue
+            input.runTimeTicks = item.runTimeTicks
+        }
         stateVersion += 1
         startProgressTimer()
 
@@ -508,11 +597,8 @@ final class DownloadManager: NSObject, ObservableObject {
         pendingAssetTasks[key]?.forEach { $0.cancel() }
         pendingAssetTasks.removeValue(forKey: key)
 
-        pendingProgress.removeValue(forKey: key)
-        byteCounts.removeValue(forKey: key)
-        activeDownloads.removeValue(forKey: key)
-        preparingItems.remove(key)
-        lastProgressSave.removeValue(forKey: key)
+        clearProgress(for: key)
+        forgetEstimate(for: key)
 
         try? DownloadFileManager.deleteItemDirectory(for: itemId, serverID: serverID)
         deleteRecordFromMainContext(itemId: itemId, serverID: serverID)
@@ -764,11 +850,7 @@ final class DownloadManager: NSObject, ObservableObject {
         taskServerMap = serverMap
 
         let recordKey = downloadKey(itemId: itemId, serverID: serverID)
-        pendingProgress.removeValue(forKey: recordKey)
-        byteCounts.removeValue(forKey: recordKey)
-        activeDownloads.removeValue(forKey: recordKey)
-        preparingItems.remove(recordKey)
-        lastProgressSave.removeValue(forKey: recordKey)
+        clearProgress(for: recordKey)
 
         let quality = persistence.fetchQuality(itemId: itemId, serverID: serverID) ?? .high
         persistence.updateStatus(itemId: itemId, serverID: serverID, status: .queued)
@@ -892,6 +974,10 @@ final class DownloadManager: NSObject, ObservableObject {
         taskIdMap = [:]
         taskServerMap = [:]
         activeDownloads = [:]
+        progressDetails = [:]
+        speedTrackers.removeAll()
+        estimateInputs.removeAll()
+        DownloadEstimateStore.clearAll()
 
         downloadQueue.removeAll()
         currentDownloadItemId = nil
@@ -946,9 +1032,16 @@ final class DownloadManager: NSObject, ObservableObject {
                         if task.state == .running {
                             let serverID = self.taskServerMap[self.taskKey(task.taskIdentifier)]
                             let key = self.downloadKey(itemId: itemId, serverID: serverID)
+                            // The task kept downloading while the app was
+                            // gone: pick its byte counts up rather than
+                            // starting the row again from "Preparing...".
+                            let received = task.countOfBytesReceived
+                            self.byteCounts[key] = (received, task.countOfBytesExpectedToReceive)
                             self.pendingProgress[key] = 0
-                            self.activeDownloads[key] = 0
-                            self.preparingItems.insert(key)
+                            self.activeDownloads[key] = self.progressDetail(for: key).display.fraction ?? -1
+                            if received <= 0 {
+                                self.preparingItems.insert(key)
+                            }
                             self.persistence.updateStatus(
                                 itemId: itemId,
                                 serverID: serverID,
@@ -961,6 +1054,8 @@ final class DownloadManager: NSObject, ObservableObject {
                         }
                     }
                 }
+
+                self.publishProgress()
 
                 // Mark any "downloading"/"preparing" records without active tasks as failed
                 // (stale from previous install/crash)
@@ -1095,6 +1190,26 @@ final class DownloadManager: NSObject, ObservableObject {
         _ = await fetchSubtitles(itemId: item.id, itemType: item.type, server: server, token: token, skipping: [])
     }
 
+    /// The item's media source from playback info. For a download in flight
+    /// its bitrates also feed the size estimate (see noteSource).
+    private func mediaSource(itemId: String, itemType: ItemType?, server: ServerConfig) async -> MediaSourceInfo? {
+        guard let client = try? await client(for: server.id),
+              let playbackInfo = try? await client.getPlaybackInfo(
+                  itemId: itemId,
+                  itemType: itemType,
+                  engine: .avFoundation,
+                  maxBitrate: nil
+              ),
+              let mediaSource = playbackInfo.mediaSources?.first else {
+            return nil
+        }
+        let key = downloadKey(itemId: itemId, serverID: server.id)
+        if pendingProgress[key] != nil {
+            noteSource(mediaSource, for: key)
+        }
+        return mediaSource
+    }
+
     /// Downloads the item's subtitle tracks, except `skipping` (stream indexes
     /// already on disk). Returns what it wrote, or nil if the track list could
     /// not be fetched or any track failed -- so a caller can try again later.
@@ -1105,17 +1220,9 @@ final class DownloadManager: NSObject, ObservableObject {
         token: String,
         skipping: Set<Int>
     ) async -> [OfflineSubtitle]? {
-        guard let client = try? await client(for: server.id),
-              let playbackInfo = try? await client.getPlaybackInfo(
-                  itemId: itemId,
-                  itemType: itemType,
-                  engine: .avFoundation,
-                  maxBitrate: nil
-              ) else {
+        guard let mediaSource = await mediaSource(itemId: itemId, itemType: itemType, server: server) else {
             return nil
         }
-
-        guard let mediaSource = playbackInfo.mediaSources?.first else { return nil }
         try? DownloadFileManager.createSubtitlesDirectory(for: itemId, serverID: server.id)
 
         var written: [OfflineSubtitle] = []
@@ -1239,11 +1346,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     message: "Server returned HTTP \(http.statusCode)",
                     kind: DownloadRetryPolicy.classify(httpStatusCode: http.statusCode)
                 )
-                let key = self.downloadKey(itemId: itemId, serverID: serverID)
-                self.pendingProgress.removeValue(forKey: key)
-                self.byteCounts.removeValue(forKey: key)
-                self.activeDownloads.removeValue(forKey: key)
-                self.preparingItems.remove(key)
+                self.clearProgress(for: self.downloadKey(itemId: itemId, serverID: serverID))
                 var map = self.taskIdMap
                 map.removeValue(forKey: self.taskKey(taskId))
                 self.taskIdMap = map
@@ -1285,11 +1388,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
             }
 
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
-            self.pendingProgress.removeValue(forKey: key)
-            self.byteCounts.removeValue(forKey: key)
-            self.activeDownloads.removeValue(forKey: key)
-            self.preparingItems.remove(key)
-            self.lastProgressSave.removeValue(forKey: key)
+            self.clearProgress(for: key)
+            if moveError == nil {
+                self.forgetEstimate(for: key)
+            }
             self.stateVersion += 1
 
             var map = self.taskIdMap
@@ -1330,29 +1432,16 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 self.preparingItems.remove(key)
             }
 
-            // Bandwidth tracking
+            // Throttle SwiftData writes to every 5s per item. The saved
+            // fraction is the shown one (estimated when there is no length).
             let now = Date()
-            let elapsed = now.timeIntervalSince(self.lastSpeedCheck)
-            if elapsed >= 1.0 {
-                let bytesDelta = totalBytesWritten - self.lastBytesWritten
-                if bytesDelta > 0 {
-                    let bytesPerSecond = Double(bytesDelta) / elapsed
-                    self.downloadSpeed = ByteCountFormatter.string(
-                        fromByteCount: Int64(bytesPerSecond), countStyle: .file
-                    ) + "/s"
-                }
-                self.lastBytesWritten = totalBytesWritten
-                self.lastSpeedCheck = now
-            }
-
-            // Throttle SwiftData writes to every 5s per item
             let lastSave = self.lastProgressSave[key] ?? .distantPast
             if now.timeIntervalSince(lastSave) >= 5 {
                 self.lastProgressSave[key] = now
                 self.persistence.updateProgress(
                     itemId: itemId,
                     serverID: serverID,
-                    progress: progress,
+                    progress: self.progressDetail(for: key).display.fraction ?? progress,
                     downloadedBytes: totalBytesWritten,
                     totalBytes: totalBytesExpectedToWrite
                 )
@@ -1383,10 +1472,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 message: error.localizedDescription,
                 kind: DownloadRetryPolicy.classify(error: error)
             )
-            self.pendingProgress.removeValue(forKey: key)
-            self.byteCounts.removeValue(forKey: key)
-            self.activeDownloads.removeValue(forKey: key)
-            self.preparingItems.remove(key)
+            self.clearProgress(for: key)
 
             var map = self.taskIdMap
             map.removeValue(forKey: self.taskKey(taskId))
