@@ -68,27 +68,23 @@ struct ManageChannelsView: View {
         }
         .onExitCommand(perform: back)
         .task { await model.loadChannels() }
-        .confirmationDialog(
+        // Both open with Cancel focused: a stray press of the remote must not
+        // take a channel off air or delete it.
+        .destructiveConfirmation(
             removalTitle,
             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingRemoval
-        ) { removal in
-            Button("Remove", role: .destructive) { remove(removal) }
-            Button("Cancel", role: .cancel) { pendingRemoval = nil }
-        } message: { removal in
-            Text("\(removal.item.name) is the last title on \(removal.channel.name) and nothing else feeds it, so the channel will go off air.")
+            message: removalMessage,
+            confirmTitle: "Remove"
+        ) {
+            if let removal = pendingRemoval { remove(removal) }
         }
-        .confirmationDialog(
+        .destructiveConfirmation(
             "Delete \(currentChannel?.name ?? "this channel")?",
             isPresented: $confirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Channel", role: .destructive) { deleteCurrent() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The channel and its guide are removed from every device. The titles stay in your library.")
-        }
+            message: "The channel and its guide are removed from every device. The titles stay in your library.",
+            confirmTitle: "Delete Channel",
+            onConfirm: deleteCurrent
+        )
         .alert("Couldn't update the channel", isPresented: errorBinding) {
             Button("OK", role: .cancel) { model.errorMessage = nil }
         } message: {
@@ -201,6 +197,11 @@ struct ManageChannelsView: View {
 
     private var removalTitle: String {
         "Take \(pendingRemoval?.channel.name ?? "this channel") off air?"
+    }
+
+    private var removalMessage: String {
+        guard let removal = pendingRemoval else { return "" }
+        return "\(removal.item.name) is the last title on \(removal.channel.name) and nothing else feeds it, so the channel will go off air."
     }
 
     private var errorBinding: Binding<Bool> {
