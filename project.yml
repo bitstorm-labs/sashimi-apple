@@ -50,6 +50,10 @@ targets:
         # a single source of truth (xcodegen otherwise hardcodes a default "1.0"),
         # and the Settings About row shows the real version.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        # Dark-only theme: an Apple TV set to Light appearance otherwise draws
+        # system surfaces (alerts, lists, menus) light behind the app's
+        # fixed dark colours.
+        UIUserInterfaceStyle: Dark
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -126,6 +130,11 @@ targets:
         # Background audio so Picture-in-Picture keeps playing in the background.
         UIBackgroundModes:
           - audio
+        # The theme is dark-only (MobileColors are fixed colours). Without this
+        # a device in Light appearance drew system surfaces -- plain lists,
+        # navigation bars, sheets -- white behind the app's dark rows and
+        # white text.
+        UIUserInterfaceStyle: Dark
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
