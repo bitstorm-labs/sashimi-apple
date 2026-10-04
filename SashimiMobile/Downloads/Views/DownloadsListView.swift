@@ -185,7 +185,7 @@ struct DownloadsListView: View {
                         ActiveDownloadRow(
                             item: item,
                             isPreparing: downloadManager.preparingItems.contains(item.recordID),
-                            progress: downloadManager.activeDownloads[item.recordID],
+                            detail: downloadManager.progressDetails[item.recordID],
                             waitReason: waitReason,
                             onCancel: {
                                 Task { await downloadManager.cancelDownload(itemId: item.itemId, serverID: item.serverID) }

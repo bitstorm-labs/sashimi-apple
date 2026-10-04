@@ -8,7 +8,8 @@ struct DownloadButton: View {
     var showQualityPicker: Bool = true
 
     @State private var downloadState: DownloadButtonState = .notDownloaded
-    @State private var progress: Double = 0
+    /// The record's saved fraction, used until the manager publishes a live one.
+    @State private var savedProgress: Double = 0
     @State private var showingQualitySheet = false
     @State private var showingDeleteConfirmation = false
     // Cached after the first playback-info fetch so re-taps don't refetch.
@@ -49,6 +50,9 @@ struct DownloadButton: View {
         .tint(.white)
         .onAppear { refreshState() }
         .onChange(of: downloadManager.stateVersion) { _, _ in refreshState() }
+        // First bytes arriving ends "preparing" without a state bump.
+        .onChange(of: downloadManager.preparingItems) { _, _ in refreshState() }
+        .accessibilityLabel(accessibilityText)
         // DownloadButton is recycled in ForEach/LazyVStack; `item` is a `let`,
         // so SwiftUI won't reset @State when a reused view gets a new item.
         // Clear cached Original availability so we don't show a stale result.
@@ -97,12 +101,12 @@ struct DownloadButton: View {
                 .scaleEffect(0.7)
 
         case .downloading:
-            if progress < 0 {
-                ProgressView()
-                    .scaleEffect(0.7)
+            // Read live: the manager republishes progress on a timer, and an
+            // estimated-size download has a fraction too.
+            if let progress = liveProgress {
+                DownloadProgressRing(fraction: progress)
             } else {
-                ProgressView(value: progress)
-                    .progressViewStyle(.circular)
+                ProgressView()
                     .scaleEffect(0.7)
             }
 
@@ -120,6 +124,28 @@ struct DownloadButton: View {
             Label("Retry", systemImage: "exclamationmark.triangle")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MobileColors.error)
+        }
+    }
+
+    /// 0...0.99, or nil when the size is neither known nor estimable.
+    private var liveProgress: Double? {
+        let progress = downloadManager.activeDownloads[downloadRecordID] ?? savedProgress
+        return progress >= 0 ? progress : nil
+    }
+
+    private var accessibilityText: String {
+        switch downloadState {
+        case .notDownloaded: return "Download"
+        case .queued: return "Download queued. Cancel"
+        case .preparing: return "Preparing download. Cancel"
+        case .downloading:
+            guard let detail = downloadManager.progressDetails[downloadRecordID] else {
+                return "Downloading. Cancel"
+            }
+            return "Downloading, \(DownloadProgressText.accessibilityLabel(for: detail)). Cancel"
+        case .paused: return "Download paused. Resume"
+        case .completed: return "Downloaded. Remove download"
+        case .failed: return "Download failed. Retry"
         }
     }
 
@@ -225,7 +251,7 @@ struct DownloadButton: View {
     private func refreshState() {
         guard let record = downloadManager.downloadStatus(for: item.id, serverID: serverID) else {
             downloadState = .notDownloaded
-            progress = 0
+            savedProgress = 0
             return
         }
 
@@ -237,7 +263,7 @@ struct DownloadButton: View {
                 downloadState = .preparing
             } else {
                 downloadState = .downloading
-                progress = downloadManager.activeDownloads[downloadRecordID] ?? record.progress
+                savedProgress = record.progress
             }
         case .paused:
             downloadState = .paused
@@ -246,5 +272,29 @@ struct DownloadButton: View {
         case .failed:
             downloadState = .failed
         }
+    }
+}
+
+/// Determinate ring for a download in flight, with the stop square the tap
+/// performs (cancel) in the middle.
+struct DownloadProgressRing: View {
+    let fraction: Double
+    var diameter: CGFloat = 22
+    var lineWidth: CGFloat = 2.5
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.25), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: min(max(fraction, 0.02), 1))
+                .stroke(MobileColors.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 0.5), value: fraction)
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.white)
+                .frame(width: diameter * 0.32, height: diameter * 0.32)
+        }
+        .frame(width: diameter, height: diameter)
     }
 }
