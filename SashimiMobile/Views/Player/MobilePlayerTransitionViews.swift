@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MobilePlayerLoadingView: View {
     @ObservedObject var viewModel: PlayerViewModel
+    /// Nil when there is nothing to retry against (a local file).
+    var onRetry: (() -> Void)?
     let onClose: () -> Void
 
     var body: some View {
@@ -29,8 +31,14 @@ struct MobilePlayerLoadingView: View {
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding()
-                    Button("Dismiss", action: onClose)
-                        .buttonStyle(.bordered)
+                    HStack(spacing: 12) {
+                        if let onRetry {
+                            Button("Try Again", action: onRetry)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        Button("Dismiss", action: onClose)
+                            .buttonStyle(.bordered)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

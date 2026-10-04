@@ -319,6 +319,9 @@ struct MediaSourceInfo: Codable {
     /// Decoded purely so the player's diagnostics can record it: without it,
     /// an unexplained transcode had to be reconstructed from server logs.
     let transcodeReasons: [String]?
+    /// The audio stream the server will play for this source: the requested
+    /// `AudioStreamIndex` when one was sent, otherwise the user's default.
+    let defaultAudioStreamIndex: Int?
 
     var videoCodec: String? {
         mediaStreams?.first(where: { $0.type == "Video" })?.codec
@@ -382,6 +385,7 @@ struct MediaSourceInfo: Codable {
         case mediaStreams = "MediaStreams"
         case bitrate = "Bitrate"
         case transcodeReasons = "TranscodeReasons"
+        case defaultAudioStreamIndex = "DefaultAudioStreamIndex"
     }
 }
 

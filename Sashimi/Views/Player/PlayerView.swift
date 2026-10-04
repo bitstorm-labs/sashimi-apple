@@ -36,6 +36,9 @@ struct PlayerView: View {
     /// the server's side is indistinguishable from one session restarting.
     /// A view tag plus the view model's own tag separates the two cases.
     @State private var viewTag = String(UUID().uuidString.prefix(8))
+    /// Bumped by "Try Again". The load is the view's `.task`, keyed on this,
+    /// so a retry is cancelled with the view exactly like the first load.
+    @State private var loadAttempt = 0
 
     var body: some View {
         ZStack {
@@ -62,10 +65,10 @@ struct PlayerView: View {
                             PlayerDiagnostics.field("view", viewTag),
                             PlayerDiagnostics.field("trigger", "menu-button")
                         ])
-                        Task {
-                            await viewModel.stop(reason: .userStop)
-                            dismiss()
-                        }
+                        // Close first; the stopped report and transcode
+                        // cleanup carry on behind the dismissal (#591).
+                        viewModel.beginStop(reason: .userStop)
+                        dismiss()
                     }
                 )
                 .ignoresSafeArea()
@@ -92,8 +95,8 @@ struct PlayerView: View {
         }
         .animation(.easeInOut(duration: 0.5), value: viewModel.upNext)
         .animation(.easeInOut(duration: 0.3), value: viewModel.playbackNotice)
-        .task {
-            // One `view.task` line per presentation. Two lines with different
+        .task(id: loadAttempt) {
+            // One `view.task` line per presentation (and per retry). Two lines with different
             // `view` tags for the same item means SwiftUI rebuilt the player;
             // two `load.begin` lines under the same `vm` tag means one view
             // model was asked to load twice. Those need different fixes, and
@@ -102,7 +105,8 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("view", viewTag),
                 PlayerDiagnostics.field("item", item.id),
                 PlayerDiagnostics.field("type", item.type?.rawValue),
-                PlayerDiagnostics.field("startFromBeginning", startFromBeginning)
+                PlayerDiagnostics.field("startFromBeginning", startFromBeginning),
+                PlayerDiagnostics.field("loadAttempt", loadAttempt)
             ])
             await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning)
             await viewModel.announceStation()
@@ -125,11 +129,8 @@ struct PlayerView: View {
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }
             viewModel.player?.pause()
-            let stopTask = viewModel.beginStop(reason: .sceneBackground)
-            Task {
-                await stopTask.value
-                dismiss()
-            }
+            viewModel.beginStop(reason: .sceneBackground)
+            dismiss()
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             if ended && (!playbackSettings.showEpisodeNavigationControls ||
@@ -155,14 +156,20 @@ struct PlayerView: View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle").font(.system(size: 60)).foregroundStyle(.red)
             Text("Playback Error").font(.title2)
-            Text(viewModel.errorMessage ?? "Unknown error").foregroundStyle(.secondary)
-            Button("Dismiss") {
-                PlayerDiagnostics.event(.viewDismiss, [
-                    PlayerDiagnostics.field("view", viewTag),
-                    PlayerDiagnostics.field("trigger", "error-dismiss")
-                ])
-                Task {
-                    await viewModel.stop(reason: .userStop)
+            Text(viewModel.errorMessage ?? "Unknown error")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 40) {
+                // A load that timed out or failed is often worth one more go
+                // (a server waking up, a link that came back) without making
+                // the viewer find the title again.
+                Button("Try Again") { loadAttempt += 1 }
+                Button("Dismiss") {
+                    PlayerDiagnostics.event(.viewDismiss, [
+                        PlayerDiagnostics.field("view", viewTag),
+                        PlayerDiagnostics.field("trigger", "error-dismiss")
+                    ])
+                    viewModel.beginStop(reason: .userStop)
                     dismiss()
                 }
             }
