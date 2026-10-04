@@ -34,6 +34,16 @@ extension PlayerViewModel {
         }
     }
 
+    /// Stops playback: everything local happens before this returns, the
+    /// network work is left running in the returned task (#591).
+    ///
+    /// The player used to stay up until the stopped report and the transcode
+    /// DELETE had both come back, so a slow or dead server held the viewer on
+    /// the player for 30 seconds to two minutes. Nothing the viewer sees
+    /// depends on those requests: the position is captured and the report
+    /// persisted here, synchronously, and the delivery layer retries a report
+    /// that fails. Callers dismiss straight away and await the task only for
+    /// work that must follow the report (a Home refresh, delete-after-watching).
     @discardableResult
     func beginStop(reason: PlayerDiagnostics.TeardownReason = .unspecified) -> Task<Void, Never> {
         // Invalidate a transition waiting on report delivery synchronously,
@@ -47,9 +57,34 @@ extension PlayerViewModel {
             return teardownTask
         }
 
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performStop(reason: reason)
+        let work = tearDownLocally(reason: reason)
+        // Captured by value: the view model is a @StateObject of a view that
+        // is on its way out, and the report must not depend on it surviving.
+        let reporter = playbackReporter
+        let client = client
+        let tag = sessionTag
+        let task = Task { @MainActor in
+            if let report = work.report {
+                await reporter.stopped(
+                    itemID: report.itemID,
+                    positionTicks: report.positionTicks,
+                    playSessionID: work.playSessionID
+                )
+            }
+            // Posted once the server has the position (or the attempt has
+            // failed and the report is queued), so Home refreshes against it.
+            NotificationCenter.default.post(name: .playbackDidEnd, object: nil)
+
+            // The stopped report already ends the session's transcode: the
+            // server's ReportPlaybackStopped calls KillTranscodingJobs for its
+            // PlaySessionId (verified live: ffmpeg exits on the report alone).
+            // The DELETE is only needed when no such report went out: channel
+            // playback, a session that never started, or a failed delivery.
+            guard let playSessionID = work.transcodeSessionID,
+                  !reporter.lastStoppedReportEndedSession else { return }
+            Task {
+                await Self.stopActiveEncoding(playSessionID: playSessionID, reason: reason, client: client, tag: tag)
+            }
         }
         teardownTask = task
         return task
@@ -61,7 +96,17 @@ extension PlayerViewModel {
         teardownTask = nil
     }
 
-    private func performStop(reason: PlayerDiagnostics.TeardownReason) async {
+    /// What is left to tell the server once the player is gone.
+    private struct PendingStopWork {
+        var report: (itemID: String, positionTicks: Int64)?
+        var playSessionID: String?
+        /// Set when the session had a server-side transcode to end.
+        var transcodeSessionID: String?
+    }
+
+    /// Releases the player and every observer on it, and returns what still
+    /// has to be reported. Synchronous: nothing here waits on the network.
+    private func tearDownLocally(reason: PlayerDiagnostics.TeardownReason) -> PendingStopWork {
         diag(.teardown, [
             PlayerDiagnostics.field("reason", reason.rawValue),
             PlayerDiagnostics.field("item", currentItem?.id),
@@ -85,43 +130,40 @@ extension PlayerViewModel {
             self.endObserver = nil
         }
 
-        if let item = currentItem,
-           let player,
-           let currentTime = player.currentItem?.currentTime() {
-            // Check if playback was too short (< 10 seconds)
-            // If so, preserve the original resume position to prevent progress reset
-            let elapsedSeconds = playbackStartDate.map { Date().timeIntervalSince($0) } ?? 0
-            var positionTicks: Int64
-            if elapsedSeconds < 10 && resumePositionTicks > 0 {
-                // Quick exit - preserve original progress
-                positionTicks = resumePositionTicks
-            } else {
-                // Normal exit - report current position
-                positionTicks = Int64(currentTime.seconds * 10_000_000)
-            }
-
-            if !isOfflinePlayback {
-                await playbackReporter.stopped(
-                    itemID: item.id,
-                    positionTicks: positionTicks,
-                    playSessionID: playSessionId
-                )
-            }
+        var work = PendingStopWork(playSessionID: playSessionId)
+        if let item = currentItem, !isOfflinePlayback, let positionTicks = stoppedReportPositionTicks() {
+            work.report = (item.id, positionTicks)
         }
-
-        // Kill the session's server-side transcode, if one was active.
-        await stopActiveEncodingIfNeeded(reason: reason)
+        if !isOfflinePlayback, currentMediaSource?.transcodingUrl != nil {
+            work.transcodeSessionID = playSessionId
+        }
         playSessionId = nil
 
         player?.pause()
         invalidatePlayerObservers()
         player = nil
         isPlayerReady = false
+        pendingResumeTicks = 0
+        activeTrackRequest = nil
         setCurrentItem(nil)
         transitionState = .empty
         playbackStartDate = nil
+        return work
+    }
 
-        // Notify that playback ended so Home can refresh
-        NotificationCenter.default.post(name: .playbackDidEnd, object: nil)
+    private static func stopActiveEncoding(
+        playSessionID: String,
+        reason: PlayerDiagnostics.TeardownReason,
+        client: JellyfinClient,
+        tag: String
+    ) async {
+        let context = [PlayerDiagnostics.field("vm", tag), PlayerDiagnostics.field("reason", reason.rawValue)]
+        PlayerDiagnostics.event(.encodingStop, context + [PlayerDiagnostics.field("playSession", playSessionID)])
+        do {
+            try await client.stopActiveEncoding(playSessionId: playSessionID)
+        } catch {
+            logger.error("stopActiveEncoding failed: \(error.localizedDescription, privacy: .public)")
+            PlayerDiagnostics.failure(.encodingStop, context + PlayerDiagnostics.fields(for: error))
+        }
     }
 }

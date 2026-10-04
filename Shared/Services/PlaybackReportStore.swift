@@ -218,6 +218,16 @@ protocol PlayerPlaybackReporting: AnyObject {
     func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async
     func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async
     func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async
+    /// True when the most recent `stopped` call delivered a report that named
+    /// a play session. The server ends that session's transcode on such a
+    /// report, so the player skips its own DELETE /Videos/ActiveEncodings.
+    var lastStoppedReportEndedSession: Bool { get }
+}
+
+extension PlayerPlaybackReporting {
+    /// Reporters that send nothing (channels) or do not track delivery leave
+    /// the transcode cleanup to the explicit DELETE.
+    var lastStoppedReportEndedSession: Bool { false }
 }
 private let playbackReportLogger = Logger(
     subsystem: "com.mondominator.sashimi",
@@ -275,10 +285,12 @@ final class PlaybackReportDelivery {
         })
     }
 
+    /// - Returns: whether the server accepted the report.
+    @discardableResult
     func sendStopped(
         _ report: PendingPlaybackReport,
         client: any PlaybackReportingClient
-    ) async {
+    ) async -> Bool {
         await send(report, client: client, action: { client in
             try await client.reportPlaybackStopped(
                 itemId: report.itemID,
@@ -392,30 +404,35 @@ final class PlaybackReportDelivery {
         }
     }
 
+    @discardableResult
     private func send(
         _ report: PendingPlaybackReport,
         client: any PlaybackReportingClient,
         action: @escaping (any PlaybackReportingClient) async throws -> Void
-    ) async {
+    ) async -> Bool {
         if !report.serverID.isEmpty {
             let stored = store.enqueue(report)
-            guard inFlightReportIDs.insert(stored.id).inserted else { return }
+            guard inFlightReportIDs.insert(stored.id).inserted else { return false }
             defer { inFlightReportIDs.remove(stored.id) }
             do {
                 try await action(client)
                 store.remove(stored)
+                return true
             } catch {
                 playbackReportLogger.error(
                     "Playback \(report.kind.rawValue, privacy: .public) report queued for retry: \(error.localizedDescription, privacy: .public)"
                 )
+                return false
             }
         } else {
             do {
                 try await action(client)
+                return true
             } catch {
                 playbackReportLogger.error(
                     "Online \(report.kind.rawValue, privacy: .public) report failed without a server identity: \(error.localizedDescription, privacy: .public)"
                 )
+                return false
             }
         }
     }
@@ -430,6 +447,7 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
     private var stopRequested = false
     private var completionRequested = false
     private var pendingStoppedReport: PendingPlaybackReport?
+    private(set) var lastStoppedReportEndedSession = false
 
     init(
         serverID: String?,
@@ -446,6 +464,7 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
         stopRequested = false
         completionRequested = false
         pendingStoppedReport = nil
+        lastStoppedReportEndedSession = false
     }
 
     func prepareStopped(itemID: String, positionTicks: Int64, playSessionID: String?) {
@@ -485,17 +504,20 @@ final class PlaybackSessionReporter: PlayerPlaybackReporting {
     }
 
     func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async {
+        lastStoppedReportEndedSession = false
         if let pendingStoppedReport {
             self.pendingStoppedReport = nil
-            await delivery.sendStopped(pendingStoppedReport, client: client)
+            let delivered = await delivery.sendStopped(pendingStoppedReport, client: client)
+            lastStoppedReportEndedSession = delivered && pendingStoppedReport.playSessionID != nil
             return
         }
         guard hasStarted, !stopRequested, !completionRequested else { return }
         stopRequested = true
-        await delivery.sendStopped(
+        let delivered = await delivery.sendStopped(
             report(itemID: itemID, positionTicks: positionTicks, playSessionID: playSessionID, kind: .stopped),
             client: client
         )
+        lastStoppedReportEndedSession = delivered && playSessionID != nil
     }
 
     func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async {

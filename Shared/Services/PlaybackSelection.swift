@@ -212,6 +212,11 @@ enum PlaybackSelection {
         preferredLanguage: String,
         subtitlesEnabled: Bool
     ) -> MediaStream? {
+        // Text streams only (#595): an image subtitle (PGS, VobSub) can only
+        // be shown by having the server burn it in, which is a full video
+        // re-encode. That happens when the viewer picks one in the player,
+        // never as a side effect of a language preference.
+        let streams = streams.filter { !isImageSubtitle($0) }
         guard subtitlesEnabled, !streams.isEmpty else { return nil }
 
         if !preferredLanguage.isEmpty,

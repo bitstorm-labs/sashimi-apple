@@ -263,8 +263,7 @@ extension PlayerViewModel {
     private func recordOfflinePositionForTransition() {
         guard let item = currentItem,
               let offlineEpisodeSource,
-              let seconds = player?.currentItem?.currentTime().seconds,
-              seconds.isFinite, seconds > 0 else { return }
-        offlineEpisodeSource.recordPosition(Int64(seconds * 10_000_000), for: item)
+              let ticks = livePositionTicks(), ticks > 0 else { return }
+        offlineEpisodeSource.recordPosition(ticks, for: item)
     }
 }
