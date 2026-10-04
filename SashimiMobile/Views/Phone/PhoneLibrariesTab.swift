@@ -18,6 +18,8 @@ struct PhoneLibrariesTab: View {
             .listRowBackground(MobileColors.cardBackground)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(MobileColors.background)
         .navigationTitle("Libraries")
         .task {
             do {
