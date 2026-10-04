@@ -129,10 +129,7 @@ struct MobilePlayerPillRow: View {
                 checkButton(Self.speedName(speed), isOn: playbackSpeed == speed) {
                     playbackSpeed = speed
                     // defaultRate keeps the speed across pause/play
-                    viewModel.player?.defaultRate = speed
-                    if viewModel.player?.rate != 0 {
-                        viewModel.player?.rate = speed
-                    }
+                    if let player = viewModel.player { PlaybackSpeed.apply(speed, to: player) }
                 }
             }
         } label: {

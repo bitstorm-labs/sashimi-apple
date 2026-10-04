@@ -77,11 +77,11 @@ enum BulkDownloadPlanner {
     }
 
     /// True when an existing record means the item must not be queued again.
-    /// Failed and paused records are re-queued, as the manager already allows.
+    /// Failed records are re-queued, as the manager already allows.
     static func isAlreadyTracked(_ status: DownloadStatus?) -> Bool {
         switch status {
         case .completed, .queued, .preparing, .downloading: return true
-        case .failed, .paused, nil: return false
+        case .failed, nil: return false
         }
     }
 

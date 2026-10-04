@@ -708,7 +708,10 @@ struct PlaybackSettingsView: View {
     private var autoLimitLabel: String {
         guard let bandwidthStatus else { return "Checking…" }
         let mbps = Int(round(Double(bandwidthStatus.cap) / 1_000_000))
-        return bandwidthStatus.isMeasured ? "\(mbps) Mbps measured" : "\(mbps) Mbps (not measured)"
+        if bandwidthStatus.isMeasured { return "\(mbps) Mbps measured" }
+        return bandwidthStatus.skippedOnMeteredNetwork
+            ? "\(mbps) Mbps (not measured: metered network)"
+            : "\(mbps) Mbps (not measured)"
     }
 
     private var bitrateLabel: String {

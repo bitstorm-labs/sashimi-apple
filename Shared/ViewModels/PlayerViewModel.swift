@@ -122,12 +122,6 @@ final class PlayerViewModel: ObservableObject {
     var nextEpisode: BaseItemDto? { transitionState.nextEpisode }
     var previousEpisode: BaseItemDto? { transitionState.previousEpisode }
 
-    /// A lookup error is intentionally generic at the UI boundary. The
-    /// detailed, scrubbed error is emitted through PlayerDiagnostics instead.
-    var episodeLookupFailed: Bool {
-        transitionState.lookupStatus == .failed
-    }
-
     /// Bumped whenever the player is rebuilt against a different asset, so
     /// views can refresh track menus that would otherwise describe the old one.
     @Published var tracksVersion = 0

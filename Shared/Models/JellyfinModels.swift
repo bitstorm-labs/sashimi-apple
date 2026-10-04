@@ -311,7 +311,6 @@ struct MediaSourceInfo: Codable {
     let supportsDirectStream: Bool?
     let supportsTranscoding: Bool?
     let transcodingUrl: String?
-    let directStreamUrl: String?
     let mediaStreams: [MediaStream]?
     let bitrate: Int?
     /// Why the server decided this source cannot be played as-is
@@ -381,7 +380,6 @@ struct MediaSourceInfo: Codable {
         case supportsDirectStream = "SupportsDirectStream"
         case supportsTranscoding = "SupportsTranscoding"
         case transcodingUrl = "TranscodingUrl"
-        case directStreamUrl = "DirectStreamUrl"
         case mediaStreams = "MediaStreams"
         case bitrate = "Bitrate"
         case transcodeReasons = "TranscodeReasons"

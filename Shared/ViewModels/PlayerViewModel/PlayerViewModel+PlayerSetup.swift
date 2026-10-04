@@ -47,7 +47,7 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("itemType", item.type?.rawValue),
             PlayerDiagnostics.field("requestedBitrate", effectiveBitrate),
             PlayerDiagnostics.field("effectiveCap", effectiveBitrate ?? bandwidth.cap),
-            PlayerDiagnostics.field("capSource", effectiveBitrate != nil ? "explicit" : (bandwidth.isMeasured ? "measured" : "default")),
+            PlayerDiagnostics.field("capSource", effectiveBitrate != nil ? "explicit" : bandwidth.capSource),
             PlayerDiagnostics.field("measuredBitrate", bandwidth.measuredBitrate),
             PlayerDiagnostics.field("localServer", bandwidth.isLocalServer),
             PlayerDiagnostics.field("maxWidth", maxWidth),
@@ -164,7 +164,6 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("supportsDirectStream", mediaSource.supportsDirectStream),
             PlayerDiagnostics.field("supportsTranscoding", mediaSource.supportsTranscoding),
             PlayerDiagnostics.field("hasTranscodingUrl", mediaSource.transcodingUrl?.isEmpty == false),
-            PlayerDiagnostics.field("hasDirectStreamUrl", mediaSource.directStreamUrl?.isEmpty == false),
             PlayerDiagnostics.field("videoCodec", mediaSource.videoCodec),
             PlayerDiagnostics.field("audioCodec", mediaSource.audioCodec),
             PlayerDiagnostics.field("sourceBitrate", mediaSource.bitrate),
@@ -179,6 +178,9 @@ extension PlayerViewModel {
         var pinnedHLSVariant = false
         // The pinned master with its trickplay image stream kept (#449).
         var pinnedMultivariantPlaylist: String?
+        // A remux (video copied) arrives here too: Jellyfin delivers every
+        // non-direct-play stream as a TranscodingUrl and has no
+        // DirectStreamUrl field at all (#608).
         if let transcodingPath = mediaSource.transcodingUrl, !transcodingPath.isEmpty {
             streamKind = .transcodeHLS
             let resolution = await client.resolveHLSStreamURL(transcodingPath: transcodingPath)
@@ -187,10 +189,6 @@ extension PlayerViewModel {
             pinnedMultivariantPlaylist = resolution?.pinnedMultivariantPlaylist
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
             noteLoadProgress()
-        } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
-            streamKind = .directStream
-            resolvedURL = await client.buildURL(path: directPath)
-            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } else if mediaSource.supportsDirectPlay != false {
             streamKind = .directPlayStatic
             resolvedURL = await client.getPlaybackURL(itemId: item.id, mediaSourceId: mediaSource.id, container: mediaSource.container)
