@@ -405,10 +405,7 @@ private struct OfflinePhoneEpisodeRow: View {
                     .offlineIndicator(itemId: episode.itemId, serverID: episode.serverID, size: 14)
                     .pendingSyncBadge(episode.needsSync, size: 9)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MobileCornerRadius.small)
-                            .stroke(isCurrent ? Color.white : .clear, lineWidth: 2)
-                    )
+                    .currentEpisodeHighlight(isCurrent)
 
                 VStack(alignment: .leading, spacing: 4) {
                     if let number = episode.episodeNumber {

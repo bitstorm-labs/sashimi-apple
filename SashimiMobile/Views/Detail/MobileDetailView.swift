@@ -1517,10 +1517,7 @@ struct MobileEpisodeCard: View {
                 .frame(width: 180, height: 100)
                 .offlineIndicator(itemId: episode.id, serverID: serverID)
                 .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MobileCornerRadius.small)
-                        .stroke(isCurrentEpisode ? MobileColors.accent : .clear, lineWidth: 2)
-                )
+                .currentEpisodeHighlight(isCurrentEpisode)
 
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
