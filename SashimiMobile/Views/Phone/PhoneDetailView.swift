@@ -1043,10 +1043,7 @@ struct PhoneDetailView: View {
                         .frame(width: 120, height: 68)
                         .offlineIndicator(itemId: episode.id, serverID: serverID, size: 14)
                         .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MobileCornerRadius.small)
-                                .stroke(episode.id == currentEpisodeId ? Color.white : .clear, lineWidth: 2)
-                        )
+                        .currentEpisodeHighlight(episode.id == currentEpisodeId)
 
                         VStack(alignment: .leading, spacing: 4) {
                             if !isYouTubeStyle, let epNum = episode.indexNumber {
