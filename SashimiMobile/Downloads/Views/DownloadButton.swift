@@ -24,7 +24,6 @@ struct DownloadButton: View {
         case queued
         case preparing
         case downloading
-        case paused
         case completed
         case failed
     }
@@ -110,11 +109,6 @@ struct DownloadButton: View {
                     .scaleEffect(0.7)
             }
 
-        case .paused:
-            Image(systemName: "pause.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(MobileColors.warning)
-
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 20))
@@ -143,7 +137,6 @@ struct DownloadButton: View {
                 return "Downloading. Cancel"
             }
             return "Downloading, \(DownloadProgressText.accessibilityLabel(for: detail)). Cancel"
-        case .paused: return "Download paused. Resume"
         case .completed: return "Downloaded. Remove download"
         case .failed: return "Download failed. Retry"
         }
@@ -177,9 +170,6 @@ struct DownloadButton: View {
 
         case .queued, .preparing, .downloading:
             Task { await downloadManager.cancelDownload(itemId: item.id, serverID: serverID) }
-
-        case .paused:
-            Task { await downloadManager.retryDownload(itemId: item.id, serverID: serverID) }
 
         case .completed:
             showingDeleteConfirmation = true
@@ -265,8 +255,6 @@ struct DownloadButton: View {
                 downloadState = .downloading
                 savedProgress = record.progress
             }
-        case .paused:
-            downloadState = .paused
         case .completed:
             downloadState = .completed
         case .failed:

@@ -205,25 +205,59 @@ enum PlaybackSelection {
     }
 
     /// Which subtitle stream to pre-select when playback starts, or nil for
-    /// no subtitles. Preference order: the user's preferred language, then
-    /// the stream the server flags as default, then the first stream.
+    /// no subtitles.
+    ///
+    /// Subtitles on: a full (non-forced) track in the preferred language, then
+    /// a forced one in that language, then a forced track in the language of
+    /// the audio that is playing, then the server's default-flagged track,
+    /// then the first full track.
+    ///
+    /// Subtitles off: only a forced track in the playing audio language — the
+    /// lines a film subtitles for everyone (foreign dialogue, signs), which
+    /// every standard player shows even with subtitles off.
+    ///
+    /// A forced track carries a handful of lines, so it must never win over a
+    /// full track the viewer asked for: on a file listing "English (Forced)"
+    /// first, the old first-match pick showed English viewers almost nothing.
     static func preferredSubtitleStream(
         from streams: [MediaStream],
         preferredLanguage: String,
-        subtitlesEnabled: Bool
+        subtitlesEnabled: Bool,
+        audioLanguage: String? = nil
     ) -> MediaStream? {
         // Text streams only (#595): an image subtitle (PGS, VobSub) can only
         // be shown by having the server burn it in, which is a full video
         // re-encode. That happens when the viewer picks one in the player,
         // never as a side effect of a language preference.
         let streams = streams.filter { !isImageSubtitle($0) }
-        guard subtitlesEnabled, !streams.isEmpty else { return nil }
+        guard !streams.isEmpty else { return nil }
 
-        if !preferredLanguage.isEmpty,
-           let match = streams.first(where: { languagesMatch($0.language, preferredLanguage) }) {
-            return match
+        let forcedForAudio = streams.first { $0.isForced == true && languagesMatch($0.language, audioLanguage) }
+        guard subtitlesEnabled else { return forcedForAudio }
+
+        let full = streams.filter { $0.isForced != true }
+        if !preferredLanguage.isEmpty {
+            if let match = full.first(where: { languagesMatch($0.language, preferredLanguage) })
+                ?? streams.first(where: { languagesMatch($0.language, preferredLanguage) }) {
+                return match
+            }
         }
-        return streams.first { $0.isDefault == true } ?? streams.first
+        if let forcedForAudio { return forcedForAudio }
+        return full.first { $0.isDefault == true }
+            ?? streams.first { $0.isDefault == true }
+            ?? full.first
+            ?? streams.first
+    }
+
+    /// The menu label for a subtitle stream. Jellyfin's DisplayTitle already
+    /// says "Forced" on an English-language server; a stream without a
+    /// DisplayTitle (or one titled in a way that hides it) gets the marker
+    /// added, so a forced track is never mistaken for the full one.
+    static func subtitleDisplayName(for stream: MediaStream) -> String {
+        let base = stream.displayTitle ?? stream.language ?? "Unknown"
+        guard stream.isForced == true,
+              base.range(of: "forced", options: .caseInsensitive) == nil else { return base }
+        return "\(base) (Forced)"
     }
 
     /// Finds the stream in a (possibly new) media source that corresponds to
@@ -242,7 +276,10 @@ enum PlaybackSelection {
         let candidates = streams.filter { $0.index != nil && languagesMatch($0.language, language) }
 
         if let displayTitle,
-           let match = candidates.first(where: { ($0.isExternal ?? false) == isExternal && $0.displayTitle == displayTitle }) {
+           let match = candidates.first(where: {
+               ($0.isExternal ?? false) == isExternal
+                   && ($0.displayTitle == displayTitle || subtitleDisplayName(for: $0) == displayTitle)
+           }) {
             return match
         }
         if let match = candidates.first(where: { ($0.isExternal ?? false) == isExternal }) {

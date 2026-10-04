@@ -146,7 +146,6 @@ enum PlayerDiagnostics {
     /// today, obvious with this field.
     enum StreamKind: String {
         case transcodeHLS = "transcode-hls"
-        case directStream = "direct-stream"
         case directPlayStatic = "direct-play-static"
         case localFile = "local-file"
     }

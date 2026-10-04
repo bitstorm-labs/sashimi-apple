@@ -320,11 +320,31 @@ final class CertificateValidationDelegate: NSObject, URLSessionDelegate, URLSess
 /// sustains, which is what the copy-vs-transcode decision needs.
 ///
 /// Stops at whichever of `maxBytes` / `maxDuration` comes first, so fast links
-/// get a big enough sample and slow links never hit the request timeout. A
-/// gigabit link that finishes before the warmup window returns nil (never
-/// reaches steady-state measurement) and Auto falls back to its default cap —
-/// correct, because such a link is genuinely fast.
+/// get a big enough sample and slow links never hit the request timeout.
+///
+/// A fast link can deliver the whole sample before the warm-up window ends
+/// (25 MB in under a second is anything above ~200 Mbps). There is no
+/// steady-state window to time then, so the *whole* transfer is timed from
+/// its first byte instead. That reading includes the slow-start ramp, so it
+/// can only under-read the link, never inflate it, and every such link sits
+/// at or above the Auto ceiling anyway. This used to return nil: a gigabit
+/// Apple TV never got a measurement and retried a 50 MB probe three times on
+/// every launch.
 final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    /// What one probe produced: the reading (nil when nothing trustworthy was
+    /// measured) and how many bytes it cost, so the caller can bound the data
+    /// spent across retries.
+    struct Outcome: Equatable, Sendable {
+        let bitsPerSecond: Int?
+        let bytesReceived: Int
+    }
+
+    /// Default sample cap. Large enough that any link below the Auto ceiling
+    /// (100 Mbps) still gets a steady-state window after the warm-up.
+    static let defaultMaxBytes = 25_000_000
+    /// A whole-transfer reading needs at least this much data behind it.
+    static let minimumWholeTransferBytes = 1_000_000
+
     private let authDelegate: CertificateValidationDelegate
     private let warmup: TimeInterval
     private let maxDuration: TimeInterval
@@ -335,13 +355,14 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
     private var warmupEnd: Date?
     private var warmupEndBytes = 0
     private var received = 0
+    private var reachedByteCap = false
     private var finished = false
-    private var continuation: CheckedContinuation<Int?, Never>?
+    private var continuation: CheckedContinuation<Outcome, Never>?
 
     init(authDelegate: CertificateValidationDelegate,
          warmup: TimeInterval = 1.0,
          maxDuration: TimeInterval = 5.0,
-         maxBytes: Int = 50_000_000) {
+         maxBytes: Int = SustainedBandwidthProbe.defaultMaxBytes) {
         self.authDelegate = authDelegate
         self.warmup = warmup
         self.maxDuration = maxDuration
@@ -355,13 +376,36 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
         return Int((Double(measuredBytes) * 8.0) / seconds)
     }
 
-    func run(request: URLRequest) async -> Int? {
+    /// The probe's reading. The steady-state window wins when it is long
+    /// enough to trust. Otherwise, a transfer that *completed* (reached the
+    /// byte cap, or the server finished the body) is timed whole from its
+    /// first byte: the link moved the full sample faster than the warm-up,
+    /// which is a measurement, not a failure. A transfer cut short by an error
+    /// before then says nothing and stays nil.
+    static func bitsPerSecond(
+        totalBytes: Int,
+        totalSeconds: TimeInterval,
+        steadyBytes: Int,
+        steadySeconds: TimeInterval,
+        transferCompleted: Bool
+    ) -> Int? {
+        if let steady = bitsPerSecond(measuredBytes: steadyBytes, seconds: steadySeconds) {
+            return steady
+        }
+        guard transferCompleted, totalBytes >= minimumWholeTransferBytes else { return nil }
+        // A sub-millisecond total is a buffered burst, not a timing: floor it
+        // so the reading is huge (and clamped by Auto) rather than infinite.
+        let seconds = max(totalSeconds, 0.001)
+        return Int((Double(totalBytes) * 8.0) / seconds)
+    }
+
+    func run(request: URLRequest) async -> Outcome {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = maxDuration + 10
         config.timeoutIntervalForResource = maxDuration + 15
         config.urlCache = nil
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        let result = await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+        let result = await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
             lock.lock()
             continuation = cont
             lock.unlock()
@@ -371,7 +415,7 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
         return result
     }
 
-    private func complete(with result: Int?) {
+    private func complete(with result: Outcome) {
         lock.lock()
         guard !finished else { lock.unlock(); return }
         finished = true
@@ -393,6 +437,7 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
             warmupEnd = now
             warmupEndBytes = received
         }
+        if received >= maxBytes { reachedByteCap = true }
         let done = elapsed >= maxDuration || received >= maxBytes
         lock.unlock()
         if done { dataTask.cancel() }  // -> didCompleteWithError
@@ -400,10 +445,23 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
-        let bytes = (warmupEnd != nil) ? received - warmupEndBytes : 0
-        let seconds = warmupEnd.map { Date().timeIntervalSince($0) } ?? 0
+        let now = Date()
+        let steadyBytes = (warmupEnd != nil) ? received - warmupEndBytes : 0
+        let steadySeconds = warmupEnd.map { now.timeIntervalSince($0) } ?? 0
+        let totalSeconds = start.map { now.timeIntervalSince($0) } ?? 0
+        let total = received
+        // Our own cancel at the byte cap reports a cancellation error; a body
+        // the server finished reports none. Both delivered the whole sample.
+        let completed = reachedByteCap || error == nil
         lock.unlock()
-        complete(with: Self.bitsPerSecond(measuredBytes: bytes, seconds: seconds))
+        let reading = Self.bitsPerSecond(
+            totalBytes: total,
+            totalSeconds: totalSeconds,
+            steadyBytes: steadyBytes,
+            steadySeconds: steadySeconds,
+            transferCompleted: completed
+        )
+        complete(with: Outcome(bitsPerSecond: reading, bytesReceived: total))
     }
 
     // MARK: Auth — reuse the client's cert-trust policy so self-signed servers work
@@ -579,8 +637,22 @@ actor JellyfinClient {
     /// server still starting up) must not leave Auto guessing all session.
     private static let bandwidthProbeBackoff: [Duration] = [.seconds(3), .seconds(15), .seconds(60)]
 
+    /// The most data one round of probing (first attempt plus retries) may
+    /// download. Retries only happen after a failed attempt; this keeps a link
+    /// that keeps dropping mid-sample from pulling sample after sample.
+    static let bandwidthProbeByteBudget = 50_000_000
+
+    /// Whether another full-size probe fits in the round's data budget.
+    static func bandwidthProbeBudgetAllowsAnotherAttempt(bytesSpent: Int) -> Bool {
+        bytesSpent + SustainedBandwidthProbe.defaultMaxBytes <= bandwidthProbeByteBudget
+    }
+
     /// The retrying probe, so a reconnect replaces it rather than racing it.
     private var bandwidthProbeTask: Task<Void, Never>?
+
+    /// True while the active path is metered (cellular, hotspot, Low Data
+    /// Mode) and the probe was therefore not run. Auto uses its default cap.
+    private var bandwidthProbeSkippedOnMeteredNetwork = false
 
     /// Where the Auto bitrate cap currently comes from. Read by Settings and
     /// logged with every PlaybackInfo request: a cap in force used to be
@@ -593,8 +665,16 @@ actor JellyfinClient {
         /// Whether the active link is wired Ethernet. Wireless links get a
         /// smooth-4K ceiling so a heavy source is never copied over Wi-Fi.
         let isWired: Bool
+        /// The probe was skipped because the link costs the viewer data.
+        var skippedOnMeteredNetwork = false
 
         var isMeasured: Bool { measuredBitrate != nil }
+
+        /// Where the cap came from, for diagnostics and Settings.
+        var capSource: String {
+            if isMeasured { return "measured" }
+            return skippedOnMeteredNetwork ? "default-metered" : "default"
+        }
     }
 
     var bandwidthStatus: BandwidthStatus {
@@ -602,7 +682,8 @@ actor JellyfinClient {
             measuredBitrate: measuredBitrate,
             cap: autoBitrateCap(),
             isLocalServer: PlaybackSelection.isLocalServer(serverURL),
-            isWired: NetworkConnectionMonitor.shared.isWired
+            isWired: NetworkConnectionMonitor.shared.isWired,
+            skippedOnMeteredNetwork: bandwidthProbeSkippedOnMeteredNetwork
         )
     }
 
@@ -649,40 +730,69 @@ actor JellyfinClient {
     }
 
     private func runBandwidthProbes() async {
-        if await measureBandwidth() { return }
+        // Decide on the real interface, not the monitor's pre-update default:
+        // the activation-time probe starts right after `start()`.
+        await NetworkConnectionMonitor.shared.waitForFirstPath()
+        guard !Task.isCancelled else { return }
+        if NetworkConnectionMonitor.shared.isMetered {
+            // Cellular, a hotspot or Low Data Mode: never spend the viewer's
+            // data on a 25 MB sample. A measurement taken on the previous
+            // (unmetered) link says nothing about this one either, so drop it
+            // and let Auto use its location-keyed default.
+            measuredBitrate = nil
+            bandwidthMeasuredAt = nil
+            bandwidthProbeSkippedOnMeteredNetwork = true
+            logger.info("Bandwidth probe skipped on a metered network; Auto uses the default cap")
+            return
+        }
+        bandwidthProbeSkippedOnMeteredNetwork = false
+
+        var bytesSpent = 0
+        let first = await measureBandwidth()
+        if first.succeeded { return }
+        bytesSpent += first.bytes
         for delay in Self.bandwidthProbeBackoff {
+            guard Self.bandwidthProbeBudgetAllowsAnotherAttempt(bytesSpent: bytesSpent) else {
+                logger.warning("Bandwidth probe data budget spent (\(bytesSpent) bytes); Auto uses the default cap")
+                return
+            }
             guard (try? await Task.sleep(for: delay)) != nil else { return }
-            if await measureBandwidth() { return }
+            let attempt = await measureBandwidth()
+            if attempt.succeeded { return }
+            bytesSpent += attempt.bytes
         }
         logger.warning("Bandwidth probe failed after all retries; Auto uses the default cap")
     }
 
-    /// Time a fixed-size download from the server's BitrateTest endpoint to
-    /// estimate the connection bandwidth, then cache it for Auto bitrate.
-    /// Best-effort: returns false on any failure, leaving the previous/default
-    /// cap standing for the caller to retry against.
-    private func measureBandwidth() async -> Bool {
-        guard let serverURL else { return false }
+    /// Time a download from the server's BitrateTest endpoint to estimate the
+    /// connection bandwidth, then cache it for Auto bitrate. Best-effort:
+    /// `succeeded` is false on any failure, leaving the previous/default cap
+    /// standing for the caller to retry against; `bytes` is what it cost.
+    private func measureBandwidth() async -> (succeeded: Bool, bytes: Int) {
+        guard let serverURL else { return (false, 0) }
         // Request far more than we'll read: the probe streams the response and
         // stops at whichever of its byte/duration caps comes first, so this is
         // only an upper bound that fast links hit and slow links never reach.
         guard var components = URLComponents(
             url: serverURL.appendingPathComponent("Playback/BitrateTest"),
             resolvingAgainstBaseURL: false
-        ) else { return false }
+        ) else { return (false, 0) }
         components.queryItems = [URLQueryItem(name: "Size", value: "50000000")]
-        guard let url = components.url else { return false }
+        guard let url = components.url else { return (false, 0) }
 
         var req = URLRequest(url: url)
         req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 20
 
         let probe = SustainedBandwidthProbe(authDelegate: certificateDelegate)
-        guard let bitsPerSecond = await probe.run(request: req), bitsPerSecond > 0 else { return false }
+        let outcome = await probe.run(request: req)
+        guard let bitsPerSecond = outcome.bitsPerSecond, bitsPerSecond > 0 else {
+            return (false, outcome.bytesReceived)
+        }
         measuredBitrate = bitsPerSecond
         bandwidthMeasuredAt = Date()
-        logger.info("Bandwidth probe (sustained) measured \(bitsPerSecond) bps")
-        return true
+        logger.info("Bandwidth probe measured \(bitsPerSecond) bps from \(outcome.bytesReceived) bytes")
+        return (true, outcome.bytesReceived)
     }
 
     var isConfigured: Bool {
@@ -1142,13 +1252,57 @@ actor JellyfinClient {
     /// the server must respect. Internal (not private) so the profile shape
     /// is unit-testable — the `.vlc` shape depends on a key being absent,
     /// which is invisible in any log line.
-    func videoDeviceProfile(engine: PlaybackEngineKind, streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+    func videoDeviceProfile(
+        engine: PlaybackEngineKind,
+        streamingBitrate: Int,
+        maxWidth: Int?,
+        supportsDolbyVision: Bool = DeviceMediaCompatibility.deviceSupportsDolbyVision
+    ) -> [String: Any] {
         switch engine {
         case .avFoundation:
-            return avFoundationDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: maxWidth)
+            return avFoundationDeviceProfile(
+                streamingBitrate: streamingBitrate,
+                maxWidth: maxWidth,
+                supportsDolbyVision: supportsDolbyVision
+            )
         case .vlc:
             return vlcDeviceProfile(streamingBitrate: streamingBitrate, maxWidth: maxWidth)
         }
+    }
+
+    /// HEVC dynamic ranges AVPlayer renders correctly here, in Jellyfin's
+    /// `VideoRangeType` vocabulary.
+    ///
+    /// SDR, HDR10 (HDR10+ satisfies it server-side) and HLG always: Apple
+    /// devices tone-map HDR for an SDR display. Dolby Vision only when this
+    /// device *and its current display* can render it
+    /// (`AVPlayer.availableHDRModes`). Without it, single-layer DV
+    /// (Profile 5, `DOVI`) has no base layer to fall back to and plays with
+    /// green/purple colours, so it must not be direct-played or copied — the
+    /// server re-encodes it. DV with an HDR10/HLG/SDR base layer is left off
+    /// the list on purpose: Jellyfin then stream-copies it as that base
+    /// (`CanStreamCopyVideo` allows DOVIWithHDR10 for an HDR10 client) instead
+    /// of direct-playing a `dvh1` file a non-DV player may refuse.
+    static func supportedHEVCRangeTypes(supportsDolbyVision: Bool) -> [String] {
+        let base = ["SDR", "HDR10", "HDR10Plus", "HLG"]
+        guard supportsDolbyVision else { return base }
+        return base + ["DOVI", "DOVIWithHDR10", "DOVIWithHDR10Plus", "DOVIWithHLG", "DOVIWithSDR"]
+    }
+
+    /// The VideoRangeType condition on HEVC. `IsRequired: false` so a stream
+    /// whose range the server could not determine still direct-plays, as it
+    /// did before this condition existed.
+    static func videoRangeCodecProfile(supportsDolbyVision: Bool) -> [String: Any] {
+        [
+            "Type": "Video",
+            "Codec": "hevc",
+            "Conditions": [[
+                "Condition": "EqualsAny",
+                "Property": "VideoRangeType",
+                "Value": supportedHEVCRangeTypes(supportsDolbyVision: supportsDolbyVision).joined(separator: "|"),
+                "IsRequired": false
+            ]]
+        ]
     }
 
     /// A width condition is what actually downscales. MaxStreamingBitrate is
@@ -1168,7 +1322,7 @@ actor JellyfinClient {
         } ?? []
     }
 
-    private func avFoundationDeviceProfile(streamingBitrate: Int, maxWidth: Int?) -> [String: Any] {
+    private func avFoundationDeviceProfile(streamingBitrate: Int, maxWidth: Int?, supportsDolbyVision: Bool) -> [String: Any] {
         [
             "MaxStreamingBitrate": streamingBitrate,
             "MaxStaticBitrate": 100000000,
@@ -1204,7 +1358,8 @@ actor JellyfinClient {
                 ]
             ],
             "ContainerProfiles": [],
-            "CodecProfiles": widthCodecProfiles(maxWidth: maxWidth),
+            "CodecProfiles": widthCodecProfiles(maxWidth: maxWidth)
+                + [Self.videoRangeCodecProfile(supportsDolbyVision: supportsDolbyVision)],
             "SubtitleProfiles": [
                 ["Format": "vtt", "Method": "External"],
                 ["Format": "srt", "Method": "External"]
@@ -1651,23 +1806,47 @@ actor JellyfinClient {
         return try JSONDecoder().decode(PublicSystemInfo.self, from: data)
     }
 
-    /// Whether the configured server answers at all: an unauthenticated
+    /// Whether the configured server answers: an unauthenticated
     /// `GET /System/Info/Public` on a short-timeout session that does not wait
-    /// for connectivity. Any response short of a 5xx counts (a reverse proxy
-    /// with Jellyfin down answers 502/503/504). With no server configured
-    /// there is nothing to be unreachable, so that reports true.
+    /// for connectivity, and the answer must be Jellyfin's own (see
+    /// `isJellyfinPublicInfoResponse`). With no server configured there is
+    /// nothing to be unreachable, so that reports true.
     func probeReachability() async -> Bool {
         guard let serverURL else { return true }
         var request = URLRequest(url: serverURL.appendingPathComponent("/System/Info/Public"))
         request.timeoutInterval = ServerReachabilityTracker.probeTimeout
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
-            let (_, response) = try await probeSession.data(for: request)
+            let (data, response) = try await probeSession.data(for: request)
             guard let http = response as? HTTPURLResponse else { return false }
-            return http.statusCode < 500
+            return Self.isJellyfinPublicInfoResponse(statusCode: http.statusCode, body: data)
         } catch {
             return false
         }
+    }
+
+    /// The fields of `/System/Info/Public` that only a Jellyfin server sends.
+    private struct ReachabilityInfo: Decodable {
+        let id: String?
+        let version: String?
+        enum CodingKeys: String, CodingKey {
+            case id = "Id"
+            case version = "Version"
+        }
+    }
+
+    /// Whether a probe answer came from a Jellyfin server: a 2xx whose body
+    /// decodes as public system info carrying the server's `Id` and `Version`.
+    /// The old rule, "anything short of a 5xx", took a captive portal's (or a
+    /// wrong proxy's) 200 HTML page for the server: the app stayed "online",
+    /// every list failed to decode, and the offline library with the viewer's
+    /// downloads never appeared.
+    static func isJellyfinPublicInfoResponse(statusCode: Int, body: Data) -> Bool {
+        guard (200..<300).contains(statusCode),
+              let info = try? JSONDecoder().decode(ReachabilityInfo.self, from: body),
+              let id = info.id, !id.isEmpty,
+              let version = info.version, !version.isEmpty else { return false }
+        return true
     }
 
     /// Transport failures (and gateway errors) that suggest the server itself

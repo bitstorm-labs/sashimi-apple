@@ -12,13 +12,13 @@ extension TVPlayerView {
             ("0.5×", 0.5), ("0.75×", 0.75), ("1× Normal", 1.0),
             ("1.25×", 1.25), ("1.5×", 1.5), ("2×", 2.0)
         ]
-        let currentRate = player.rate != 0 ? player.rate : 1.0
+        let currentRate = PlaybackSpeed.current(of: player)
         let speedActions = speeds.map { title, rate in
             UIAction(
                 title: title,
                 state: currentRate == rate ? .on : .off
             ) { _ in
-                player.rate = rate
+                PlaybackSpeed.apply(rate, to: player)
             }
         }
         let speedMenu = UIMenu(
