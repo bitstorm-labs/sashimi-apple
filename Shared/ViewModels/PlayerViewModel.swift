@@ -148,7 +148,16 @@ final class PlayerViewModel: ObservableObject {
     /// Resume position still waiting to be applied once the item is ready to
     /// play. A pre-ready seek is silently dropped for HLS/transcode streams
     /// (no seekable range yet), so we re-seek from the status observer.
-    var pendingResumeTicks: Int64 = 0
+    ///
+    /// While it is set it IS the viewer's position: the item's own clock still
+    /// reads zero, so every report and teardown path prefers it (#593). It is
+    /// cleared when the resume seek lands, not when it is issued.
+    var pendingResumeTicks: Int64 = 0 {
+        didSet { resumeSeekIssued = false }
+    }
+    /// The resume seek for `pendingResumeTicks` has been issued and has not
+    /// completed. Stops a repeated `.readyToPlay` issuing it twice.
+    var resumeSeekIssued = false
     @Published var resumePositionTicks: Int64 = 0
     @Published var selectedQuality: QualityOption = .auto
     /// The bitrate cap the current stream was requested with (the tier's, a
@@ -212,6 +221,15 @@ final class PlayerViewModel: ObservableObject {
     /// Pending stall watchdog — armed on a stall notification, cancelled when
     /// playback recovers on its own or the player is torn down.
     var stallWatchdogTask: Task<Void, Never>?
+    /// A watchdog stood down because the viewer paused (#592). It is re-armed
+    /// when playback is asked to resume, so a stream that was stalled before
+    /// the pause and is still stalled after it is still recovered.
+    var stallWatchdogAwaitingResume = false
+    /// When the load in flight last made progress (a response arrived). The
+    /// load deadline measures from here, not from the start (#594).
+    var lastLoadProgress = Date()
+    /// How long a load may go without progress before it is abandoned.
+    var loadStallBudget: TimeInterval = PlaybackLoadPolicy.stallBudget
     var navigationTask: Task<Void, Never>?
 
     /// Whether the error/stall fallback can still fire for this item.
@@ -232,7 +250,9 @@ final class PlayerViewModel: ObservableObject {
 
     // Media source info for subtitle/audio selection
     var currentMediaSource: MediaSourceInfo?
-    private var currentSubtitleStreamIndex: Int?
+    /// The audio and subtitle streams the current stream was requested with
+    /// (#590). Nil for offline playback and before the first request.
+    var activeTrackRequest: StreamTrackRequest?
 
     /// The subtitle track the session wants, described by content rather
     /// than stream index (indexes are not stable across media sources).
@@ -376,9 +396,15 @@ enum PlayerError: LocalizedError {
     case noStreamURL
     case noPlayableEpisode(String)
     case sourceNotPlayable
+    /// The load went `PlaybackLoadPolicy.stallBudget` without progress.
+    case loadTimedOut(serverReachable: Bool)
 
     var errorDescription: String? {
         switch self {
+        case .loadTimedOut(let serverReachable):
+            return serverReachable
+                ? "The server is taking too long to respond. Try again in a moment."
+                : "Can't reach the server. Check your connection and try again."
         case .noMediaSource:
             return "No playable media source found"
         case .noStreamURL:

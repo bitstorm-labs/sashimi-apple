@@ -26,6 +26,7 @@ extension PlayerViewModel {
         recoveryAttempts = 0
         qualityStepDowns = 0
         activeBitrateCap = nil
+        activeTrackRequest = nil
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
         resetTransitionState(for: item)
@@ -115,6 +116,9 @@ extension PlayerViewModel {
                 // Offline playback from local file
                 freshItem = item
                 setCurrentItem(item)
+                // A local file has no server-side source: nothing from an
+                // earlier online item may steer its audio or subtitle menus.
+                currentMediaSource = nil
 
                 let audioSession = AVAudioSession.sharedInstance()
                 try audioSession.setCategory(.playback, mode: .moviePlayback)
@@ -141,14 +145,24 @@ extension PlayerViewModel {
                 // production). Entry points like the Continue Watching Play
                 // button and Top Shelf deep links hand over whatever item the
                 // row carried, so the guarantee lives here, not in each caller.
-                freshItem = try await resolvePlayableItem(client.getItem(itemId: item.id))
-                setCurrentItem(freshItem)
+                //
+                // Everything up to the player existing runs under the
+                // no-progress deadline (#594): a server that has stopped
+                // answering becomes an error with a way out, and a slow one
+                // that is still answering is left alone.
+                try await withLoadDeadline {
+                    let resolved = try await self.resolvePlayableItem(self.client.getItem(itemId: item.id))
+                    self.noteLoadProgress()
+                    self.setCurrentItem(resolved)
 
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playback, mode: .moviePlayback)
-                try audioSession.setActive(true)
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.setCategory(.playback, mode: .moviePlayback)
+                    try audioSession.setActive(true)
 
-                try await setupPlayer(for: freshItem)
+                    try await self.setupPlayer(for: resolved)
+                }
+                guard let resolved = currentItem else { throw PlayerError.noMediaSource }
+                freshItem = resolved
                 await applyPreferredTracks()
             }
 
