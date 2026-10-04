@@ -297,6 +297,12 @@ struct MediaDetailView: View {
                 Task { await refreshItemState() }
             }
         }
+        // The player now closes before its stopped report has reached the
+        // server (#591), so the refresh above can read the position from
+        // before this viewing. This one runs once the report is in.
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
+            Task { await refreshItemState() }
+        }
     }
 
     // MARK: - Main Content

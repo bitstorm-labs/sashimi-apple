@@ -16,6 +16,10 @@ extension PlayerViewModel {
     /// began and publish that episode's tracks -- the same staleness the other
     /// async audio paths here already guard against.
     private func loadAudioTracksIfCurrent() async {
+        if usesServerSideAudioSelection {
+            loadServerSideAudioTracks()
+            return
+        }
         guard let playerItem = player?.currentItem, let itemID = currentItem?.id else { return }
         let generation = PlaybackGeneration(itemID: itemID, attempt: playbackAttempt)
 
@@ -53,7 +57,60 @@ extension PlayerViewModel {
     /// `loadAudioTracks()` -- both view call sites are sync closures (a
     /// `UIAction` handler on tvOS, a `Button` action on mobile).
     func selectAudioTrack(_ track: AudioTrackOption) {
-        Task { await selectAudioTrackIfCurrent(track) }
+        if usesServerSideAudioSelection {
+            Task { await changeAudioStream(to: track) }
+        } else {
+            Task { await selectAudioTrackIfCurrent(track) }
+        }
+    }
+
+    // MARK: - Server-side audio selection (#590)
+
+    /// A transcode or remux carries ONE audio track, mapped by the server
+    /// (`-map 0:N`), so AVPlayer has nothing to choose between: the menu has
+    /// to list the source's streams and a pick has to renegotiate the stream.
+    /// Direct play and downloads keep AVPlayer's own media selection.
+    var usesServerSideAudioSelection: Bool {
+        !isOfflinePlayback && currentMediaSource?.transcodingUrl?.isEmpty == false
+    }
+
+    /// The audio stream the current transcode was built with.
+    var activeAudioStreamIndex: Int? {
+        activeTrackRequest?.audioStreamIndex
+            ?? currentMediaSource?.defaultAudioStreamIndex
+            ?? currentMediaSource?.audioStreams.first?.index
+    }
+
+    /// The image subtitle burned into the current stream, if any (#595).
+    var burnedInSubtitleIndex: Int? {
+        guard !isOfflinePlayback, let request = activeTrackRequest, request.burnsInSubtitle else { return nil }
+        return request.subtitleStreamIndex
+    }
+
+    private func loadServerSideAudioTracks() {
+        audioTracks = (currentMediaSource?.audioStreams ?? []).compactMap { stream in
+            guard let index = stream.index else { return nil }
+            return AudioTrackOption(
+                id: "\(index)",
+                displayName: PlaybackSelection.audioDisplayName(for: stream),
+                languageCode: stream.language,
+                index: index
+            )
+        }
+        selectedAudioTrackId = activeAudioStreamIndex.map { "\($0)" }
+    }
+
+    /// Switches the audio stream of a transcode: records the pick as the
+    /// session's audio intent and rebuilds the stream through the same path a
+    /// quality change uses, which resolves the intent to an `AudioStreamIndex`
+    /// and resumes at the current position.
+    private func changeAudioStream(to track: AudioTrackOption) async {
+        guard track.index != activeAudioStreamIndex, !transitionState.isTransitioning else { return }
+        let previous = sessionAudioPreference
+        sessionAudioPreference = AudioPreference(language: track.languageCode, displayName: track.displayName)
+        if await !rebuildStream(for: .audio(name: track.displayName)) {
+            sessionAudioPreference = previous
+        }
     }
 
     /// Ordering is deliberately identical to the previous synchronous version:
@@ -82,6 +139,12 @@ extension PlayerViewModel {
     /// fall back to the Settings preference.
     @discardableResult
     func applySessionAudioPreference(expectedGeneration: PlaybackGeneration? = nil) async -> Bool {
+        // On a transcode the request already carried the choice (session pick
+        // or Settings language); there is nothing left to select client-side.
+        if usesServerSideAudioSelection {
+            loadServerSideAudioTracks()
+            return true
+        }
         guard let preference = sessionAudioPreference,
               let playerItem = player?.currentItem,
               let audioGroup = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible)
@@ -93,7 +156,11 @@ extension PlayerViewModel {
         // resolves to "Japanese" on a source that labels it differently.
         let byName = audioGroup.options.firstIndex { $0.displayName == preference.displayName }
         let byLanguage = preference.language.flatMap { language in
-            audioGroup.options.firstIndex { $0.locale?.language.languageCode?.identifier == language }
+            // languagesMatch, not ==: a pick made on a transcode records the
+            // stream's three-letter code, AVFoundation reports two-letter.
+            audioGroup.options.firstIndex {
+                PlaybackSelection.languagesMatch($0.locale?.language.languageCode?.identifier, language)
+            }
         }
         guard let index = byName ?? byLanguage else { return false }
 
@@ -140,7 +207,7 @@ extension PlayerViewModel {
 
     func applyPreferredAudioLanguage(expectedGeneration: PlaybackGeneration? = nil) async {
         let preferred = playbackSettings.preferredAudioLanguage
-        guard !preferred.isEmpty, let playerItem = player?.currentItem else { return }
+        guard !usesServerSideAudioSelection, !preferred.isEmpty, let playerItem = player?.currentItem else { return }
 
         // appliesMediaSelectionCriteriaAutomatically is false, so the default
         // track plays unless we pick one explicitly.
@@ -250,6 +317,20 @@ extension PlayerViewModel {
             return
         }
 
+        // An image subtitle (PGS, VobSub) has no text form: the only way to
+        // show it is for the server to burn it into the video, which means a
+        // new stream (#595). Selecting one used to move the checkmark and
+        // render nothing.
+        let needsBurnIn = isImageSubtitleTrack(track)
+        let needsRebuild = needsBurnIn ? burnedInSubtitleIndex != track.index : burnedInSubtitleIndex != nil
+        if needsRebuild {
+            // A rebuild cannot start while another transition holds the
+            // player; ignore the pick rather than record an intent the stream
+            // does not match. Automatic re-applies never start a burn-in:
+            // setupPlayer has already asked for whatever the session wanted.
+            guard isUserSelection, !transitionState.isTransitioning else { return }
+        }
+
         selectedSubtitleTrackId = track.id
 
         if isUserSelection {
@@ -272,6 +353,17 @@ extension PlayerViewModel {
             }
         }
 
+        if needsRebuild {
+            let change: StreamChange = needsBurnIn ? .burnInSubtitle(name: track.displayName) : .removeBurnedInSubtitle
+            Task { await rebuildStream(for: change) }
+            return
+        }
+        if needsBurnIn {
+            // Already in the picture; there is no overlay to load.
+            subtitleManager.clear()
+            return
+        }
+
         guard let item = currentItem, let player = player else { return }
 
         // Load and display subtitles via our custom overlay. Capture the
@@ -280,17 +372,26 @@ extension PlayerViewModel {
         // tracking a stale player would leave a live observer on it.
         let capturedPlayer = player
         subtitleLoadTask = Task {
+            let loaded: Bool
             if isOfflinePlayback,
                let downloaded = offlineSubtitles.first(where: { $0.index == track.index }) {
-                await subtitleManager.loadSubtitles(fileURL: downloaded.fileURL)
+                loaded = await subtitleManager.loadSubtitles(fileURL: downloaded.fileURL)
             } else {
-                await subtitleManager.loadSubtitles(
+                loaded = await subtitleManager.loadSubtitles(
                     itemId: item.id,
                     subtitleIndex: track.index,
                     serverID: serverID
                 )
             }
             guard !Task.isCancelled, self.player === capturedPlayer else { return }
+            guard loaded else {
+                // Say so, and take the checkmark off a track that is not
+                // showing. The saved preference is left alone: the next item
+                // may well have a track that loads.
+                if selectedSubtitleTrackId == track.id { selectedSubtitleTrackId = "off" }
+                showPlaybackNotice("Couldn't load subtitles: \(track.displayName)")
+                return
+            }
             subtitleManager.startTracking(player: capturedPlayer)
         }
     }
@@ -304,11 +405,27 @@ extension PlayerViewModel {
     /// subtitle intent, and it persists the "off" choice — subtitles stay
     /// off across episodes and app launches until re-enabled.
     func disableSubtitles() {
+        // A burned-in subtitle is part of the picture: turning it off means a
+        // new stream, which cannot start while another transition is running.
+        let removesBurnIn = burnedInSubtitleIndex != nil
+        if removesBurnIn, transitionState.isTransitioning { return }
         subtitleLoadTask?.cancel()
         selectedSubtitleTrackId = "off"
         subtitleManager.clear()
         sessionSubtitlePreference = nil
         playbackSettings.subtitlesEnabled = false
+        if removesBurnIn {
+            Task { await rebuildStream(for: .removeBurnedInSubtitle) }
+        }
+    }
+
+    /// Whether a menu entry is an image subtitle of the current online source.
+    /// Downloads only ever carry text subtitles (as .vtt files).
+    private func isImageSubtitleTrack(_ track: SubtitleTrackOption) -> Bool {
+        guard !isOfflinePlayback,
+              let stream = currentMediaSource?.subtitleStreams.first(where: { $0.index == track.index })
+        else { return false }
+        return PlaybackSelection.isImageSubtitle(stream)
     }
 
     func loadAllTracks() {

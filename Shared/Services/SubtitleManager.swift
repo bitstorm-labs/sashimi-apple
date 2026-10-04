@@ -33,7 +33,9 @@ class SubtitleManager: ObservableObject {
     /// Offline playback has no server to fetch from, so the network path above
     /// can never work there -- downloaded subtitle files were being written and
     /// then never read by anything.
-    func loadSubtitles(fileURL: URL) async {
+    /// - Returns: whether the file could be read.
+    @discardableResult
+    func loadSubtitles(fileURL: URL) async -> Bool {
         isLoading = true
         currentCue = nil
         cues = []
@@ -42,12 +44,29 @@ class SubtitleManager: ObservableObject {
         do {
             let contents = try String(contentsOf: fileURL, encoding: .utf8)
             cues = parseWebVTT(contents)
+            return true
         } catch {
             logger.error("Failed to read downloaded subtitles at \(fileURL.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
-    func loadSubtitles(itemId: String, subtitleIndex: Int, serverID: String? = nil) async {
+    /// The VTT text in a subtitle response, or nil when the server did not
+    /// return one (#595).
+    ///
+    /// The status has to be checked: for a track it cannot convert (an image
+    /// format, a broken file) Jellyfin answers 500 with an error body, and
+    /// that body used to be handed to the VTT parser. It parsed to zero cues,
+    /// so the track looked selected and showed nothing, with no failure
+    /// anywhere.
+    static func vttText(from data: Data, response: URLResponse) -> String? {
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// - Returns: whether the server returned subtitles for the track.
+    @discardableResult
+    func loadSubtitles(itemId: String, subtitleIndex: Int, serverID: String? = nil) async -> Bool {
         isLoading = true
         currentCue = nil
         cues = []
@@ -65,7 +84,7 @@ class SubtitleManager: ObservableObject {
 
         guard let serverURL, let accessToken else {
             isLoading = false
-            return
+            return false
         }
 
         // Build subtitle URL
@@ -78,16 +97,23 @@ class SubtitleManager: ObservableObject {
 
         do {
             let session = await JellyfinClient.shared.urlSession
-            let (data, _) = try await session.data(for: request)
-            if let vttContent = String(data: data, encoding: .utf8) {
-                cues = parseWebVTT(vttContent)
+            let (data, response) = try await session.data(for: request)
+            guard let vttContent = Self.vttText(from: data, response: response) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                logger.error("Subtitle request for item \(itemId, privacy: .public) index \(subtitleIndex) returned HTTP \(status)")
+                isLoading = false
+                return false
             }
+            cues = parseWebVTT(vttContent)
         } catch {
             // Subtitle loading failed — no subtitles will be shown
             logger.error("Failed to load subtitles for item \(itemId, privacy: .public) index \(subtitleIndex): \(error.localizedDescription, privacy: .public)")
+            isLoading = false
+            return false
         }
 
         isLoading = false
+        return true
     }
 
     func clear() {

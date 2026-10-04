@@ -70,11 +70,19 @@ extension PlayerViewModel {
         // RESUME point, not to the couple of seconds the wedged player
         // reports. Observed live: a hung resume seek left currentTime ≈ 2 s
         // while the viewer's real position was 30 minutes in.
+        //
+        // A resume seek that has not landed (a rebuild that failed in turn)
+        // outranks both: pendingResumeTicks is where the viewer is (#593).
         let liveSeconds = player?.currentTime().seconds ?? 0
         let liveTicks = (liveSeconds.isFinite && liveSeconds > 0) ? Int64(liveSeconds * 10_000_000) : 0
-        let positionTicks = liveTicks > 100_000_000  // > 10 s: playback was really underway
-            ? liveTicks
-            : max(liveTicks, resumePositionTicks)
+        let positionTicks: Int64
+        if pendingResumeTicks > 0 {
+            positionTicks = pendingResumeTicks
+        } else if liveTicks > 100_000_000 {  // > 10 s: playback was really underway
+            positionTicks = liveTicks
+        } else {
+            positionTicks = max(liveTicks, resumePositionTicks)
+        }
 
         advancePlaybackAttemptForSameItem(itemID: item.id)
         let recoveryGeneration = PlaybackGeneration(itemID: item.id, attempt: playbackAttempt)
@@ -112,6 +120,11 @@ extension PlayerViewModel {
         invalidatePlayerObservers()
         player = nil
         isLoading = true
+        // Armed before the first await, not after the rebuild: leaving while
+        // the new stream loads must still report where the viewer was (#593).
+        if positionTicks > 0 {
+            pendingResumeTicks = positionTicks
+        }
         await stopActiveEncodingIfNeeded(reason: .recovery)
         guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
 
@@ -119,21 +132,20 @@ extension PlayerViewModel {
             if let recoverySetup {
                 try await recoverySetup(item, recoveryQuality.maxBitrate, recoveryQuality.maxWidth, allowVideoStreamCopy)
             } else {
-                try await setupPlayer(
-                    for: item,
-                    maxBitrate: recoveryQuality.maxBitrate,
-                    maxWidth: recoveryQuality.maxWidth,
-                    forceTranscode: true,
-                    allowVideoStreamCopy: allowVideoStreamCopy,
-                    expectedPlaybackGeneration: recoveryGeneration
-                )
+                try await withLoadDeadline {
+                    try await self.setupPlayer(
+                        for: item,
+                        maxBitrate: recoveryQuality.maxBitrate,
+                        maxWidth: recoveryQuality.maxWidth,
+                        forceTranscode: true,
+                        allowVideoStreamCopy: allowVideoStreamCopy,
+                        expectedPlaybackGeneration: recoveryGeneration
+                    )
+                }
             }
             guard isCurrentPlaybackGeneration(recoveryGeneration), !Task.isCancelled else { return }
             isLoading = false
             updateNowPlayingInfo(item: item)
-            if positionTicks > 0 {
-                pendingResumeTicks = positionTicks
-            }
             if !applySessionSubtitlePreference() {
                 applyPreferredSubtitles()
             }
@@ -216,21 +228,62 @@ extension PlayerViewModel {
     /// cancels `stallWatchdogTask`, and when the watchdog task itself invoked
     /// recovery that cancellation propagated into the in-flight rebuild's
     /// network awaits and aborted it mid-recovery.
+    ///
+    /// A pause is not a stall (#592): the watchdog only recovers a player
+    /// that WANTS to play and cannot. One that finds the viewer paused stands
+    /// down and is re-armed when they resume (see `playbackPauseStateChanged`).
     func armStallWatchdog(for generation: PlaybackGeneration, grace: Double = 8) {
         guard isCurrentPlaybackGeneration(generation), let watchedPlayer = player else { return }
         stallWatchdogTask?.cancel()
+        stallWatchdogAwaitingResume = false
         let stalledAt = watchedPlayer.currentTime().seconds
         stallWatchdogTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(grace))
             guard !Task.isCancelled, let self else { return }
             guard self.isCurrentPlaybackGeneration(generation),
                   let player = self.player,
-                  player === watchedPlayer,
-                  player.timeControlStatus != .playing else { return }
-            let now = player.currentTime().seconds
-            guard now.isFinite, abs(now - stalledAt) < 0.5 else { return }
+                  player === watchedPlayer else { return }
             self.stallWatchdogTask = nil
-            Task { await self.attemptPlaybackRecovery(reason: Self.stallRecoveryReason, itemID: generation.itemID, attempt: generation.attempt) }
+            let verdict = PlaybackRecoveryPlan.stallVerdict(
+                timeControl: Self.timeControl(of: player),
+                positionDelta: player.currentTime().seconds - stalledAt
+            )
+            switch verdict {
+            case .standDown:
+                break
+            case .waitForResume:
+                self.stallWatchdogAwaitingResume = true
+                self.diag(.timeControl, [PlayerDiagnostics.field("stallWatchdog", "paused-stand-down")])
+            case .recover:
+                Task { await self.attemptPlaybackRecovery(reason: Self.stallRecoveryReason, itemID: generation.itemID, attempt: generation.attempt) }
+            }
+        }
+    }
+
+    static func timeControl(of player: AVPlayer) -> PlaybackRecoveryPlan.TimeControl {
+        switch player.timeControlStatus {
+        case .playing: return .playing
+        case .waitingToPlayAtSpecifiedRate: return .waiting
+        case .paused: return .paused
+        @unknown default: return .paused
+        }
+    }
+
+    /// Called on every `timeControlStatus` change. AVPlayer only ever moves
+    /// itself between waiting and playing, so `.paused` is the viewer (or the
+    /// app on their behalf): the transport bar, the remote, a headset, the
+    /// lock screen. All of them land here without each needing to say so.
+    func playbackPauseStateChanged(isPaused: Bool, generation: PlaybackGeneration) {
+        if isPaused {
+            // A watchdog still counting down would otherwise fire into the
+            // pause; park it instead of letting the timer race the viewer.
+            guard stallWatchdogTask != nil else { return }
+            stallWatchdogTask?.cancel()
+            stallWatchdogTask = nil
+            stallWatchdogAwaitingResume = true
+        } else if stallWatchdogAwaitingResume {
+            // Resumed: if the stream is still stuck, this is what notices.
+            armStallWatchdog(for: generation, grace: 15)
         }
     }
 
@@ -243,9 +296,10 @@ extension PlayerViewModel {
     /// `pendingResumeTicks` is cleared before seeking so a repeated
     /// `.readyToPlay` cannot issue a second seek.
     func applyPendingResumeSeekIfNeeded(generation: PlaybackGeneration) {
-        guard isCurrentPlaybackGeneration(generation), pendingResumeTicks > 0, let player else { return }
-        let target = CMTime(value: pendingResumeTicks / 10000, timescale: 1000)
-        pendingResumeTicks = 0
+        guard isCurrentPlaybackGeneration(generation), pendingResumeTicks > 0, !resumeSeekIssued,
+              let player else { return }
+        let ticks = pendingResumeTicks
+        let target = CMTime(value: ticks / 10000, timescale: 1000)
         let drift = abs(player.currentTime().seconds - target.seconds)
         diag(.seek, [
             PlayerDiagnostics.field("phase", "post-ready-resume"),
@@ -254,11 +308,23 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("applied", drift > 3)
         ])
         if drift > 3 {
-            player.seek(to: target)
+            // Cleared when the seek LANDS, not here (#593): until then the
+            // item's clock still reads the old position, and an exit or a
+            // progress report in that window would record it.
+            resumeSeekIssued = true
+            player.seek(to: target) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isCurrentPlaybackGeneration(generation),
+                          self.resumeSeekIssued, self.pendingResumeTicks == ticks else { return }
+                    self.pendingResumeTicks = 0
+                }
+            }
             // The resume seek is the observed hang case: the segment request
             // for the target can wedge server-side (grid divergence) with no
             // notification ever posted. Watchdog it like a fresh start.
             armStallWatchdog(for: generation, grace: 15)
+        } else {
+            pendingResumeTicks = 0
         }
     }
 }

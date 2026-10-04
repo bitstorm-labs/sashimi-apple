@@ -29,6 +29,9 @@ struct MobilePlayerView: View {
     @State private var isScrubbing = false
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
+    /// Bumped by "Try Again". The load is the view's `.task`, keyed on this,
+    /// so a retry is cancelled with the view exactly like the first load.
+    @State private var loadAttempt = 0
     /// Downloaded items that played to their end. Acted on (Delete downloads
     /// after watching) only once the player is gone, never mid-playback.
     @State private var finishedDownloadItemIDs: [String] = []
@@ -101,10 +104,8 @@ struct MobilePlayerView: View {
                         onPlayNext: { Task { await viewModel.playNextEpisode() } },
                         onReplay: { Task { await viewModel.replayCurrentItem() } },
                         onDone: {
-                            Task {
-                                await viewModel.stop(reason: .userStop)
-                                dismiss()
-                            }
+                            viewModel.beginStop(reason: .userStop)
+                            dismiss()
                         }
                     )
                 } else {
@@ -133,10 +134,11 @@ struct MobilePlayerView: View {
             } else {
                 MobilePlayerLoadingView(
                     viewModel: viewModel,
+                    onRetry: localFileURL == nil ? { loadAttempt += 1 } : nil,
                     onClose: {
                         viewModel.player?.pause()
                         saveOfflinePositionIfNeeded()
-                        Task { await viewModel.stop(reason: .userStop) }
+                        viewModel.beginStop(reason: .userStop)
                         dismiss()
                     }
                 )
@@ -148,18 +150,12 @@ struct MobilePlayerView: View {
         // hidden for the whole time the player is up, controls or not.
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .task {
-            // For online playback, add a timeout so we don't hang forever if unreachable
+        .task(id: loadAttempt) {
+            // The load bounds itself (PlaybackLoadPolicy): it fails only once
+            // the server has gone quiet, not five seconds in while the
+            // requests are still being answered (#594).
             if localFileURL == nil {
-                let timeoutTask = Task {
-                    try await Task.sleep(for: .seconds(5))
-                    if viewModel.isLoading && viewModel.player == nil {
-                        viewModel.isLoading = false
-                        viewModel.errorMessage = "Can't connect to server. Download this item to watch offline."
-                    }
-                }
                 await viewModel.loadMedia(item: item, startFromBeginning: startFromBeginning, localFileURL: nil)
-                timeoutTask.cancel()
                 await viewModel.announceStation()
             } else {
                 // A download rolls into the next downloaded episode of its
@@ -229,11 +225,8 @@ struct MobilePlayerView: View {
             guard newPhase == .background, !pictureInPicture.isActive else { return }
             viewModel.player?.pause()
             saveOfflinePositionIfNeeded()
-            let stopTask = viewModel.beginStop(reason: .sceneBackground)
-            Task {
-                await stopTask.value
-                dismiss()
-            }
+            viewModel.beginStop(reason: .sceneBackground)
+            dismiss()
         }
         // The .task above runs once. It does not re-run when changeQuality
         // rebuilds the player or when auto-play-next swaps in the next episode,
@@ -338,10 +331,12 @@ struct MobilePlayerView: View {
         // where the offline save lives. The position was silently lost
         // every time the X was used.
         saveOfflinePositionIfNeeded()
-        Task {
-            await viewModel.stop(reason: .userStop)
-            dismiss()
-        }
+        // Close first (#591). The player is released and the stopped report
+        // persisted before beginStop returns; delivery carries on behind the
+        // dismissal, and onDisappear waits on the same task for the work that
+        // has to follow it (delete-after-watching, .playbackDidStop).
+        viewModel.beginStop(reason: .userStop)
+        dismiss()
     }
 
     private func scheduleAutoHide() {
@@ -361,9 +356,11 @@ struct MobilePlayerView: View {
     private func saveOfflinePositionIfNeeded() {
         // A natural end already saved the item as finished; the stopped
         // player's clock must not overwrite that.
-        guard localFileURL != nil, !viewModel.playbackEnded,
-              let currentTime = viewModel.player?.currentTime() else { return }
-        let ticks = Int64(currentTime.seconds * 10_000_000)
+        // livePositionTicks, not the player's clock: until the resume seek
+        // lands the clock reads zero, and closing in that window used to save
+        // zero over the stored position (#593).
+        guard localFileURL != nil, !viewModel.playbackEnded, viewModel.player != nil,
+              let ticks = viewModel.livePositionTicks() else { return }
         DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
     }
 }

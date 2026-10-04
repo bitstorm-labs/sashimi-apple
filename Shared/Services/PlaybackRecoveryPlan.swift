@@ -82,4 +82,44 @@ enum PlaybackRecoveryPlan {
         }
         return .giveUp
     }
+
+    // MARK: - Stall watchdog (#592)
+
+    /// What the player is doing, reduced to what the watchdog needs.
+    /// (`AVPlayer.TimeControlStatus`, without the AVFoundation dependency.)
+    enum TimeControl: Equatable {
+        /// Rate 0 and not waiting: somebody paused it.
+        case paused
+        /// Wants to play and cannot (`.waitingToPlayAtSpecifiedRate`).
+        case waiting
+        case playing
+    }
+
+    enum StallVerdict: Equatable {
+        /// Playback is running or has moved on: nothing to do.
+        case standDown
+        /// The viewer paused. Not a stall; look again when they resume.
+        case waitForResume
+        /// Wants to play, cannot, and has not moved: rebuild.
+        case recover
+    }
+
+    /// Whether a watchdog that has run out its grace period should recover.
+    ///
+    /// A stall is the player WANTING to play and being unable to. The old
+    /// test was "not playing and has not moved", which is also the exact
+    /// description of a paused player — so pausing within the grace period
+    /// tore the stream down, rebuilt it as a transcode and resumed it.
+    ///
+    /// - Parameter positionDelta: seconds moved since the watchdog was armed.
+    static func stallVerdict(timeControl: TimeControl, positionDelta: Double) -> StallVerdict {
+        switch timeControl {
+        case .playing:
+            return .standDown
+        case .paused:
+            return .waitForResume
+        case .waiting:
+            return positionDelta.isFinite && abs(positionDelta) < 0.5 ? .recover : .standDown
+        }
+    }
 }
