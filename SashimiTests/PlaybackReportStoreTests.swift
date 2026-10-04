@@ -189,6 +189,54 @@ final class PlaybackReportStoreTests: XCTestCase {
         XCTAssertFalse(events.contains(where: { if case .markPlayed = $0 { return true }; return false }))
     }
 
+    /// #591: the player skips its DELETE /Videos/ActiveEncodings only when a
+    /// stopped report naming the play session actually reached the server
+    /// (that report is what ends the transcode).
+    func testDeliveredStoppedReportWithASessionEndsTheTranscode() async {
+        let delivery = PlaybackReportDelivery(store: PlaybackReportStore(defaults: testDefaults))
+        let reporter = PlaybackSessionReporter(
+            serverID: "server-a",
+            client: FakePlaybackReportingClient(),
+            delivery: delivery
+        )
+        XCTAssertFalse(reporter.lastStoppedReportEndedSession)
+
+        await reporter.start(itemID: "item-a", positionTicks: 0, playSessionID: "session-a", playMethod: "Transcode")
+        await reporter.stopped(itemID: "item-a", positionTicks: 500, playSessionID: "session-a")
+
+        XCTAssertTrue(reporter.lastStoppedReportEndedSession)
+    }
+
+    func testFailedOrSessionlessStoppedReportLeavesTheTranscodeToTheDelete() async {
+        let delivery = PlaybackReportDelivery(store: PlaybackReportStore(defaults: testDefaults))
+        let failing = PlaybackSessionReporter(
+            serverID: "server-a",
+            client: FakePlaybackReportingClient(failAll: true),
+            delivery: delivery
+        )
+        await failing.start(itemID: "item-a", positionTicks: 0, playSessionID: "session-a", playMethod: "Transcode")
+        await failing.stopped(itemID: "item-a", positionTicks: 500, playSessionID: "session-a")
+        XCTAssertFalse(failing.lastStoppedReportEndedSession, "an undelivered report ended nothing")
+
+        let sessionless = PlaybackSessionReporter(
+            serverID: "server-b",
+            client: FakePlaybackReportingClient(),
+            delivery: delivery
+        )
+        await sessionless.start(itemID: "item-b", positionTicks: 0, playSessionID: nil, playMethod: "Transcode")
+        await sessionless.stopped(itemID: "item-b", positionTicks: 500, playSessionID: nil)
+        XCTAssertFalse(sessionless.lastStoppedReportEndedSession)
+
+        // Never started: stopped() sends nothing at all.
+        let idle = PlaybackSessionReporter(
+            serverID: "server-c",
+            client: FakePlaybackReportingClient(),
+            delivery: delivery
+        )
+        await idle.stopped(itemID: "item-c", positionTicks: 500, playSessionID: "session-c")
+        XCTAssertFalse(idle.lastStoppedReportEndedSession)
+    }
+
     func testNaturalCompletionDeliversStoppedBeforeMarkPlayed() async {
         let store = PlaybackReportStore(defaults: testDefaults)
         let delivery = PlaybackReportDelivery(store: store)

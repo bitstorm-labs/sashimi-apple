@@ -1288,6 +1288,75 @@ actor JellyfinClient {
         )
     }
 
+    /// The PlaybackInfo request body. Static and pure so its contents are
+    /// unit-testable: a missing key here is invisible in any log line and only
+    /// shows up as the server quietly choosing something else.
+    static func playbackInfoBody(
+        userId: String,
+        streamingBitrate: Int,
+        deviceProfile: [String: Any],
+        forceDirectPlay effectiveForceDirectPlay: Bool = false,
+        forceTranscode: Bool = false,
+        allowVideoStreamCopy: Bool = true,
+        tracks: StreamTrackRequest
+    ) -> [String: Any] {
+        // Jellyfin's PlaybackInfo API has no "force direct play" flag.
+        // Disabling DirectStream and Transcoding leaves direct play as the
+        // only option, so the server either returns the original file or
+        // reports the item unplayable (rather than silently remuxing).
+        //
+        // Conversely, forceTranscode disables DirectPlay and DirectStream so
+        // the server MUST return a transcodingUrl that honors the bitrate
+        // cap — the quality tiers are caps, not targets, so a direct-played
+        // source under the cap would otherwise make the pick a no-op.
+        //
+        // MaxStreamingBitrate is sent both top-level and inside the device
+        // profile: which one the server honors is version-dependent.
+        var body: [String: Any] = [
+            "UserId": userId,
+            "MaxStreamingBitrate": streamingBitrate,
+            "DeviceProfile": deviceProfile,
+            "EnableDirectPlay": !forceTranscode,
+            "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
+            "EnableTranscoding": !effectiveForceDirectPlay,
+            // Allow video stream-copy (the native-correct path). AVPlayer can't
+            // demux MKV, so an MKV goes through HLS — but for content the Apple TV
+            // decodes natively (e.g. a 4K HDR10 HEVC remux), the server should
+            // stream-COPY the video untouched and only remux the container +
+            // transcode incompatible audio (DTS→AAC). That preserves native 4K
+            // HDR at near-zero server cost.
+            //
+            // History: #359 set this false to force a re-encode as a workaround
+            // for the stream-copy HLS seek-freeze (jellyfin#16070/#4188 — the
+            // playlist grid and the restarted ffmpeg's segment grid diverge on
+            // seek). That was unworkable: forcing a real-time re-encode of an
+            // 88 GB 4K HDR remux OOM-killed ffmpeg (exit 137) into a restart
+            // storm, so 4K titles could not play at all (CoreMediaError -12889).
+            // The seek-freeze is handled the way the official clients handle
+            // broken playback: an error/stall RECOVERY fallback (see
+            // PlayerViewModel.attemptPlaybackRecovery) rebuilds the session at
+            // the current position forcing a transcode, escalating to
+            // allowVideoStreamCopy=false on a second failure — recovery only,
+            // never as the default path.
+            "AllowVideoStreamCopy": allowVideoStreamCopy,
+            "AllowAudioStreamCopy": true,
+            "AutoOpenLiveStream": true
+        ]
+        // Track selection (#590). MediaSourceId is what makes the server apply
+        // the two indexes at all: MediaInfoHelper only copies them onto the
+        // source whose id matches. Without them the server picks the audio
+        // track from the Jellyfin user's server-side preference (the Audio
+        // menu and Preferred Audio Language did nothing on a transcode) and
+        // the user's default subtitle, burning it in when it is an image
+        // format.
+        body["MediaSourceId"] = tracks.mediaSourceId
+        body["SubtitleStreamIndex"] = tracks.subtitleStreamIndex
+        if let audioStreamIndex = tracks.audioStreamIndex {
+            body["AudioStreamIndex"] = audioStreamIndex
+        }
+        return body
+    }
+
     func getPlaybackInfo(
         itemId: String,
         itemType: ItemType? = nil,
@@ -1296,7 +1365,8 @@ actor JellyfinClient {
         maxWidth: Int? = nil,
         forceDirectPlay: Bool = false,
         forceTranscode: Bool = false,
-        allowVideoStreamCopy: Bool = true
+        allowVideoStreamCopy: Bool = true,
+        tracks: StreamTrackRequest? = nil
     ) async throws -> PlaybackInfoResponse {
         // Defensive guard: PlaybackInfo for a container type (Series, Season,
         // BoxSet, folder) is a guaranteed server 500 — Jellyfin throws
@@ -1343,48 +1413,18 @@ actor JellyfinClient {
 
         let deviceProfile = videoDeviceProfile(engine: engine, streamingBitrate: streamingBitrate, maxWidth: effectiveMaxWidth)
 
-        // Jellyfin's PlaybackInfo API has no "force direct play" flag.
-        // Disabling DirectStream and Transcoding leaves direct play as the
-        // only option, so the server either returns the original file or
-        // reports the item unplayable (rather than silently remuxing).
-        //
-        // Conversely, forceTranscode disables DirectPlay and DirectStream so
-        // the server MUST return a transcodingUrl that honors the bitrate
-        // cap — the quality tiers are caps, not targets, so a direct-played
-        // source under the cap would otherwise make the pick a no-op.
-        //
-        // MaxStreamingBitrate is sent both top-level and inside the device
-        // profile: which one the server honors is version-dependent.
-        let body: [String: Any] = [
-            "UserId": userId,
-            "MaxStreamingBitrate": streamingBitrate,
-            "DeviceProfile": deviceProfile,
-            "EnableDirectPlay": !forceTranscode,
-            "EnableDirectStream": !effectiveForceDirectPlay && !forceTranscode,
-            "EnableTranscoding": !effectiveForceDirectPlay,
-            // Allow video stream-copy (the native-correct path). AVPlayer can't
-            // demux MKV, so an MKV goes through HLS — but for content the Apple TV
-            // decodes natively (e.g. a 4K HDR10 HEVC remux), the server should
-            // stream-COPY the video untouched and only remux the container +
-            // transcode incompatible audio (DTS→AAC). That preserves native 4K
-            // HDR at near-zero server cost.
-            //
-            // History: #359 set this false to force a re-encode as a workaround
-            // for the stream-copy HLS seek-freeze (jellyfin#16070/#4188 — the
-            // playlist grid and the restarted ffmpeg's segment grid diverge on
-            // seek). That was unworkable: forcing a real-time re-encode of an
-            // 88 GB 4K HDR remux OOM-killed ffmpeg (exit 137) into a restart
-            // storm, so 4K titles could not play at all (CoreMediaError -12889).
-            // The seek-freeze is handled the way the official clients handle
-            // broken playback: an error/stall RECOVERY fallback (see
-            // PlayerViewModel.attemptPlaybackRecovery) rebuilds the session at
-            // the current position forcing a transcode, escalating to
-            // allowVideoStreamCopy=false on a second failure — recovery only,
-            // never as the default path.
-            "AllowVideoStreamCopy": allowVideoStreamCopy,
-            "AllowAudioStreamCopy": true,
-            "AutoOpenLiveStream": true
-        ]
+        let body = Self.playbackInfoBody(
+            userId: userId,
+            streamingBitrate: streamingBitrate,
+            deviceProfile: deviceProfile,
+            forceDirectPlay: effectiveForceDirectPlay,
+            forceTranscode: forceTranscode,
+            allowVideoStreamCopy: allowVideoStreamCopy,
+            // The item's own version is the source the server lists first, so
+            // its id is the item id until a response says otherwise (the
+            // player re-requests when it does).
+            tracks: tracks ?? StreamTrackRequest(mediaSourceId: itemId)
+        )
 
         let bodyData = try JSONSerialization.data(withJSONObject: body)
 

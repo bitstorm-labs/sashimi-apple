@@ -264,6 +264,12 @@ struct MobileDetailView: View {
                 }
             }
         }
+        // Posted once the stopped report has been delivered: the player
+        // closes before that (#591), and on a slow server the one-second
+        // guess above reads the position from before this viewing.
+        .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
+            Task { await refreshPlaybackState() }
+        }
         .alert("File Info", isPresented: $showingFileInfo) {
             Button("OK", role: .cancel) { }
         } message: {

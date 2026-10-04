@@ -1,10 +1,51 @@
 import Foundation
 import AVFoundation
 
+/// Why the stream is being renegotiated mid-playback. Every case goes through
+/// the same rebuild (`PlayerViewModel.rebuildStream`): tear the player down,
+/// ask the server again, resume where the viewer was.
+enum StreamChange: Equatable {
+    case quality(QualityOption)
+    /// A different audio stream. A transcode or remux carries one audio
+    /// track, mapped server-side, so switching it means a new stream (#590).
+    case audio(name: String)
+    /// An image subtitle (PGS, VobSub) to burn into the picture (#595).
+    case burnInSubtitle(name: String)
+    /// Back to a stream with no burned-in subtitle.
+    case removeBurnedInSubtitle
+
+    /// Shown while the rebuild is in flight.
+    func startNotice(quality: QualityOption) -> String {
+        switch self {
+        case .quality: return "Switching to \(quality.menuTitle)…"
+        case .audio(let name): return "Switching audio to \(name)…"
+        case .burnInSubtitle(let name): return "Loading subtitles: \(name)…"
+        case .removeBurnedInSubtitle: return "Switching subtitles…"
+        }
+    }
+
+    var diagnosticName: String {
+        switch self {
+        case .quality: return "quality"
+        case .audio: return "audio"
+        case .burnInSubtitle: return "subtitle-burn-in"
+        case .removeBurnedInSubtitle: return "subtitle-burn-in-removed"
+        }
+    }
+}
+
 extension PlayerViewModel {
-    func changeQuality(_ quality: QualityOption) async { // swiftlint:disable:this function_body_length
-        guard !transitionState.isTransitioning, let item = currentItem else { return }
-        // Quality changes rebuild the same mutable player as episode
+    func changeQuality(_ quality: QualityOption) async {
+        await rebuildStream(for: .quality(quality))
+    }
+
+    /// Renegotiates the current item's stream and resumes at the same
+    /// position. Returns false when a transition was already in flight and
+    /// nothing was done.
+    @discardableResult
+    func rebuildStream(for change: StreamChange) async -> Bool { // swiftlint:disable:this function_body_length
+        guard !transitionState.isTransitioning, let item = currentItem else { return false }
+        // Stream rebuilds replace the same mutable player as episode
         // transitions. Claim the shared lock before the first await so two
         // rapid menu selections cannot tear down and recreate the player out
         // of order.
@@ -15,28 +56,32 @@ extension PlayerViewModel {
             finishTransition()
         }
 
-        // Save current position
-        let currentPosition = player?.currentItem?.currentTime()
-        let positionTicks = currentPosition.map { Int64($0.seconds * 10_000_000) } ?? 0
+        // Where the viewer is. Not the item's clock alone: a second change
+        // made while the first rebuild is still loading reads zero there, and
+        // the real position is the pending resume point (#593).
+        let positionTicks = livePositionTicks() ?? 0
 
         advancePlaybackAttemptForSameItem(itemID: item.id)
         diag(.qualityChange, [
+            PlayerDiagnostics.field("change", change.diagnosticName),
             PlayerDiagnostics.field("from", selectedQuality.rawValue),
-            PlayerDiagnostics.field("to", quality.rawValue),
             PlayerDiagnostics.field("item", item.id),
-            PlayerDiagnostics.field("positionSeconds", currentPosition?.seconds)
-        ])
+            PlayerDiagnostics.field("positionSeconds", Double(positionTicks) / 10_000_000)
+        ] + (change.newQuality.map { [PlayerDiagnostics.field("to", $0.rawValue)] } ?? []))
 
-        // Update quality setting
-        selectedQuality = quality
+        if let quality = change.newQuality {
+            selectedQuality = quality
+        }
+        let quality = selectedQuality
         let attempt = playbackAttempt
         // Visible confirmation: the rebuild takes seconds and, without this,
         // nothing on screen said the pick had registered.
-        showPlaybackNotice("Switching to \(quality.menuTitle)…", duration: nil)
+        showPlaybackNotice(change.startNotice(quality: quality), duration: nil)
 
         // Stop current playback
         diag(.teardown, [
             PlayerDiagnostics.field("reason", PlayerDiagnostics.TeardownReason.qualityChange.rawValue),
+            PlayerDiagnostics.field("change", change.diagnosticName),
             PlayerDiagnostics.field("item", item.id)
         ])
         player?.pause()
@@ -61,38 +106,46 @@ extension PlayerViewModel {
         player = nil
         isLoading = true
 
+        // Armed now, before anything awaits, and applied by the status
+        // observer once the new item is ready. A pre-ready seek is silently
+        // dropped on HLS/transcode streams, and until the seek lands this is
+        // the only record of where the viewer is: leaving mid-rebuild used to
+        // report position 0 and wipe the server's resume point (#593).
+        if positionTicks > 0 {
+            pendingResumeTicks = positionTicks
+            diag(.seek, [
+                PlayerDiagnostics.field("phase", "stream-change-armed"),
+                PlayerDiagnostics.field("targetSeconds", Double(positionTicks) / 10_000_000)
+            ])
+        }
+
         // Kill the old transcode session before requesting a new one, so the
         // server isn't left encoding a stream nobody is watching.
         await stopActiveEncodingIfNeeded(reason: .qualityChange)
-        guard playbackAttempt == attempt, !Task.isCancelled else { return }
+        guard playbackAttempt == attempt, !Task.isCancelled else { return true }
 
         do {
             // An explicit non-Auto pick forces a transcode so the selection
             // visibly takes effect: the tiers are caps, and a direct-played
             // source under the cap would otherwise make the pick a no-op.
-            try await setupPlayer(for: item, maxBitrate: quality.maxBitrate, maxWidth: quality.maxWidth, forceTranscode: quality != .auto)
-            guard playbackAttempt == attempt, !Task.isCancelled else { return }
-            isLoading = false
-            showPlaybackNotice("Quality: \(qualityStatusLabel)")
-            updateNowPlayingInfo(item: item)
-
-            // Seek to saved position. A bare pre-ready seek is silently dropped
-            // on HLS/transcode streams -- and forceTranscode above means any
-            // non-Auto pick is ALWAYS that case -- so arm pendingResumeTicks
-            // too and let the status observer re-apply it once the item is
-            // ready. Without this the stream restarts at 0:00 and the 5s
-            // progress report then overwrites the server's resume point with 0.
-            if positionTicks > 0 {
-                // Armed only — same reasoning as the resume path in loadMedia:
-                // awaiting a pre-ready seek blocked startup, and issuing it here
-                // as well as from the status observer meant two seeks (two
-                // server-side transcode restarts) for one position change.
-                pendingResumeTicks = positionTicks
-                diag(.seek, [
-                    PlayerDiagnostics.field("phase", "quality-change-armed"),
-                    PlayerDiagnostics.field("targetSeconds", Double(positionTicks) / 10_000_000)
-                ])
+            // The audio and subtitle streams to ask for are resolved inside
+            // setupPlayer, from the session's picks.
+            try await withLoadDeadline {
+                try await self.setupPlayer(
+                    for: item,
+                    maxBitrate: quality.maxBitrate,
+                    maxWidth: quality.maxWidth,
+                    forceTranscode: quality != .auto
+                )
             }
+            guard playbackAttempt == attempt, !Task.isCancelled else { return true }
+            isLoading = false
+            if let notice = finishNotice(for: change) {
+                showPlaybackNotice(notice)
+            } else {
+                clearPlaybackNotice()
+            }
+            updateNowPlayingInfo(item: item)
 
             // Re-apply the session's subtitle selection on the rebuilt
             // player — the overlay was cleared along with the old player.
@@ -123,13 +176,31 @@ extension PlayerViewModel {
         } catch {
             clearPlaybackNotice()
             diagFailure(.loadFailed, [
-                PlayerDiagnostics.field("phase", "quality-change"),
+                PlayerDiagnostics.field("phase", "stream-change"),
+                PlayerDiagnostics.field("change", change.diagnosticName),
                 PlayerDiagnostics.field("item", item.id)
             ] + PlayerDiagnostics.fields(for: error))
             self.error = error
             self.errorMessage = error.localizedDescription
             isLoading = false
         }
+        return true
+    }
+
+    private func finishNotice(for change: StreamChange) -> String? {
+        switch change {
+        case .quality: return "Quality: \(qualityStatusLabel)"
+        case .audio(let name): return "Audio: \(name)"
+        case .burnInSubtitle(let name): return "Subtitles: \(name)"
+        case .removeBurnedInSubtitle: return nil
+        }
+    }
+}
+
+private extension StreamChange {
+    var newQuality: QualityOption? {
+        if case .quality(let quality) = self { return quality }
+        return nil
     }
 }
 

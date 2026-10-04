@@ -66,17 +66,51 @@ extension PlayerViewModel {
         // observation, but the player below is still AVPlayer either way.
         let engine: PlaybackEngineKind = playbackSettings.debugVLCDeviceProfile ? .vlc : .avFoundation
 
-        var playbackInfo = try await client.getPlaybackInfo(
-            itemId: item.id,
-            itemType: item.type,
-            engine: engine,
-            maxBitrate: effectiveBitrate,
-            maxWidth: maxWidth,
-            forceDirectPlay: playbackSettings.forceDirectPlay,
-            forceTranscode: forceTranscode,
-            allowVideoStreamCopy: allowVideoStreamCopy
-        )
+        // Which audio and subtitle streams to ask for (#590). Resolved from
+        // the item's own streams so the common case costs no extra request.
+        var tracks = trackRequest(mediaSourceId: item.id, streams: item.mediaStreams ?? [])
+        func requestPlaybackInfo(maxBitrate: Int?, maxWidth: Int?) async throws -> PlaybackInfoResponse {
+            diag(.playbackInfoRequest, [
+                PlayerDiagnostics.field("phase", "tracks"),
+                PlayerDiagnostics.field("audioStreamIndex", tracks.audioStreamIndex),
+                PlayerDiagnostics.field("subtitleStreamIndex", tracks.subtitleStreamIndex)
+            ])
+            return try await client.getPlaybackInfo(
+                itemId: item.id,
+                itemType: item.type,
+                engine: engine,
+                maxBitrate: maxBitrate,
+                maxWidth: maxWidth,
+                // A burn-in is a transcode by definition, so it beats Force
+                // Direct Play the same way an explicit quality pick does.
+                forceDirectPlay: playbackSettings.forceDirectPlay && !tracks.burnsInSubtitle,
+                forceTranscode: forceTranscode,
+                allowVideoStreamCopy: allowVideoStreamCopy,
+                tracks: tracks
+            )
+        }
+
+        var playbackInfo = try await requestPlaybackInfo(maxBitrate: effectiveBitrate, maxWidth: maxWidth)
         try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+        noteLoadProgress()
+
+        // The response is the authority on the source that will play. When it
+        // names a different source, or its streams resolve the viewer's
+        // choice differently from the item's (an item handed over without
+        // streams resolves nothing), ask again with the right indexes.
+        if let source = playbackInfo.mediaSources?.first {
+            let resolved = trackRequest(mediaSourceId: source.id, streams: source.mediaStreams ?? [])
+            if PlaybackSelection.needsTrackRetry(
+                sent: tracks,
+                resolved: resolved,
+                serverAudioStreamIndex: source.defaultAudioStreamIndex
+            ) {
+                tracks = resolved
+                playbackInfo = try await requestPlaybackInfo(maxBitrate: effectiveBitrate, maxWidth: maxWidth)
+                try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+                noteLoadProgress()
+            }
+        }
 
         // Source-aware retry (Auto path only). The source bitrate is only known
         // from the response, so it takes a second pass: if the link cannot carry
@@ -105,17 +139,9 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
             ])
             requestedBitrateCap = override.maxBitrate
-            playbackInfo = try await client.getPlaybackInfo(
-                itemId: item.id,
-                itemType: item.type,
-                engine: engine,
-                maxBitrate: override.maxBitrate,
-                maxWidth: override.maxWidth,
-                forceDirectPlay: playbackSettings.forceDirectPlay,
-                forceTranscode: forceTranscode,
-                allowVideoStreamCopy: allowVideoStreamCopy
-            )
+            playbackInfo = try await requestPlaybackInfo(maxBitrate: override.maxBitrate, maxWidth: override.maxWidth)
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+            noteLoadProgress()
         }
 
         activeBitrateCap = requestedBitrateCap ?? effectiveBitrate ?? bandwidth.cap
@@ -160,6 +186,7 @@ extension PlayerViewModel {
             pinnedHLSVariant = resolution?.pinnedVariant ?? false
             pinnedMultivariantPlaylist = resolution?.pinnedMultivariantPlaylist
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+            noteLoadProgress()
         } else if let directPath = mediaSource.directStreamUrl, !directPath.isEmpty {
             streamKind = .directStream
             resolvedURL = await client.buildURL(path: directPath)
@@ -195,6 +222,7 @@ extension PlayerViewModel {
         try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
+        activeTrackRequest = tracks
         videoResolution = mediaSource.videoResolution
         streamInfo = nil   // stale for the new session; refreshed when the overlay opens
 
@@ -259,5 +287,25 @@ extension PlayerViewModel {
         #else
         return nil
         #endif
+    }
+
+    /// The audio and subtitle streams this session wants from the server,
+    /// resolved against `streams` (#590, #595).
+    func trackRequest(mediaSourceId: String, streams: [MediaStream]) -> StreamTrackRequest {
+        PlaybackSelection.streamTrackRequest(
+            mediaSourceId: mediaSourceId,
+            streams: streams,
+            audio: sessionAudioPreference.map {
+                PlaybackSelection.AudioIntent(language: $0.language, displayName: $0.displayName)
+            },
+            preferredAudioLanguage: playbackSettings.preferredAudioLanguage,
+            subtitle: sessionSubtitlePreference.map {
+                PlaybackSelection.SubtitleIntent(
+                    language: $0.language,
+                    displayTitle: $0.displayTitle,
+                    isExternal: $0.isExternal
+                )
+            }
+        )
     }
 }

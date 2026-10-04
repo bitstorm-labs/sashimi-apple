@@ -96,6 +96,10 @@ extension PlayerViewModel {
                     PlayerDiagnostics.field("reason", observed.reasonForWaitingToPlay?.rawValue),
                     PlayerDiagnostics.field("positionSeconds", observed.currentTime().seconds)
                 ])
+                self.playbackPauseStateChanged(
+                    isPaused: observed.timeControlStatus == .paused,
+                    generation: generation
+                )
                 self.refreshNowPlayingProgress()
                 await self.reportProgress()
             }
@@ -278,5 +282,6 @@ extension PlayerViewModel {
         // replaces it. (Recovery re-arms its own if the new stream stalls.)
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
+        stallWatchdogAwaitingResume = false
     }
 }
