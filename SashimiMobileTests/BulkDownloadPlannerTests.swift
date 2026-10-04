@@ -55,7 +55,9 @@ final class BulkDownloadPlannerTests: XCTestCase {
             .map { Self.episode($0, season: 1, played: false) }
         let statuses: [String: DownloadStatus] = [
             "done": .completed, "queued": .queued, "preparing": .preparing,
-            "downloading": .downloading, "failed": .failed, "paused": .paused,
+            "downloading": .downloading, "failed": .failed,
+            // A legacy stored "paused" record reads as failed (#608).
+            "paused": DownloadStatus.fromStored("paused"),
         ]
 
         let ids = BulkDownloadPlanner.pending(episodes) { statuses[$0] }.map(\.id)

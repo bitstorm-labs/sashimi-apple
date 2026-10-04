@@ -122,9 +122,20 @@ enum DownloadStatus: String, Codable {
     case queued
     case preparing
     case downloading
-    case paused
     case completed
     case failed
+
+    /// Reads a stored `statusRaw`. Builds before #179 could pause a download
+    /// and stored "paused"; nothing has written it since, and its only action
+    /// was "Retry". Such a record reads as `.failed`, which offers exactly
+    /// that, instead of `.queued` (the fallback for anything unrecognised),
+    /// which would show a download that is not actually running.
+    static func fromStored(_ raw: String) -> DownloadStatus {
+        if let status = DownloadStatus(rawValue: raw) { return status }
+        return raw == legacyPausedRawValue ? .failed : .queued
+    }
+
+    static let legacyPausedRawValue = "paused"
 }
 
 // MARK: - Downloaded Item
@@ -183,7 +194,7 @@ final class DownloadedItem {
     }
 
     var status: DownloadStatus {
-        get { DownloadStatus(rawValue: statusRaw) ?? .queued }
+        get { DownloadStatus.fromStored(statusRaw) }
         set { statusRaw = newValue.rawValue }
     }
 

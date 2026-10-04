@@ -40,13 +40,6 @@ extension PlayerViewModel {
         )
     }
 
-    /// Flushes the current in-memory position when the scene is about to be
-    /// backgrounded. The reporter persists the event before attempting the
-    /// request, so suspension or a transient network failure cannot discard it.
-    func reportCurrentProgress() async {
-        await reportProgress()
-    }
-
     func reportCurrentPlaybackStoppedForTransition() async {
         guard let item = currentItem, !isOfflinePlayback else { return }
 

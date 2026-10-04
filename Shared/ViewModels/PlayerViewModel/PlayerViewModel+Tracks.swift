@@ -184,8 +184,33 @@ extension PlayerViewModel {
         // e.g. during the previous episode) wins over the Settings-based
         // preference — subtitles stay on until manually turned off.
         if !applySessionSubtitlePreference() {
-            applyPreferredSubtitles()
+            applyPreferredSubtitles(audioLanguage: await selectedAudioLanguage())
         }
+    }
+
+    /// The language of the audio that is playing, best answer available
+    /// without waiting: the stream a transcode was built with, else the
+    /// source's default audio stream (what AVPlayer starts on for direct
+    /// play). Picks forced subtitles when nothing else asks for subtitles.
+    var playingAudioLanguageHint: String? {
+        guard let source = currentMediaSource else { return nil }
+        let streams = source.audioStreams
+        if let index = activeAudioStreamIndex, let stream = streams.first(where: { $0.index == index }) {
+            return stream.language
+        }
+        return streams.first?.language
+    }
+
+    /// The language AVPlayer actually selected, for direct play, where the
+    /// Settings preference may have switched away from the default track.
+    private func selectedAudioLanguage() async -> String? {
+        guard !usesServerSideAudioSelection,
+              let playerItem = player?.currentItem,
+              let group = try? await playerItem.asset.loadMediaSelectionGroup(for: .audible),
+              let option = playerItem.currentMediaSelection.selectedMediaOption(in: group),
+              let code = option.locale?.language.languageCode?.identifier ?? option.extendedLanguageTag
+        else { return playingAudioLanguageHint }
+        return code
     }
 
     /// Re-applies the session's subtitle intent against the current media
@@ -221,12 +246,16 @@ extension PlayerViewModel {
         }
     }
 
-    func applyPreferredSubtitles() {
+    /// `audioLanguage` decides which forced track (if any) shows when
+    /// subtitles are off or nothing matches the preference; nil uses
+    /// `playingAudioLanguageHint`.
+    func applyPreferredSubtitles(audioLanguage: String? = nil) {
         guard let mediaSource = currentMediaSource,
               let stream = PlaybackSelection.preferredSubtitleStream(
                 from: mediaSource.subtitleStreams,
                 preferredLanguage: playbackSettings.preferredSubtitleLanguage,
-                subtitlesEnabled: playbackSettings.subtitlesEnabled
+                subtitlesEnabled: playbackSettings.subtitlesEnabled,
+                audioLanguage: audioLanguage ?? playingAudioLanguageHint
               ) else { return }
 
         selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
@@ -238,7 +267,7 @@ extension PlayerViewModel {
     private static func subtitleTrackOption(for stream: MediaStream) -> SubtitleTrackOption {
         SubtitleTrackOption(
             id: "\(stream.index ?? 0)",
-            displayName: stream.displayTitle ?? stream.language ?? "Unknown",
+            displayName: PlaybackSelection.subtitleDisplayName(for: stream),
             languageCode: stream.language,
             index: stream.index ?? 0,
             isOffOption: false,
@@ -274,10 +303,9 @@ extension PlayerViewModel {
         } else if let mediaSource = currentMediaSource {
             let subtitleStreams = mediaSource.subtitleStreams
             for stream in subtitleStreams {
-                let displayName = stream.displayTitle ?? stream.language ?? "Unknown"
                 tracks.append(SubtitleTrackOption(
                     id: "\(stream.index ?? 0)",
-                    displayName: displayName,
+                    displayName: PlaybackSelection.subtitleDisplayName(for: stream),
                     languageCode: stream.language,
                     index: stream.index ?? 0,
                     isOffOption: false,

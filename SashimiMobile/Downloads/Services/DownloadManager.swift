@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import os
 import SwiftData
 import UIKit
 
@@ -66,6 +67,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var subtitlesVerified: Set<String> = []
 
     private let persistence = DownloadPersistence()
+    private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "DownloadManager")
 
     private struct ServerDownloadContext {
         let server: ServerConfig
@@ -1165,20 +1167,24 @@ final class DownloadManager: NSObject, ObservableObject {
         guard let url = asset.url,
               let request = DownloadURLBuilder.authorizedRequest(for: url, accessToken: asset.token) else { return }
         do {
-            let (tempURL, _) = try await URLSession.shared.download(for: request)
-            try DownloadFileManager.moveFile(from: tempURL, to: asset.destination)
+            try await DownloadAssetFetcher.live().fetch(request, to: asset.destination)
             if asset.keyPath == "posterFileName" {
                 persistence.updatePosterFileName(itemId: asset.itemID, fileName: asset.fileName)
             } else if asset.keyPath == "backdropFileName" {
                 persistence.updateBackdropFileName(itemId: asset.itemID, fileName: asset.fileName)
             }
         } catch {
-            // Best-effort: images are not critical
+            // Best-effort (images are not critical), but never silent: a trust
+            // or proxy failure here used to leave every download posterless
+            // with nothing in the log.
+            logger.error(
+                "Download artwork \(asset.keyPath, privacy: .public) failed for item \(asset.itemID, privacy: .public): \(DownloadAssetFetcher.logDescription(of: error), privacy: .public)"
+            )
         }
     }
 
     private func downloadSubtitles(for item: BaseItemDto, server: ServerConfig, token: String) async {
-        // Runs on URLSession.shared, not the background session: it dies the
+        // Runs on the foreground API session, not the background one: it dies the
         // moment iOS suspends the app. A download queued before the screen
         // locks used to finish its video with no subtitles at all -- the
         // player then showed a subtitle button with nothing in it. Ask for
@@ -1227,6 +1233,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         var written: [OfflineSubtitle] = []
         var complete = true
+        let fetcher = await DownloadAssetFetcher.live()
         for stream in mediaSource.subtitleStreams {
             guard let index = stream.index, !skipping.contains(index),
                   let language = stream.language ?? stream.displayTitle else {
@@ -1252,14 +1259,7 @@ final class DownloadManager: NSObject, ObservableObject {
             let displayTitle = stream.displayTitle ?? language
 
             do {
-                let (tempURL, response) = try await URLSession.shared.download(for: request)
-                // An image-based track (PGS) has no VTT form: the server
-                // answers 500, and saving that body gave a track with no cues.
-                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    try? FileManager.default.removeItem(at: tempURL)
-                    continue
-                }
-                try DownloadFileManager.moveFile(from: tempURL, to: destination)
+                try await fetcher.fetch(request, to: destination)
                 persistence.addSubtitle(
                     itemId: itemId,
                     serverID: server.id,
@@ -1274,7 +1274,18 @@ final class DownloadManager: NSObject, ObservableObject {
                     displayTitle: displayTitle,
                     fileURL: destination
                 ))
+            } catch DownloadAssetFetcher.FetchError.badStatus(let status) {
+                // An image-based track (PGS) has no VTT form: the server
+                // answers 500, and saving that body gave a track with no cues.
+                // Retrying will not change that, so it does not mark the set
+                // incomplete.
+                logger.info(
+                    "Subtitle \(index, privacy: .public) for item \(itemId, privacy: .public) unavailable as VTT (HTTP \(status, privacy: .public))"
+                )
             } catch {
+                logger.error(
+                    "Subtitle \(index, privacy: .public) download failed for item \(itemId, privacy: .public): \(DownloadAssetFetcher.logDescription(of: error), privacy: .public)"
+                )
                 complete = false
             }
         }

@@ -4,7 +4,7 @@ import XCTest
 /// Phase 1 of the VLCKit work: the device profile is engine-shaped, and the
 /// `.vlc` shape hinges on the `Container` key being *absent* from the
 /// direct-play profile — an invariant no log line can show. These tests are
-/// the acceptance guard for that, plus the pure track-index mapping.
+/// the acceptance guard for that, plus the width and dynamic-range conditions.
 final class PlaybackEngineProfileTests: XCTestCase {
     private func directPlayProfiles(_ profile: [String: Any]) -> [[String: Any]] {
         (profile["DirectPlayProfiles"] as? [[String: Any]]) ?? []
@@ -91,12 +91,18 @@ final class PlaybackEngineProfileTests: XCTestCase {
 
     // MARK: - Width condition applies to both engines
 
+    private func conditions(_ profile: [String: Any], property: String) -> [[String: Any]] {
+        let codecProfiles = (profile["CodecProfiles"] as? [[String: Any]]) ?? []
+        return codecProfiles
+            .flatMap { ($0["Conditions"] as? [[String: Any]]) ?? [] }
+            .filter { ($0["Property"] as? String) == property }
+    }
+
     func testWidthConditionPresentWhenMaxWidthGiven() async {
         let client = JellyfinClient.shared
         for engine in PlaybackEngineKind.allCases {
             let profile = await client.videoDeviceProfile(engine: engine, streamingBitrate: 8_000_000, maxWidth: 1280)
-            let codecProfiles = (profile["CodecProfiles"] as? [[String: Any]]) ?? []
-            XCTAssertFalse(codecProfiles.isEmpty, "\(engine) should carry a width condition when capped")
+            XCTAssertFalse(conditions(profile, property: "Width").isEmpty, "\(engine) should carry a width condition when capped")
         }
     }
 
@@ -104,8 +110,72 @@ final class PlaybackEngineProfileTests: XCTestCase {
         let client = JellyfinClient.shared
         for engine in PlaybackEngineKind.allCases {
             let profile = await client.videoDeviceProfile(engine: engine, streamingBitrate: 8_000_000, maxWidth: nil)
-            let codecProfiles = (profile["CodecProfiles"] as? [[String: Any]]) ?? []
-            XCTAssertTrue(codecProfiles.isEmpty, "\(engine) unrestricted must not downscale")
+            XCTAssertTrue(conditions(profile, property: "Width").isEmpty, "\(engine) unrestricted must not downscale")
         }
+    }
+
+    // MARK: - Dynamic range (#606)
+
+    private func hevcRangeTypes(_ profile: [String: Any]) -> Set<String>? {
+        let codecProfiles = (profile["CodecProfiles"] as? [[String: Any]]) ?? []
+        guard let hevc = codecProfiles.first(where: {
+            ($0["Codec"] as? String) == "hevc"
+                && (($0["Conditions"] as? [[String: Any]]) ?? []).contains { ($0["Property"] as? String) == "VideoRangeType" }
+        }),
+            let condition = (hevc["Conditions"] as? [[String: Any]])?.first(where: { ($0["Property"] as? String) == "VideoRangeType" }),
+            (condition["Condition"] as? String) == "EqualsAny",
+            let value = condition["Value"] as? String else { return nil }
+        return Set(value.split(separator: "|").map(String.init))
+    }
+
+    func testNonDolbyVisionDisplayRefusesProfile5() async {
+        // Single-layer DV (VideoRangeType "DOVI") has no base layer: without
+        // DV it renders green/purple. Not listing it makes Jellyfin refuse
+        // direct play (VideoRangeTypeNotSupported) and refuse stream copy
+        // (EncodingHelper.CanStreamCopyVideo), so it is re-encoded.
+        let profile = await JellyfinClient.shared.videoDeviceProfile(
+            engine: .avFoundation, streamingBitrate: 100_000_000, maxWidth: nil, supportsDolbyVision: false
+        )
+        let ranges = hevcRangeTypes(profile)
+        XCTAssertNotNil(ranges, "the HEVC profile must carry a VideoRangeType condition")
+        XCTAssertEqual(ranges?.contains("DOVI"), false)
+        XCTAssertEqual(ranges?.isSuperset(of: ["SDR", "HDR10", "HLG"]), true)
+    }
+
+    func testNonDolbyVisionDisplayPlaysDolbyVisionWithABaseLayerAsThatBase() async {
+        // DOVIWithHDR10/HLG/SDR stay OFF the list: the server then copies them
+        // as their HDR10/HLG/SDR base (CanStreamCopyVideo allows exactly that
+        // for a client listing the base range) instead of direct-playing a
+        // dvh1 file a non-DV player may refuse.
+        let profile = await JellyfinClient.shared.videoDeviceProfile(
+            engine: .avFoundation, streamingBitrate: 100_000_000, maxWidth: nil, supportsDolbyVision: false
+        )
+        let ranges = hevcRangeTypes(profile) ?? []
+        XCTAssertTrue(ranges.isDisjoint(with: ["DOVIWithHDR10", "DOVIWithHLG", "DOVIWithSDR"]))
+        XCTAssertTrue(ranges.isSuperset(of: ["HDR10", "HLG", "SDR"]))
+    }
+
+    func testDolbyVisionDisplayKeepsDolbyVision() async {
+        let profile = await JellyfinClient.shared.videoDeviceProfile(
+            engine: .avFoundation, streamingBitrate: 100_000_000, maxWidth: nil, supportsDolbyVision: true
+        )
+        let ranges = hevcRangeTypes(profile) ?? []
+        XCTAssertTrue(ranges.isSuperset(of: ["DOVI", "DOVIWithHDR10", "DOVIWithHLG", "DOVIWithSDR", "HDR10", "SDR"]))
+    }
+
+    func testRangeConditionIsNotRequiredSoUnknownRangesStillDirectPlay() async {
+        let profile = await JellyfinClient.shared.videoDeviceProfile(
+            engine: .avFoundation, streamingBitrate: 100_000_000, maxWidth: nil, supportsDolbyVision: false
+        )
+        let range = conditions(profile, property: "VideoRangeType").first
+        XCTAssertEqual(range?["IsRequired"] as? Bool, false)
+    }
+
+    func testRangeConditionAndWidthConditionCoexist() async {
+        let profile = await JellyfinClient.shared.videoDeviceProfile(
+            engine: .avFoundation, streamingBitrate: 8_000_000, maxWidth: 1280, supportsDolbyVision: false
+        )
+        XCTAssertEqual(conditions(profile, property: "Width").count, 1)
+        XCTAssertNotNil(hevcRangeTypes(profile))
     }
 }

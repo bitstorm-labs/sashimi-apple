@@ -106,23 +106,7 @@ final class DownloadPersistence {
         }
     }
 
-    func deleteRecord(itemId: String, serverID: String? = nil) {
-        queue.async { [weak self] in
-            guard let self, let context = self.modelContext,
-                  let record = self.record(itemId: itemId, serverID: serverID, in: context) else { return }
-            context.delete(record)
-            try? context.save()
-        }
-    }
-
     // MARK: - Queries (sync — returns values, but fast)
-
-    func fetchStatus(itemId: String, serverID: String? = nil) -> DownloadStatus? {
-        queue.sync {
-            guard let context = modelContext else { return nil }
-            return record(itemId: itemId, serverID: serverID, in: context)?.status
-        }
-    }
 
     func fetchQuality(itemId: String, serverID: String? = nil) -> DownloadQuality? {
         queue.sync {
