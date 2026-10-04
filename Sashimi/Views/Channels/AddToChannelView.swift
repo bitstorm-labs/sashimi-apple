@@ -49,17 +49,15 @@ struct AddToChannelView: View {
         }
         .onExitCommand(perform: back)
         .task { await model.loadMenu(itemId: target.itemId) }
-        .confirmationDialog(
+        // Opens with Cancel focused: a stray press of the remote must not
+        // take a channel off air.
+        .destructiveConfirmation(
             "Take \(channelName(pendingRemoval)) off air?",
             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
-            titleVisibility: .visible
+            message: "\(target.title) is the last title on \(channelName(pendingRemoval)) and nothing else feeds it, so the channel will go off air.",
+            confirmTitle: "Remove"
         ) {
-            Button("Remove", role: .destructive) {
-                if let option = pendingRemoval { apply(option, confirmed: true) }
-            }
-            Button("Cancel", role: .cancel) { pendingRemoval = nil }
-        } message: {
-            Text("\(target.title) is the last title on \(channelName(pendingRemoval)) and nothing else feeds it, so the channel will go off air.")
+            if let option = pendingRemoval { apply(option, confirmed: true) }
         }
         .alert("Couldn't update the channel", isPresented: errorBinding) {
             Button("OK", role: .cancel) { model.errorMessage = nil }
