@@ -28,16 +28,6 @@ final class DownloadManager: NSObject, ObservableObject {
     // swiftlint:disable:next implicitly_unwrapped_optional
     private var backgroundSession: URLSession!
     private var backgroundCompletionHandler: (() -> Void)?
-
-    // A locked iPad keeps a queue moving only if the NEXT download starts while
-    // iOS has the app awake. Starting one is async (playback info for Original,
-    // then the task), and the app used to hand back the system's completion
-    // handler before that finished, so iOS suspended it and the queue sat until
-    // the app was reopened. While preparing, hold a background-time assertion
-    // and defer the handler until the next task has actually been created.
-    private var preparingKey: String?
-    private var preparationTaskID: UIBackgroundTaskIdentifier = .invalid
-    private var backgroundEventsFinished = false
     private(set) var modelContainer: ModelContainer?
     private var cachedContext: ModelContext?
 
@@ -74,11 +64,42 @@ final class DownloadManager: NSObject, ObservableObject {
         let token: String
     }
 
-    // Serial download queue
-    private struct QueuedDownload {
-        let item: BaseItemDto
-        let quality: DownloadQuality
+    /// Everything needed to build a download's request, from the item when
+    /// it is queued or from its stored record afterwards: a retry or a
+    /// relaunch needs no network to queue it again.
+    private struct DownloadJob {
+        let itemId: String
         let serverID: String?
+        var quality: DownloadQuality
+        /// Original was confirmed playable on this device (or downgraded).
+        var originalVerified = false
+        let itemType: ItemType?
+        let runTimeTicks: Int64?
+        let seriesId: String?
+
+        init(item: BaseItemDto, quality: DownloadQuality, serverID: String?) {
+            itemId = item.id
+            self.serverID = serverID
+            self.quality = quality
+            itemType = item.type
+            runTimeTicks = item.runTimeTicks
+            seriesId = item.seriesId
+        }
+
+        init(record: DownloadedItem) {
+            itemId = record.itemId
+            serverID = record.serverID
+            quality = record.downloadQuality
+            itemType = record.itemType
+            runTimeTicks = record.runTimeTicks
+            seriesId = record.seriesId
+        }
+    }
+
+    /// A download handed to the background session.
+    private struct ScheduledTask {
+        let recordID: String
+        let host: String
     }
 
     private struct ImageDownload {
@@ -90,10 +111,24 @@ final class DownloadManager: NSObject, ObservableObject {
         let fileName: String
     }
 
-    private var downloadQueue: [QueuedDownload] = []
-    private var currentDownloadItemId: String?
-    private var currentDownloadServerID: String?
-    var queuedCount: Int { downloadQueue.count }
+    /// Queued downloads with no task yet, in queue order: being handed over,
+    /// or (Original only) waiting for the server to answer the check.
+    private var pendingJobs: [String: DownloadJob] = [:]
+    private var pendingOrder: [String] = []
+    /// Pending Original downloads whose compatibility check is in flight.
+    private var checkingOriginal: Set<String> = []
+    /// taskIdentifier -> the download it runs.
+    private var scheduledTasks: [Int: ScheduledTask] = [:]
+    /// What each scheduled download's row last showed (see recomputeSchedule).
+    private var appliedSlots: [String: DownloadTaskSlot] = [:]
+    /// Artwork and subtitles are fetched one download at a time.
+    private var assetChain: Task<Void, Never>?
+    /// Failed downloads already queued again once by the recovery sweep.
+    nonisolated private static let recoveredKey = "downloadInterruptionRecovered"
+
+    var queuedCount: Int {
+        pendingJobs.count + appliedSlots.values.filter { $0 == .queued }.count
+    }
 
     // Progress throttling
     private var pendingProgress: [String: Double] = [:]
@@ -120,13 +155,13 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Automatic retries of failed downloads (see DownloadRetryPolicy).
     let retryStore = DownloadRetryStore()
     private var retryTimer: Task<Void, Never>?
-    /// Retries started but not yet back in the queue (the item is refetched
-    /// first), so overlapping evaluations don't start one twice.
+    /// Retries started but not yet back in the queue, so overlapping
+    /// evaluations don't start one twice.
     private var retriesInFlight: Set<String> = []
-    /// The download being started or run, kept so a task that has to be
-    /// recreated (network setting changed) needn't refetch its item.
-    private var currentQueued: QueuedDownload?
     private var cancellables: Set<AnyCancellable> = []
+    /// Set once the relaunch reconciliation has run; queue work waits for it
+    /// so a task iOS still holds is never handed over a second time.
+    private var hasReconciled = false
 
     override private init() {
         super.init()
@@ -137,6 +172,10 @@ final class DownloadManager: NSObject, ObservableObject {
         // Stays true: "Download over Cellular" is applied to each request
         // (DownloadNetworkPolicy), and false here would override it.
         config.allowsCellularAccess = true
+        // The whole queue is handed to the session up front; this is what
+        // makes nsurlsessiond run it a couple at a time (see
+        // DownloadQueuePolicy.maxConcurrentDownloads).
+        config.httpMaximumConnectionsPerHost = DownloadQueuePolicy.maxConcurrentDownloads
         backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
 
         // Reconnect any in-flight downloads from previous launch
@@ -147,8 +186,15 @@ final class DownloadManager: NSObject, ObservableObject {
             .sink { [weak self] _ in self?.downloadConditionsChanged() }
             .store(in: &cancellables)
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in self?.evaluateRetries() }
+            .sink { [weak self] _ in self?.appBecameActive() }
             .store(in: &cancellables)
+    }
+
+    private func appBecameActive() {
+        guard hasReconciled else { return }
+        recoverInterruptedFailures()
+        evaluateRetries()
+        handOffPending()
     }
 
     func setModelContainer(_ container: ModelContainer) {
@@ -205,8 +251,9 @@ final class DownloadManager: NSObject, ObservableObject {
         progressDetails = details
         activeDownloads = fractions
 
-        let current = currentDownloadItemId.map { downloadKey(itemId: $0, serverID: currentDownloadServerID) }
-        let speed = current.flatMap { details[$0]?.bytesPerSecond }.map(DownloadProgressText.speed) ?? ""
+        // Combined across everything running at once.
+        let rates = details.values.compactMap(\.bytesPerSecond)
+        let speed = rates.isEmpty ? "" : DownloadProgressText.speed(rates.reduce(0, +))
         if downloadSpeed != speed { downloadSpeed = speed }
     }
 
@@ -293,11 +340,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func enqueue(item: BaseItemDto, quality: DownloadQuality, serverID: String?) -> Bool {
         guard insertQueuedRecord(item: item, quality: quality, serverID: serverID) else { return false }
-        downloadQueue.append(QueuedDownload(item: item, quality: quality, serverID: serverID))
+        addPending(DownloadJob(item: item, quality: quality, serverID: serverID))
         stateVersion += 1
-        if currentDownloadItemId == nil {
-            startNextDownload()
-        }
+        handOffPending()
         return true
     }
 
@@ -372,117 +417,120 @@ final class DownloadManager: NSObject, ObservableObject {
             ?? records.first { $0.itemId == itemId }
     }
 
-    private func startNextDownload() {
-        guard !downloadQueue.isEmpty else {
-            currentDownloadItemId = nil
-            currentDownloadServerID = nil
-            currentQueued = nil
-            stopProgressTimer()
-            downloadSpeed = ""
-            endPreparation()
-            return
-        }
+    // MARK: - Handing downloads to the session
 
-        let queued = downloadQueue.removeFirst()
-        let item = queued.item
-        let quality = queued.quality
-        let serverID = queued.serverID
-        let itemId = item.id
-
-        // Check disk space
-        let availableSpace = DownloadFileManager.availableDiskSpace()
-        if availableSpace < 500 * 1024 * 1024 {
-            markFailed(
-                itemId: itemId,
-                serverID: serverID,
-                message: "Not enough disk space. Available: \(ByteCountFormatter.string(fromByteCount: availableSpace, countStyle: .file))",
-                kind: .permanent
-            )
-            startNextDownload()
-            return
-        }
-
-        // Mark this item as the current download synchronously so re-entrant
-        // enqueues don't kick off a second concurrent download while we await
-        // the (only-for-.original) compatibility check below.
-        currentDownloadItemId = itemId
-        currentDownloadServerID = serverID
-        currentQueued = queued
-        beginPreparation(key: downloadKey(itemId: itemId, serverID: serverID))
-
-        // Resolve the effective quality — for `.original`, verify the raw source
-        // will direct-play on this device; if not (or on any error) downgrade to
-        // `.high` and persist the downgrade — then start the actual download.
-        Task { [weak self] in
-            guard let self else { return }
-            let effectiveQuality = await self.resolveEffectiveQuality(
-                itemId: itemId,
-                requested: quality,
-                serverID: serverID
-            )
-            self.beginDownload(item: item, quality: effectiveQuality, serverID: serverID)
+    private func addPending(_ job: DownloadJob, atFront: Bool = false) {
+        let key = downloadKey(itemId: job.itemId, serverID: job.serverID)
+        pendingJobs[key] = job
+        pendingOrder.removeAll { $0 == key }
+        if atFront {
+            pendingOrder.insert(key, at: 0)
+        } else {
+            pendingOrder.append(key)
         }
     }
 
-    /// For `.original`, fetches playback info and downgrades to `.high` unless
-    /// the source can direct-play (fails closed on missing source / error).
-    /// Non-`.original` qualities skip the network call entirely. Persists the
-    /// downgrade so the DB/UI reflect what was actually downloaded.
-    private func resolveEffectiveQuality(
-        itemId: String,
-        requested: DownloadQuality,
-        serverID: String?
-    ) async -> DownloadQuality {
-        guard requested == .original else { return requested }
+    private func removePending(_ key: String) {
+        pendingJobs.removeValue(forKey: key)
+        pendingOrder.removeAll { $0 == key }
+        checkingOriginal.remove(key)
+    }
 
-        let compatible: Bool
+    /// Creates a background task for every queued download that has none,
+    /// at once: nsurlsessiond runs them in turn whether or not the app is
+    /// awake. Only an Original download asks the server anything first.
+    private func handOffPending() {
+        guard hasReconciled else { return }
+        let freeBytes = DownloadFileManager.availableDiskSpace()
+        var originals: [String] = []
+        for key in pendingOrder {
+            guard let job = pendingJobs[key], !checkingOriginal.contains(key) else { continue }
+            let status = mainRecord(itemId: job.itemId, serverID: job.serverID)?.status
+            guard status == .queued || status == .downloading || status == .preparing,
+                  !scheduledTasks.values.contains(where: { $0.recordID == key }) else {
+                removePending(key) // Cancelled, finished, or already handed over.
+                continue
+            }
+            switch DownloadHandOff.step(quality: job.quality, originalVerified: job.originalVerified, freeBytes: freeBytes) {
+            case .handOver:
+                handOver(job)
+            case .checkOriginal:
+                originals.append(key)
+            case .fail(let message):
+                removePending(key)
+                markFailed(itemId: job.itemId, serverID: job.serverID, message: message, kind: .permanent)
+            }
+        }
+        guard !originals.isEmpty else { return }
+        originals.forEach { checkingOriginal.insert($0) }
+        // The checks need the network; finish them even if the app is
+        // backgrounded straight after queueing.
+        let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "check-original-downloads")
+        Task { [weak self] in
+            defer {
+                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+            }
+            for key in originals {
+                await self?.checkOriginal(key: key)
+            }
+        }
+    }
+
+    /// For Original: downgrades to High unless the source can direct-play
+    /// here, persisting the downgrade so the row shows what is downloaded.
+    /// If the server can't be reached the download stays queued and the
+    /// check runs again when the app is active or the network changes.
+    private func checkOriginal(key: String) async {
+        guard var job = pendingJobs[key] else { return }
+        let compatible: Result<Bool, Error>
         do {
             // Downloads stay on the AVPlayer profile until Phase 5: an MKV
             // downloaded under a VLC profile would be one AVPlayer can't open.
-            let client = try await client(for: serverID)
-            let info = try await client.getPlaybackInfo(itemId: itemId, engine: .avFoundation)
+            let client = try await client(for: job.serverID)
+            let info = try await client.getPlaybackInfo(itemId: job.itemId, engine: .avFoundation)
             if let source = info.mediaSources?.first {
-                noteSource(source, for: downloadKey(itemId: itemId, serverID: serverID))
+                noteSource(source, for: key)
             }
-            compatible = info.mediaSources?.first
-                .map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false
+            compatible = .success(info.mediaSources?.first.map { DeviceMediaCompatibility.canRemuxForDownload($0) } ?? false)
         } catch {
-            compatible = false // fail closed
+            compatible = .failure(error)
         }
 
-        let effective = DownloadQuality.effectiveQuality(requested: requested, sourceIsCompatible: compatible)
-        if effective != requested {
-            persistence.updateQuality(itemId: itemId, serverID: serverID, quality: effective)
-            // Also reflect the downgrade in the UI's source of truth (mainContext).
-            // The persistence write above goes to a private queue context, which the
-            // @Query-backed UI doesn't observe — without this, a completed download
-            // can keep showing "Original" even though the file is actually High.
-            if let context = mainContext {
-                if let record = mainRecord(itemId: itemId, serverID: serverID) {
-                    record.downloadQuality = effective
-                    try? context.save()
-                }
+        checkingOriginal.remove(key)
+        // Cancelled while the check was in flight.
+        guard pendingJobs[key] != nil else { return }
+        switch DownloadHandOff.originalCheckOutcome(compatible) {
+        case .waitForNetwork:
+            return
+        case .quality(let effective):
+            if effective != job.quality, let context = mainContext,
+               let record = mainRecord(itemId: job.itemId, serverID: job.serverID) {
+                // The main context is what the @Query-backed rows observe.
+                record.downloadQuality = effective
+                try? context.save()
             }
+            job.quality = effective
+            job.originalVerified = true
+            pendingJobs[key] = job
+            handOffPending()
         }
-        return effective
     }
 
-    /// Builds the download URL with the (already-resolved) effective quality and
-    /// starts the background download task.
-    private func beginDownload(item: BaseItemDto, quality: DownloadQuality, serverID: String?) {
-        let itemId = item.id
-
-        // The item may have been cancelled while the compatibility check was in
-        // flight; bail if it's no longer the current download.
-        guard currentDownloadItemId == itemId,
-              currentDownloadServerID == serverID else { return }
+    /// Builds the request with the (already-resolved) quality and creates
+    /// the background task. The row stays Queued until the session gives
+    /// the task a connection (recomputeSchedule).
+    private func handOver(_ job: DownloadJob) {
+        let itemId = job.itemId
+        let serverID = job.serverID
+        let key = downloadKey(itemId: itemId, serverID: serverID)
+        removePending(key)
 
         // URLRequest (not bare URL) so the token travels in a header and the
         // background task keeps it across app relaunches.
         guard let context = serverContext(for: serverID),
               let downloadURL = DownloadURLBuilder.downloadURL(
                   itemId: itemId,
-                  quality: quality,
+                  quality: job.quality,
                   serverURL: context.server.url
               ),
               var downloadRequest = DownloadURLBuilder.authorizedRequest(
@@ -491,12 +539,13 @@ final class DownloadManager: NSObject, ObservableObject {
               ) else {
             // No server or token for it: retrying can't help until sign-in.
             markFailed(itemId: itemId, serverID: serverID, message: "Could not build download URL", kind: .permanent)
-            startNextDownload()
             return
         }
+        // Per task: each request carries the cellular / Low Data Mode rule
+        // in force when it was created (see reconcileTaskNetworkAccess).
         DownloadNetworkPolicy.apply(to: &downloadRequest, allowCellular: DownloadNetworkPolicy.allowsCellular)
-        if quality != .original {
-            DownloadEncodingAudit.markEncodedWithVideoBitrate(recordID: downloadKey(itemId: itemId, serverID: serverID))
+        if job.quality != .original {
+            DownloadEncodingAudit.markEncodedWithVideoBitrate(recordID: key)
         }
 
         do {
@@ -508,7 +557,6 @@ final class DownloadManager: NSObject, ObservableObject {
                 message: "Could not create directory: \(error.localizedDescription)",
                 kind: DownloadRetryPolicy.classify(error: error)
             )
-            startNextDownload()
             return
         }
 
@@ -521,58 +569,128 @@ final class DownloadManager: NSObject, ObservableObject {
             serverMap[taskKey(task.taskIdentifier)] = serverID
         }
         taskServerMap = serverMap
-
-        // currentDownloadItemId was already set synchronously in startNextDownload
-        // so re-entrant enqueues couldn't start a second concurrent download.
-        task.resume()
-        endPreparation(key: downloadKey(itemId: itemId, serverID: serverID))
-        persistence.updateStatus(itemId: itemId, serverID: serverID, status: .downloading)
-        let key = downloadKey(itemId: itemId, serverID: serverID)
-        preparingItems.insert(key)
-        pendingProgress[key] = 0
+        scheduledTasks[task.taskIdentifier] = ScheduledTask(recordID: key, host: Self.hostKey(for: downloadURL))
         byteCounts.removeValue(forKey: key)
         speedTrackers.removeValue(forKey: key)
         updateEstimateInput(for: key) { input in
-            input.quality = quality.rawValue
-            input.runTimeTicks = item.runTimeTicks
+            input.quality = job.quality.rawValue
+            input.runTimeTicks = job.runTimeTicks
+        }
+        task.resume()
+        recomputeSchedule()
+
+        fetchAssets(for: job, server: context.server, token: context.token)
+    }
+
+    nonisolated private static func hostKey(for url: URL?) -> String {
+        guard let url else { return "" }
+        return "\(url.host ?? ""):\(url.port.map(String.init) ?? url.scheme ?? "")"
+    }
+
+    /// Re-derives which handed-over downloads are running and which are
+    /// waiting their turn, and shows that: a task waiting behind the limit is
+    /// Queued (no progress, no "Preparing..."), one with a connection but no
+    /// bytes is Preparing, and one receiving bytes is Downloading.
+    private func recomputeSchedule() {
+        let entries = scheduledTasks.map { taskIdentifier, scheduled in
+            DownloadTaskSchedule.Entry(
+                recordID: scheduled.recordID,
+                host: scheduled.host,
+                taskIdentifier: taskIdentifier,
+                bytesReceived: byteCounts[scheduled.recordID]?.written ?? 0
+            )
+        }
+        let slots = DownloadTaskSchedule.slots(entries)
+        for (key, slot) in slots {
+            switch slot {
+            case .queued:
+                pendingProgress.removeValue(forKey: key)
+                activeDownloads.removeValue(forKey: key)
+                progressDetails.removeValue(forKey: key)
+                preparingItems.remove(key)
+            case .preparing:
+                if pendingProgress[key] == nil { pendingProgress[key] = 0 }
+                preparingItems.insert(key)
+            case .downloading:
+                if pendingProgress[key] == nil { pendingProgress[key] = 0 }
+                preparingItems.remove(key)
+            }
+            guard appliedSlots[key] != slot else { continue }
+            let wasQueued = appliedSlots[key].map { $0 == .queued } ?? true
+            appliedSlots[key] = slot
+            if wasQueued != (slot == .queued), let (itemId, serverID) = Self.splitKey(key) {
+                persistence.updateStatus(itemId: itemId, serverID: serverID, status: slot == .queued ? .queued : .downloading)
+            }
+        }
+        for key in appliedSlots.keys where slots[key] == nil {
+            appliedSlots.removeValue(forKey: key)
+        }
+        if slots.values.contains(where: { $0 != .queued }) {
+            startProgressTimer()
+        } else {
+            stopProgressTimer()
+            pendingProgress.removeAll()
+            if !downloadSpeed.isEmpty { downloadSpeed = "" }
         }
         stateVersion += 1
-        startProgressTimer()
-
-        // Download assets in background
-        downloadAssets(for: item, server: context.server, token: context.token)
     }
 
-    private func beginPreparation(key: String) {
-        preparingKey = key
-        guard preparationTaskID == .invalid else { return }
-        preparationTaskID = UIApplication.shared.beginBackgroundTask(withName: "prepare-next-download") { [weak self] in
-            // Out of time: give everything back rather than be killed for it.
-            Task { @MainActor in self?.endPreparation() }
+    /// Writes a status on the main context, so the rows and the queue see
+    /// it at once.
+    private func setStatus(_ record: DownloadedItem, _ status: DownloadStatus, errorMessage: String? = nil) {
+        record.status = status
+        record.errorMessage = errorMessage
+        try? mainContext?.save()
+    }
+
+    /// "server:item" back into its parts ("legacy" is a record without one).
+    nonisolated private static func splitKey(_ key: String) -> (itemId: String, serverID: String?)? {
+        guard let colon = key.firstIndex(of: ":") else { return nil }
+        let server = String(key[..<colon])
+        return (String(key[key.index(after: colon)...]), server == "legacy" ? nil : server)
+    }
+
+    /// Forgets a task the app no longer tracks (finished, failed, cancelled).
+    private func forgetTask(_ taskIdentifier: Int) {
+        var map = taskIdMap
+        map.removeValue(forKey: taskKey(taskIdentifier))
+        taskIdMap = map
+        var serverMap = taskServerMap
+        serverMap.removeValue(forKey: taskKey(taskIdentifier))
+        taskServerMap = serverMap
+        scheduledTasks.removeValue(forKey: taskIdentifier)
+    }
+
+    /// Cancels every task running a download (there is normally one).
+    private func cancelTasks(for key: String) async {
+        for task in await backgroundSession.allTasks
+        where scheduledTasks[task.taskIdentifier]?.recordID == key || taskRecordID(task.taskIdentifier) == key {
+            forgetTask(task.taskIdentifier)
+            task.cancel()
         }
     }
 
-    /// Preparation of `key` (or, with nil, of anything) is over: the task
-    /// exists or the queue is empty. Returns the background time, and the
-    /// deferred system completion handler if iOS already finished its events.
-    private func endPreparation(key: String? = nil) {
-        if let key, preparingKey != key { return }
-        preparingKey = nil
-        if backgroundEventsFinished {
-            backgroundEventsFinished = false
-            backgroundCompletionHandler?()
-            backgroundCompletionHandler = nil
-        }
-        if preparationTaskID != .invalid {
-            UIApplication.shared.endBackgroundTask(preparationTaskID)
-            preparationTaskID = .invalid
-        }
+    private func taskRecordID(_ taskIdentifier: Int) -> String? {
+        taskIdMap[taskKey(taskIdentifier)].map { downloadKey(itemId: $0, serverID: taskServerMap[taskKey(taskIdentifier)]) }
     }
 
-    private func dequeueNext() {
-        currentDownloadItemId = nil
-        currentDownloadServerID = nil
-        startNextDownload()
+    /// The device slept, the app was suspended or killed, or the network
+    /// dropped: the download goes back to Queued without using a retry, and
+    /// is handed over again once the app is active.
+    private func requeueInterrupted(itemId: String, serverID: String?) {
+        let key = downloadKey(itemId: itemId, serverID: serverID)
+        clearProgress(for: key)
+        appliedSlots.removeValue(forKey: key)
+        if let record = mainRecord(itemId: itemId, serverID: serverID) {
+            setStatus(record, .queued)
+            var job = DownloadJob(record: record)
+            job.originalVerified = true // Checked when it was first handed over.
+            addPending(job, atFront: true)
+        }
+        stateVersion += 1
+        if UIApplication.shared.applicationState == .active {
+            handOffPending()
+        }
     }
 
     private func deleteRecordFromMainContext(itemId: String, serverID: String?) {
@@ -584,37 +702,34 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func cancelDownload(itemId: String, serverID: String? = nil) async {
         let tasks = await backgroundSession.allTasks
+        var cancelledKeys: Set<String> = []
         for task in tasks where taskIdMap[taskKey(task.taskIdentifier)] == itemId
             && (serverID == nil || taskServerMap[taskKey(task.taskIdentifier)] == serverID) {
+            if let key = taskRecordID(task.taskIdentifier) { cancelledKeys.insert(key) }
+            forgetTask(task.taskIdentifier)
             task.cancel()
-            var map = taskIdMap
-            map.removeValue(forKey: taskKey(task.taskIdentifier))
-            taskIdMap = map
-            var serverMap = taskServerMap
-            serverMap.removeValue(forKey: taskKey(task.taskIdentifier))
-            taskServerMap = serverMap
         }
 
         let key = downloadKey(itemId: itemId, serverID: serverID)
-        pendingAssetTasks[key]?.forEach { $0.cancel() }
-        pendingAssetTasks.removeValue(forKey: key)
-
-        clearProgress(for: key)
+        cancelledKeys.insert(key)
+        if serverID == nil {
+            // Unscoped: whatever server's copy of this item is queued.
+            pendingJobs.values.filter { $0.itemId == itemId }
+                .forEach { cancelledKeys.insert(downloadKey(itemId: $0.itemId, serverID: $0.serverID)) }
+        }
+        for cancelled in cancelledKeys {
+            removePending(cancelled)
+            appliedSlots.removeValue(forKey: cancelled)
+            pendingAssetTasks[cancelled]?.forEach { $0.cancel() }
+            pendingAssetTasks.removeValue(forKey: cancelled)
+            clearProgress(for: cancelled)
+        }
         forgetEstimate(for: key)
 
         try? DownloadFileManager.deleteItemDirectory(for: itemId, serverID: serverID)
         deleteRecordFromMainContext(itemId: itemId, serverID: serverID)
         DownloadEncodingAudit.forget(recordID: key)
-
-        // Manage queue
-        if itemId == currentDownloadItemId
-            && (serverID == nil || serverID == currentDownloadServerID) {
-            dequeueNext()
-        } else {
-            downloadQueue.removeAll {
-                $0.item.id == itemId && (serverID == nil || $0.serverID == serverID)
-            }
-        }
+        recomputeSchedule()
     }
 
     func deleteDownload(itemId: String, serverID: String? = nil) async {
@@ -676,31 +791,59 @@ final class DownloadManager: NSObject, ObservableObject {
     /// resets the automatic-retry count; the automatic retries and the
     /// relaunch requeue pass false so the count survives them.
     func retryDownload(itemId: String, serverID: String? = nil, userInitiated: Bool = true) async {
-        let record = downloadStatus(for: itemId, serverID: serverID)
-        let resolvedServerID = serverID ?? record?.serverID
-        guard let quality = persistence.fetchQuality(itemId: itemId, serverID: resolvedServerID) else { return }
+        guard let record = downloadStatus(for: itemId, serverID: serverID) else { return }
+        let resolvedServerID = record.serverID
         if userInitiated {
             retryStore.clear(itemId: itemId, serverID: resolvedServerID)
         }
-
-        let freshItem: BaseItemDto
-        do {
-            freshItem = try await client(for: resolvedServerID).getItem(itemId: itemId)
-        } catch {
-            markFailed(
-                itemId: itemId,
-                serverID: resolvedServerID,
-                message: "Could not fetch item info",
-                kind: DownloadRetryPolicy.classify(error: error)
-            )
-            return
-        }
-
-        await cancelDownload(itemId: itemId, serverID: resolvedServerID)
-        guard enqueue(item: freshItem, quality: quality, serverID: resolvedServerID) else { return }
+        requeueFromScratch(record)
         if userInitiated {
             announceIfWaitingForNetwork(count: 1)
         }
+    }
+
+    /// Starts a download over from its stored record: the old task and files
+    /// go, the record is reset to Queued and handed to the session again. Its
+    /// metadata is what was saved when it was queued, so this works offline
+    /// (the task then waits for the network) -- it used to refetch the item
+    /// first, and fail with "Could not fetch item info" when it couldn't.
+    private func requeueFromScratch(_ record: DownloadedItem) {
+        let itemId = record.itemId
+        let serverID = record.serverID
+        let key = downloadKey(itemId: itemId, serverID: serverID)
+        let cancelled = scheduledTasks.filter { $0.value.recordID == key }.map(\.key)
+        cancelled.forEach(forgetTask)
+        if !cancelled.isEmpty {
+            backgroundSession.getAllTasks { tasks in
+                tasks.filter { cancelled.contains($0.taskIdentifier) }.forEach { $0.cancel() }
+            }
+        }
+        removePending(key)
+        appliedSlots.removeValue(forKey: key)
+        pendingAssetTasks[key]?.forEach { $0.cancel() }
+        pendingAssetTasks.removeValue(forKey: key)
+        clearProgress(for: key)
+        forgetEstimate(for: key)
+        DownloadEncodingAudit.forget(recordID: key)
+        try? DownloadFileManager.deleteItemDirectory(for: itemId, serverID: serverID)
+
+        for subtitle in record.subtitles {
+            mainContext?.delete(subtitle)
+        }
+        record.subtitles = []
+        record.videoFileName = nil
+        record.posterFileName = nil
+        record.backdropFileName = nil
+        record.progress = 0
+        record.downloadedBytes = 0
+        record.totalBytes = 0
+        record.dateCompleted = nil
+        subtitlesVerified.remove(key)
+        setStatus(record, .queued)
+
+        addPending(DownloadJob(record: record))
+        recomputeSchedule()
+        handOffPending()
     }
 
     /// Whether a completed download was made by the pre-fix transcode URL
@@ -714,9 +857,9 @@ final class DownloadManager: NSObject, ObservableObject {
         )
     }
 
-    /// Replaces unwatchable pre-fix downloads: each is deleted and queued
-    /// again at its own quality (retryDownload only deletes once the item's
-    /// metadata has been fetched, so offline nothing is lost).
+    /// Replaces unwatchable pre-fix downloads: each file is deleted and the
+    /// download queued again at its own quality, from its stored record --
+    /// offline it waits for the network as Queued instead of failing.
     func redownload(_ items: [(itemId: String, serverID: String?)]) async {
         guard !items.isEmpty else { return }
         for item in items {
@@ -806,7 +949,11 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func downloadConditionsChanged() {
         stateVersion += 1
+        guard hasReconciled else { return }
         evaluateRetries()
+        // Original checks that waited for the network, and downloads
+        // requeued by an outage.
+        handOffPending()
         Task { await reconcileTaskNetworkAccess() }
     }
 
@@ -816,7 +963,8 @@ final class DownloadManager: NSObject, ObservableObject {
     private func reconcileTaskNetworkAccess() async {
         let allowCellular = DownloadNetworkPolicy.allowsCellular
         let network = DownloadNetworkStatus.current
-        for task in await backgroundSession.allTasks {
+        var restarted = false
+        for task in await backgroundSession.allTasks.sorted(by: { $0.taskIdentifier < $1.taskIdentifier }) {
             let key = taskKey(task.taskIdentifier)
             guard task.state == .running || task.state == .suspended,
                   let itemId = taskIdMap[key],
@@ -825,43 +973,31 @@ final class DownloadManager: NSObject, ObservableObject {
                       allowCellular: allowCellular,
                       network: network
                   ) else { continue }
-            await restartTask(task, itemId: itemId, serverID: taskServerMap[key])
+            restartTask(task, itemId: itemId, serverID: taskServerMap[key])
+            restarted = true
         }
+        guard restarted else { return }
+        recomputeSchedule()
+        handOffPending()
     }
 
-    /// Cancels a task and puts its item back at the front of the queue,
-    /// keeping its record, so the next task picks up the current setting.
-    private func restartTask(_ task: URLSessionTask, itemId: String, serverID: String?) async {
-        let item: BaseItemDto
-        if let queued = currentQueued, queued.item.id == itemId, queued.serverID == serverID {
-            item = queued.item
-        } else if let fetched = try? await client(for: serverID).getItem(itemId: itemId) {
-            item = fetched // Reconnected after a relaunch: the item wasn't kept.
-        } else {
-            return
-        }
+    /// Cancels a task and queues its download to be handed over again,
+    /// keeping its record, so the new task picks up the current setting.
+    /// Rebuilt from the record: no network needed.
+    private func restartTask(_ task: URLSessionTask, itemId: String, serverID: String?) {
         let key = taskKey(task.taskIdentifier)
         guard taskIdMap[key] == itemId else { return } // Finished or cancelled meanwhile.
-
+        forgetTask(task.taskIdentifier)
         task.cancel()
-        var map = taskIdMap
-        map.removeValue(forKey: key)
-        taskIdMap = map
-        var serverMap = taskServerMap
-        serverMap.removeValue(forKey: key)
-        taskServerMap = serverMap
 
         let recordKey = downloadKey(itemId: itemId, serverID: serverID)
         clearProgress(for: recordKey)
-
-        let quality = persistence.fetchQuality(itemId: itemId, serverID: serverID) ?? .high
-        persistence.updateStatus(itemId: itemId, serverID: serverID, status: .queued)
-        downloadQueue.insert(QueuedDownload(item: item, quality: quality, serverID: serverID), at: 0)
-        stateVersion += 1
-        if currentDownloadItemId == itemId && currentDownloadServerID == serverID {
-            dequeueNext()
-        } else if currentDownloadItemId == nil {
-            startNextDownload()
+        appliedSlots.removeValue(forKey: recordKey)
+        if let record = mainRecord(itemId: itemId, serverID: serverID) {
+            setStatus(record, .queued)
+            var job = DownloadJob(record: record)
+            job.originalVerified = true
+            addPending(job)
         }
     }
 
@@ -952,7 +1088,7 @@ final class DownloadManager: NSObject, ObservableObject {
         let serverID = serverID ?? SessionManager.shared.activeServerId
         let inserted = episodes.filter { insertQueuedRecord(item: $0, quality: quality, serverID: serverID) }
         for episode in inserted {
-            downloadQueue.append(QueuedDownload(item: episode, quality: quality, serverID: serverID))
+            addPending(DownloadJob(item: episode, quality: quality, serverID: serverID))
         }
         let insertedCount = inserted.count
         guard insertedCount > 0 else { return }
@@ -961,10 +1097,7 @@ final class DownloadManager: NSObject, ObservableObject {
         stateVersion += 1
         toastMessage = "Downloading \(insertedCount) episode\(insertedCount == 1 ? "" : "s")..."
         announceIfWaitingForNetwork(count: insertedCount)
-
-        if currentDownloadItemId == nil {
-            startNextDownload()
-        }
+        handOffPending()
     }
 
     // MARK: - Delete All
@@ -981,10 +1114,13 @@ final class DownloadManager: NSObject, ObservableObject {
         estimateInputs.removeAll()
         DownloadEstimateStore.clearAll()
 
-        downloadQueue.removeAll()
-        currentDownloadItemId = nil
-        currentDownloadServerID = nil
-        currentQueued = nil
+        pendingJobs.removeAll()
+        pendingOrder.removeAll()
+        checkingOriginal.removeAll()
+        scheduledTasks.removeAll()
+        appliedSlots.removeAll()
+        pendingAssetTasks.values.flatMap { $0 }.forEach { $0.cancel() }
+        pendingAssetTasks.removeAll()
         retryStore.clearAll()
         pendingProgress.removeAll()
         byteCounts.removeAll()
@@ -1024,77 +1160,117 @@ final class DownloadManager: NSObject, ObservableObject {
         return client
     }
 
+    /// After a launch: adopts the tasks the session still holds, cancels any
+    /// that belong to nothing (or duplicate another), and hands every
+    /// unfinished download without a task to the session again -- with no
+    /// retry attempt used and no server call needed.
     private func reconnectTasks() {
         backgroundSession.getAllTasks { [weak self] tasks in
             Task { @MainActor in
-                guard let self else { return }
-                var activeTaskItemIds: Set<String> = []
-                for task in tasks {
-                    if let itemId = self.taskIdMap[self.taskKey(task.taskIdentifier)] {
-                        if task.state == .running {
-                            let serverID = self.taskServerMap[self.taskKey(task.taskIdentifier)]
-                            let key = self.downloadKey(itemId: itemId, serverID: serverID)
-                            // The task kept downloading while the app was
-                            // gone: pick its byte counts up rather than
-                            // starting the row again from "Preparing...".
-                            let received = task.countOfBytesReceived
-                            self.byteCounts[key] = (received, task.countOfBytesExpectedToReceive)
-                            self.pendingProgress[key] = 0
-                            self.activeDownloads[key] = self.progressDetail(for: key).display.fraction ?? -1
-                            if received <= 0 {
-                                self.preparingItems.insert(key)
-                            }
-                            self.persistence.updateStatus(
-                                itemId: itemId,
-                                serverID: serverID,
-                                status: .downloading
-                            )
-                            self.currentDownloadItemId = itemId
-                            self.currentDownloadServerID = serverID
-                            self.startProgressTimer()
-                            activeTaskItemIds.insert(key)
-                        }
-                    }
-                }
-
-                self.publishProgress()
-
-                // Mark any "downloading"/"preparing" records without active tasks as failed
-                // (stale from previous install/crash)
-                self.cleanupStaleDownloads(activeTaskItemIds: activeTaskItemIds)
+                self?.reconcile(with: tasks)
             }
         }
     }
 
-    private func cleanupStaleDownloads(activeTaskItemIds: Set<String>) {
-        guard let context = mainContext else { return }
-        let descriptor = FetchDescriptor<DownloadedItem>()
-        guard let items = try? context.fetch(descriptor) else { return }
+    private func reconcile(with tasks: [URLSessionTask]) {
+        guard let context = mainContext,
+              let records = try? context.fetch(FetchDescriptor<DownloadedItem>()) else {
+            // No store yet (setModelContainer runs at app start): try again
+            // shortly rather than lose the reconciliation.
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(200))
+                self?.reconnectTasks()
+            }
+            return
+        }
+        let plan = DownloadRelaunchReconciler.plan(
+            records: records.map {
+                DownloadRelaunchReconciler.Record(
+                    recordID: $0.recordID,
+                    status: $0.status,
+                    errorMessage: $0.errorMessage,
+                    hasRetryEntry: retryStore.entry(itemId: $0.itemId, serverID: $0.serverID) != nil
+                )
+            },
+            tasks: tasks.map {
+                DownloadRelaunchReconciler.SessionTask(
+                    taskIdentifier: $0.taskIdentifier,
+                    recordID: taskRecordID($0.taskIdentifier),
+                    isLive: $0.state == .running || $0.state == .suspended,
+                    bytesReceived: $0.countOfBytesReceived
+                )
+            },
+            alreadyRecovered: []
+        )
 
-        var requeue: [(itemId: String, serverID: String?)] = []
-        for item in items {
-            let status = item.status
-            let isIncomplete = status == .downloading || status == .preparing || status == .queued
-            guard isIncomplete && !activeTaskItemIds.contains(item.recordID) else { continue }
-            if status == .queued {
-                // Never started: the in-memory queue was lost when iOS ended the
-                // app (e.g. a long lock), not the download. Queue it again
-                // rather than failing a whole season the user set going.
-                requeue.append((item.itemId, item.serverID))
-            } else {
-                item.status = .failed
-                item.errorMessage = "Download interrupted. Tap retry to restart."
-                retryStore.recordFailure(itemId: item.itemId, serverID: item.serverID, kind: .transient)
+        for task in tasks where plan.cancel.contains(task.taskIdentifier) {
+            forgetTask(task.taskIdentifier)
+            task.cancel()
+        }
+        let recordsByID = Dictionary(records.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
+        for task in tasks {
+            guard let recordID = taskRecordID(task.taskIdentifier),
+                  plan.adopt[recordID] == task.taskIdentifier else { continue }
+            // The task kept going while the app was gone: pick its byte
+            // counts up rather than starting the row from "Preparing...".
+            scheduledTasks[task.taskIdentifier] = ScheduledTask(
+                recordID: recordID,
+                host: Self.hostKey(for: task.originalRequest?.url)
+            )
+            if task.countOfBytesReceived > 0 {
+                byteCounts[recordID] = (task.countOfBytesReceived, task.countOfBytesExpectedToReceive)
+            }
+            if recordsByID[recordID]?.status != .queued {
+                appliedSlots[recordID] = .downloading
             }
         }
-        try? context.save()
-        stateVersion += 1
+        // Queue order: oldest first.
+        let requeue = plan.requeue.compactMap { recordsByID[$0] }.sorted { $0.dateAdded < $1.dateAdded }
+        for record in requeue {
+            if record.status != .queued { setStatus(record, .queued) }
+            var job = DownloadJob(record: record)
+            // A record past Queued was handed over, so already checked.
+            job.originalVerified = record.status != .queued
+            addPending(job)
+        }
+
+        hasReconciled = true
+        recomputeSchedule()
+        publishProgress()
+        recoverInterruptedFailures()
         evaluateRetries()
-        guard !requeue.isEmpty else { return }
-        Task {
-            for entry in requeue {
-                await retryDownload(itemId: entry.itemId, serverID: entry.serverID, userInitiated: false)
-            }
+        handOffPending()
+    }
+
+    /// Failed downloads that only failed because the device slept, the app
+    /// was suspended or the network dropped -- under builds that counted
+    /// that as a failure ("Could not fetch item info") -- are queued again
+    /// by themselves, once each.
+    private func recoverInterruptedFailures() {
+        guard let context = mainContext,
+              let records = try? context.fetch(FetchDescriptor<DownloadedItem>()) else { return }
+        let defaults = UserDefaults.standard
+        let recovered = Set(defaults.stringArray(forKey: Self.recoveredKey) ?? [])
+        let plan = DownloadRelaunchReconciler.plan(
+            records: records.map {
+                DownloadRelaunchReconciler.Record(
+                    recordID: $0.recordID,
+                    status: $0.status,
+                    errorMessage: $0.errorMessage,
+                    hasRetryEntry: retryStore.entry(itemId: $0.itemId, serverID: $0.serverID) != nil
+                )
+            },
+            tasks: [],
+            alreadyRecovered: recovered
+        )
+        // Remember only records that still exist, so the list can't grow forever.
+        let existing = Set(records.map(\.recordID))
+        defaults.set(Array(recovered.intersection(existing).union(plan.recover)), forKey: Self.recoveredKey)
+        let byID = Dictionary(records.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
+        for recordID in plan.recover {
+            guard let record = byID[recordID] else { continue }
+            retryStore.clear(itemId: record.itemId, serverID: record.serverID)
+            requeueFromScratch(record)
         }
     }
 
@@ -1109,11 +1285,17 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    private func downloadAssets(for item: BaseItemDto, server: ServerConfig, token: String) {
-        let itemId = item.id
-
-        let posterTask = Task {
-            await downloadImage(ImageDownload(
+    /// Artwork and subtitles for a download just handed over. Queued one
+    /// download after another (a season queued at once would otherwise
+    /// fire every request together), on the foreground API session --
+    /// backfillSubtitles repairs whatever the app's suspension cuts off.
+    private func fetchAssets(for job: DownloadJob, server: ServerConfig, token: String) {
+        let itemId = job.itemId
+        let previous = assetChain
+        let task = Task { [weak self] in
+            await previous?.value
+            guard !Task.isCancelled, let self else { return }
+            async let poster: Void = self.downloadImage(ImageDownload(
                 url: DownloadURLBuilder.posterURL(itemId: itemId, serverURL: server.url),
                 token: token,
                 destination: DownloadFileManager.posterPath(for: itemId, serverID: server.id),
@@ -1121,10 +1303,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 keyPath: "posterFileName",
                 fileName: "poster.jpg"
             ))
-        }
-
-        let backdropTask = Task {
-            await downloadImage(ImageDownload(
+            async let backdrop: Void = self.downloadImage(ImageDownload(
                 url: DownloadURLBuilder.backdropURL(itemId: itemId, serverURL: server.url),
                 token: token,
                 destination: DownloadFileManager.backdropPath(for: itemId, serverID: server.id),
@@ -1132,35 +1311,33 @@ final class DownloadManager: NSObject, ObservableObject {
                 keyPath: "backdropFileName",
                 fileName: "backdrop.jpg"
             ))
+            async let seriesPoster: Void = self.downloadSeriesPoster(for: job, server: server, token: token)
+            async let subtitles: Void = self.downloadSubtitles(
+                itemId: itemId,
+                itemType: job.itemType,
+                server: server,
+                token: token
+            )
+            _ = await (poster, backdrop, seriesPoster, subtitles)
         }
+        assetChain = task
+        pendingAssetTasks[downloadKey(itemId: itemId, serverID: server.id)] = [task]
+    }
 
-        // For episodes, also save the series poster for offline browsing
-        let seriesPosterTask = Task {
-            if item.type == .episode, let seriesId = item.seriesId {
-                let seriesPosterDest = DownloadFileManager.itemDirectory(for: itemId, serverID: server.id)
-                    .appendingPathComponent("series_poster.jpg")
-                guard !FileManager.default.fileExists(atPath: seriesPosterDest.path) else { return }
-                await downloadImage(ImageDownload(
-                    url: DownloadURLBuilder.posterURL(itemId: seriesId, serverURL: server.url),
-                    token: token,
-                    destination: seriesPosterDest,
-                    itemID: itemId,
-                    keyPath: "",
-                    fileName: ""
-                ))
-            }
-        }
-
-        let subtitleTask = Task {
-            await downloadSubtitles(for: item, server: server, token: token)
-        }
-
-        pendingAssetTasks[downloadKey(itemId: itemId, serverID: server.id)] = [
-            posterTask,
-            backdropTask,
-            seriesPosterTask,
-            subtitleTask
-        ]
+    /// For episodes, the series poster too, for offline browsing.
+    private func downloadSeriesPoster(for job: DownloadJob, server: ServerConfig, token: String) async {
+        guard job.itemType == .episode, let seriesId = job.seriesId else { return }
+        let destination = DownloadFileManager.itemDirectory(for: job.itemId, serverID: server.id)
+            .appendingPathComponent("series_poster.jpg")
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        await downloadImage(ImageDownload(
+            url: DownloadURLBuilder.posterURL(itemId: seriesId, serverURL: server.url),
+            token: token,
+            destination: destination,
+            itemID: job.itemId,
+            keyPath: "",
+            fileName: ""
+        ))
     }
 
     private func downloadImage(_ asset: ImageDownload) async {
@@ -1183,7 +1360,7 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    private func downloadSubtitles(for item: BaseItemDto, server: ServerConfig, token: String) async {
+    private func downloadSubtitles(itemId: String, itemType: ItemType?, server: ServerConfig, token: String) async {
         // Runs on the foreground API session, not the background one: it dies the
         // moment iOS suspends the app. A download queued before the screen
         // locks used to finish its video with no subtitles at all -- the
@@ -1193,7 +1370,7 @@ final class DownloadManager: NSObject, ObservableObject {
         defer {
             if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
         }
-        _ = await fetchSubtitles(itemId: item.id, itemType: item.type, server: server, token: token, skipping: [])
+        _ = await fetchSubtitles(itemId: itemId, itemType: itemType, server: server, token: token, skipping: [])
     }
 
     /// The item's media source from playback info. For a download in flight
@@ -1331,7 +1508,6 @@ final class DownloadManager: NSObject, ObservableObject {
 extension DownloadManager: URLSessionDownloadDelegate {
     // Background URLSession requires the file move and state cleanup to remain
     // in one synchronous callback before Apple's temporary file is removed.
-    // swiftlint:disable:next function_body_length
     nonisolated func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
@@ -1357,15 +1533,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     message: "Server returned HTTP \(http.statusCode)",
                     kind: DownloadRetryPolicy.classify(httpStatusCode: http.statusCode)
                 )
-                self.clearProgress(for: self.downloadKey(itemId: itemId, serverID: serverID))
-                var map = self.taskIdMap
-                map.removeValue(forKey: self.taskKey(taskId))
-                self.taskIdMap = map
-                var serverMap = self.taskServerMap
-                serverMap.removeValue(forKey: self.taskKey(taskId))
-                self.taskServerMap = serverMap
-                self.stateVersion += 1
-                self.dequeueNext()
+                let key = self.downloadKey(itemId: itemId, serverID: serverID)
+                self.clearProgress(for: key)
+                self.appliedSlots.removeValue(forKey: key)
+                self.forgetTask(taskId)
+                self.recomputeSchedule()
             }
             return
         }
@@ -1400,19 +1572,16 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
             self.clearProgress(for: key)
+            self.appliedSlots.removeValue(forKey: key)
+            self.forgetTask(taskId)
             if moveError == nil {
                 self.forgetEstimate(for: key)
+                // A completion delivered after a relaunch may find the
+                // download already handed over again: drop the duplicate.
+                self.removePending(key)
+                await self.cancelTasks(for: key)
             }
-            self.stateVersion += 1
-
-            var map = self.taskIdMap
-            map.removeValue(forKey: self.taskKey(taskId))
-            self.taskIdMap = map
-            var serverMap = self.taskServerMap
-            serverMap.removeValue(forKey: self.taskKey(taskId))
-            self.taskServerMap = serverMap
-
-            self.dequeueNext()
+            self.recomputeSchedule()
         }
     }
 
@@ -1435,12 +1604,13 @@ extension DownloadManager: URLSessionDownloadDelegate {
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
 
             // Update in-memory progress (published on timer)
+            let firstBytes = (self.byteCounts[key]?.written ?? 0) <= 0 && totalBytesWritten > 0
             self.pendingProgress[key] = progress
             self.byteCounts[key] = (totalBytesWritten, totalBytesExpectedToWrite)
 
-            // Clear preparing state once any bytes flow
-            if totalBytesWritten > 0 {
-                self.preparingItems.remove(key)
+            // The session started it: Queued/Preparing becomes Downloading.
+            if firstBytes {
+                self.recomputeSchedule()
             }
 
             // Throttle SwiftData writes to every 5s per item. The saved
@@ -1466,44 +1636,42 @@ extension DownloadManager: URLSessionDownloadDelegate {
         didCompleteWithError error: Error?
     ) {
         guard let error else { return }
-
         let taskId = task.taskIdentifier
-        let nsError = error as NSError
-
-        // Don't treat cancellation as an error
-        if nsError.code == NSURLErrorCancelled { return }
 
         Task { @MainActor in
             guard let itemId = self.taskIdMap[self.taskKey(taskId)] else { return }
             let serverID = self.taskServerMap[self.taskKey(taskId)]
             let key = self.downloadKey(itemId: itemId, serverID: serverID)
-            self.markFailed(
-                itemId: itemId,
-                serverID: serverID,
-                message: error.localizedDescription,
-                kind: DownloadRetryPolicy.classify(error: error)
+            let end = DownloadTaskEnd.resolve(
+                error: error,
+                appIsActive: UIApplication.shared.applicationState == .active,
+                networkAllowsDownloads: DownloadNetworkPolicy.canDownloadNow(
+                    allowCellular: DownloadNetworkPolicy.allowsCellular,
+                    network: .current
+                )
             )
-            self.clearProgress(for: key)
-
-            var map = self.taskIdMap
-            map.removeValue(forKey: self.taskKey(taskId))
-            self.taskIdMap = map
-            var serverMap = self.taskServerMap
-            serverMap.removeValue(forKey: self.taskKey(taskId))
-            self.taskServerMap = serverMap
-
-            self.dequeueNext()
+            switch end {
+            case .ignore, .requeue:
+                // The app forgets a task before it cancels one, so a
+                // cancellation still mapped here wasn't the app's: requeue it.
+                self.logger.info(
+                    "Download \(itemId, privacy: .public) interrupted (\((error as NSError).code, privacy: .public)); queued again"
+                )
+                self.forgetTask(taskId)
+                self.requeueInterrupted(itemId: itemId, serverID: serverID)
+            case .fail(let kind):
+                self.markFailed(itemId: itemId, serverID: serverID, message: error.localizedDescription, kind: kind)
+                self.clearProgress(for: key)
+                self.appliedSlots.removeValue(forKey: key)
+                self.forgetTask(taskId)
+            }
+            self.recomputeSchedule()
         }
     }
 
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        // Nothing to start: every queued download already has its task.
         Task { @MainActor in
-            // Still preparing the next queued download: hand the handler back
-            // once its task exists (endPreparation), or iOS suspends us first.
-            if preparingKey != nil {
-                backgroundEventsFinished = true
-                return
-            }
             backgroundCompletionHandler?()
             backgroundCompletionHandler = nil
         }
