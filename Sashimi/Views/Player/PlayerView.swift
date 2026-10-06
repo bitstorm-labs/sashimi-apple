@@ -8,7 +8,6 @@ struct PlayerView: View {
     var channelContext: ChannelPlaybackContext?
 
     @StateObject private var viewModel: PlayerViewModel
-    @ObservedObject private var playbackSettings = PlaybackSettings.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -55,6 +54,11 @@ struct PlayerView: View {
                 }
             } else if viewModel.error != nil || viewModel.errorMessage != nil {
                 errorView
+            } else if let upNext = viewModel.episodeUpNext {
+                // In place of the player rather than over it: AVKit's view
+                // would otherwise keep the remote's focus and Menu press.
+                upNextScreen(upNext)
+                    .transition(.opacity)
             } else if let player = viewModel.player {
                 TVPlayerView(
                     player: player,
@@ -94,6 +98,7 @@ struct PlayerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: viewModel.upNext)
+        .animation(.easeInOut(duration: 0.4), value: viewModel.episodeUpNext == nil)
         .animation(.easeInOut(duration: 0.3), value: viewModel.playbackNotice)
         .task(id: loadAttempt) {
             // One `view.task` line per presentation (and per retry). Two lines with different
@@ -133,8 +138,9 @@ struct PlayerView: View {
             dismiss()
         }
         .onChange(of: viewModel.playbackEnded) { _, ended in
-            if ended && (!playbackSettings.showEpisodeNavigationControls ||
-                         !viewModel.transitionState.isEpisodeNavigationAvailable) {
+            // The view model shows the Up Next card whenever there is
+            // anything to offer; with nothing to offer the player closes.
+            if ended && viewModel.episodeUpNext == nil {
                 PlayerDiagnostics.event(.viewDismiss, [
                     PlayerDiagnostics.field("view", viewTag),
                     PlayerDiagnostics.field("trigger", "playback-ended")
@@ -150,6 +156,28 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("message", message)
             ])
         }
+    }
+
+    private func upNextScreen(_ upNext: EpisodeUpNext) -> some View {
+        EpisodeUpNextScreen(
+            upNext: upNext,
+            imageURLs: { item, role in
+                EpisodeUpNextScreen.serverImageURLs(for: item, role: role, serverID: serverID)
+            },
+            serverID: serverID,
+            onPlay: { Task { await viewModel.playUpNextEpisode() } },
+            onSkip: { viewModel.skipUpNextEpisode() },
+            onCancel: { viewModel.cancelUpNext() },
+            onReplay: { Task { await viewModel.replayCurrentItem() } },
+            onDone: {
+                PlayerDiagnostics.event(.viewDismiss, [
+                    PlayerDiagnostics.field("view", viewTag),
+                    PlayerDiagnostics.field("trigger", "up-next-done")
+                ])
+                viewModel.beginStop(reason: .userStop)
+                dismiss()
+            }
+        )
     }
 
     private var errorView: some View {

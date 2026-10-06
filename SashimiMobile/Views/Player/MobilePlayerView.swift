@@ -95,19 +95,9 @@ struct MobilePlayerView: View {
                 // App-rendered VTT subtitles (same pipeline as tvOS, phone sizing)
                 SubtitleOverlay(manager: viewModel.subtitleManager, fontSize: 17, bottomPadding: 48)
 
-                if playbackSettings.showEpisodeNavigationControls,
-                   viewModel.transitionState.endCard != nil {
-                    MobilePlayerEndCard(
-                        state: viewModel.transitionState,
-                        item: displayedItem,
-                        streamInfo: viewModel.streamInfo,
-                        onPlayNext: { Task { await viewModel.playNextEpisode() } },
-                        onReplay: { Task { await viewModel.replayCurrentItem() } },
-                        onDone: {
-                            viewModel.beginStop(reason: .userStop)
-                            dismiss()
-                        }
-                    )
+                if let upNext = viewModel.episodeUpNext {
+                    upNextScreen(upNext)
+                        .transition(.opacity)
                 } else {
                     overlay
                 }
@@ -145,6 +135,7 @@ struct MobilePlayerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.playbackNotice)
+        .animation(.easeInOut(duration: 0.4), value: viewModel.episodeUpNext == nil)
         .navigationBarHidden(true)
         // The top band carries its own clock, so the system status bar stays
         // hidden for the whole time the player is up, controls or not.
@@ -220,6 +211,12 @@ struct MobilePlayerView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            // The Up Next countdown only runs while the app is in front.
+            if newPhase == .active {
+                viewModel.resumeUpNextCountdown()
+            } else {
+                viewModel.pauseUpNextCountdown()
+            }
             // Picture in Picture is the one way to keep watching outside the
             // app; leaving the app otherwise stops playback as before.
             guard newPhase == .background, !pictureInPicture.isActive else { return }
@@ -257,20 +254,26 @@ struct MobilePlayerView: View {
                 scheduleAutoHide()
             }
         }
-        .onChange(of: viewModel.playbackEnded) { _, ended in
-            // Captured now: the item is cleared when playback is torn down.
-            // Offline autoplay can finish several downloads in one sitting,
-            // so every one is remembered, not just the last.
-            if ended, localFileURL != nil, !finishedDownloadItemIDs.contains(displayedItem.id) {
-                finishedDownloadItemIDs.append(displayedItem.id)
+        .onChange(of: viewModel.finishedItemIDs) { _, finished in
+            // Captured as each item ends: the item is cleared when playback is
+            // torn down. Offline autoplay can finish several downloads in one
+            // sitting (through Up Next or straight on in Picture in Picture),
+            // so every one is remembered, once.
+            guard localFileURL != nil else { return }
+            for itemID in finished where !finishedDownloadItemIDs.contains(itemID) {
+                finishedDownloadItemIDs.append(itemID)
             }
-            // Offline with no further download there is no end card to show
-            // (the series may well go on), so close as before.
-            if ended && (!playbackSettings.showEpisodeNavigationControls ||
-                         !viewModel.transitionState.isEpisodeNavigationAvailable ||
-                         (viewModel.isOfflinePlayback && viewModel.transitionState.endCard == nil)) {
+        }
+        .onChange(of: viewModel.playbackEnded) { _, ended in
+            // The view model shows the Up Next card whenever there is anything
+            // to offer. Offline with no further download there is none (the
+            // series may well go on), so the player closes as before.
+            if ended && viewModel.episodeUpNext == nil {
                 dismiss()
             }
+        }
+        .onChange(of: pictureInPicture.isActive) { _, active in
+            viewModel.isPictureInPictureActive = active
         }
         // The delivery chip is refreshed each time the controls come up (the
         // transcode session may register or change after playback starts).
@@ -296,6 +299,38 @@ struct MobilePlayerView: View {
             handoffAcknowledged = true
             onPlaybackFailed?()
         }
+    }
+
+    // MARK: - Up Next
+
+    private func upNextScreen(_ upNext: EpisodeUpNext) -> some View {
+        EpisodeUpNextScreen(
+            upNext: upNext,
+            imageURLs: { item, role in upNextImageURLs(for: item, role: role, offline: upNext.isOffline) },
+            serverID: serverID,
+            onPlay: { Task { await viewModel.playUpNextEpisode() } },
+            onSkip: { viewModel.skipUpNextEpisode() },
+            onCancel: { viewModel.cancelUpNext() },
+            onReplay: { Task { await viewModel.replayCurrentItem() } },
+            onDone: closePlayer
+        )
+    }
+
+    /// A download's own artwork first (no server needed), then the server's.
+    private func upNextImageURLs(for item: BaseItemDto, role: EpisodeUpNextImageRole, offline: Bool) -> [URL] {
+        var urls: [URL] = []
+        if offline {
+            switch role {
+            case .thumbnail:
+                urls += [OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)].compactMap { $0 }
+            case .backdrop:
+                urls += [
+                    OfflineImageHelper.backdropURL(for: item.id, serverID: serverID),
+                    OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
+                ].compactMap { $0 }
+            }
+        }
+        return urls + EpisodeUpNextScreen.serverImageURLs(for: item, role: role, serverID: serverID)
     }
 
     // MARK: - Overlay

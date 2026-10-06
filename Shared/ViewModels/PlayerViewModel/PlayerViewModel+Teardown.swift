@@ -52,6 +52,9 @@ extension PlayerViewModel {
         playbackAttemptItemID = nil
         sameItemPlaybackAttempts.removeAll()
         pendingPlaybackEnd = nil
+        // Leaving the player settles the Up Next card: no countdown may start
+        // an episode after the viewer has gone.
+        clearEpisodeUpNext()
         preparePendingStoppedReportIfNeeded()
         if let teardownTask {
             return teardownTask

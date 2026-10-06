@@ -119,6 +119,23 @@ final class PlayerViewModel: ObservableObject {
     /// compatible while views observe this single published state.
     @Published var transitionState = PlayerTransitionState.empty
 
+    /// The full-screen Up Next card for the episode that just ended (nil
+    /// while playing). See `PlayerViewModel+UpNext`.
+    @Published var episodeUpNext: EpisodeUpNext?
+    /// Items that played to their end in this presentation, in order, each
+    /// once. Downloads act on it (Delete after watching) once the player goes.
+    @Published var finishedItemIDs: [String] = []
+    /// Set by the iOS player: in Picture in Picture there is no full-screen
+    /// card to show, so Auto-play starts the next episode straight away.
+    var isPictureInPictureActive = false
+    var upNextCountdownTask: Task<Void, Never>?
+    var upNextLookupTask: Task<Void, Never>?
+    /// Injectable for tests: the countdown's clock and its wait.
+    var upNextNow: () -> Date = { Date() }
+    var upNextSleep: @Sendable (TimeInterval) async throws -> Void = { seconds in
+        try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+    }
+
     var nextEpisode: BaseItemDto? { transitionState.nextEpisode }
     var previousEpisode: BaseItemDto? { transitionState.previousEpisode }
 
@@ -321,6 +338,7 @@ final class PlayerViewModel: ObservableObject {
     }
 
     func resetTransitionState(for item: BaseItemDto?) {
+        clearEpisodeUpNext()
         transitionState = PlayerTransitionState(
             currentItem: item,
             previousEpisode: nil,
@@ -366,6 +384,8 @@ final class PlayerViewModel: ObservableObject {
         progressReportTask?.cancel()
         subtitleLoadTask?.cancel()
         navigationTask?.cancel()
+        upNextCountdownTask?.cancel()
+        upNextLookupTask?.cancel()
         cleanupRemoteCommands()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)

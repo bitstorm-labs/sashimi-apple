@@ -6,8 +6,6 @@ import UIKit
 final class EpisodeNavigationViewController: UIViewController {
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
-    var onReplay: (() -> Void)?
-    var onDone: (() -> Void)?
     var settingsMenu: UIMenu? {
         didSet { settingsButton.menu = settingsMenu }
     }
@@ -19,20 +17,8 @@ final class EpisodeNavigationViewController: UIViewController {
     private let playPauseButton = EpisodeNavigationViewController.makeTransportButton(title: "Play/Pause", imageName: "pause.fill")
     private let skipForwardButton = EpisodeNavigationViewController.makeTransportButton(title: "Skip Forward", imageName: "goforward.10")
     private let nextButton = EpisodeNavigationViewController.makeTransportButton(title: "Next Episode", imageName: "forward.fill")
-    private let playNextButton = EpisodeNavigationViewController.makeButton(title: "Play Next", imageName: "forward.fill")
-    private let replayButton = EpisodeNavigationViewController.makeButton(title: "Replay", imageName: "gobackward")
-    private let doneButton = EpisodeNavigationViewController.makeButton(title: "Done", imageName: "checkmark")
-    private let messageLabel: UILabel = {
-        let label = UILabel()
-        label.textColor = .white
-        label.font = .systemFont(ofSize: 34, weight: .semibold)
-        label.textAlignment = .center
-        label.numberOfLines = 2
-        return label
-    }()
     private let controls = UIStackView()
     private let settingsFocusGuide = UIFocusGuide()
-    private let endCard = UIStackView()
     private weak var player: AVPlayer?
     private weak var observedPlayer: AVPlayer?
     private var playerObservation: NSKeyValueObservation?
@@ -58,25 +44,13 @@ final class EpisodeNavigationViewController: UIViewController {
         controls.addArrangedSubview(skipForwardButton)
         controls.addArrangedSubview(nextButton)
 
-        endCard.axis = .vertical
-        endCard.spacing = 20
-        endCard.alignment = .center
-        endCard.addArrangedSubview(messageLabel)
-        let actions = UIStackView(arrangedSubviews: [playNextButton, replayButton, doneButton])
-        actions.axis = .horizontal
-        actions.spacing = 18
-        endCard.addArrangedSubview(actions)
-        endCard.isHidden = true
-
         settingsButton.showsMenuAsPrimaryAction = true
         view.addLayoutGuide(settingsFocusGuide)
         settingsFocusGuide.preferredFocusEnvironments = [settingsButton]
         view.addSubview(settingsButton)
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controls)
-        view.addSubview(endCard)
         controls.translatesAutoresizingMaskIntoConstraints = false
-        endCard.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             settingsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
             settingsButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
@@ -85,9 +59,7 @@ final class EpisodeNavigationViewController: UIViewController {
             settingsFocusGuide.topAnchor.constraint(equalTo: settingsButton.bottomAnchor),
             settingsFocusGuide.bottomAnchor.constraint(equalTo: controls.topAnchor),
             controls.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            controls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -70),
-            endCard.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            endCard.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+            controls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -70)
         ])
 
         previousButton.addTarget(self, action: #selector(previousTapped), for: .primaryActionTriggered)
@@ -95,9 +67,6 @@ final class EpisodeNavigationViewController: UIViewController {
         playPauseButton.addTarget(self, action: #selector(playPauseTapped), for: .primaryActionTriggered)
         skipForwardButton.addTarget(self, action: #selector(skipForwardTapped), for: .primaryActionTriggered)
         nextButton.addTarget(self, action: #selector(nextTapped), for: .primaryActionTriggered)
-        playNextButton.addTarget(self, action: #selector(nextTapped), for: .primaryActionTriggered)
-        replayButton.addTarget(self, action: #selector(replayTapped), for: .primaryActionTriggered)
-        doneButton.addTarget(self, action: #selector(doneTapped), for: .primaryActionTriggered)
     }
 
     func update(state: PlayerTransitionState, showEpisodeNavigationControls: Bool, player: AVPlayer?) {
@@ -110,30 +79,16 @@ final class EpisodeNavigationViewController: UIViewController {
         skipForwardButton.isEnabled = player != nil
         playPauseButton.isEnabled = player != nil
         updatePlayPauseImage()
-        playNextButton.isEnabled = state.canPlayNext
-        playNextButton.isHidden = !state.canPlayNext
-        endCard.isHidden = state.endCard == nil || !showEpisodeNavigationControls
+        // The end of an episode is the Up Next screen (EpisodeUpNextScreen),
+        // which replaces the player view; the transport row steps aside.
         controls.isHidden = state.endCard != nil || !showEpisodeNavigationControls
         settingsButton.isHidden = controls.isHidden
         settingsFocusGuide.isEnabled = !controls.isHidden && !state.isTransitioning
         settingsButton.isEnabled = !state.isTransitioning
-        replayButton.isEnabled = !state.isTransitioning
-        switch state.endCard {
-        case .nextEpisode:
-            messageLabel.text = "Episode complete\nReady for the next episode"
-        case .finalEpisode:
-            messageLabel.text = "There are no more episodes"
-        case .lookupFailed:
-            messageLabel.text = "Next episode unavailable\nTry again later or replay"
-        case nil:
-            messageLabel.text = nil
-        }
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        let candidates = endCard.isHidden
-            ? (controls.isHidden ? [] : [playPauseButton, previousButton, nextButton, settingsButton])
-            : [playNextButton, replayButton, doneButton]
+        let candidates = controls.isHidden ? [] : [playPauseButton, previousButton, nextButton, settingsButton]
         if let first = candidates.first(where: { !$0.isHidden && $0.isEnabled }) {
             return [first]
         }
@@ -221,6 +176,4 @@ final class EpisodeNavigationViewController: UIViewController {
     }
     @objc private func skipForwardTapped() { seek(by: 10) }
     @objc private func nextTapped() { onNext?() }
-    @objc private func replayTapped() { onReplay?() }
-    @objc private func doneTapped() { onDone?() }
 }

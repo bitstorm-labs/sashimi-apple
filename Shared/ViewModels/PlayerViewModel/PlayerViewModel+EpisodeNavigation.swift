@@ -56,10 +56,7 @@ extension PlayerViewModel {
                 guard let index = $0.indexNumber else { return false }
                 return index < currentIndex
             }
-            var next = episodes.first {
-                guard let index = $0.indexNumber else { return false }
-                return index > currentIndex
-            }
+            var next = Self.episode(after: currentIndex, in: episodes)
 
             // A season boundary is part of the same ordered series as an
             // in-season transition. Resolve both directions from the server's
@@ -112,6 +109,28 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("offline", true),
             PlayerDiagnostics.field("outcome", adjacent.next == nil ? "no-successor" : "available")
         ])
+    }
+
+    private static func episode(after index: Int, in episodes: [BaseItemDto]) -> BaseItemDto? {
+        episodes.first {
+            guard let candidate = $0.indexNumber else { return false }
+            return candidate > index
+        }
+    }
+
+    /// The episode after `item` in series order, resolved the same way as the
+    /// player's Next (in-season, then the next non-empty season). The Up Next
+    /// screen's Skip uses it to look past the episode it is showing; offline,
+    /// only downloaded episodes count.
+    func episodeFollowing(_ item: BaseItemDto) async throws -> BaseItemDto? {
+        if isOfflinePlayback {
+            return offlineEpisodeSource?.adjacentEpisodes(to: item).next
+        }
+        guard let seasonId = item.seasonId, let currentIndex = item.indexNumber else { return nil }
+        if let next = Self.episode(after: currentIndex, in: try await episodes(in: seasonId)) {
+            return next
+        }
+        return try await fetchFirstEpisodeOfNextSeason(for: item)
     }
 
     func waitForEpisodeNavigation(for item: BaseItemDto) async {

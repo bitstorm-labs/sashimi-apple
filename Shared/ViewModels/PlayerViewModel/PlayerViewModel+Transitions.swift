@@ -10,7 +10,8 @@ extension PlayerViewModel {
         await handlePlaybackEnded(itemID: itemID, attempt: playbackAttempt)
     }
 
-    /// Offer or start the next episode of the series.
+    /// Offer (the Up Next screen) or start (Picture in Picture) the next
+    /// episode of the series.
     ///
     /// Extracted from `handlePlaybackEnded` so the end-of-playback path stays
     /// within the complexity limit as it gains cases.
@@ -20,31 +21,26 @@ extension PlayerViewModel {
         await waitForEpisodeNavigation(for: item)
         guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return true }
 
-        // Offline, "no next" only means nothing further is downloaded — not
-        // that the series is over — so end as before rather than claim it.
-        if isOfflinePlayback && transitionState.nextEpisode == nil {
+        let decision = EpisodeUpNext.decide(EpisodeUpNext.Context(
+            finishedItem: item,
+            lookupStatus: transitionState.lookupStatus,
+            nextEpisode: transitionState.nextEpisode,
+            autoPlayNextEpisode: playbackSettings.autoPlayNextEpisode,
+            showsEpisodeNavigationControls: playbackSettings.showEpisodeNavigationControls,
+            isOffline: isOfflinePlayback,
+            isPictureInPicture: isPictureInPictureActive,
+            now: upNextNow()
+        ))
+        switch decision {
+        case .autoplayImmediately(let next):
+            await transition(to: next, automatic: true)
+            return true
+        case .showUpNext(let upNext):
+            presentEpisodeUpNext(upNext)
+            return false
+        case .end:
             return false
         }
-
-        switch transitionState.lookupStatus {
-        case .available where transitionState.nextEpisode != nil:
-            if playbackSettings.autoPlayNextEpisode {
-                await autoplayNextEpisode()
-                return true
-            }
-            if playbackSettings.showEpisodeNavigationControls {
-                transitionState.endCard = .nextEpisode
-            }
-        case .failed:
-            if playbackSettings.showEpisodeNavigationControls {
-                transitionState.endCard = .lookupFailed
-            }
-        default:
-            if playbackSettings.showEpisodeNavigationControls {
-                transitionState.endCard = .finalEpisode
-            }
-        }
-        return false
     }
 
     func handlePlaybackEnded(itemID: String, attempt: Int) async {
@@ -82,6 +78,7 @@ extension PlayerViewModel {
             }
 
             guard isCurrentPlaybackAttempt(itemID: item.id, attempt: attempt), !Task.isCancelled else { return }
+            recordFinishedItem(item.id)
 
             // A channel decides what follows, which is rarely the next episode
             // of this series. Intercept before the episode-navigation logic
@@ -191,6 +188,12 @@ extension PlayerViewModel {
     }
 
     func playNextEpisode() async {
+        // From the Up Next screen, "next" is whatever it is showing (Skip may
+        // have moved it past the immediate successor).
+        if episodeUpNext != nil {
+            await playUpNextEpisode()
+            return
+        }
         guard let next = transitionState.nextEpisode else { return }
         // The end card follows the completion report, so pressing Play Next
         // there must not send a second stopped report. During active playback
@@ -209,12 +212,12 @@ extension PlayerViewModel {
         await transition(to: item, automatic: playbackEnded, startFromBeginning: true)
     }
 
-    private func autoplayNextEpisode() async {
-        guard let next = transitionState.nextEpisode else { return }
-        await transition(to: next, automatic: true)
+    private func recordFinishedItem(_ itemID: String) {
+        guard !finishedItemIDs.contains(itemID) else { return }
+        finishedItemIDs.append(itemID)
     }
 
-    private func transition(to item: BaseItemDto, automatic: Bool, startFromBeginning: Bool = false) async {
+    func transition(to item: BaseItemDto, automatic: Bool, startFromBeginning: Bool = false) async {
         guard item.type == .episode || startFromBeginning,
               !transitionState.isTransitioning,
               automatic || !isHandlingEnd else { return }
@@ -222,6 +225,9 @@ extension PlayerViewModel {
         // must never reset the reporter or rebuild the same player concurrently.
         transitionState.isTransitioning = true
         defer { finishTransition() }
+        // Whatever was on the Up Next screen is settled now: its countdown
+        // must not fire into the item being loaded.
+        clearEpisodeUpNext()
         let attempt = playbackAttempt
         player?.pause()
         progressReportTask?.cancel()
