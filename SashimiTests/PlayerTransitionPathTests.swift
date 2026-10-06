@@ -499,7 +499,9 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
     }
 
-    func testNaturalCompletionWithNavigationControlsDisabledDismissesWithoutEndCard() async {
+    /// The Up Next screen replaces the end card for a next episode whatever
+    /// the navigation-controls setting (it used to dismiss with it off).
+    func testNaturalCompletionWithNavigationControlsDisabledStillOffersUpNext() async {
         let current = makeItem(
             id: "episode-1",
             type: .episode,
@@ -538,13 +540,16 @@ final class PlayerTransitionPathTests: XCTestCase {
         await viewModel.refreshEpisodeNavigation()
         await viewModel.handlePlaybackEnded()
 
-        XCTAssertNil(viewModel.transitionState.endCard)
+        XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
+        XCTAssertEqual(viewModel.episodeUpNext?.countdown, .off)
         XCTAssertTrue(viewModel.playbackEnded)
         XCTAssertTrue(loader.loadedItemIDs.isEmpty)
         XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
     }
 
-    func testNaturalCompletionAutoplaysSuccessorThroughProductionTransitionPath() async {
+    /// Auto-play goes through the Up Next countdown, then the production
+    /// transition path, with one completion report for the finished episode.
+    func testNaturalCompletionAutoplaysSuccessorAfterTheUpNextCountdown() async {
         let current = makeItem(
             id: "episode-1",
             type: .episode,
@@ -575,12 +580,23 @@ final class PlayerTransitionPathTests: XCTestCase {
         settings.autoPlayNextEpisode = true
         defer { settings.autoPlayNextEpisode = previousAutoPlay }
 
+        let ended = Date()
+        viewModel.upNextNow = { ended }
+        viewModel.upNextSleep = { _ in try await Task.sleep(nanoseconds: 3_600 * 1_000_000_000) }
+
         await viewModel.refreshEpisodeNavigation()
         await viewModel.handlePlaybackEnded()
 
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+
+        viewModel.upNextNow = { ended.addingTimeInterval(EpisodeUpNext.countdownDuration) }
+        await viewModel.upNextCountdownElapsed()
+
         XCTAssertEqual(loader.loadedItemIDs, [next.id])
         XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
-        XCTAssertNil(viewModel.transitionState.endCard)
+        XCTAssertNil(viewModel.episodeUpNext)
         XCTAssertFalse(viewModel.playbackEnded)
     }
 
@@ -619,6 +635,53 @@ final class PlayerTransitionPathTests: XCTestCase {
         XCTAssertTrue(viewModel.playbackEnded)
         XCTAssertTrue(loader.loadedItemIDs.isEmpty)
         XCTAssertEqual(reporter.events, [.completed(itemID: current.id)])
+    }
+
+    // The two below use only the pre-Up Next API, so they also fail
+    // (rather than not compile) against the old immediate-autoplay code.
+    func testAutoplayWaitsOnTheUpNextScreenInsteadOfLoadingImmediately() async {
+        let current = makeItem(id: "e1", type: .episode, seriesId: "series", seasonId: "season-1", seasonNumber: 1, episodeNumber: 1)
+        let next = makeItem(id: "e2", type: .episode, seriesId: "series", seasonId: "season-1", seasonNumber: 1, episodeNumber: 2)
+        let loader = RecordingPlayerTransitionLoader()
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: RecordingPlayerPlaybackReporter(),
+            transitionLoader: loader
+        )
+        viewModel.currentItem = current
+        let settings = PlaybackSettings.shared
+        let previous = (settings.autoPlayNextEpisode, settings.showEpisodeNavigationControls)
+        settings.autoPlayNextEpisode = true
+        settings.showEpisodeNavigationControls = false
+        defer { (settings.autoPlayNextEpisode, settings.showEpisodeNavigationControls) = previous }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
+        XCTAssertTrue(viewModel.playbackEnded)
+    }
+
+    func testAutoplayOffWithControlsOffStillOffersTheNextEpisode() async {
+        let current = makeItem(id: "e1", type: .episode, seriesId: "series", seasonId: "season-1", seasonNumber: 1, episodeNumber: 1)
+        let next = makeItem(id: "e2", type: .episode, seriesId: "series", seasonId: "season-1", seasonNumber: 1, episodeNumber: 2)
+        let viewModel = PlayerViewModel(
+            navigationClient: FakePlayerEpisodeNavigationClient(itemsByParent: ["season-1": [current, next]]),
+            reporter: RecordingPlayerPlaybackReporter(),
+            transitionLoader: RecordingPlayerTransitionLoader()
+        )
+        viewModel.currentItem = current
+        let settings = PlaybackSettings.shared
+        let previous = (settings.autoPlayNextEpisode, settings.showEpisodeNavigationControls)
+        settings.autoPlayNextEpisode = false
+        settings.showEpisodeNavigationControls = false
+        defer { (settings.autoPlayNextEpisode, settings.showEpisodeNavigationControls) = previous }
+
+        await viewModel.refreshEpisodeNavigation()
+        await viewModel.handlePlaybackEnded()
+
+        XCTAssertEqual(viewModel.transitionState.endCard, .nextEpisode)
     }
 
     private func makeItem(

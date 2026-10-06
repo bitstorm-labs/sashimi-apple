@@ -246,8 +246,18 @@ final class OfflinePlayerNavigationTests: XCTestCase {
         settings.autoPlayNextEpisode = true
         defer { settings.autoPlayNextEpisode = previousAutoPlay }
 
+        let ended = Date()
+        viewModel.upNextNow = { ended }
+        viewModel.upNextSleep = { _ in try await Task.sleep(nanoseconds: 3_600 * 1_000_000_000) }
+
         await viewModel.refreshEpisodeNavigation()
         await viewModel.handlePlaybackEnded()
+
+        // Through the Up Next countdown, as online.
+        XCTAssertTrue(loader.loadedItemIDs.isEmpty)
+        XCTAssertEqual(viewModel.episodeUpNext?.isOffline, true)
+        viewModel.upNextNow = { ended.addingTimeInterval(EpisodeUpNext.countdownDuration) }
+        await viewModel.upNextCountdownElapsed()
 
         XCTAssertEqual(loader.loadedItemIDs, ["e2"])
         XCTAssertFalse(viewModel.playbackEnded)

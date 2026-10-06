@@ -201,10 +201,6 @@ struct TVPlayerView: UIViewControllerRepresentable {
         navigationVC.onNext = {
             Task { @MainActor in await viewModel.playNextEpisode() }
         }
-        navigationVC.onReplay = {
-            Task { @MainActor in await viewModel.replayCurrentItem() }
-        }
-        navigationVC.onDone = onDismiss
         navigationVC.settingsMenu = UIMenu(children: buildMenus(includeAudio: true))
         navigationVC.view.translatesAutoresizingMaskIntoConstraints = false
         navigationVC.view.isHidden = !usesEpisodeTransportControls
