@@ -56,7 +56,8 @@ struct EpisodeUpNext: Equatable {
         /// viewer cannot see or press a full-screen card from there.
         case autoplayImmediately(BaseItemDto)
         case showUpNext(EpisodeUpNext)
-        /// Nothing to offer: the player closes, as before.
+        /// Nothing to offer: the player closes. Only offline with nothing
+        /// further downloaded; online, the final / lookup-failed card shows.
         case end
     }
 
@@ -65,10 +66,11 @@ struct EpisodeUpNext: Equatable {
         var lookupStatus: PlayerTransitionState.LookupStatus
         var nextEpisode: BaseItemDto?
         var autoPlayNextEpisode: Bool
-        /// The "Episode navigation controls" setting. It used to gate every
-        /// end card; it now only gates the final / lookup-failed cards, since
-        /// the Up Next screen replaces auto-play itself.
-        var showsEpisodeNavigationControls: Bool
+        // The "Episode navigation controls" setting is deliberately not an
+        // input: it governs the in-player previous / next buttons, not whether
+        // the end screen appears. Gating the final card on it made a device
+        // with the setting off close the player silently after a YouTube
+        // channel's newest video while another device showed the screen (#619).
         var isOffline: Bool
         var isPictureInPicture: Bool
         var now: Date
@@ -97,7 +99,6 @@ struct EpisodeUpNext: Equatable {
                     : .off
             ))
         case .failed:
-            guard context.showsEpisodeNavigationControls else { return .end }
             return .showUpNext(EpisodeUpNext(
                 kind: .lookupFailed,
                 finishedItem: context.finishedItem,
@@ -111,9 +112,11 @@ struct EpisodeUpNext: Equatable {
         }
     }
 
+    /// Nothing follows: the series is over, or — for a YouTube channel,
+    /// ordered by upload date — the newest video has been watched. Replay and
+    /// Done stay on screen rather than the player closing on its own.
     private static func finalCard(_ context: Context) -> Decision {
-        guard context.showsEpisodeNavigationControls else { return .end }
-        return .showUpNext(EpisodeUpNext(
+        .showUpNext(EpisodeUpNext(
             kind: .finalEpisode,
             finishedItem: context.finishedItem,
             isOffline: context.isOffline,
@@ -225,25 +228,35 @@ struct EpisodeUpNext: Equatable {
 
     // MARK: - Text
 
+    /// A YouTube (Pinchflat) channel: a "series" of uploads with the year as
+    /// the season. Its end screen talks about the channel being caught up,
+    /// not a series being complete — new videos keep arriving.
+    var isYouTube: Bool {
+        PlayerInfoText.isYouTubeEpisode(finishedItem)
+    }
+
     var eyebrow: String {
         switch kind {
         case .nextEpisode, .lookupFailed: return "UP NEXT"
-        case .finalEpisode: return "SERIES COMPLETE"
+        case .finalEpisode: return isYouTube ? "ALL CAUGHT UP" : "SERIES COMPLETE"
         }
     }
 
     var title: String {
         switch kind {
         case .nextEpisode: return episode?.name ?? ""
-        case .finalEpisode: return "There are no more episodes"
-        case .lookupFailed: return "Next episode unavailable"
+        case .finalEpisode: return isYouTube ? "You're all caught up" : "There are no more episodes"
+        case .lookupFailed: return isYouTube ? "Next video unavailable" : "Next episode unavailable"
         }
     }
 
     /// "S3:E6" for the episode shown (or the finished one on the final card).
+    /// None for YouTube: "S2026:E100599" is an upload date, not a position,
+    /// and the player's info bar hides it for the same reason.
     var episodeLabel: String? {
         let item = episode ?? finishedItem
-        guard let season = item.parentIndexNumber, let number = item.indexNumber else { return nil }
+        guard !PlayerInfoText.isYouTubeEpisode(item),
+              let season = item.parentIndexNumber, let number = item.indexNumber else { return nil }
         return "S\(season):E\(number)"
     }
 
@@ -270,8 +283,14 @@ struct EpisodeUpNext: Equatable {
             let overview = episode?.overview?.trimmingCharacters(in: .whitespacesAndNewlines)
             return overview?.isEmpty == false ? overview : nil
         case .finalEpisode:
+            if isYouTube {
+                return "You've watched the latest from \(finishedItem.seriesName ?? "this channel")."
+            }
             return "You've finished \(finishedItem.seriesName ?? "this series")."
         case .lookupFailed:
+            if isYouTube {
+                return "The next video couldn't be loaded. Try again later or replay this video."
+            }
             return "The next episode couldn't be loaded. Try again later or replay this episode."
         }
     }
