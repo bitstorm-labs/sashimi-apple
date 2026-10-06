@@ -26,7 +26,6 @@ extension PlayerViewModel {
             lookupStatus: transitionState.lookupStatus,
             nextEpisode: transitionState.nextEpisode,
             autoPlayNextEpisode: playbackSettings.autoPlayNextEpisode,
-            showsEpisodeNavigationControls: playbackSettings.showEpisodeNavigationControls,
             isOffline: isOfflinePlayback,
             isPictureInPicture: isPictureInPictureActive,
             now: upNextNow()

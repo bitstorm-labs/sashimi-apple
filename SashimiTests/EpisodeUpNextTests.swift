@@ -13,7 +13,6 @@ final class EpisodeUpNextStateTests: XCTestCase {
         lookup: PlayerTransitionState.LookupStatus = .available,
         next: BaseItemDto?,
         autoplay: Bool = true,
-        controls: Bool = false,
         offline: Bool = false,
         pip: Bool = false
     ) -> EpisodeUpNext.Context {
@@ -22,7 +21,6 @@ final class EpisodeUpNextStateTests: XCTestCase {
             lookupStatus: lookup,
             nextEpisode: next,
             autoPlayNextEpisode: autoplay,
-            showsEpisodeNavigationControls: controls,
             isOffline: offline,
             isPictureInPicture: pip,
             now: now
@@ -60,8 +58,8 @@ final class EpisodeUpNextStateTests: XCTestCase {
     /// The Up Next screen replaces auto-play; it does not depend on the
     /// navigation-controls setting that gated the old end card.
     func testNextEpisodeScreenDoesNotDependOnNavigationControlsSetting() throws {
-        XCTAssertEqual(try shown(context(next: next, controls: false)).kind, .nextEpisode)
-        XCTAssertEqual(try shown(context(next: next, autoplay: false, controls: false)).kind, .nextEpisode)
+        XCTAssertEqual(try shown(context(next: next)).kind, .nextEpisode)
+        XCTAssertEqual(try shown(context(next: next, autoplay: false)).kind, .nextEpisode)
     }
 
     func testPictureInPictureWithAutoplayStartsTheNextEpisodeWithoutAScreen() throws {
@@ -77,25 +75,30 @@ final class EpisodeUpNextStateTests: XCTestCase {
     }
 
     func testOfflineWithoutANextDownloadClosesThePlayer() {
-        XCTAssertEqual(EpisodeUpNext.decide(context(lookup: .unavailable, next: nil, controls: true, offline: true)), .end)
+        XCTAssertEqual(EpisodeUpNext.decide(context(lookup: .unavailable, next: nil, offline: true)), .end)
     }
 
-    func testFinalEpisodeKeepsItsMessageAndItsSettingGate() throws {
-        let upNext = try shown(context(lookup: .unavailable, next: nil, controls: true))
-        XCTAssertEqual(upNext.kind, .finalEpisode)
-        XCTAssertEqual(upNext.title, "There are no more episodes")
-        XCTAssertNil(upNext.episode)
-        XCTAssertFalse(upNext.showsSkip)
-        XCTAssertFalse(upNext.showsCountdown)
-        XCTAssertEqual(EpisodeUpNext.decide(context(lookup: .unavailable, next: nil, controls: false)), .end)
+    /// Shown whatever the navigation-controls setting (#619): it used to
+    /// close the player silently on a device with the setting off.
+    func testFinalEpisodeShowsItsScreen() throws {
+        for lookup in [PlayerTransitionState.LookupStatus.unavailable, .available, .notApplicable] {
+            let upNext = try shown(context(lookup: lookup, next: nil))
+            XCTAssertEqual(upNext.kind, .finalEpisode)
+            XCTAssertEqual(upNext.eyebrow, "SERIES COMPLETE")
+            XCTAssertEqual(upNext.title, "There are no more episodes")
+            XCTAssertEqual(upNext.message, "You've finished Series.")
+            XCTAssertEqual(upNext.episodeLabel, "S1:E1")
+            XCTAssertNil(upNext.episode)
+            XCTAssertFalse(upNext.showsSkip)
+            XCTAssertFalse(upNext.showsCountdown)
+        }
     }
 
-    func testLookupFailureKeepsItsMessageAndItsSettingGate() throws {
-        let upNext = try shown(context(lookup: .failed, next: nil, controls: true))
+    func testLookupFailureShowsItsScreen() throws {
+        let upNext = try shown(context(lookup: .failed, next: nil))
         XCTAssertEqual(upNext.kind, .lookupFailed)
         XCTAssertEqual(upNext.title, "Next episode unavailable")
         XCTAssertFalse(upNext.showsCountdown)
-        XCTAssertEqual(EpisodeUpNext.decide(context(lookup: .failed, next: nil, controls: false)), .end)
     }
 
     // MARK: Countdown
