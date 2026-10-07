@@ -8,6 +8,7 @@ struct HomeView: View {
     /// the rail (which grabbed it while the hero was still loading).
     var onHeroReady: (() -> Void)?
     @StateObject private var viewModel = HomeViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
     @EnvironmentObject private var sessionManager: SessionManager
@@ -168,10 +169,18 @@ struct HomeView: View {
             if count > 0 { onHeroReady?() }
         }
         .onAppear {
-            // Initial load happens in .task above (and .task re-runs when the
-            // view re-enters the hierarchy), so no extra refresh here — it
-            // used to double-fetch everything on first appearance.
+            // Initial load happens in .task above. Home stays in the hierarchy
+            // when another section is shown, so .task does not re-run on the
+            // way back; reload then only if what is on screen has gone stale
+            // (e.g. something was watched on another device).
             startAutoRefresh()
+            Task { await viewModel.refreshIfStale() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Back from the screensaver, sleep or another app: the 30 s timer
+            // does not run while suspended, so reload now if stale.
+            guard phase == .active, selectedItem == nil, playingItem == nil else { return }
+            Task { await viewModel.refreshIfStale() }
         }
         .onDisappear {
             stopAutoRefresh()

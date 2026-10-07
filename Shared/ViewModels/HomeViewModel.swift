@@ -18,6 +18,14 @@ final class HomeViewModel: ObservableObject {
     @Published var error: Error?
 
     private let client = JellyfinClient.shared
+
+    /// When Home last loaded successfully, so a return to Home (or to the
+    /// app) can tell whether what it shows may be out of date.
+    private(set) var lastLoadedAt: Date?
+    /// Injectable clock for tests.
+    var now: () -> Date = Date.init
+    /// Older than this, Home reloads when it comes back on screen.
+    static let staleAfter: TimeInterval = 15
     #if os(tvOS)
     /// Shared with the Top Shelf extension. iOS has no such extension and no
     /// app-group entitlement, so the write is tvOS-only (#311).
@@ -55,6 +63,7 @@ final class HomeViewModel: ObservableObject {
             #endif
             await loadContinueWatchingLibraryNames()
             await loadHeroItems()
+            lastLoadedAt = now()
         } catch {
             self.error = error
         }
@@ -209,6 +218,26 @@ final class HomeViewModel: ObservableObject {
     }
 
     func refresh() async {
+        await loadContent()
+    }
+
+    /// Whether Home's content may be out of date: never loaded, or loaded
+    /// longer ago than `maxAge`. Something watched on another device only
+    /// shows up after a reload.
+    func isStale(maxAge: TimeInterval = HomeViewModel.staleAfter) -> Bool {
+        guard let lastLoadedAt else { return true }
+        return now().timeIntervalSince(lastLoadedAt) >= maxAge
+    }
+
+    /// Test hook: pretend Home last loaded at `date`.
+    func setLastLoadedForTesting(_ date: Date?) {
+        lastLoadedAt = date
+    }
+
+    /// Reload when Home comes back on screen or the app returns to the
+    /// foreground, unless it loaded moments ago or a load is under way.
+    func refreshIfStale(maxAge: TimeInterval = HomeViewModel.staleAfter) async {
+        guard !isLoading, isStale(maxAge: maxAge) else { return }
         await loadContent()
     }
 
