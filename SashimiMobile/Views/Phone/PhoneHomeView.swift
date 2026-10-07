@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PhoneHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var rowSettings = HomeRowSettings.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
@@ -90,6 +91,12 @@ struct PhoneHomeView: View {
         .sheet(isPresented: $showManageChannels) { MobileManageChannelsView() }
         .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
             Task { await channelsViewModel.load() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Back from the background: something may have been watched on
+            // another device. Reload if what Home shows has gone stale.
+            guard phase == .active else { return }
+            Task { await viewModel.refreshIfStale() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task {
