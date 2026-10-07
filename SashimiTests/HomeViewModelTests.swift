@@ -257,4 +257,41 @@ final class HomeViewModelTests: XCTestCase {
 
         XCTAssertEqual(row.map(\.id), ["ep-1", "movie-1"], "a Season or Series reached Continue Watching")
     }
+
+    /// The live row on 2026-10-07: a YouTube video stopped part-way at 18:52
+    /// (Resume) and three unstarted Next Up episodes with no date, one of them
+    /// the next video of the same channel.
+    @MainActor
+    func testJustStoppedEpisodeLeadsAndIsNotReplacedByAnUndatedNextUp() {
+        func episode(_ id: String, series: String, played: String?) -> BaseItemDto {
+            BaseItemDto(
+                id: id, name: id, type: .episode,
+                seriesName: series, seriesId: series, seasonId: nil, parentId: nil,
+                indexNumber: nil, parentIndexNumber: nil, overview: nil,
+                runTimeTicks: nil, userData: UserItemDataDto(
+                    playbackPositionTicks: played == nil ? 0 : 1_000, playCount: 0, isFavorite: false, played: false,
+                    lastPlayedDate: played, unplayedItemCount: nil
+                ), imageTags: nil,
+                backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil,
+                taglines: nil, people: nil, criticRating: nil,
+                premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
+            )
+        }
+        let resume = [
+            episode("syd-ride", series: "syd", played: "2026-10-07T18:52:58.97Z"),
+            episode("sabrina-bundt", series: "sabrina", played: "2026-10-01T17:35:00Z")
+        ]
+        let nextUp = [
+            episode("insidejob-clone", series: "insidejob", played: nil),
+            episode("the100-lie", series: "the100", played: nil),
+            episode("syd-gravel", series: "syd", played: nil)
+        ]
+
+        let row = HomeViewModel().mergeAndSortContinueItems(resume: resume, nextUp: nextUp)
+
+        XCTAssertEqual(row.first?.id, "syd-ride", "The episode just stopped must lead the row")
+        XCTAssertFalse(row.map(\.id).contains("syd-gravel"), "An undated Next Up must not replace the part-watched episode")
+    }
 }
