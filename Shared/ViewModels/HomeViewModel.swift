@@ -289,7 +289,15 @@ final class HomeViewModel: ObservableObject {
             )
         }
 
-        var carried = Date()
+        // Undated NextUp items are anchored just below the newest real
+        // activity, not at `now`. Stamped `now`, an unstarted "next" episode
+        // (a show not touched in days) outranked the episode the user had just
+        // stopped part-way — and when it was the same series, the dedupe below
+        // dropped the part-watched episode from the row entirely (#628).
+        let newestKnown = (resume.map(\.userData?.lastPlayedDate) + nextUp.map(\.userData?.lastPlayedDate))
+            .compactMap { parseDate($0) }
+            .max()
+        var carried = newestKnown ?? Date()
         for item in nextUp {
             if let played = parseDate(item.userData?.lastPlayedDate) {
                 carried = played
