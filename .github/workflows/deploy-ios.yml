@@ -23,7 +23,7 @@ env:
   # 'latest' (not 'latest-stable'): the xcode-27 image only carries a beta
   # until 27.0 GA reaches it. TestFlight accepts beta-Xcode uploads; App
   # Store submission needs a GA iOS SDK.
-  XCODE_VERSION: 'latest'
+  XCODE_VERSION: 'latest-stable'  # 'latest' picked the Xcode 27.2 beta; App Store Connect rejects beta-SDK uploads
 
 jobs:
   deploy:
