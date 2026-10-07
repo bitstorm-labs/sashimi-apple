@@ -102,8 +102,13 @@ extension PlayerViewModel {
             } catch {
                 return
             }
-            guard !Task.isCancelled else { return }
-            await self?.upNextCountdownElapsed()
+            guard !Task.isCancelled, let self else { return }
+            // The wait is over: let go of this task before playing. The
+            // transition clears the Up Next screen, which cancels
+            // `upNextCountdownTask` — while that was still this task, the
+            // transition cancelled itself and the next episode never loaded.
+            self.upNextCountdownTask = nil
+            await self.upNextCountdownElapsed()
         }
     }
 

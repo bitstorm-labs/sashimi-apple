@@ -296,6 +296,28 @@ final class EpisodeUpNextPlayerTests: XCTestCase {
         XCTAssertEqual(harness.reporter.events, ["completed:e1"], "No second report for the finished episode")
     }
 
+    /// The real countdown task, not a hand call to `upNextCountdownElapsed`:
+    /// the transition it starts clears the Up Next screen, which cancelled
+    /// the countdown task it was running on, so the next episode never
+    /// loaded and the player was left on the finished one (#622).
+    func testTheCountdownTaskItselfStartsTheNextEpisode() async {
+        let harness = makeHarness(episodes: [upNextEpisode("e1", 1), upNextEpisode("e2", 2)])
+        // A short real wait so the countdown task runs on its own.
+        harness.viewModel.upNextSleep = { _ in try await Task.sleep(nanoseconds: 20_000_000) }
+        await finishFirstEpisode(harness)
+        XCTAssertTrue(harness.viewModel.episodeUpNext?.isCountingDown == true)
+        let countdown = harness.viewModel.upNextCountdownTask
+        XCTAssertNotNil(countdown)
+
+        advanceClock(harness, by: 11)
+        await countdown?.value
+
+        XCTAssertEqual(harness.loader.loadedItemIDs, ["e2"], "The countdown must play the next episode")
+        XCTAssertNil(harness.viewModel.episodeUpNext)
+        XCTAssertFalse(harness.viewModel.playbackEnded, "The player must not be left on the finished episode")
+        XCTAssertEqual(harness.reporter.events, ["completed:e1"])
+    }
+
     func testCancelKeepsTheScreenAndNothingStartsOnItsOwn() async {
         let harness = makeHarness(episodes: [upNextEpisode("e1", 1), upNextEpisode("e2", 2)])
         await finishFirstEpisode(harness)
