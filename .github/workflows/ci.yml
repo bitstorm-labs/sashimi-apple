@@ -1,10 +1,37 @@
 name: CI
 
+# Required checks (branch protection on main): "Build tvOS App" and "SwiftLint".
+# Each platform job builds and tests with the SAME runner image + Xcode
+# selector its deploy workflow ships with, so green CI means the shipping
+# toolchain builds it:
+#
+#   platform     runner     Xcode selector   deploy workflow
+#   tvOS         macos-15   latest-stable    deploy.yml       (Xcode 26.x)
+#   iOS          xcode-27   latest-stable    deploy-ios.yml   (newest GA Xcode 27)
+#   Mac          xcode-27   latest-stable    deploy-mac.yml   (newest GA Xcode 27)
+#
+# scripts/check-toolchains.rb (the "Release tooling" job) fails if a pair
+# drifts. The Xcode beta only runs in the non-blocking "Forward compat" job.
+
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # The merge queue builds the queued merge commit; required checks must run
+  # on it or the queue waits forever.
+  merge_group:
+  # The nightly flaky-test run calls this workflow with tests_only + 2 iterations.
+  workflow_call:
+    inputs:
+      test_iterations:
+        description: 'Run each unit test this many times (all must pass)'
+        type: number
+        default: 1
+      tests_only:
+        description: 'Skip lint / forward-compat / tooling jobs'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,10 +40,9 @@ concurrency:
 jobs:
   build:
     name: Build tvOS App
-    # xcode-27 is GitHub's Xcode 27 image (macOS 27, iOS/tvOS 27 SDKs), still a
-    # public preview -- see actions/runner-images#14404. macos-15 / macos-26 top
-    # out at Xcode 26.x, which cannot compile against iOS 27 APIs.
-    runs-on: xcode-27
+    # TOOLCHAIN (tvOS) = deploy.yml: macos-15 + latest-stable (Xcode 26.x).
+    runs-on: macos-15
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -25,9 +51,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          # 'latest': the xcode-27 image only carries a beta until 27.0 GA
-          # reaches it, and 'latest-stable' would then have nothing to select.
-          xcode-version: 'latest'
+          xcode-version: 'latest-stable'
 
       - name: Install tvOS Platform
         run: |
@@ -97,18 +121,28 @@ jobs:
           xcrun simctl create "ci-atv" "Apple TV 4K (3rd generation)" "$RUNTIME"
 
       - name: Run Tests
+        env:
+          TEST_ITERATIONS: ${{ inputs.test_iterations || 1 }}
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
+          # xcodebuild rejects -test-iterations 1, so pass it only for >1
+          # (the nightly flaky-test run).
+          ITERATIONS=()
+          if [ "$TEST_ITERATIONS" -gt 1 ]; then ITERATIONS=(-test-iterations "$TEST_ITERATIONS"); fi
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
             -destination 'platform=tvOS Simulator,name=ci-atv' \
+            "${ITERATIONS[@]}" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
   build-ios:
     name: Build iOS App
+    # TOOLCHAIN (iOS) = deploy-ios.yml: xcode-27 + latest-stable (newest GA
+    # Xcode 27). xcode-27 is a public-preview image (actions/runner-images#14404).
     runs-on: xcode-27
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -117,7 +151,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          xcode-version: 'latest'
+          xcode-version: 'latest-stable'
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -181,18 +215,28 @@ jobs:
           xcrun simctl create "ci-iphone" "$DEVICE_TYPE" "$RUNTIME"
 
       - name: Run Tests
+        env:
+          TEST_ITERATIONS: ${{ inputs.test_iterations || 1 }}
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
+          # xcodebuild rejects -test-iterations 1, so pass it only for >1
+          # (the nightly flaky-test run).
+          ITERATIONS=()
+          if [ "$TEST_ITERATIONS" -gt 1 ]; then ITERATIONS=(-test-iterations "$TEST_ITERATIONS"); fi
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme SashimiMobile \
             -destination 'platform=iOS Simulator,name=ci-iphone' \
+            "${ITERATIONS[@]}" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
   build-mac:
     name: Build Mac Catalyst App
+    # TOOLCHAIN (Mac) = deploy-mac.yml: xcode-27 + latest-stable.
+    if: ${{ !inputs.tests_only }}
     runs-on: xcode-27
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -201,7 +245,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          xcode-version: 'latest'
+          xcode-version: 'latest-stable'
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -234,6 +278,7 @@ jobs:
 
   swiftlint:
     name: SwiftLint
+    if: ${{ !inputs.tests_only }}
     # Lints with its own bundled SwiftSyntax; no SDK involved, so it does not
     # need the Xcode 27 image.
     runs-on: macos-15
@@ -256,3 +301,78 @@ jobs:
           unzip -qo /tmp/swiftlint.zip -d /tmp/swiftlint
           /tmp/swiftlint/swiftlint version
           /tmp/swiftlint/swiftlint lint --strict --reporter github-actions-logging
+
+  forward-compat:
+    # NOT a required check and never blocks a merge: an early warning that the
+    # next Xcode (the beta on the xcode-27 image) breaks the build, before it
+    # becomes the shipping toolchain. Build only, no tests; skipped in the
+    # merge queue to keep the queue fast.
+    name: Forward compat (Xcode beta, non-blocking)
+    if: ${{ !inputs.tests_only && github.event_name != 'merge_group' }}
+    runs-on: xcode-27
+    continue-on-error: true
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          # Deliberately the newest Xcode INCLUDING betas. The only job allowed
+          # 'latest' (scripts/check-toolchains.rb).
+          xcode-version: 'latest'
+
+      - name: Install tvOS Platform
+        run: |
+          for _ in 1 2 3; do
+            xcodebuild -downloadPlatform tvOS && break
+            sleep 10
+          done
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build tvOS and iOS (Simulator)
+        shell: bash
+        run: |
+          xcodebuild -version
+          for target in "Sashimi|generic/platform=tvOS Simulator" "SashimiMobile|generic/platform=iOS Simulator"; do
+            xcodebuild build \
+              -project Sashimi.xcodeproj \
+              -scheme "${target%%|*}" \
+              -destination "${target#*|}" \
+              -configuration Debug \
+              CODE_SIGNING_ALLOWED=NO \
+              | xcpretty --color
+          done
+
+  release-tooling:
+    # Fast Linux checks for the release machinery: the TestFlight notes helper's
+    # unit tests and the CI-vs-deploy toolchain pairing.
+    name: Release tooling
+    if: ${{ !inputs.tests_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: '3.3'
+
+      - name: TestFlight notes helper tests
+        run: ruby scripts/test/release_notes_test.rb
+
+      - name: CI and deploy toolchains match
+        run: ruby scripts/check-toolchains.rb
+
+      - name: Version check script
+        run: scripts/check-version.sh ""

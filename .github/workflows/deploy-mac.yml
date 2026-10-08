@@ -1,10 +1,13 @@
 name: Deploy Mac
 
 # The Mac app: SashimiMobile built for Mac Catalyst, uploaded to TestFlight as
-# the macOS platform of the same app. Mirrors deploy-ios.yml. Needs the
-# one-time setup in docs/RELEASING.md ("Mac (Mac Catalyst)") before the first
-# run: Mac Catalyst on the App ID, the macOS platform in App Store Connect,
-# and the Catalyst profile + Mac installer certificate in match.
+# the macOS platform of the same app. Three ways in:
+#   * the Release workflow calls it (workflow_call) -- the normal path;
+#   * a hand-pushed mac-vX.Y.Z-betaN tag;
+#   * Actions -> Deploy Mac -> Run workflow (dry_run archives, signs and
+#     exports the .pkg, but does not upload).
+# Signing is Apple cloud-managed via the App Store Connect API key (see the
+# `platform :mac` lanes in fastlane/Fastfile): no match certificates/profiles.
 
 on:
   workflow_dispatch:
@@ -16,28 +19,70 @@ on:
         type: choice
         options:
           - testflight
+      dry_run:
+        description: 'Dry run: build and sign, but do not upload'
+        type: boolean
+        default: false
+
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to build'
+        type: string
+        required: true
+      tag:
+        description: 'Release tag (mac-vX.Y.Z-betaN); MARKETING_VERSION must match it'
+        type: string
+        required: true
+      notes:
+        description: 'TestFlight notes; blank = generated from commits'
+        type: string
+        default: ''
+      dry_run:
+        type: boolean
+        default: false
+      environment:
+        type: string
+        default: 'testflight'
 
   push:
     tags:
       - 'mac-v*'
 
+permissions:
+  contents: read
+
 env:
-  # 'latest-stable', as deploy-ios.yml: 'latest' picked an Xcode beta and
-  # App Store Connect rejects beta-SDK uploads.
+  # TOOLCHAIN (iOS + Mac, same as deploy-ios.yml): xcode-27 + latest-stable = the newest GA Xcode 27.
+  # Never bare 'latest': it picked an Xcode beta and App Store Connect rejected
+  # the upload ("Unsupported SDK or Xcode version"). ci.yml's "Build Mac Catalyst App"
+  # uses the SAME runner + selector (scripts/check-toolchains.rb enforces it).
+  # xcode-27 is GitHub's Xcode 27 image, still a public preview --
+  # actions/runner-images#14404.
   XCODE_VERSION: 'latest-stable'
 
 jobs:
   deploy:
-    name: Deploy Mac to ${{ github.event.inputs.environment || 'testflight' }}
+    name: Deploy Mac to ${{ inputs.environment || 'testflight' }}${{ inputs.dry_run && ' (dry run)' || '' }}
     runs-on: xcode-27
-    environment: ${{ github.event.inputs.environment || 'testflight' }}
+    environment: ${{ inputs.environment || 'testflight' }}
     timeout-minutes: 40
+    env:
+      # Tag being shipped: the Release workflow's, or the pushed/selected tag.
+      RELEASE_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      LANE: ${{ inputs.environment == 'appstore' && 'release' || 'beta' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0  # tags + history for the TestFlight notes
+
+      - name: Check MARKETING_VERSION matches the tag
+        run: scripts/check-version.sh "$RELEASE_TAG"
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
@@ -68,15 +113,22 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_CONNECT_KEY_CONTENT" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_"$APP_STORE_CONNECT_KEY_ID".p8
 
-      - name: Deploy to TestFlight
+      - name: Deploy to TestFlight${{ inputs.dry_run && ' (dry run, no upload)' || '' }}
+        if: env.LANE == 'beta'
         env:
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane mac beta
+        run: bundle exec fastlane mac beta dry_run:"$DRY_RUN"
+
+      - name: Revoke certificates created on this runner
+        if: always()
+        continue-on-error: true
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+        run: bundle exec fastlane mac revoke_runner_certificates
 
       - name: Upload Build Artifacts
         if: always()
@@ -84,7 +136,7 @@ jobs:
         with:
           name: Sashimi-mac-build
           path: |
-            fastlane/build/*.pkg
-            fastlane/build/*.dSYM.zip
+            build/*.pkg
+            build/ExportOptions-mac.plist
           retention-days: 30
           if-no-files-found: ignore

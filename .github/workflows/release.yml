@@ -1,52 +1,320 @@
 name: Release
 
+# One click: Actions -> Release -> Run workflow (or `gh workflow run release.yml`).
+#
+#   1. bump    MARKETING_VERSION (project.yml x3) in a PR from release/vX.Y.Z,
+#              queued for merge (auto-merge / merge queue). Skipped when main
+#              is already at the version (beta2 / one-platform re-releases).
+#   2. tag     the merge commit: vX.Y.Z-betaN (tvOS), ios-vX.Y.Z-betaN,
+#              mac-vX.Y.Z-betaN -- only for the platforms selected.
+#   3. deploy  by CALLING deploy.yml / deploy-ios.yml / deploy-mac.yml with
+#              that commit and tag (workflow_call). Deploys do not depend on
+#              the tag push triggering anything: tags pushed with GITHUB_TOKEN
+#              deliberately trigger no workflows, so nothing ships twice.
+#
+# dry_run: everything except the PR, merge, tags and uploads. The bump is
+# committed to a throwaway release-dry-run/<run id> branch (deleted at the
+# end), and each selected deploy builds and signs that commit without
+# uploading.
+#
+# Needs secret RELEASE_TOKEN (not for dry runs): a fine-grained PAT on this
+# repo with Contents + Pull requests read/write. GITHUB_TOKEN can't do step 1:
+# a PR it opens never triggers CI (events from GITHUB_TOKEN start no
+# workflows), so the required checks would never report and the merge would
+# never happen. See docs/RELEASING.md.
+
 on:
-  push:
-    tags:
-      - 'v*'
-      # Prerelease tags are handled by deploy.yml — exclude them here
-      - '!v*-beta*'
-      - '!v*-rc*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version X.Y.Z (blank = next patch after main)'
+        type: string
+        default: ''
+      beta:
+        description: 'Beta number (tags end -betaN)'
+        type: string
+        default: '1'
+      tvos:
+        description: 'tvOS'
+        type: boolean
+        default: true
+      ios:
+        description: 'iOS / iPad'
+        type: boolean
+        default: true
+      macos:
+        description: 'macOS (Mac Catalyst)'
+        type: boolean
+        default: true
+      notes:
+        description: 'TestFlight notes, all platforms ("\n" = new line). Blank = generated per platform from commits'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Dry run: no PR, merge, tags or uploads (builds and signs only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  build-release:
-    name: Build Release Archive
-    # xcode-27 is GitHub's Xcode 27 image (macOS 27, iOS/tvOS 27 SDKs), still a
-    # public preview -- see actions/runner-images#14404. macos-15 / macos-26 top
-    # out at Xcode 26.x, which cannot compile against iOS 27 APIs.
-    runs-on: xcode-27
+  prepare:
+    name: Bump version${{ inputs.dry_run && ' (dry run)' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # waits for the bump PR's CI + merge
+    permissions:
+      contents: write   # dry run: push the throwaway release-dry-run/* branch
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
+      tvos_tag: ${{ steps.plan.outputs.tvos_tag }}
+      ios_tag: ${{ steps.plan.outputs.ios_tag }}
+      mac_tag: ${{ steps.plan.outputs.mac_tag }}
+      notes: ${{ steps.plan.outputs.notes }}
+      dry_run_branch: ${{ steps.commit.outputs.dry_run_branch }}
+    env:
+      VERSION_IN: ${{ inputs.version }}
+      BETA_IN: ${{ inputs.beta }}
+      NOTES_IN: ${{ inputs.notes }}
+      WANT_TVOS: ${{ inputs.tvos }}
+      WANT_IOS: ${{ inputs.ios }}
+      WANT_MAC: ${{ inputs.macos }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      GH_REPO: ${{ github.repository }}
 
+    steps:
+      - name: Real releases run from main
+        if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Run the Release workflow on main (dry runs may use any branch)."
+          exit 1
+
+      # The dispatched ref: main for a real release, any branch for a dry run
+      # (so changes to this machinery can be dry-run before they merge).
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          # The bump branch is pushed with these credentials: RELEASE_TOKEN for
+          # a real release, GITHUB_TOKEN for a dry run's throwaway branch.
+          token: ${{ (!inputs.dry_run && secrets.RELEASE_TOKEN) || github.token }}
+
+      - name: Plan
+        id: plan
+        run: |
+          set -euo pipefail
+          echo "Releasing from $GITHUB_REF @ $(git rev-parse --short HEAD)"
+          current=$(grep -m1 -E '^\s*MARKETING_VERSION:' project.yml | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"?([0-9.]+).*/\1/')
+          if [ -z "$VERSION_IN" ]; then
+            IFS=. read -r ma mi pa <<< "$current"
+            version="$ma.$mi.$((pa + 1))"
+          else
+            version="$VERSION_IN"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version '$version' is not X.Y.Z"; exit 1; }
+          [[ "$BETA_IN" =~ ^[0-9]+$ ]] || { echo "::error::beta '$BETA_IN' is not a number"; exit 1; }
+          lowest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | head -1)
+          if [ "$lowest" != "$current" ]; then
+            echo "::error::version $version is lower than main's $current"; exit 1
+          fi
+          if [ "$WANT_TVOS$WANT_IOS$WANT_MAC" = "falsefalsefalse" ]; then
+            echo "::error::select at least one platform"; exit 1
+          fi
+
+          suffix="v$version-beta$BETA_IN"
+          tvos_tag=""; ios_tag=""; mac_tag=""
+          [ "$WANT_TVOS" = true ] && tvos_tag="$suffix"
+          [ "$WANT_IOS" = true ] && ios_tag="ios-$suffix"
+          [ "$WANT_MAC" = true ] && mac_tag="mac-$suffix"
+          for t in $tvos_tag $ios_tag $mac_tag; do
+            if git rev-parse -q --verify "refs/tags/$t" >/dev/null; then
+              echo "::error::tag $t already exists. Pick the next beta number."; exit 1
+            fi
+          done
+
+          # Workflow inputs are one line; "\n" in the notes means a new line.
+          notes=$(printf '%b' "$NOTES_IN")
+
+          {
+            echo "current=$current"
+            echo "version=$version"
+            echo "tvos_tag=$tvos_tag"
+            echo "ios_tag=$ios_tag"
+            echo "mac_tag=$mac_tag"
+            echo "notes<<NOTES_EOF_$GITHUB_RUN_ID"
+            echo "$notes"
+            echo "NOTES_EOF_$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release $version (beta $BETA_IN)"
+            [ "$DRY_RUN" = true ] && echo "**Dry run** -- no PR, merge, tags or uploads."
+            echo ""
+            echo "| Platform | Tag |"
+            echo "|---|---|"
+            echo "| tvOS | ${tvos_tag:-skipped} |"
+            echo "| iOS | ${ios_tag:-skipped} |"
+            echo "| macOS | ${mac_tag:-skipped} |"
+            echo ""
+            echo "main is at $current; bump needed: $([ "$current" = "$version" ] && echo no || echo yes)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require RELEASE_TOKEN
+        if: inputs.dry_run == false && steps.plan.outputs.current != steps.plan.outputs.version
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error title=RELEASE_TOKEN missing::Add a RELEASE_TOKEN repository secret (fine-grained PAT, this repo, Contents + Pull requests read/write). See docs/RELEASING.md."
+            exit 1
+          fi
+
+      - name: Bump, PR, wait for merge
+        id: commit
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          CURRENT: ${{ steps.plan.outputs.current }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "main is already at $VERSION: re-release, no bump."
+            scripts/check-version.sh "$VERSION"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          scripts/bump-version.sh "$VERSION"
+          scripts/check-version.sh "$VERSION"
+          git add project.yml
+          git commit -m "chore: $VERSION"
+
+          if [ "$DRY_RUN" = true ]; then
+            branch="release-dry-run/$GITHUB_RUN_ID"
+            git push origin "HEAD:refs/heads/$branch"
+            echo "dry_run_branch=$branch" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "Dry run: bump committed to $branch (no PR)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Real release: push + PR with RELEASE_TOKEN so CI runs on the PR.
+          export GH_TOKEN="$RELEASE_TOKEN"
+          branch="release/v$VERSION"
+          git push origin "HEAD:refs/heads/$branch"
+          url=$(gh pr create --base main --head "$branch" \
+            --title "chore: $VERSION" \
+            --body "Version bump for the $VERSION release, opened by the Release workflow ($GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID). Merges itself when the required checks pass.")
+          echo "Bump PR: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Queues the PR (merge queue) / enables auto-merge; merges on green.
+          gh pr merge "$url" --auto --squash
+
+          # Wait up to ~110 min for the merge (CI is ~20 min, plus the queue).
+          for _ in $(seq 1 220); do
+            read -r state sha < <(gh pr view "$url" --json state,mergeCommit --jq '"\(.state) \(.mergeCommit.oid // "")"')
+            case "$state" in
+              MERGED)
+                echo "Merged as $sha"
+                echo "sha=$sha" >> "$GITHUB_OUTPUT"
+                exit 0 ;;
+              CLOSED)
+                echo "::error::$url was closed without merging"; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::$url did not merge in time; check its CI. Re-run this workflow once it merges (it will skip the bump)."
+          exit 1
+
+  tag:
+    name: Tag
+    needs: prepare
+    if: inputs.dry_run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ needs.prepare.outputs.sha }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAGS: ${{ needs.prepare.outputs.tvos_tag }} ${{ needs.prepare.outputs.ios_tag }} ${{ needs.prepare.outputs.mac_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          xcode-version: 'latest'
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
 
-      - name: Install tvOS Platform
+      - name: Tag the merge commit
+        # Pushed with GITHUB_TOKEN on purpose: such pushes start no workflows,
+        # so the tag-triggered deploys don't fire a second time -- this
+        # workflow calls them below.
         run: |
-          xcodebuild -downloadPlatform tvOS
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          scripts/check-version.sh "$VERSION"
+          for t in $TAGS; do
+            git tag -a "$t" -m "Sashimi $t" "$SHA"
+          done
+          # shellcheck disable=SC2086 # word-splitting the tag list is intended
+          git push origin $TAGS
+          echo "Tagged $SHA: $TAGS" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+  deploy-tvos:
+    name: tvOS
+    needs: [prepare, tag]
+    if: ${{ always() && inputs.tvos && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/deploy.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.tvos_tag }}
+      notes: ${{ needs.prepare.outputs.notes }}
+      dry_run: ${{ inputs.dry_run }}
+    secrets: inherit
 
-      - name: Generate Xcode Project
-        run: xcodegen generate
+  deploy-ios:
+    name: iOS
+    needs: [prepare, tag]
+    if: ${{ always() && inputs.ios && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-ios.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.ios_tag }}
+      notes: ${{ needs.prepare.outputs.notes }}
+      dry_run: ${{ inputs.dry_run }}
+    secrets: inherit
 
-      - name: Build Archive
-        run: |
-          xcodebuild archive \
-            -project Sashimi.xcodeproj \
-            -scheme Sashimi \
-            -sdk appletvos \
-            -archivePath build/Sashimi.xcarchive \
-            CODE_SIGNING_ALLOWED=NO
+  deploy-mac:
+    name: macOS
+    needs: [prepare, tag]
+    if: ${{ always() && inputs.macos && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/deploy-mac.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.mac_tag }}
+      notes: ${{ needs.prepare.outputs.notes }}
+      dry_run: ${{ inputs.dry_run }}
+    secrets: inherit
 
-      - name: Upload Archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: Sashimi-${{ github.ref_name }}
-          path: build/Sashimi.xcarchive
-          retention-days: 90
+  cleanup:
+    name: Delete dry-run branch
+    needs: [prepare, deploy-tvos, deploy-ios, deploy-mac]
+    if: ${{ always() && needs.prepare.outputs.dry_run_branch != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete ${{ needs.prepare.outputs.dry_run_branch }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.prepare.outputs.dry_run_branch }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH"

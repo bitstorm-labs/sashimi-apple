@@ -1,7 +1,14 @@
 name: Deploy
 
+# tvOS -> TestFlight (or the App Store). Three ways in:
+#   * the Release workflow calls it (workflow_call) -- the normal path;
+#   * a hand-pushed vX.Y.Z-betaN / -rcN tag;
+#   * Actions -> Deploy -> Run workflow (dry_run builds + signs, no upload).
+# iOS ships from deploy-ios.yml only. (This workflow used to ALSO run the iOS
+# lane, so every tvOS tag uploaded a second iOS build, made with this job's
+# older Xcode.)
+
 on:
-  # Manual trigger with environment selection
   workflow_dispatch:
     inputs:
       environment:
@@ -12,36 +19,70 @@ on:
         options:
           - testflight
           - appstore
+      dry_run:
+        description: 'Dry run: build and sign, but do not upload'
+        type: boolean
+        default: false
 
-  # Auto-deploy to TestFlight on release tags
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to build'
+        type: string
+        required: true
+      tag:
+        description: 'Release tag (vX.Y.Z-betaN); MARKETING_VERSION must match it'
+        type: string
+        required: true
+      notes:
+        description: 'TestFlight notes; blank = generated from commits'
+        type: string
+        default: ''
+      dry_run:
+        type: boolean
+        default: false
+      environment:
+        type: string
+        default: 'testflight'
+
   push:
     tags:
       - 'v*-beta*'
       - 'v*-rc*'
 
+permissions:
+  contents: read
+
 env:
-  # TEMPORARY REVERT (see 2026-09-17 tvOS beta2 failure): App Store Connect
-  # rejected an Xcode 27.0.0 (27A5252f) tvOS upload with "Unsupported SDK or
-  # Xcode version ... need the latest Release Candidate to submit." The
-  # identical toolchain was accepted for the iOS upload the same day (see
-  # deploy-ios.yml, which stays on xcode-27/latest), so this is a tvOS-SDK-
-  # specific Apple-side gate, not a build problem. Revert to the last known-
-  # working config until Apple/GitHub ship an RC-qualified Xcode 27 tvOS SDK,
-  # then switch back to xcode-27/latest to match deploy-ios.yml.
-  XCODE_VERSION: 'latest-stable'  # Apple requires tvOS 26 SDK (Xcode 26+) for uploads
+  # TOOLCHAIN (tvOS): macos-15 + latest-stable (Xcode 26.x). App Store Connect
+  # rejected a tvOS upload built with Xcode 27.0 ("Unsupported SDK or Xcode
+  # version", 2026-09-17), so tvOS stays here until a GA Xcode 27 tvOS upload
+  # is proven. ci.yml's "Build tvOS App" uses the SAME runner + selector --
+  # keep them in step (scripts/check-toolchains.rb fails CI if they drift).
+  XCODE_VERSION: 'latest-stable'
 
 jobs:
   deploy:
-    name: Deploy to ${{ github.event.inputs.environment || 'testflight' }}
+    name: Deploy tvOS to ${{ inputs.environment || 'testflight' }}${{ inputs.dry_run && ' (dry run)' || '' }}
     runs-on: macos-15
-    environment: ${{ github.event.inputs.environment || 'testflight' }}
+    environment: ${{ inputs.environment || 'testflight' }}
     timeout-minutes: 40
+    env:
+      # Tag being shipped: the Release workflow's, or the pushed/selected tag.
+      RELEASE_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      LANE: ${{ inputs.environment == 'appstore' && 'release' || 'beta' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0  # tags + history for the TestFlight notes
+
+      - name: Check MARKETING_VERSION matches the tag
+        run: scripts/check-version.sh "$RELEASE_TAG"
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
@@ -92,10 +133,10 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane certificates
+        run: bundle exec fastlane tvos certificates
 
-      - name: Deploy to TestFlight
-        if: github.event.inputs.environment == 'testflight' || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+      - name: Deploy to TestFlight${{ inputs.dry_run && ' (dry run, no upload)' || '' }}
+        if: env.LANE == 'beta'
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
@@ -103,23 +144,10 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane beta
-
-      # The iOS (SashimiMobile) beta lane fetches its own match certs and
-      # stamps its own epoch build number, so it runs standalone after tvOS.
-      - name: Deploy iOS to TestFlight
-        if: github.event.inputs.environment == 'testflight' || contains(github.ref, 'beta') || contains(github.ref, 'rc')
-        env:
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane ios beta
+        run: bundle exec fastlane tvos beta dry_run:"$DRY_RUN"
 
       - name: Deploy to App Store
-        if: github.event.inputs.environment == 'appstore'
+        if: env.LANE == 'release' && env.DRY_RUN != 'true'
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
@@ -127,13 +155,15 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane release
+        run: bundle exec fastlane tvos release
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Sashimi-build
+          name: Sashimi-tvOS-build
+          # gym's output_directory "./build" resolves from the project root
+          # (the old fastlane/build/* paths matched nothing).
           path: |
-            fastlane/build/*.ipa
-            fastlane/build/*.dSYM.zip
+            build/*.ipa
+            build/*.dSYM.zip
           retention-days: 30

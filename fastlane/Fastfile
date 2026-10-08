@@ -1,7 +1,22 @@
 # Fastfile for Sashimi tvOS App
 # Documentation: https://docs.fastlane.tools
 
+# Short TestFlight "What to Test" notes (see scripts/release_notes.rb).
+require_relative "../scripts/release_notes"
+
 default_platform(:tvos)
+
+# dry_run:true (passed by the deploy workflows' dry_run input) does everything
+# except the TestFlight upload, so signing + build can be proven on CI.
+def dry_run?(options)
+  options[:dry_run].to_s == "true"
+end
+
+def testflight_notes(platform)
+  notes = ReleaseNotes.for_platform(platform, current_tag: ENV["RELEASE_TAG"])
+  UI.message("TestFlight notes:\n#{notes}")
+  notes
+end
 
 platform :tvos do
   # ============================================
@@ -71,8 +86,8 @@ platform :tvos do
   # TESTFLIGHT (BETA)
   # ============================================
 
-  desc "Push a new build to TestFlight"
-  lane :beta do
+  desc "Push a new build to TestFlight (dry_run:true builds and signs but does not upload)"
+  lane :beta do |options|
     ensure_git_status_clean unless is_ci
 
     # Authenticate with the App Store Connect API key BEFORE any ASC query
@@ -94,19 +109,19 @@ platform :tvos do
     # Build
     build
 
+    notes = testflight_notes(:tvos)
+    if dry_run?(options)
+      UI.important("dry_run: skipping the TestFlight upload")
+      next
+    end
+
     # Upload to TestFlight
     upload_to_testflight(
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
       app_platform: "appletvos",
       skip_waiting_for_build_processing: true,
-      # Only this build's changes (commits since the previous beta tag),
-      # merge commits excluded — keeps TestFlight notes short.
-      changelog: changelog_from_git_commits(
-        tag_match_pattern: "v*-beta.*",
-        pretty: "- %s",
-        merge_commit_filtering: "exclude_merges"
-      )
+      changelog: notes
     )
 
     # Commit version bump
@@ -210,8 +225,8 @@ platform :ios do
     )
   end
 
-  desc "Push a new iOS build to TestFlight"
-  lane :beta do
+  desc "Push a new iOS build to TestFlight (dry_run:true builds and signs but does not upload)"
+  lane :beta do |options|
     ensure_git_status_clean unless is_ci
 
     api_key = app_store_connect_api_key(
@@ -227,15 +242,17 @@ platform :ios do
     certificates
     build
 
+    notes = testflight_notes(:ios)
+    if dry_run?(options)
+      UI.important("dry_run: skipping the TestFlight upload")
+      next
+    end
+
     upload_to_testflight(
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
       skip_waiting_for_build_processing: true,
-      changelog: changelog_from_git_commits(
-        tag_match_pattern: "v*-beta.*",
-        pretty: "- %s",
-        merge_commit_filtering: "exclude_merges"
-      )
+      changelog: notes
     )
   end
 end
@@ -245,28 +262,16 @@ end
 # com.mondominator.sashimi, so it is the macOS platform of the one Universal
 # Purchase app. Uploads a .pkg to TestFlight for macOS.
 #
-# One-time account setup (cannot be done from CI; see docs/RELEASING.md):
-# Mac Catalyst enabled on the App ID, macOS platform added to the app in App
-# Store Connect, and `fastlane mac certificates_create` run once locally to
-# put the Catalyst App Store profile and the Mac installer certificate into
-# the match repo. CI then only reads them (readonly).
+# Signing is Apple CLOUD-MANAGED, not match: xcodebuild gets the App Store
+# Connect API key (-allowProvisioningUpdates + -authenticationKey*), creates or
+# downloads the Catalyst profile itself, and the export signs the app and the
+# installer .pkg with Apple's cloud-managed distribution certificates. Nothing
+# to set up in the match repo. Requires the API key to have the Admin role
+# (cloud-managed distribution certificates need it) and the one-time account
+# setup in docs/RELEASING.md (Mac Catalyst on the App ID, macOS platform in
+# App Store Connect).
 # ============================================================================
 platform :mac do
-  # match names the Catalyst profile with a "catalyst" suffix.
-  MAC_PROFILE = "match AppStore com.mondominator.sashimi catalyst".freeze
-
-  def mac_match(readonly:)
-    match(
-      type: "appstore",
-      app_identifier: "com.mondominator.sashimi",
-      platform: "catalyst",
-      # The .pkg uploaded to App Store Connect is signed with the Mac
-      # installer certificate, on top of the app's Apple Distribution one.
-      additional_cert_types: ["mac_installer_distribution"],
-      readonly: readonly
-    )
-  end
-
   def mac_api_key
     app_store_connect_api_key(
       key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
@@ -276,68 +281,137 @@ platform :mac do
     )
   end
 
-  desc "ONE-TIME, run locally: create the Mac Catalyst App Store profile and Mac installer cert in match"
-  lane :certificates_create do
-    UI.user_error!("Run this locally, not on CI") if is_ci
-    mac_api_key
-    mac_match(readonly: false)
+  # xcodebuild's own App Store Connect authentication. The deploy workflow
+  # writes the .p8 to ~/.appstoreconnect/private_keys (as for iOS/tvOS).
+  def xcode_auth_args
+    key_id = ENV.fetch("APP_STORE_CONNECT_KEY_ID")
+    key_path = ENV["APP_STORE_CONNECT_KEY_PATH"] ||
+               File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")
+    UI.user_error!("App Store Connect key not found at #{key_path}") unless File.exist?(key_path)
+    [
+      "-allowProvisioningUpdates",
+      "-authenticationKeyPath", key_path,
+      "-authenticationKeyID", key_id,
+      "-authenticationKeyIssuerID", ENV.fetch("APP_STORE_CONNECT_ISSUER_ID")
+    ]
   end
 
-  desc "Sync the Mac Catalyst certificates and profile from match (read-only)"
-  lane :certificates do
-    setup_ci
-    mac_api_key
-    mac_match(readonly: true)
-  end
-
-  desc "Build the Mac Catalyst app as an App Store .pkg"
-  lane :build do
+  desc "Archive + export the Mac Catalyst app as an App Store .pkg (cloud-managed signing)"
+  lane :build do |options|
     # Do NOT run xcodegen here (it would reset the build number; see the
-    # tvOS build lane).
-    update_code_signing_settings(
-      path: "Sashimi.xcodeproj",
-      use_automatic_signing: false,
-      team_id: CredentialsManager::AppfileConfig.try_fetch_value(:team_id),
-      targets: ["SashimiMobile"],
-      code_sign_identity: "Apple Distribution",
-      profile_name: MAC_PROFILE,
-      build_configurations: ["Release"]
+    # tvOS build lane). Lanes run inside fastlane/, hence the ../ paths.
+    team_id = CredentialsManager::AppfileConfig.try_fetch_value(:team_id)
+    build_number = options[:build_number] || Time.now.to_i.to_s
+    # ../build: the same root-level build/ that gym's "./build" lands in for
+    # tvOS/iOS (actions run from the project root, Fastfile code in fastlane/).
+    out_dir = File.expand_path("../build")
+    archive = File.join(out_dir, "Sashimi-mac.xcarchive")
+    export_options = File.join(out_dir, "ExportOptions-mac.plist")
+    FileUtils.mkdir_p(out_dir)
+    FileUtils.rm_rf(archive)
+
+    sh(
+      "xcodebuild", "archive",
+      "-project", File.expand_path("../Sashimi.xcodeproj"),
+      "-scheme", "SashimiMobile",
+      "-configuration", "Release",
+      "-destination", "generic/platform=macOS,variant=Mac Catalyst",
+      "-archivePath", archive,
+      *xcode_auth_args,
+      "CODE_SIGN_STYLE=Automatic",
+      "DEVELOPMENT_TEAM=#{team_id}",
+      "CURRENT_PROJECT_VERSION=#{build_number}"
     )
 
-    build_app(
-      project: "Sashimi.xcodeproj",
-      scheme: "SashimiMobile",
-      destination: "generic/platform=macOS,variant=Mac Catalyst",
-      catalyst_platform: "macos",
-      configuration: "Release",
-      export_method: "app-store",
-      output_directory: "./build",
-      output_name: "Sashimi-mac"
+    File.write(export_options, <<~PLIST)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>method</key><string>app-store-connect</string>
+        <key>signingStyle</key><string>automatic</string>
+        <key>teamID</key><string>#{team_id}</string>
+        <key>destination</key><string>export</string>
+        <key>manageAppVersionAndBuildNumber</key><false/>
+        <key>uploadSymbols</key><true/>
+      </dict>
+      </plist>
+    PLIST
+
+    sh(
+      "xcodebuild", "-exportArchive",
+      "-archivePath", archive,
+      "-exportOptionsPlist", export_options,
+      "-exportPath", out_dir,
+      *xcode_auth_args
     )
+
+    pkg = Dir[File.join(out_dir, "*.pkg")].max_by { |f| File.mtime(f) }
+    UI.user_error!("Export produced no .pkg in #{out_dir}") unless pkg
+    sh("pkgutil", "--check-signature", pkg)
+    UI.success("Built #{pkg} (build #{build_number})")
+    lane_context[SharedValues::PKG_OUTPUT_PATH] = pkg
+    pkg
   end
 
-  desc "Push a new Mac build to TestFlight"
-  lane :beta do
+  # An ephemeral runner has no signing identity, so xcodebuild's automatic
+  # signing may create a fresh Apple Development certificate (private key on the
+  # runner only) to sign the archive before the export re-signs it with the
+  # cloud-managed distribution certificate. Left alone, one of those piles up
+  # per run until the account hits its certificate limit. Revoke exactly the
+  # certificates whose private key is in THIS runner's keychain -- they are
+  # unusable anywhere else once the runner is gone.
+  desc "CI only: revoke signing certificates created on this throwaway runner"
+  lane :revoke_runner_certificates do
+    UI.user_error!("Only on CI: this revokes certificates whose key is in the local keychain") unless is_ci
+    require "base64"
+    require "digest"
+    mac_api_key
+
+    identities = sh("security", "find-identity", "-v", "-p", "codesigning", log: false)
+    local = identities.scan(/\b([0-9A-F]{40})\b/).flatten.uniq
+    if local.empty?
+      UI.message("No signing identities on this runner; nothing to revoke")
+      next
+    end
+
+    revoked = 0
+    Spaceship::ConnectAPI::Certificate.all.each do |cert|
+      next if cert.certificate_content.to_s.empty?
+
+      sha1 = Digest::SHA1.hexdigest(Base64.decode64(cert.certificate_content)).upcase
+      next unless local.include?(sha1)
+
+      UI.important("Revoking #{cert.certificate_type} '#{cert.display_name}' (#{cert.id}), created on this runner")
+      cert.delete!
+      revoked += 1
+    end
+    UI.message("Revoked #{revoked} runner certificate(s)")
+  end
+
+  desc "Push a new Mac build to TestFlight (dry_run:true builds, signs and exports but does not upload)"
+  lane :beta do |options|
     ensure_git_status_clean unless is_ci
     api_key = mac_api_key
 
     # Epoch-seconds build number, as on tvOS and iOS: unique and increasing.
-    increment_build_number(build_number: Time.now.to_i.to_s)
+    build_number = Time.now.to_i.to_s
+    increment_build_number(build_number: build_number)
+    pkg = build(build_number: build_number)
 
-    certificates
-    build
+    notes = testflight_notes(:mac)
+    if dry_run?(options)
+      UI.important("dry_run: skipping the TestFlight upload of #{pkg}")
+      next
+    end
 
     upload_to_testflight(
       api_key: api_key,
       app_identifier: "com.mondominator.sashimi",
       app_platform: "osx",
-      pkg: lane_context[SharedValues::PKG_OUTPUT_PATH],
+      pkg: pkg,
       skip_waiting_for_build_processing: true,
-      changelog: changelog_from_git_commits(
-        tag_match_pattern: "mac-v*",
-        pretty: "- %s",
-        merge_commit_filtering: "exclude_merges"
-      )
+      changelog: notes
     )
   end
 end

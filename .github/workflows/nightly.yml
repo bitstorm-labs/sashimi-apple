@@ -1,0 +1,21 @@
+name: Nightly flaky tests
+
+# Runs the tvOS and iOS unit tests twice in a row (-test-iterations 2: every
+# test must pass both times) on main, to surface flaky tests before they
+# flake a PR. Not a required check; a red run here blocks nothing.
+
+on:
+  schedule:
+    - cron: '17 8 * * *'  # 08:17 UTC daily, off the hour to dodge cron congestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit tests x2
+    uses: ./.github/workflows/ci.yml
+    with:
+      test_iterations: 2
+      tests_only: true
