@@ -234,7 +234,7 @@ jobs:
           exit 1
 
   tag:
-    name: Tag ${{ needs.prepare.outputs.version }}
+    name: Tag
     needs: prepare
     if: inputs.dry_run == false
     runs-on: ubuntu-latest

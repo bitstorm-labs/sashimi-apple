@@ -146,7 +146,13 @@ For bug fixes, enhancements, or new features - create the issue first, then the 
 - **main** branch has protection rules enforced (including for admins)
 - All changes MUST go through pull requests
 - Required status checks: `Build tvOS App` and `SwiftLint`
+- Merges go through GitHub's **merge queue** (no "branch must be up to date" re-runs):
+  `gh pr merge --auto` queues a PR once its checks pass; CI re-runs on the queued
+  merge commit (`merge_group`)
 - Never bypass PR requirements - create a branch and PR instead
+- CI builds each platform with the SAME runner + Xcode its deploy ships with (see
+  the table at the top of `.github/workflows/ci.yml`); change both together —
+  `scripts/check-toolchains.rb` fails CI on drift
 
 ### Creating Changes
 ```bash
@@ -360,19 +366,18 @@ cp -r CatIcon.imagestack MyIcon.imagestack
 # Then replace the icon.png and icon@2x.png files in each layer
 ```
 
-## Releasing: bump MARKETING_VERSION every TestFlight build
+## Releasing: use the Release workflow
 
-`MARKETING_VERSION` is hardcoded in **`project.yml`** in three places (tvOS, iOS,
-and the shared target) — `xcodegen` writes it into the pbxproj, so editing the
-pbxproj directly is pointless. Fastlane only auto-increments the *build* number
-(epoch seconds); nothing touches the marketing version.
+**Actions → Release → Run workflow** on `main` (`gh workflow run release.yml`, or
+`-f dry_run=true` from any branch to rehearse). It bumps `MARKETING_VERSION` (the
+three entries in `project.yml`) via an auto-merged PR, tags the merge commit
+(`vX.Y.Z-betaN`, `ios-v…`, `mac-v…` for the selected platforms) and calls the
+three deploy workflows directly. Full details, inputs and troubleshooting:
+[docs/RELEASING.md](docs/RELEASING.md).
 
-**Bump all three before triggering a TestFlight deploy.** Shipping several builds
-under one version makes them indistinguishable in TestFlight and in Jellyfin's
-`ApplicationVersion` — during the 2026-08-03 playback investigation three builds
-all reported `1.2.0`, so neither the user nor the server logs could say which
-code was running while a fix was being tested.
-
-```bash
-sed -i '' 's/MARKETING_VERSION: 1\.2\.0/MARKETING_VERSION: 1.2.1/g' project.yml
-```
+Every TestFlight build needs a new `MARKETING_VERSION` (or a new beta number of
+the same version) — during the 2026-08-03 playback investigation three builds all
+reported `1.2.0`, so nobody could tell which code was running. Each deploy refuses
+a build whose `MARKETING_VERSION` doesn't match its tag (`scripts/check-version.sh`).
+`xcodegen` writes the version into the pbxproj, so edit `project.yml`
+(`scripts/bump-version.sh X.Y.Z`), never the pbxproj.
