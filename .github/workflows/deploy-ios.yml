@@ -141,7 +141,7 @@ jobs:
         run: bundle exec fastlane ios beta dry_run:"$DRY_RUN"
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: SashimiMobile-build
           # gym's output_directory "./build" resolves from the project root
