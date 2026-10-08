@@ -9,8 +9,9 @@
 #
 # Why this exists: the lanes used to call
 # `changelog_from_git_commits(tag_match_pattern: "v*-beta.*")`. Our tags are
-# `v1.6.40-beta1` (no dot after "beta"), so that pattern never matched a
-# previous tag and fastlane pasted the project's whole history into TestFlight.
+# `v1.6.40-beta1` (no dot after "beta"), so the only tag that pattern ever
+# matched was the ancient v1.2.0-beta.4 -- every 1.6.x build pasted ~220
+# commits (everything since July) into TestFlight.
 #
 # Rules:
 #   * RELEASE_NOTES (the Release workflow's `notes` input) wins, verbatim.
