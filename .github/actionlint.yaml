@@ -1,0 +1,5 @@
+# actionlint config. xcode-27 is GitHub's hosted Xcode 27 image (public
+# preview, actions/runner-images#14404), not yet in actionlint's label list.
+self-hosted-runner:
+  labels:
+    - xcode-27

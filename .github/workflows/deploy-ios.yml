@@ -1,7 +1,11 @@
 name: Deploy iOS
 
+# iOS/iPad (SashimiMobile) -> TestFlight. Three ways in:
+#   * the Release workflow calls it (workflow_call) -- the normal path;
+#   * a hand-pushed ios-vX.Y.Z-betaN / -rcN tag;
+#   * Actions -> Deploy iOS -> Run workflow (dry_run builds + signs, no upload).
+
 on:
-  # Manual trigger with environment selection
   workflow_dispatch:
     inputs:
       environment:
@@ -11,35 +15,71 @@ on:
         type: choice
         options:
           - testflight
-          - appstore
+      dry_run:
+        description: 'Dry run: build and sign, but do not upload'
+        type: boolean
+        default: false
 
-  # Auto-deploy to TestFlight on iOS release tags
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to build'
+        type: string
+        required: true
+      tag:
+        description: 'Release tag (ios-vX.Y.Z-betaN); MARKETING_VERSION must match it'
+        type: string
+        required: true
+      notes:
+        description: 'TestFlight notes; blank = generated from commits'
+        type: string
+        default: ''
+      dry_run:
+        type: boolean
+        default: false
+      environment:
+        type: string
+        default: 'testflight'
+
   push:
     tags:
       - 'ios-v*-beta*'
       - 'ios-v*-rc*'
 
+permissions:
+  contents: read
+
 env:
-  # 'latest' (not 'latest-stable'): the xcode-27 image only carries a beta
-  # until 27.0 GA reaches it. TestFlight accepts beta-Xcode uploads; App
-  # Store submission needs a GA iOS SDK.
-  XCODE_VERSION: 'latest-stable'  # 'latest' picked the Xcode 27.2 beta; App Store Connect rejects beta-SDK uploads
+  # TOOLCHAIN (iOS + Mac): xcode-27 + latest-stable = the newest GA Xcode 27.
+  # Never bare 'latest': it picked an Xcode beta and App Store Connect rejected
+  # the upload ("Unsupported SDK or Xcode version"). ci.yml's "Build iOS App"
+  # uses the SAME runner + selector (scripts/check-toolchains.rb enforces it).
+  # xcode-27 is GitHub's Xcode 27 image, still a public preview --
+  # actions/runner-images#14404.
+  XCODE_VERSION: 'latest-stable'
 
 jobs:
   deploy:
-    name: Deploy iOS to ${{ github.event.inputs.environment || 'testflight' }}
-    # xcode-27 is GitHub's Xcode 27 image (macOS 27, iOS/tvOS 27 SDKs), still a
-    # public preview -- see actions/runner-images#14404. macos-15 / macos-26 top
-    # out at Xcode 26.x, which cannot compile against iOS 27 APIs.
+    name: Deploy iOS to ${{ inputs.environment || 'testflight' }}${{ inputs.dry_run && ' (dry run)' || '' }}
     runs-on: xcode-27
-    environment: ${{ github.event.inputs.environment || 'testflight' }}
+    environment: ${{ inputs.environment || 'testflight' }}
     timeout-minutes: 40
+    env:
+      # Tag being shipped: the Release workflow's, or the pushed/selected tag.
+      RELEASE_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      LANE: ${{ inputs.environment == 'appstore' && 'release' || 'beta' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0  # tags + history for the TestFlight notes
+
+      - name: Check MARKETING_VERSION matches the tag
+        run: scripts/check-version.sh "$RELEASE_TAG"
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
@@ -89,8 +129,8 @@ jobs:
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
         run: bundle exec fastlane ios certificates
 
-      - name: Deploy to TestFlight
-        if: github.event.inputs.environment == 'testflight' || contains(github.ref, 'beta') || contains(github.ref, 'rc')
+      - name: Deploy to TestFlight${{ inputs.dry_run && ' (dry run, no upload)' || '' }}
+        if: env.LANE == 'beta'
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
@@ -98,13 +138,15 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
-        run: bundle exec fastlane ios beta
+        run: bundle exec fastlane ios beta dry_run:"$DRY_RUN"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SashimiMobile-build
+          # gym's output_directory "./build" resolves from the project root
+          # (the old fastlane/build/* paths matched nothing).
           path: |
-            fastlane/build/*.ipa
-            fastlane/build/*.dSYM.zip
+            build/*.ipa
+            build/*.dSYM.zip
           retention-days: 30
