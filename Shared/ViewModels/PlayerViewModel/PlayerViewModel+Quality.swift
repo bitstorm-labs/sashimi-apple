@@ -13,6 +13,9 @@ enum StreamChange: Equatable {
     case burnInSubtitle(name: String)
     /// Back to a stream with no burned-in subtitle.
     case removeBurnedInSubtitle
+    /// Auto started on an unmeasured default and a measurement has since
+    /// landed that carries a better stream (#631).
+    case bandwidthMeasured
 
     /// Shown while the rebuild is in flight.
     func startNotice(quality: QualityOption) -> String {
@@ -21,6 +24,7 @@ enum StreamChange: Equatable {
         case .audio(let name): return "Switching audio to \(name)…"
         case .burnInSubtitle(let name): return "Loading subtitles: \(name)…"
         case .removeBurnedInSubtitle: return "Switching subtitles…"
+        case .bandwidthMeasured: return "Improving quality for your connection…"
         }
     }
 
@@ -30,6 +34,7 @@ enum StreamChange: Equatable {
         case .audio: return "audio"
         case .burnInSubtitle: return "subtitle-burn-in"
         case .removeBurnedInSubtitle: return "subtitle-burn-in-removed"
+        case .bandwidthMeasured: return "bandwidth-upgrade"
         }
     }
 }
@@ -189,11 +194,74 @@ extension PlayerViewModel {
 
     private func finishNotice(for change: StreamChange) -> String? {
         switch change {
-        case .quality: return "Quality: \(qualityStatusLabel)"
+        case .quality, .bandwidthMeasured: return "Quality: \(qualityStatusLabel)"
         case .audio(let name): return "Audio: \(name)"
         case .burnInSubtitle(let name): return "Subtitles: \(name)"
         case .removeBurnedInSubtitle: return nil
         }
+    }
+}
+
+extension PlayerViewModel {
+    /// How long a stream started on an unmeasured default keeps waiting for
+    /// the probe. The probe's whole retry schedule fits inside it.
+    static let bandwidthUpgradeWaitLimit: Duration = .seconds(90)
+
+    /// Watches for a bandwidth measurement under a stream Auto had to start
+    /// on an unmeasured default, and rebuilds it once at the current position
+    /// if the measurement carries a meaningfully better stream (#631). Audio
+    /// and subtitle picks carry over through the normal rebuild path.
+    func watchForMeasuredBandwidth(generation: PlaybackGeneration) {
+        bandwidthUpgradeTask?.cancel()
+        guard !bandwidthUpgradeDone else { return }
+        let client = self.client
+        bandwidthUpgradeTask = Task { [weak self] in
+            // A player on a server the session never probed (another saved
+            // server) still gets one measurement.
+            await client.startBandwidthMeasurementIfNeverRun()
+            await client.waitForAnyBandwidthMeasurement(upTo: Self.bandwidthUpgradeWaitLimit)
+            while !Task.isCancelled {
+                guard let self, self.isCurrentPlaybackGeneration(generation) else { return }
+                let status = await client.bandwidthStatus
+                guard !Task.isCancelled, self.isCurrentPlaybackGeneration(generation) else { return }
+                let decision = self.upwardRenegotiation(measuredCap: status.isMeasured ? status.cap : nil)
+                switch decision {
+                case .none:
+                    return
+                case .after(let seconds):
+                    try? await Task.sleep(for: .seconds(seconds))
+                case .now:
+                    self.bandwidthUpgradeDone = true
+                    self.bandwidthUpgradeTask = nil
+                    self.diag(.qualityChange, [
+                        PlayerDiagnostics.field("change", StreamChange.bandwidthMeasured.diagnosticName),
+                        PlayerDiagnostics.field("fromCap", self.activeBitrateCap),
+                        PlayerDiagnostics.field("measuredCap", status.cap)
+                    ])
+                    // Unstructured, like the stall watchdog's recovery: the
+                    // rebuild's teardown cancels this watcher, and that
+                    // cancellation must not reach the rebuild's own awaits.
+                    Task { await self.rebuildStream(for: .bandwidthMeasured) }
+                    return
+                }
+            }
+        }
+    }
+
+    /// The upward-rebuild decision for the stream that is playing now.
+    func upwardRenegotiation(measuredCap: Int?, now: Date = Date()) -> PlaybackSelection.UpwardRenegotiation {
+        PlaybackSelection.upwardRenegotiation(PlaybackSelection.UpwardRenegotiationContext(
+            isAuto: selectedQuality == .auto && playbackSettings.maxBitrate == 0,
+            startedOnUnmeasuredDefault: activeCapIsUnmeasuredDefault,
+            activeCap: activeBitrateCap,
+            measuredCap: measuredCap,
+            hasSteppedDown: qualityStepDowns > 0,
+            alreadyRenegotiated: bandwidthUpgradeDone,
+            isTranscoding: currentMediaSource?.transcodingUrl?.isEmpty == false,
+            sourceBitrate: currentMediaSource?.bitrate,
+            isBusy: isRecovering || transitionState.isTransitioning || stallWatchdogTask != nil,
+            secondsSinceRecovery: lastRecoveryAt.map { now.timeIntervalSince($0) }
+        ))
     }
 }
 
