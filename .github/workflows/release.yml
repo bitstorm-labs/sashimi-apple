@@ -88,10 +88,18 @@ jobs:
       GH_REPO: ${{ github.repository }}
 
     steps:
-      - name: Checkout main
+      - name: Real releases run from main
+        if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Run the Release workflow on main (dry runs may use any branch)."
+          exit 1
+
+      # The dispatched ref: main for a real release, any branch for a dry run
+      # (so changes to this machinery can be dry-run before they merge).
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 0
           # The bump branch is pushed with these credentials: RELEASE_TOKEN for
           # a real release, GITHUB_TOKEN for a dry run's throwaway branch.
@@ -101,6 +109,7 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
+          echo "Releasing from $GITHUB_REF @ $(git rev-parse --short HEAD)"
           current=$(grep -m1 -E '^\s*MARKETING_VERSION:' project.yml | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"?([0-9.]+).*/\1/')
           if [ -z "$VERSION_IN" ]; then
             IFS=. read -r ma mi pa <<< "$current"
