@@ -319,6 +319,7 @@ struct MobileRecentlyAddedCard: View {
                 .lineLimit(1)
                 .frame(width: width, height: titleFontSize + 5, alignment: isCircular ? .center : .leading)
         }
+        .macHoverHighlight()
     }
 
     private var posterImage: some View {

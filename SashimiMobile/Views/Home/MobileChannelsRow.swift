@@ -102,6 +102,7 @@ struct MobileChannelCard: View {
         .accessibilityLabel(card.isOffAir
             ? "\(card.channel.name), off air"
             : "\(card.channel.name), now airing \(title)")
+        .macHoverHighlight()
     }
 
     // MARK: - Artwork

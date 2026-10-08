@@ -35,6 +35,11 @@ struct MobileAuthView: View {
                 loginSection
             }
         }
+        // A Mac window is far wider than a sign-in form needs: keep the
+        // fields a readable width, centred, rather than 1000pt text fields.
+        .frame(maxWidth: MacPlatform.isMac ? 560 : .infinity)
+        .frame(maxWidth: .infinity)
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
         .toolbar {
             if let onCancel {

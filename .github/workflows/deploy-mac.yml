@@ -1,0 +1,90 @@
+name: Deploy Mac
+
+# The Mac app: SashimiMobile built for Mac Catalyst, uploaded to TestFlight as
+# the macOS platform of the same app. Mirrors deploy-ios.yml. Needs the
+# one-time setup in docs/RELEASING.md ("Mac (Mac Catalyst)") before the first
+# run: Mac Catalyst on the App ID, the macOS platform in App Store Connect,
+# and the Catalyst profile + Mac installer certificate in match.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment target'
+        required: true
+        default: 'testflight'
+        type: choice
+        options:
+          - testflight
+
+  push:
+    tags:
+      - 'mac-v*'
+
+env:
+  # 'latest-stable', as deploy-ios.yml: 'latest' picked an Xcode beta and
+  # App Store Connect rejects beta-SDK uploads.
+  XCODE_VERSION: 'latest-stable'
+
+jobs:
+  deploy:
+    name: Deploy Mac to ${{ github.event.inputs.environment || 'testflight' }}
+    runs-on: xcode-27
+    environment: ${{ github.event.inputs.environment || 'testflight' }}
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          # Gemfile.lock resolves excon >= 1.7.1, which requires Ruby >= 3.3.
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Install Fastlane
+        run: bundle install
+
+      - name: Setup App Store Connect API Key
+        env:
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_CONNECT_KEY_CONTENT" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_"$APP_STORE_CONNECT_KEY_ID".p8
+
+      - name: Deploy to TestFlight
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_KEY_CONTENT }}
+        run: bundle exec fastlane mac beta
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sashimi-mac-build
+          path: |
+            fastlane/build/*.pkg
+            fastlane/build/*.dSYM.zip
+          retention-days: 30
+          if-no-files-found: ignore

@@ -71,6 +71,49 @@ no warning — the tvOS run goes green and looks like a complete release.
 
 ---
 
+## Mac (Mac Catalyst) — a third pipeline
+
+The Mac app is the iOS target (`SashimiMobile`) built for Mac Catalyst, under the
+same bundle id, so it is the **macOS platform of the same App Store Connect app**.
+It has its own workflow (`Deploy Mac`, `.github/workflows/deploy-mac.yml`) and tag
+namespace: push `mac-vX.Y.Z-beta1` (or run the workflow by hand). It uploads a
+`.pkg` to TestFlight with platform macOS.
+
+### One-time setup before the first Mac upload
+
+CI only *reads* signing assets (match `readonly`), and App Store Connect never
+adds a platform by itself, so these are done once, by hand, by someone with
+Account Holder/Admin access:
+
+1. **Developer portal → Identifiers → `com.mondominator.sashimi`**: tick
+   **Mac Catalyst** under the App ID's platforms/capabilities and save. (Leave
+   "derive a separate Mac bundle id" off — the project sets
+   `DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO`.)
+2. **App Store Connect → Sashimi → (sidebar) "+" next to the platforms → macOS**.
+   Without it the upload fails with *"Cannot determine the Apple ID from Bundle
+   ID … platform MAC_OS"*.
+3. **Create the signing assets in the match repo**, locally, with the same
+   `MATCH_PASSWORD`, `MATCH_GIT_URL` / git access and App Store Connect API key
+   env vars CI uses:
+
+   ```bash
+   bundle exec fastlane mac certificates_create
+   ```
+
+   This runs `match appstore --platform catalyst
+   --additional_cert_types mac_installer_distribution`: it creates the
+   *Mac Catalyst App Store* provisioning profile
+   (`match AppStore com.mondominator.sashimi catalyst`) and a **Mac Installer
+   Distribution** certificate (signs the `.pkg`), and pushes both to the
+   certificates repo. The existing Apple Distribution certificate is reused.
+4. **TestFlight → macOS**: add the internal testers group to the macOS builds
+   (TestFlight for Mac must be installed on the testing Macs).
+
+After that, `mac-vX.Y.Z-beta1` tags deploy on their own. The Mac build number is
+epoch seconds like the others; the marketing version is the iOS target's.
+
+---
+
 ## Bumping the version — required every build
 
 `MARKETING_VERSION` lives in **`project.yml` in three places** (tvOS, iOS, shared).
@@ -193,3 +236,4 @@ codesign blocks waiting on a keychain prompt that will never be answered.
 - [ ] Both runs green
 - [ ] Logs show `Successfully uploaded the new binary` for each
 - [ ] Builds visible in TestFlight after Apple processing
+- [ ] Mac too? Push `mac-vX.Y.Z-beta1` and check **`Deploy Mac`** (one-time setup above first)

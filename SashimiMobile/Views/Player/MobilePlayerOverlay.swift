@@ -8,7 +8,7 @@ enum MobilePlayerOverlayLayout {
 
     @MainActor
     static var current: MobilePlayerOverlayLayout {
-        UIDevice.current.userInterfaceIdiom == .pad ? .pad : .phone
+        MobileLayoutIdiom.usesPadLayout ? .pad : .phone
     }
 
     var infoBar: PlayerInfoBarMetrics { self == .pad ? .pad : .phone }
@@ -258,24 +258,16 @@ struct MobilePlayerOverlay: View {
     // MARK: - Playback actions
 
     private func togglePlayPause() {
-        guard let player = viewModel.player else { return }
-        if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+        viewModel.togglePlayPause()
     }
 
     private func seek(by seconds: Double) {
-        guard let player = viewModel.player else { return }
-        let current = player.currentTime().seconds
-        guard current.isFinite else { return }
-        seek(to: max(0, current + seconds))
+        viewModel.skip(by: seconds)
     }
 
     private func seek(to seconds: Double) {
         onInteract()
-        viewModel.player?.seek(
-            to: CMTime(seconds: seconds, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
-        )
+        viewModel.seek(to: seconds)
     }
 }
 

@@ -14,7 +14,7 @@ struct OfflineShowView: View {
     @State private var startOverItem: BaseItemDto?
 
     private var isPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        MobileLayoutIdiom.usesPadLayout
     }
 
     var body: some View {

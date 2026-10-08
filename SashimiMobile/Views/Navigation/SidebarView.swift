@@ -67,6 +67,9 @@ struct MainNavigationView: View {
     @State private var searchQuery = ""
     @State private var searchSubmitCount = 0
     @FocusState private var searchFieldFocused: Bool
+    /// The menu bar's ⌘1…⌘9, ⌘F and ⌘, land here.
+    @ObservedObject private var commandCenter = AppCommandCenter.shared
+    @ObservedObject private var homeRows = HomeRowSettings.shared
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -152,6 +155,15 @@ struct MainNavigationView: View {
                 leaveUnavailableSection()
             }
         }
+        .onChange(of: railItems, initial: true) { _, items in
+            commandCenter.updateRailItems(items)
+        }
+        .onDisappear {
+            commandCenter.updateRailItems([])
+        }
+        .onChange(of: commandCenter.navigationRequest) { _, request in
+            handleNavigationRequest(request)
+        }
         .onChange(of: selection) { _, newSelection in
             if newSelection == .search {
                 focusSearchFieldIfTyping()
@@ -162,6 +174,24 @@ struct MainNavigationView: View {
                 searchQuery = ""
             }
         }
+    }
+
+    private var railItems: [SidebarSelection] {
+        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries)
+    }
+
+    /// A menu-bar section change (⌘1…⌘9, ⌘F, ⌘,). Unlike a rail tap it never
+    /// starts the current section over: ⌘F on Search just focuses the field.
+    private func handleNavigationRequest(_ request: AppCommandCenter.NavigationRequest?) {
+        guard let request else { return }
+        commandCenter.consumeNavigationRequest(id: request.id)
+        guard networkMonitor.isOnline || request.selection.isAvailableOffline else { return }
+        if selection != request.selection {
+            selection = request.selection
+        } else if request.focusesSearch {
+            focusSearchFieldIfTyping()
+        }
+        collapseRail()
     }
 
     private var showsHeaderSearch: Bool {

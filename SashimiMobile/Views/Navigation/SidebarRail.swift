@@ -149,28 +149,8 @@ struct SidebarRail<Footer: View>: View {
         .animation(SidebarRailMetrics.animation, value: isExpanded)
     }
 
-    /// Home, then SashimiTV and the libraries in Home's row order, then Search,
-    /// Downloads (iPad only) and Settings.
     private var navItems: [SidebarSelection] {
-        var items: [SidebarSelection] = [.home]
-        for destination in RailOrder.destinations(
-            rowConfigs: homeRows.rows,
-            libraryIds: libraries.map(\.id)
-        ) {
-            switch destination {
-            case .finTV:
-                items.append(.finTV)
-            case .library(let id):
-                guard let library = libraries.first(where: { $0.id == id }) else { continue }
-                items.append(.library(
-                    id: library.id,
-                    name: library.name,
-                    collectionType: library.collectionType
-                ))
-            }
-        }
-        items += [.search, .downloads, .settings]
-        return items
+        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries)
     }
 
     /// The sushi mark, with the "Sashimi" wordmark beside it when expanded.
@@ -286,24 +266,69 @@ struct SidebarRail<Footer: View>: View {
     }
 }
 
+extension SidebarSelection {
+    /// The rail's destinations, top to bottom: Home, then SashimiTV and the
+    /// libraries in Home's row order, then Search, Downloads (iPad only) and
+    /// Settings. The menu bar's ⌘1…⌘9 number them in this order.
+    static func railItems(rowConfigs: [HomeRowConfig], libraries: [JellyfinLibrary]) -> [SidebarSelection] {
+        var items: [SidebarSelection] = [.home]
+        for destination in RailOrder.destinations(
+            rowConfigs: rowConfigs,
+            libraryIds: libraries.map(\.id)
+        ) {
+            switch destination {
+            case .finTV:
+                items.append(.finTV)
+            case .library(let id):
+                guard let library = libraries.first(where: { $0.id == id }) else { continue }
+                items.append(.library(
+                    id: library.id,
+                    name: library.name,
+                    collectionType: library.collectionType
+                ))
+            }
+        }
+        items += [.search, .downloads, .settings]
+        return items
+    }
+}
+
 /// The tvOS rail's row tint, with a press standing in for focus: pressed is
 /// white on the soft highlight tvOS draws under the focused row, selected is
-/// Jellyfin purple, anything else is dimmed white. No selection band.
+/// Jellyfin purple, anything else is dimmed white. No selection band. On the
+/// Mac the pointer hovering a row draws the same highlight, as focus does.
 private struct RailButtonStyle: ButtonStyle {
     let isSelected: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(tint(isPressed: configuration.isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(configuration.isPressed ? 0.14 : 0))
-            )
-            .contentShape(Rectangle())
+        RailButtonBody(configuration: configuration, isSelected: isSelected)
+    }
+}
+
+private struct RailButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isSelected: Bool
+    @State private var isHovered = false
+
+    private var isHighlighted: Bool {
+        configuration.isPressed || isHovered
     }
 
-    private func tint(isPressed: Bool) -> Color {
-        if isPressed { return .white }
+    var body: some View {
+        configuration.label
+            .foregroundStyle(tint)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.14 : (isHovered ? 0.08 : 0)))
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if MacPlatform.isMac { isHovered = hovering }
+            }
+    }
+
+    private var tint: Color {
+        if isHighlighted { return .white }
         if isSelected { return SidebarRailMetrics.selectedTint }
         return .white.opacity(0.55)
     }

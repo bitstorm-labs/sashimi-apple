@@ -239,3 +239,105 @@ platform :ios do
     )
   end
 end
+
+# ============================================================================
+# Mac (Mac Catalyst build of SashimiMobile) — same bundle id
+# com.mondominator.sashimi, so it is the macOS platform of the one Universal
+# Purchase app. Uploads a .pkg to TestFlight for macOS.
+#
+# One-time account setup (cannot be done from CI; see docs/RELEASING.md):
+# Mac Catalyst enabled on the App ID, macOS platform added to the app in App
+# Store Connect, and `fastlane mac certificates_create` run once locally to
+# put the Catalyst App Store profile and the Mac installer certificate into
+# the match repo. CI then only reads them (readonly).
+# ============================================================================
+platform :mac do
+  # match names the Catalyst profile with a "catalyst" suffix.
+  MAC_PROFILE = "match AppStore com.mondominator.sashimi catalyst".freeze
+
+  def mac_match(readonly:)
+    match(
+      type: "appstore",
+      app_identifier: "com.mondominator.sashimi",
+      platform: "catalyst",
+      # The .pkg uploaded to App Store Connect is signed with the Mac
+      # installer certificate, on top of the app's Apple Distribution one.
+      additional_cert_types: ["mac_installer_distribution"],
+      readonly: readonly
+    )
+  end
+
+  def mac_api_key
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_KEY_CONTENT"],
+      is_key_content_base64: true
+    )
+  end
+
+  desc "ONE-TIME, run locally: create the Mac Catalyst App Store profile and Mac installer cert in match"
+  lane :certificates_create do
+    UI.user_error!("Run this locally, not on CI") if is_ci
+    mac_api_key
+    mac_match(readonly: false)
+  end
+
+  desc "Sync the Mac Catalyst certificates and profile from match (read-only)"
+  lane :certificates do
+    setup_ci
+    mac_api_key
+    mac_match(readonly: true)
+  end
+
+  desc "Build the Mac Catalyst app as an App Store .pkg"
+  lane :build do
+    # Do NOT run xcodegen here (it would reset the build number; see the
+    # tvOS build lane).
+    update_code_signing_settings(
+      path: "Sashimi.xcodeproj",
+      use_automatic_signing: false,
+      team_id: CredentialsManager::AppfileConfig.try_fetch_value(:team_id),
+      targets: ["SashimiMobile"],
+      code_sign_identity: "Apple Distribution",
+      profile_name: MAC_PROFILE,
+      build_configurations: ["Release"]
+    )
+
+    build_app(
+      project: "Sashimi.xcodeproj",
+      scheme: "SashimiMobile",
+      destination: "generic/platform=macOS,variant=Mac Catalyst",
+      catalyst_platform: "macos",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "Sashimi-mac"
+    )
+  end
+
+  desc "Push a new Mac build to TestFlight"
+  lane :beta do
+    ensure_git_status_clean unless is_ci
+    api_key = mac_api_key
+
+    # Epoch-seconds build number, as on tvOS and iOS: unique and increasing.
+    increment_build_number(build_number: Time.now.to_i.to_s)
+
+    certificates
+    build
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: "com.mondominator.sashimi",
+      app_platform: "osx",
+      pkg: lane_context[SharedValues::PKG_OUTPUT_PATH],
+      skip_waiting_for_build_processing: true,
+      changelog: changelog_from_git_commits(
+        tag_match_pattern: "mac-v*",
+        pretty: "- %s",
+        merge_commit_filtering: "exclude_merges"
+      )
+    )
+  end
+end

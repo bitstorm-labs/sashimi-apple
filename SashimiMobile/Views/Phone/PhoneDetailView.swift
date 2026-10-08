@@ -1441,7 +1441,7 @@ enum AdaptiveDetailLayout: Equatable {
     case pad
 
     static func forDevice(idiom: UIUserInterfaceIdiom) -> Self {
-        idiom == .pad ? .pad : .phone
+        MobileLayoutIdiom.usesPadLayout(idiom) ? .pad : .phone
     }
 }
 
