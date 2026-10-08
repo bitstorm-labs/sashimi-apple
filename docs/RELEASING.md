@@ -42,6 +42,22 @@ What it does, in order:
    (`workflow_call`) with that commit and tag, in parallel. Each shows up as a job
    of the Release run.
 
+### Automatic: every merge ships
+
+`auto-release.yml` presses Release for you. On each push to `main` it:
+
+1. skips the Release workflow's own bump merge (`chore: X.Y.Z (#N)`) and merges
+   that change no app code since the last `v*-beta*` tag — only `Sashimi/`,
+   `SashimiMobile/`, `Shared/`, `TopShelf/`, `Vendor/`, `project.yml` and
+   `Package.*` count, so docs/tests/CI/fastlane changes ship nothing;
+2. waits 15 minutes — a newer merge cancels the wait and starts its own, so a
+   burst of merges ships as one build;
+3. starts the Release workflow with the defaults (next patch, beta 1, all three
+   platforms, generated notes).
+
+To pause it: Actions → Auto release → ⋯ → Disable workflow. The Release button
+still works either way.
+
 The tags are pushed with `GITHUB_TOKEN` on purpose: GitHub starts no workflows for
 pushes made with it, so the tag-triggered deploys don't fire a second time. The
 Release workflow deploys explicitly instead of hoping a tag push triggers
