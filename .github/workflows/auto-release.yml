@@ -1,0 +1,87 @@
+name: Auto release
+
+# Every merge to main that touches app code ships to TestFlight (all three
+# platforms) without anyone pressing Release:
+#
+#   1. skip   the Release workflow's own version-bump merge ("chore: X.Y.Z"),
+#             and merges that change no app code since the last release tag
+#             (docs, tests, CI, scripts, fastlane).
+#   2. wait   15 minutes. A newer merge cancels this run and starts its own
+#             wait, so a burst of merges ships as ONE build.
+#   3. start  the Release workflow on main (next patch version, beta 1,
+#             generated notes). Release runs one at a time (its concurrency
+#             group), so a merge during a release just queues the next one.
+#
+# All three platforms ship together on purpose: the 1.3.x line once reached
+# tvOS testers and never iOS (#400). Turn this off by disabling the workflow
+# (Actions -> Auto release -> ... -> Disable); the Release button still works.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Release if app code changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write   # start the Release workflow
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Anything to ship?
+        id: check
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          subject=$(printf '%s\n' "$HEAD_MESSAGE" | head -1)
+          if [[ "$subject" =~ ^chore:\ [0-9]+\.[0-9]+\.[0-9]+(\ \(#[0-9]+\))?$ ]]; then
+            echo "Release version bump ($subject): nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ship=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          last=$(git describe --tags --abbrev=0 --match 'v*-beta*' HEAD 2>/dev/null || true)
+          if [ -z "$last" ]; then
+            echo "No earlier release tag; not auto-releasing." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ship=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only "$last" HEAD -- \
+            Sashimi SashimiMobile Shared TopShelf Vendor project.yml Package.swift Package.resolved)
+          if [ -z "$changed" ]; then
+            echo "No app code changed since $last: nothing to ship." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ship=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          {
+            echo "### App code changed since $last"
+            echo '```'
+            echo "$changed" | head -40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ship=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for more merges
+        if: steps.check.outputs.ship == 'true'
+        run: sleep 900
+
+      - name: Start the Release workflow
+        if: steps.check.outputs.ship == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # GITHUB_TOKEN may start workflow_dispatch runs (the one event it can
+        # trigger). Release opens its bump PR with RELEASE_TOKEN.
+        run: |
+          gh workflow run release.yml --ref main
+          echo "Started the Release workflow for $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"

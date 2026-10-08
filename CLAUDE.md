@@ -368,6 +368,10 @@ cp -r CatIcon.imagestack MyIcon.imagestack
 
 ## Releasing: use the Release workflow
 
+Merging app code to `main` releases automatically: `auto-release.yml` waits 15
+minutes for more merges, then runs Release with its defaults. Run Release by hand
+only for a specific version, notes, or a single-platform re-release.
+
 **Actions → Release → Run workflow** on `main` (`gh workflow run release.yml`, or
 `-f dry_run=true` from any branch to rehearse). It bumps `MARKETING_VERSION` (the
 three entries in `project.yml`) via an auto-merged PR, tags the merge commit
