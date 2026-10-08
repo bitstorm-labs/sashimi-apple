@@ -190,6 +190,8 @@ struct MobilePlayerView: View {
         // Live channels keep the screen on through Up Next breaks (see
         // keepsScreenAwake); the system default returns when the player goes.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = viewModel.keepsScreenAwake }
+        // Menu bar / keyboard commands, and the Mac's mouse-move reveal.
+        .modifier(PlayerCommandBinding(viewModel: viewModel, perform: handleCommand, onPointerMove: revealControls))
         .onChange(of: viewModel.keepsScreenAwake) { _, awake in
             UIApplication.shared.isIdleTimerDisabled = awake
         }
@@ -397,6 +399,98 @@ struct MobilePlayerView: View {
         guard localFileURL != nil, !viewModel.playbackEnded, viewModel.player != nil,
               let ticks = viewModel.livePositionTicks() else { return }
         DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
+    }
+}
+
+// MARK: - Menu bar and keyboard commands
+
+extension MobilePlayerView {
+    /// A menu-bar or keyboard command (Space, arrows, F, M, C, Esc, …).
+    private func handleCommand(_ command: AppCommand) {
+        switch command {
+        case .playPause:
+            viewModel.togglePlayPause()
+        case .skip(let seconds):
+            viewModel.skip(by: seconds)
+        case .nextEpisode:
+            Task { await viewModel.playNextEpisode() }
+        case .previousEpisode:
+            Task { await viewModel.playPreviousEpisode() }
+        case .toggleMute:
+            viewModel.toggleMute()
+        case .setQuality(let quality):
+            Task { await viewModel.changeQuality(quality) }
+        case .toggleFullScreen:
+            toggleWindowFullScreen()
+        case .escape:
+            switch PlayerEscapeAction.forWindow(isFullScreen: isWindowFullScreen) {
+            case .exitFullScreen: toggleWindowFullScreen()
+            case .closePlayer: closePlayer()
+            }
+            return
+        case .closePlayer:
+            closePlayer()
+            return
+        case .toggleSubtitles:
+            // Switched by PlayerCommandBinding, which remembers the last track.
+            break
+        case .railSection, .search, .settings:
+            return
+        }
+        // Show what the key did (the scrubber moving, the pill changing).
+        revealControls()
+    }
+
+    private var isWindowFullScreen: Bool {
+#if targetEnvironment(macCatalyst)
+        MacWindow.isFullScreen
+#else
+        false
+#endif
+    }
+
+    private func toggleWindowFullScreen() {
+#if targetEnvironment(macCatalyst)
+        MacWindow.toggleFullScreen()
+#endif
+    }
+
+    private func revealControls() {
+        if !showCustomOverlay { showCustomOverlay = true }
+        scheduleAutoHide()
+    }
+}
+
+/// Registers the player with the menu bar while it is on screen, remembers
+/// the last subtitle track for Toggle Subtitles, and on the Mac reveals the
+/// controls when the mouse moves (they hide again after the usual idle delay).
+private struct PlayerCommandBinding: ViewModifier {
+    @ObservedObject var viewModel: PlayerViewModel
+    let perform: (AppCommand) -> Void
+    let onPointerMove: () -> Void
+    @State private var targetID = UUID()
+    @State private var lastSubtitleTrackID: String?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                AppCommandCenter.shared.registerPlayer(.init(id: targetID, viewModel: viewModel) { command in
+                    if command == .toggleSubtitles {
+                        viewModel.toggleSubtitles(lastSelectedID: lastSubtitleTrackID)
+                    }
+                    perform(command)
+                })
+            }
+            .onDisappear {
+                AppCommandCenter.shared.unregisterPlayer(id: targetID)
+            }
+            .onChange(of: viewModel.selectedSubtitleTrackId) { _, id in
+                if let id, id != "off" { lastSubtitleTrackID = id }
+            }
+            .onContinuousHover { phase in
+                guard MacPlatform.isMac, case .active = phase else { return }
+                onPointerMove()
+            }
     }
 }
 

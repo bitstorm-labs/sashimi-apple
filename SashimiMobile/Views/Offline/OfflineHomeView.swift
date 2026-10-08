@@ -16,7 +16,7 @@ struct OfflineHomeView: View {
     @GestureState private var isTouchingHero = false
 
     private var isPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        MobileLayoutIdiom.usesPadLayout
     }
 
     private var continueWatchingWidth: CGFloat {

@@ -650,8 +650,10 @@ struct MobileDetailView: View {
                 }
             }
             // Keep the text in the left column so it doesn't run under the
-            // right-side backdrop (expanded text just grows downward).
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.5, alignment: .leading)
+            // right-side backdrop (expanded text just grows downward). Half
+            // the page, not the screen: on a Mac (and in iPad split view) the
+            // window is narrower than the display.
+            .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in width * 0.5 }
         }
     }
 
@@ -1546,6 +1548,7 @@ struct MobileEpisodeCard: View {
             }
         }
         .buttonStyle(.plain)
+        .macHoverHighlight()
     }
 
     /// Air date as "Nov 8, 2024" (phone parity)
@@ -1609,6 +1612,7 @@ struct MobileCastCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(person.displayRole.map { "\(person.name), \($0)" } ?? person.name)
         .accessibilityHint("Show other movies and shows with this person")
+        .macHoverHighlight()
     }
 
     private var placeholderCircle: some View {
