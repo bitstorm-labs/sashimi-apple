@@ -571,11 +571,17 @@ actor JellyfinClient {
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
 
-    private init(scopedServerURL: URL?, accessToken: String?, userId: String?) {
+    private init(
+        scopedServerURL: URL?,
+        accessToken: String?,
+        userId: String?,
+        bandwidthStore: BandwidthMeasurementStore = .shared
+    ) {
         self.deviceId = Self.deviceIdentifier()
         self.serverURL = scopedServerURL
         self.accessToken = accessToken
         self.userId = userId
+        self.bandwidthStore = bandwidthStore
         let delegate = Self.makeCertificateDelegate()
         self.certificateDelegate = delegate
         self.urlSession = Self.makeURLSession(delegate: delegate)
@@ -589,8 +595,18 @@ actor JellyfinClient {
     /// Creates an immutable-in-practice client for one saved server. Unlike
     /// `shared.configure`, this instance can never be repointed by another
     /// route while a playback session is awaiting a report.
-    init(serverURL: URL, accessToken: String, userId: String) {
-        self.init(scopedServerURL: serverURL, accessToken: accessToken, userId: userId)
+    init(
+        serverURL: URL,
+        accessToken: String,
+        userId: String,
+        bandwidthStore: BandwidthMeasurementStore = .shared
+    ) {
+        self.init(
+            scopedServerURL: serverURL,
+            accessToken: accessToken,
+            userId: userId,
+            bandwidthStore: bandwidthStore
+        )
     }
 
     func clearCredentials() {
@@ -603,31 +619,44 @@ actor JellyfinClient {
         self.serverURL = serverURL
         self.accessToken = accessToken
         self.userId = userId
-        // A new server means a new link — force a fresh measurement, and drop
-        // any probe still in flight so it can't write the old server's result.
-        bandwidthProbeTask?.cancel()
-        bandwidthProbeTask = nil
-        measuredBitrate = nil
-        bandwidthMeasuredAt = nil
+        // Bandwidth state is keyed by server URL in `bandwidthStore`, so there
+        // is nothing to reset here: a new server has its own entry, and
+        // repointing at the same server (a server-scoped route ending,
+        // restoreActiveClient) keeps its measurement. This used to wipe the
+        // measurement on every configure, same server or not, and nothing
+        // re-probed afterwards (#631).
     }
 
-    /// Measured downstream bandwidth (bits/sec) from the last BitrateTest.
-    private var measuredBitrate: Int?
+    /// Where this device's bandwidth to each server is recorded. Shared by
+    /// every client instance: the player talks to the server through its own
+    /// per-server client, and it must see the probe the session started (#631).
+    private let bandwidthStore: BandwidthMeasurementStore
 
-    /// When the current measurement landed. Drives staleness re-probing: the
-    /// link can change under a long-lived session (roaming across mesh nodes,
-    /// congestion), so a measurement older than `bandwidthMaxAge` triggers a
-    /// background re-probe at the next Auto playback (jellyfin-web caches its
-    /// bitrate test for the same 1 hour). The stale value still serves the
-    /// current request — a re-probe never blocks playback.
-    private var bandwidthMeasuredAt: Date?
+    /// Measured downstream bandwidth (bits/sec) to this client's server.
+    private var measuredBitrate: Int? {
+        bandwidthStore.measurement(for: serverURL)?.bitsPerSecond
+    }
+
+    /// Records a measurement for this client's server, visible to every client
+    /// of that server. The probe records through the store directly, because
+    /// it may outlive a repoint of this client; this is the seam for tests.
+    func recordBandwidthMeasurement(bitsPerSecond: Int) {
+        guard let serverURL else { return }
+        bandwidthStore.record(bitsPerSecond: bitsPerSecond, for: serverURL)
+    }
+
+    /// A measurement older than this triggers a background re-probe at the
+    /// next Auto playback. The link can change under a long-lived session
+    /// (roaming across mesh nodes, congestion), and jellyfin-web caches its
+    /// bitrate test for the same hour. The stale value still serves the
+    /// current request, because a re-probe never blocks playback.
     private static let bandwidthMaxAge: TimeInterval = 3600
 
     /// Kicks a background re-probe when the measurement is stale. Called on
     /// the Auto path at playback time; deliberately non-blocking.
     private func refreshBandwidthIfStale() {
-        guard let bandwidthMeasuredAt,
-              Date().timeIntervalSince(bandwidthMeasuredAt) > Self.bandwidthMaxAge else { return }
+        guard let measuredAt = bandwidthStore.measurement(for: serverURL)?.measuredAt,
+              Date().timeIntervalSince(measuredAt) > Self.bandwidthMaxAge else { return }
         logger.info("Bandwidth measurement stale (>1h); re-probing in background")
         startBandwidthMeasurement()
     }
@@ -646,13 +675,6 @@ actor JellyfinClient {
     static func bandwidthProbeBudgetAllowsAnotherAttempt(bytesSpent: Int) -> Bool {
         bytesSpent + SustainedBandwidthProbe.defaultMaxBytes <= bandwidthProbeByteBudget
     }
-
-    /// The retrying probe, so a reconnect replaces it rather than racing it.
-    private var bandwidthProbeTask: Task<Void, Never>?
-
-    /// True while the active path is metered (cellular, hotspot, Low Data
-    /// Mode) and the probe was therefore not run. Auto uses its default cap.
-    private var bandwidthProbeSkippedOnMeteredNetwork = false
 
     /// Where the Auto bitrate cap currently comes from. Read by Settings and
     /// logged with every PlaybackInfo request: a cap in force used to be
@@ -683,42 +705,68 @@ actor JellyfinClient {
             cap: autoBitrateCap(),
             isLocalServer: PlaybackSelection.isLocalServer(serverURL),
             isWired: NetworkConnectionMonitor.shared.isWired,
-            skippedOnMeteredNetwork: bandwidthProbeSkippedOnMeteredNetwork
+            skippedOnMeteredNetwork: bandwidthStore.skippedOnMeteredNetwork(for: serverURL)
         )
     }
 
     /// The bitrate to request on "Auto": the measured bandwidth with headroom,
-    /// clamped to a sane range. Until a measurement lands the default is keyed
-    /// on where the server is, because a failed probe says nothing about the
-    /// link (see PlaybackSelection.autoBitrateCap).
+    /// clamped to a sane range. Until a measurement lands, the default
+    /// depends on where the server is and on the device's own network, because
+    /// a failed probe says nothing about the link (see
+    /// PlaybackSelection.autoBitrateCap).
     private func autoBitrateCap() -> Int {
         PlaybackSelection.autoBitrateCap(
             measuredBitrate: measuredBitrate,
-            isLocalServer: PlaybackSelection.isLocalServer(serverURL)
+            isLocalServer: PlaybackSelection.isLocalServer(serverURL),
+            isMeteredNetwork: NetworkConnectionMonitor.shared.isMetered
         )
     }
 
     /// Starts measuring the connection, retrying with backoff until a probe
     /// succeeds. Returns immediately; the Auto cap updates when one lands.
-    /// Any probe already running is cancelled first.
+    /// A probe already running for this server is cancelled first.
     func startBandwidthMeasurement() {
         // Begin (idempotent) interface monitoring alongside the bandwidth probe
         // so the copy-vs-transcode decision knows wired from wireless.
         NetworkConnectionMonitor.shared.start()
-        bandwidthProbeTask?.cancel()
-        bandwidthProbeTask = Task { await self.runBandwidthProbes() }
+        guard let serverURL else { return }
+        // Captured now: the shared client can be repointed while the probe
+        // runs, and the probe must keep talking to the server it measures.
+        let authorization = authorizationHeader
+        bandwidthStore.replaceProbe(for: serverURL, with: Task {
+            await self.runBandwidthProbes(for: serverURL, authorization: authorization)
+        })
+    }
+
+    /// Starts a probe only when this server has never been probed in this
+    /// process. A player on a server the session did not activate (or a
+    /// session that never probed) still gets a measurement, but a round that
+    /// already ran and failed is not repeated on every play.
+    func startBandwidthMeasurementIfNeverRun() {
+        guard serverURL != nil, measuredBitrate == nil,
+              bandwidthStore.probe(for: serverURL) == nil else { return }
+        startBandwidthMeasurement()
     }
 
     /// Gives an in-flight probe a short window to land before an Auto
     /// PlaybackInfo request on a REMOTE server. Without it, pressing play
     /// within the first seconds after launch (Continue Watching is right
-    /// there) locked the whole episode to the unmeasured remote default —
-    /// now 4 Mbps, so a fast remote link would have been stuck at 480p.
-    /// Local servers already default high, so they never wait.
+    /// there) started the episode on the unmeasured default. The player
+    /// still raises the stream once a later measurement lands (#631), but
+    /// starting at the right quality avoids a rebuild. Local servers
+    /// already default high, so they never wait.
     func waitForBandwidthMeasurement(upTo timeout: Duration) async {
+        guard !PlaybackSelection.isLocalServer(serverURL) else { return }
+        await waitForAnyBandwidthMeasurement(upTo: timeout)
+    }
+
+    /// Waits (bounded) for this server's in-flight probe, local or remote.
+    /// Returns at once when there is a measurement already or no probe to
+    /// wait for. The player uses this to raise a stream it had to start on
+    /// an unmeasured default.
+    func waitForAnyBandwidthMeasurement(upTo timeout: Duration) async {
         guard measuredBitrate == nil,
-              !PlaybackSelection.isLocalServer(serverURL),
-              let probe = bandwidthProbeTask else { return }
+              let probe = bandwidthStore.probe(for: serverURL) else { return }
         await withTaskGroup(of: Void.self) { group in
             // Cancelling the group never cancels the probe itself: it is an
             // unstructured task we only observe.
@@ -729,7 +777,7 @@ actor JellyfinClient {
         }
     }
 
-    private func runBandwidthProbes() async {
+    private func runBandwidthProbes(for serverURL: URL, authorization: String) async {
         // Decide on the real interface, not the monitor's pre-update default:
         // the activation-time probe starts right after `start()`.
         await NetworkConnectionMonitor.shared.waitForFirstPath()
@@ -738,17 +786,16 @@ actor JellyfinClient {
             // Cellular, a hotspot or Low Data Mode: never spend the viewer's
             // data on a 25 MB sample. A measurement taken on the previous
             // (unmetered) link says nothing about this one either, so drop it
-            // and let Auto use its location-keyed default.
-            measuredBitrate = nil
-            bandwidthMeasuredAt = nil
-            bandwidthProbeSkippedOnMeteredNetwork = true
+            // and let Auto use its metered default.
+            bandwidthStore.clearMeasurement(for: serverURL)
+            bandwidthStore.setSkippedOnMeteredNetwork(true, for: serverURL)
             logger.info("Bandwidth probe skipped on a metered network; Auto uses the default cap")
             return
         }
-        bandwidthProbeSkippedOnMeteredNetwork = false
+        bandwidthStore.setSkippedOnMeteredNetwork(false, for: serverURL)
 
         var bytesSpent = 0
-        let first = await measureBandwidth()
+        let first = await measureBandwidth(serverURL: serverURL, authorization: authorization)
         if first.succeeded { return }
         bytesSpent += first.bytes
         for delay in Self.bandwidthProbeBackoff {
@@ -757,7 +804,7 @@ actor JellyfinClient {
                 return
             }
             guard (try? await Task.sleep(for: delay)) != nil else { return }
-            let attempt = await measureBandwidth()
+            let attempt = await measureBandwidth(serverURL: serverURL, authorization: authorization)
             if attempt.succeeded { return }
             bytesSpent += attempt.bytes
         }
@@ -768,8 +815,7 @@ actor JellyfinClient {
     /// connection bandwidth, then cache it for Auto bitrate. Best-effort:
     /// `succeeded` is false on any failure, leaving the previous/default cap
     /// standing for the caller to retry against; `bytes` is what it cost.
-    private func measureBandwidth() async -> (succeeded: Bool, bytes: Int) {
-        guard let serverURL else { return (false, 0) }
+    private func measureBandwidth(serverURL: URL, authorization: String) async -> (succeeded: Bool, bytes: Int) {
         // Request far more than we'll read: the probe streams the response and
         // stops at whichever of its byte/duration caps comes first, so this is
         // only an upper bound that fast links hit and slow links never reach.
@@ -781,7 +827,7 @@ actor JellyfinClient {
         guard let url = components.url else { return (false, 0) }
 
         var req = URLRequest(url: url)
-        req.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        req.setValue(authorization, forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 20
 
         let probe = SustainedBandwidthProbe(authDelegate: certificateDelegate)
@@ -789,8 +835,8 @@ actor JellyfinClient {
         guard let bitsPerSecond = outcome.bitsPerSecond, bitsPerSecond > 0 else {
             return (false, outcome.bytesReceived)
         }
-        measuredBitrate = bitsPerSecond
-        bandwidthMeasuredAt = Date()
+        guard !Task.isCancelled else { return (false, outcome.bytesReceived) }
+        bandwidthStore.record(bitsPerSecond: bitsPerSecond, for: serverURL)
         logger.info("Bandwidth probe measured \(bitsPerSecond) bps from \(outcome.bytesReceived) bytes")
         return (true, outcome.bytesReceived)
     }

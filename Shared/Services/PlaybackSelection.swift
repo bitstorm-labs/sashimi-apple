@@ -28,12 +28,24 @@ enum PlaybackSelection {
     /// fast — the same value a measured gigabit link clamps to.
     static let unmeasuredLocalBitrateCap = 100_000_000
 
-    /// Cap on "Auto" with no measurement and a server reached over the
-    /// internet, where guessing high really can stall playback. 4 Mbps (480p),
-    /// not the old 20: a remote iPad whose probe had not landed was handed
-    /// 7-10 Mbps streams its connection could not sustain, and they stalled
-    /// and restarted over and over. A measurement, once it lands, raises it.
-    static let unmeasuredRemoteBitrateCap = 4_000_000
+    /// Cap on "Auto" with no measurement, on a path that costs the viewer
+    /// data: cellular, a personal hotspot, or Low Data Mode. Guessing high
+    /// there really can stall playback. A remote iPad whose probe had not
+    /// landed was handed 7-10 Mbps streams its connection could not sustain,
+    /// and they stalled and restarted over and over (#586). 4 Mbps is 480p.
+    /// A measurement, once it lands, replaces it.
+    static let unmeasuredMeteredBitrateCap = 4_000_000
+
+    /// Cap on "Auto" with no measurement, on an unmetered path (Wi-Fi or
+    /// Ethernet, which is every Apple TV) to a server with a public hostname.
+    ///
+    /// The hostname does not say where the device is. A home server is often
+    /// reached through its public domain: hairpin NAT or a reverse proxy
+    /// carries the stream across the LAN at hundreds of Mbps. Keying the
+    /// default on the hostname put a living-room Apple TV on the 4 Mbps
+    /// cellular default and played a 9.75 Mbps 1080p episode at 480p (#631).
+    /// 20 Mbps (1080p) is what Auto assumed before #587.
+    static let unmeasuredUnmeteredRemoteBitrateCap = 20_000_000
 
     /// Clamp applied to a measured link. The floor keeps a badly timed probe
     /// (a probe that raced a buffering stream) from pinning quality to
@@ -48,14 +60,94 @@ enum PlaybackSelection {
     static let measuredBitrateHeadroom = 0.85
 
     /// The bitrate cap sent on "Auto": the measured bandwidth with headroom,
-    /// clamped to a sane range, or a default keyed on where the server is when
-    /// nothing has been measured yet.
-    static func autoBitrateCap(measuredBitrate: Int?, isLocalServer: Bool) -> Int {
+    /// clamped to a sane range. With no measurement yet it is a default set
+    /// by the device's network first, then by the server's address. A metered
+    /// path is cautious wherever the server is. An unmetered path is fast to
+    /// a LAN server and assumed to carry 1080p to any other server.
+    static func autoBitrateCap(measuredBitrate: Int?, isLocalServer: Bool, isMeteredNetwork: Bool) -> Int {
         guard let measuredBitrate, measuredBitrate > 0 else {
-            return isLocalServer ? unmeasuredLocalBitrateCap : unmeasuredRemoteBitrateCap
+            if isMeteredNetwork { return unmeasuredMeteredBitrateCap }
+            return isLocalServer ? unmeasuredLocalBitrateCap : unmeasuredUnmeteredRemoteBitrateCap
         }
         let withHeadroom = Int(Double(measuredBitrate) * measuredBitrateHeadroom)
         return min(max(withHeadroom, minimumMeasuredBitrateCap), maximumMeasuredBitrateCap)
+    }
+
+    // MARK: - Upward renegotiation (#631)
+
+    /// What the player knows when a bandwidth measurement lands after Auto
+    /// started the stream on an unmeasured default.
+    struct UpwardRenegotiationContext: Equatable {
+        /// Auto is the quality in force (no session pick, no Settings cap).
+        var isAuto: Bool
+        /// The current stream's cap came from a default, not a measurement.
+        var startedOnUnmeasuredDefault: Bool
+        /// The cap the current stream was requested with.
+        var activeCap: Int?
+        /// The Auto cap the new measurement gives. Nil while unmeasured.
+        var measuredCap: Int?
+        /// A stall step-down happened. It sets a ceiling for the session, and
+        /// a probe that raced the stall must not undo it.
+        var hasSteppedDown: Bool
+        /// The one upward rebuild this session allows has already run.
+        var alreadyRenegotiated: Bool
+        /// The server is transcoding or remuxing this stream, not serving the
+        /// file directly.
+        var isTranscoding: Bool
+        var sourceBitrate: Int?
+        /// A recovery or another rebuild is in flight, or a stall is being
+        /// watched.
+        var isBusy: Bool
+        /// Time since the last stall/error recovery began. Nil if none ran.
+        var secondsSinceRecovery: TimeInterval?
+    }
+
+    enum UpwardRenegotiation: Equatable {
+        case none
+        case now
+        /// Not yet: ask again after this many seconds.
+        case after(TimeInterval)
+    }
+
+    /// A measured cap must be at least this multiple of the current one
+    /// before a rebuild is worth interrupting playback for.
+    static let upwardRenegotiationMinimumRatio = 2
+
+    /// No upward rebuild within this many seconds of a stall recovery. The
+    /// fresh stream gets time to settle, and a recovery that is about to step
+    /// down gets to make that call first.
+    static let upwardRenegotiationRecoveryQuietPeriod: TimeInterval = 15
+
+    /// Whether to rebuild an Auto stream that started on an unmeasured
+    /// default, now that a measurement has landed.
+    ///
+    /// Before #631, nothing ever raised a stream like that. A probe that
+    /// landed a second after PlaybackInfo left the whole episode at the
+    /// default's 480p. A rebuild costs the viewer a short interruption, so it
+    /// happens at most once, and only when it changes the picture: the cap at
+    /// least doubles, it crosses a width tier, and the server is transcoding a
+    /// source the old cap was holding down.
+    static func upwardRenegotiation(_ context: UpwardRenegotiationContext) -> UpwardRenegotiation {
+        guard context.isAuto,
+              context.startedOnUnmeasuredDefault,
+              !context.hasSteppedDown,
+              !context.alreadyRenegotiated,
+              context.isTranscoding,
+              let activeCap = context.activeCap, activeCap > 0,
+              let measuredCap = context.measuredCap,
+              measuredCap >= activeCap * upwardRenegotiationMinimumRatio,
+              autoMaxWidth(forBitrateCap: measuredCap) != autoMaxWidth(forBitrateCap: activeCap) else {
+            return .none
+        }
+        // A source the old cap already covered was not held down by it.
+        if let sourceBitrate = context.sourceBitrate, sourceBitrate > 0, sourceBitrate <= activeCap {
+            return .none
+        }
+        if context.isBusy { return .after(upwardRenegotiationRecoveryQuietPeriod) }
+        if let elapsed = context.secondsSinceRecovery, elapsed < upwardRenegotiationRecoveryQuietPeriod {
+            return .after(upwardRenegotiationRecoveryQuietPeriod - elapsed)
+        }
+        return .now
     }
 
     /// Width cap to pair with a bitrate cap when the caller did not pick a
