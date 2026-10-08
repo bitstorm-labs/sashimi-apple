@@ -121,6 +121,11 @@ targets:
       path: SashimiMobile/Info.plist
       properties:
         CFBundleDisplayName: Sashimi
+        # The Mac shows CFBundleName in the menu bar ("About Sashimi", "Quit
+        # Sashimi"); it would otherwise be the target name, SashimiMobile.
+        CFBundleName: Sashimi
+        # Required for a Mac App Store / TestFlight upload; ignored on iOS.
+        LSApplicationCategoryType: public.app-category.entertainment
         # Marketing version flows from the MARKETING_VERSION build setting so it's
         # a single source of truth (xcodegen otherwise hardcodes a default "1.0").
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -162,8 +167,22 @@ targets:
         SWIFT_VERSION: 5.9
         SDKROOT: iphoneos
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
-        SUPPORTS_MACCATALYST: false
-        TARGETED_DEVICE_FAMILY: "1,2"
+        # Mac Catalyst: the Mac app is this target, built from the iPad UI.
+        SUPPORTS_MACCATALYST: true
+        # Same bundle id on Mac so it joins the tvOS/iOS Universal Purchase,
+        # instead of Xcode's default "maccatalyst.<id>".
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: false
+        # "6" = Mac idiom ("Optimize Interface for Mac"): native 1:1 points and
+        # AppKit-looking controls instead of the 77%-scaled iPad rendering.
+        TARGETED_DEVICE_FAMILY: "1,2,6"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # Installed as Sashimi.app on the Mac. The module keeps its name so
+        # `@testable import SashimiMobile` and the iOS build are unchanged.
+        "PRODUCT_NAME[sdk=macosx*]": Sashimi
+        PRODUCT_MODULE_NAME: SashimiMobile
+        # The Mac App Store requires the sandbox; the app only needs outgoing
+        # connections to Jellyfin servers. iOS keeps its own (empty) file.
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": SashimiMobile/SashimiMobile-Mac.entitlements
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_SKIP_APP_STORE_DEPLOYMENT: NO

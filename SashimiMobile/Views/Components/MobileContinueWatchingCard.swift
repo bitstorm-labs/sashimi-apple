@@ -186,6 +186,7 @@ struct MobileContinueWatchingCard: View {
             }
             .frame(width: width, alignment: .leading)
         }
+        .macHoverHighlight()
     }
 
     private var backdropImage: some View {

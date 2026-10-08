@@ -44,8 +44,13 @@ struct SashimiMobileApp: App {
             ContentView()
                 .environmentObject(sessionManager)
                 .mobileStationReminders()
+                .macWindowConfiguration()
         }
         .modelContainer(modelContainer)
+        // The Mac menu bar (and the iPad's keyboard shortcut overlay).
+        .commands {
+            SashimiCommands(center: AppCommandCenter.shared)
+        }
         // Mirrors SashimiApp (tvOS): background/lock is a scene-phase change,
         // not a view teardown, so the theme has to be stopped from here
         // rather than relying on a detail screen's `onDisappear`.
@@ -78,6 +83,8 @@ struct ContentView: View {
     @State private var intentMediaEntity: SashimiMediaEntity?
     @State private var intentPlaybackEntity: SashimiMediaEntity?
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
+    /// A poster context menu's Play / Add to Channel.
+    @ObservedObject private var itemActions = ItemActionRouter.shared
 
     // Pick the layout by DEVICE TYPE (stable), not horizontalSizeClass (transient).
     // The size class flips .compact -> .regular when an iPhone Plus/Pro Max rotates
@@ -85,7 +92,7 @@ struct ContentView: View {
     // layout) and tear down its subtree — dismissing an active fullScreenCover video
     // player. A phone stays on the phone UI in landscape; iPad always uses the iPad UI.
     private var isPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        MobileLayoutIdiom.usesPadLayout
     }
 
     var body: some View {
@@ -212,6 +219,14 @@ struct ContentView: View {
             // process a route that already exists when ContentView appears.
             intentCoordinator.reloadPersistedRoute()
             handleIntentRoute(intentCoordinator.route)
+        }
+        .onChange(of: itemActions.playItem?.id) { _, _ in
+            guard let item = itemActions.playItem else { return }
+            itemActions.playItem = nil
+            deepLinkDestination = .play(item, serverID: sessionManager.activeServerId)
+        }
+        .sheet(item: $itemActions.channelTarget) { target in
+            MobileAddToChannelSheet(target: target)
         }
         .fullScreenCover(item: $deepLinkDestination) { destination in
             switch destination {

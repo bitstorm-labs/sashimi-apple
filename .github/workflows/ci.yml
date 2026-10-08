@@ -190,6 +190,48 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
+  build-mac:
+    name: Build Mac Catalyst App
+    runs-on: xcode-27
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest'
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Cache SPM Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build for Mac Catalyst (Debug and Release)
+        shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
+        run: |
+          for config in Debug Release; do
+            xcodebuild build \
+              -project Sashimi.xcodeproj \
+              -scheme SashimiMobile \
+              -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+              -configuration "$config" \
+              CODE_SIGNING_ALLOWED=NO \
+              | xcpretty --color
+          done
+
   swiftlint:
     name: SwiftLint
     # Lints with its own bundled SwiftSyntax; no SDK involved, so it does not
