@@ -325,9 +325,9 @@ struct HomeView: View {
 extension HeroLayout {
     /// The ten-foot hero the shared `HeroSection` was drawn for: 32:9 of the
     /// content width, every size at its original value. The picture starts
-    /// below the TV's overscan strip (tvOS's 60pt top safe area); the hero
+    /// 30pt below the top edge (chosen by eye on the living-room TV); the hero
     /// itself still bleeds to the top edge.
-    static let tv = HeroLayout(imageTopInset: 60, accent: SashimiTheme.accent)
+    static let tv = HeroLayout(imageTopInset: 30, accent: SashimiTheme.accent)
 }
 
 // MARK: - Recently Added Library Row
