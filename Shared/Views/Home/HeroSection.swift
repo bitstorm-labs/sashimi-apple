@@ -155,7 +155,11 @@ struct HeroSection: View {
                         )
                         .id(currentItem.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        .frame(width: layout.imageWidth(in: geometry.size), height: geometry.size.height)
+                        .frame(
+                            width: layout.imageWidth(in: geometry.size),
+                            height: max(0, geometry.size.height - layout.imageTopInset)
+                        )
+                        .padding(.top, layout.imageTopInset)
                         .transition(.opacity)
                         .animation(.easeInOut(duration: 0.6), value: currentItem.id)
                     }
@@ -460,6 +464,11 @@ struct HeroLayout {
     /// 16:9 backdrop needs to fill the hero's height (an iPad in portrait).
     /// Off on tvOS, whose 32:9 frame never needs it.
     var widensImageToFillHeight = false
+    /// Space kept clear above the backdrop picture. The hero bleeds to the
+    /// top edge of the screen, but TVs commonly overscan that edge (tvOS's
+    /// top safe-area inset is 60pt), which cut the top off backdrops whose
+    /// subject sits high. The dark hero background still runs to the edge.
+    var imageTopInset: CGFloat = 0
     /// Pin the text block this far (before scaling) below `topInset` instead
     /// of centring it. tvOS centres it in a short 32:9 frame, which lands it
     /// near the top; a taller iPad hero centres it visibly low, so the iPad
