@@ -53,6 +53,7 @@ extension PlayerViewModel {
 
         transitionState.isTransitioning = true
         isRecovering = true
+        lastRecoveryAt = Date()
         defer {
             isRecovering = false
             finishTransition()

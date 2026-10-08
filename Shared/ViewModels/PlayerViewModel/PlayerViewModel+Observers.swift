@@ -283,5 +283,9 @@ extension PlayerViewModel {
         stallWatchdogTask?.cancel()
         stallWatchdogTask = nil
         stallWatchdogAwaitingResume = false
+        // Same for a bandwidth watcher: the stream it would raise is gone.
+        // A replacement built on a default starts its own (setupPlayer).
+        bandwidthUpgradeTask?.cancel()
+        bandwidthUpgradeTask = nil
     }
 }

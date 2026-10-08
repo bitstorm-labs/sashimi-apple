@@ -56,35 +56,60 @@ final class PlaybackSelectionTests: XCTestCase {
     func testUnmeasuredLocalServerGetsOptimisticCap() {
         // The bug: a failed probe looked identical to a slow link, so a 24.9
         // Mbps 4K source on a gigabit LAN was capped at 20 Mbps and re-encoded.
-        let cap = PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true)
+        let cap = PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true, isMeteredNetwork: false)
         XCTAssertEqual(cap, PlaybackSelection.unmeasuredLocalBitrateCap)
         XCTAssertGreaterThan(cap, 24_879_906)
     }
 
-    func testUnmeasuredRemoteServerStaysConservative() {
+    func testUnmeasuredDefaultOnAMeteredNetworkIsA480pBitrate() {
+        // #586: the old 20 Mbps remote guess handed a slow remote iPad on
+        // cellular 7-10 Mbps streams that stalled and restarted.
+        let cap = PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false, isMeteredNetwork: true)
+        XCTAssertEqual(cap, 4_000_000)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: cap), 854)
+    }
+
+    func testMeteredNetworkIsCautiousEvenToALANAddress() {
+        // A VPN over cellular to a 192.168 server still spends the viewer's data.
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false),
-            PlaybackSelection.unmeasuredRemoteBitrateCap
+            PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true, isMeteredNetwork: true),
+            PlaybackSelection.unmeasuredMeteredBitrateCap
         )
     }
 
-    func testUnmeasuredRemoteDefaultIsA480pBitrate() {
-        // #586: the old 20 Mbps remote guess handed a slow remote iPad 7-10
-        // Mbps streams that stalled and restarted.
-        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false), 4_000_000)
-        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: true), 100_000_000)
+    // MARK: - Unmeasured default follows the device's network (#631)
+
+    func testPublicHostnameOnAnUnmeteredNetworkGetsTheHomeDefault() {
+        // The living-room Apple TV reaches its home server through the public
+        // domain (reverse proxy, hairpin NAT). It was handed the cellular 4
+        // Mbps default and played a 9.75 Mbps 1080p episode at 854x480.
+        let cap = PlaybackSelection.autoBitrateCap(measuredBitrate: nil, isLocalServer: false, isMeteredNetwork: false)
+        XCTAssertEqual(cap, 20_000_000)
+        XCTAssertEqual(PlaybackSelection.autoMaxWidth(forBitrateCap: cap), 1920)
+        XCTAssertGreaterThan(cap, 9_750_000, "a 9.75 Mbps 1080p source must not be forced to transcode")
+    }
+
+    func testMeasurementBeatsEveryDefault() {
+        for metered in [false, true] {
+            for local in [false, true] {
+                XCTAssertEqual(
+                    PlaybackSelection.autoBitrateCap(measuredBitrate: 40_000_000, isLocalServer: local, isMeteredNetwork: metered),
+                    34_000_000
+                )
+            }
+        }
     }
 
     func testMeasuredSlowLinkIsNotRaisedToThreeMbps() {
         // A 1.5 Mbps link was asked for 3 Mbps (the old floor): twice what it
         // can carry. It now gets its measurement with headroom.
-        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: 1_500_000, isLocalServer: false), 1_275_000)
+        XCTAssertEqual(PlaybackSelection.autoBitrateCap(measuredBitrate: 1_500_000, isLocalServer: false, isMeteredNetwork: false), 1_275_000)
         XCTAssertEqual(PlaybackSelection.minimumMeasuredBitrateCap, 720_000)
     }
 
     func testMeasuredBitrateKeepsHeadroom() {
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: 40_000_000, isLocalServer: true),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 40_000_000, isLocalServer: true, isMeteredNetwork: false),
             34_000_000
         )
     }
@@ -92,25 +117,25 @@ final class PlaybackSelectionTests: XCTestCase {
     func testMeasuredSlowLinkIsHonoredOnALocalServer() {
         // A measurement is evidence; a LAN server does not override it.
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: 10_000_000, isLocalServer: true),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 10_000_000, isLocalServer: true, isMeteredNetwork: false),
             8_500_000
         )
     }
 
     func testMeasuredBitrateIsClampedBothWays() {
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: 500_000, isLocalServer: false),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 500_000, isLocalServer: false, isMeteredNetwork: false),
             PlaybackSelection.minimumMeasuredBitrateCap
         )
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: 1_000_000_000, isLocalServer: false),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 1_000_000_000, isLocalServer: false, isMeteredNetwork: false),
             PlaybackSelection.maximumMeasuredBitrateCap
         )
     }
 
     func testNonPositiveMeasurementIsTreatedAsNoMeasurement() {
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: 0, isLocalServer: true),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: 0, isLocalServer: true, isMeteredNetwork: false),
             PlaybackSelection.unmeasuredLocalBitrateCap
         )
     }

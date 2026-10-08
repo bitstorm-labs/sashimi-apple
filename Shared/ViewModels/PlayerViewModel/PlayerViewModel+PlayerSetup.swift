@@ -145,6 +145,7 @@ extension PlayerViewModel {
         }
 
         activeBitrateCap = requestedBitrateCap ?? effectiveBitrate ?? bandwidth.cap
+        activeCapIsUnmeasuredDefault = effectiveBitrate == nil && !bandwidth.isMeasured
 
         guard let mediaSource = playbackInfo.mediaSources?.first else {
             diagFailure(.playbackInfoResponse, [
@@ -269,6 +270,9 @@ extension PlayerViewModel {
         }
 
         makePlayerAndObservers(for: playerItem)
+        if activeCapIsUnmeasuredDefault {
+            watchForMeasuredBandwidth(generation: PlaybackGeneration(itemID: item.id, attempt: playbackAttempt))
+        }
     }
 
     /// The in-memory master to play instead of the pinned media playlist, so

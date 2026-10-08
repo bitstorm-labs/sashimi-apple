@@ -175,6 +175,16 @@ final class PlayerViewModel: ObservableObject {
     /// Settings cap, or Auto's measured/default cap). Drives the quality label
     /// and is where Auto's step-down starts from.
     @Published var activeBitrateCap: Int?
+    /// The current stream's Auto cap was an unmeasured default, so a
+    /// measurement landing later may raise it (#631).
+    var activeCapIsUnmeasuredDefault = false
+    /// Waits for a measurement to land under a stream started on a default.
+    var bandwidthUpgradeTask: Task<Void, Never>?
+    /// The one upward rebuild this player session allows has run.
+    var bandwidthUpgradeDone = false
+    /// When the last stall/error recovery began. An upward rebuild waits out
+    /// a quiet period after it.
+    var lastRecoveryAt: Date?
     /// A brief player message: "Switching to 480p · 4 Mbps…" while a quality
     /// change rebuilds, "Lowering quality for your connection" after a
     /// bandwidth step-down. Shown by both player surfaces.

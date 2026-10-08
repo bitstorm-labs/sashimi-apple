@@ -82,7 +82,7 @@ final class BandwidthProbeTests: XCTestCase {
             transferCompleted: true
         )
         XCTAssertEqual(
-            PlaybackSelection.autoBitrateCap(measuredBitrate: reading, isLocalServer: true),
+            PlaybackSelection.autoBitrateCap(measuredBitrate: reading, isLocalServer: true, isMeteredNetwork: false),
             PlaybackSelection.maximumMeasuredBitrateCap
         )
     }
