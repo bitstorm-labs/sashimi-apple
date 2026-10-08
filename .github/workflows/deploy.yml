@@ -158,7 +158,7 @@ jobs:
         run: bundle exec fastlane tvos release
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Sashimi-tvOS-build
           # gym's output_directory "./build" resolves from the project root
