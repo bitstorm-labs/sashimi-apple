@@ -97,7 +97,7 @@ jobs:
       # The dispatched ref: main for a real release, any branch for a dry run
       # (so changes to this machinery can be dry-run before they merge).
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
@@ -247,7 +247,7 @@ jobs:
       TAGS: ${{ needs.prepare.outputs.tvos_tag }} ${{ needs.prepare.outputs.ios_tag }} ${{ needs.prepare.outputs.mac_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
