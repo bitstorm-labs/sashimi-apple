@@ -125,11 +125,15 @@ jobs:
           TEST_ITERATIONS: ${{ inputs.test_iterations || 1 }}
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
+          # xcodebuild rejects -test-iterations 1, so pass it only for >1
+          # (the nightly flaky-test run).
+          ITERATIONS=()
+          if [ "$TEST_ITERATIONS" -gt 1 ]; then ITERATIONS=(-test-iterations "$TEST_ITERATIONS"); fi
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme Sashimi \
             -destination 'platform=tvOS Simulator,name=ci-atv' \
-            -test-iterations "$TEST_ITERATIONS" \
+            "${ITERATIONS[@]}" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
@@ -215,11 +219,15 @@ jobs:
           TEST_ITERATIONS: ${{ inputs.test_iterations || 1 }}
         shell: bash # explicit bash enables pipefail so xcodebuild failures aren't masked by xcpretty
         run: |
+          # xcodebuild rejects -test-iterations 1, so pass it only for >1
+          # (the nightly flaky-test run).
+          ITERATIONS=()
+          if [ "$TEST_ITERATIONS" -gt 1 ]; then ITERATIONS=(-test-iterations "$TEST_ITERATIONS"); fi
           xcodebuild test \
             -project Sashimi.xcodeproj \
             -scheme SashimiMobile \
             -destination 'platform=iOS Simulator,name=ci-iphone' \
-            -test-iterations "$TEST_ITERATIONS" \
+            "${ITERATIONS[@]}" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --color
 
