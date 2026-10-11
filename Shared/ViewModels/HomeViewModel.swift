@@ -52,10 +52,16 @@ final class HomeViewModel: ObservableObject {
             async let resumeItems = client.getResumeItems()
             async let nextUpItems = client.getNextUp()
             async let libraryViews = client.getLibraryViews()
+            // Optional: without it the row still loads, just ordered as before.
+            async let recentlyPlayed = try? client.getRecentlyPlayedEpisodes()
 
             let (resume, nextUp, libs) = try await (resumeItems, nextUpItems, libraryViews)
 
-            continueWatchingItems = mergeAndSortContinueItems(resume: resume, nextUp: nextUp)
+            continueWatchingItems = mergeAndSortContinueItems(
+                resume: resume,
+                nextUp: nextUp,
+                seriesLastPlayed: seriesLastPlayed(from: await recentlyPlayed ?? [])
+            )
             libraries = libs.filter { isMediaLibrary($0) }
 
             #if os(tvOS)
@@ -252,7 +258,22 @@ final class HomeViewModel: ObservableObject {
     // Internal rather than private so the rule below is testable. The dedupe
     // test that predates this re-implemented the loop inside the test and
     // proved nothing about this method.
-    func mergeAndSortContinueItems(resume: [BaseItemDto], nextUp: [BaseItemDto]) -> [BaseItemDto] {
+    /// Each series' latest finished episode, from a newest-first list.
+    func seriesLastPlayed(from episodes: [BaseItemDto]) -> [String: Date] {
+        var dates: [String: Date] = [:]
+        for episode in episodes {
+            guard let seriesId = episode.seriesId,
+                  let played = parseDate(episode.userData?.lastPlayedDate) else { continue }
+            dates[seriesId] = max(dates[seriesId] ?? played, played)
+        }
+        return dates
+    }
+
+    func mergeAndSortContinueItems(
+        resume: [BaseItemDto],
+        nextUp: [BaseItemDto],
+        seriesLastPlayed: [String: Date] = [:]
+    ) -> [BaseItemDto] {
         // Only things that can be played belong here. The resume endpoint,
         // asked without a media filter, also returns Seasons and Series whose
         // children are partly watched; the request now filters, but a folder
@@ -289,17 +310,23 @@ final class HomeViewModel: ObservableObject {
             )
         }
 
-        // Undated NextUp items are anchored just below the newest real
-        // activity, not at `now`. Stamped `now`, an unstarted "next" episode
-        // (a show not touched in days) outranked the episode the user had just
-        // stopped part-way — and when it was the same series, the dedupe below
-        // dropped the part-watched episode from the row entirely (#628).
+        // An undated NextUp item takes its series' last finished episode —
+        // the show just binged leads, even though its next episode is
+        // unstarted. Without that date it is anchored just below the newest
+        // real activity, not at `now`. Stamped `now`, an unstarted "next"
+        // episode (a show not touched in days) outranked the episode the user
+        // had just stopped part-way — and when it was the same series, the
+        // dedupe below dropped the part-watched episode from the row (#628).
+        // Anchoring alone put a binged show behind whatever else carried a
+        // date, however old.
         let newestKnown = (resume.map(\.userData?.lastPlayedDate) + nextUp.map(\.userData?.lastPlayedDate))
             .compactMap { parseDate($0) }
             .max()
         var carried = newestKnown ?? Date()
         for item in nextUp {
             if let played = parseDate(item.userData?.lastPlayedDate) {
+                carried = played
+            } else if let seriesId = item.seriesId, let played = seriesLastPlayed[seriesId] {
                 carried = played
             } else {
                 carried = carried.addingTimeInterval(-1)

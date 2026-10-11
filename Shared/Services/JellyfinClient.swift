@@ -1022,6 +1022,29 @@ actor JellyfinClient {
         return response.items
     }
 
+    /// Most recently finished episodes, newest first. Continue Watching dates
+    /// an unstarted Next Up episode by its series' latest one: Jellyfin gives
+    /// neither the episode nor the Series item a LastPlayedDate.
+    func getRecentlyPlayedEpisodes(limit: Int = 100) async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+
+        let data = try await request(
+            path: "/Users/\(userId)/Items",
+            queryItems: [
+                URLQueryItem(name: "Recursive", value: "true"),
+                URLQueryItem(name: "IncludeItemTypes", value: "Episode"),
+                URLQueryItem(name: "Filters", value: "IsPlayed"),
+                URLQueryItem(name: "SortBy", value: "DatePlayed"),
+                URLQueryItem(name: "SortOrder", value: "Descending"),
+                URLQueryItem(name: "Limit", value: "\(limit)"),
+                URLQueryItem(name: "EnableUserData", value: "true"),
+                URLQueryItem(name: "EnableImages", value: "false")
+            ]
+        )
+
+        return try JSONDecoder().decode(ItemsResponse.self, from: data).items
+    }
+
     /// Next-up episodes. Pass `seriesId` to ask the server for the next
     /// episode of one specific series (used to resolve a Series handed to a
     /// play action into the episode that should actually play).
