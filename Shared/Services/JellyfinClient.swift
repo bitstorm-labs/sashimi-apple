@@ -555,12 +555,17 @@ actor JellyfinClient {
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = true
         config.urlCache = nil  // Disable caching to ensure fresh API responses
+        config.protocolClasses = testURLProtocolClasses + (config.protocolClasses ?? [])
         return URLSession(
             configuration: config,
             delegate: delegate,
             delegateQueue: nil
         )
     }
+
+    /// Tests only: URLProtocol classes put in front of every client created
+    /// afterwards, so a test can answer requests without a server.
+    nonisolated(unsafe) static var testURLProtocolClasses: [AnyClass] = []
 
     private static func makeProbeSession(delegate: CertificateValidationDelegate) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
