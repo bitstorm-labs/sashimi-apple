@@ -10,7 +10,7 @@
 
 **Working directory:** `/Users/mondo/Documents/git/sashimi-roku`
 
-**Deploy command:** `npm run package && curl --user rokudev:1234 --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"`
+**Deploy command:** `npm run package && curl --user "rokudev:$ROKU_DEV_PASSWORD" --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"`
 
 **Roku constraints (from Phase 1/2 testing):**
 - No `cornerRadius`, no `BusySpinner`, no `TextEditBox`
