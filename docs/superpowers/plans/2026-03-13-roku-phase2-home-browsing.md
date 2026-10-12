@@ -900,7 +900,7 @@ npm run build
 - [ ] **Step 4: Deploy and test on device**
 
 ```bash
-npm run package && curl --user rokudev:1234 --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"
+npm run package && curl --user "rokudev:$ROKU_DEV_PASSWORD" --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"
 ```
 
 Expected: HomeScreen shows rows of media posters from Jellyfin. Continue Watching row at top, followed by per-library rows. D-pad navigates between items and rows.
@@ -1323,7 +1323,7 @@ npm run build
 - [ ] **Step 5: Deploy and test on device**
 
 ```bash
-npm run package && curl --user rokudev:1234 --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"
+npm run package && curl --user "rokudev:$ROKU_DEV_PASSWORD" --digest -F "mysubmit=Install" -F "archive=@sashimi.zip" "http://192.168.86.30/plugin_install"
 ```
 
 Expected: Home screen loads with rows of media. Options (*) button shows Refresh/Sign Out. Navigation works between rows and items.
