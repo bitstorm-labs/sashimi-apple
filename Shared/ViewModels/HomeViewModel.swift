@@ -49,20 +49,9 @@ final class HomeViewModel: ObservableObject {
         error = nil
 
         do {
-            async let resumeItems = client.getResumeItems()
-            async let nextUpItems = client.getNextUp()
             async let libraryViews = client.getLibraryViews()
-            // Optional: without it the row still loads, just ordered as before.
-            async let recentlyPlayed = try? client.getRecentlyPlayedEpisodes()
-
-            let (resume, nextUp, libs) = try await (resumeItems, nextUpItems, libraryViews)
-
-            continueWatchingItems = mergeAndSortContinueItems(
-                resume: resume,
-                nextUp: nextUp,
-                seriesLastPlayed: seriesLastPlayed(from: await recentlyPlayed ?? [])
-            )
-            libraries = libs.filter { isMediaLibrary($0) }
+            continueWatchingItems = try await loadContinueWatching()
+            libraries = try await libraryViews.filter { isMediaLibrary($0) }
 
             #if os(tvOS)
             saveContinueWatchingForTopShelf()
@@ -75,6 +64,25 @@ final class HomeViewModel: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    /// The server's ranked row when it has the Continue Watching plugin, so every
+    /// client shows the same order; otherwise the row is merged here.
+    private func loadContinueWatching() async throws -> [BaseItemDto] {
+        if let row = try? await client.getContinueWatching() {
+            return row.filter(\.isPlayable)
+        }
+
+        async let resumeItems = client.getResumeItems()
+        async let nextUpItems = client.getNextUp()
+        // Optional: without it the row still loads, just ordered as before.
+        async let recentlyPlayed = try? client.getRecentlyPlayedEpisodes()
+        let (resume, nextUp) = try await (resumeItems, nextUpItems)
+        return mergeAndSortContinueItems(
+            resume: resume,
+            nextUp: nextUp,
+            seriesLastPlayed: seriesLastPlayed(from: await recentlyPlayed ?? [])
+        )
     }
 
     private func loadContinueWatchingLibraryNames() async {
