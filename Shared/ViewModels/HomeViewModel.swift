@@ -322,11 +322,14 @@ final class HomeViewModel: ObservableObject {
         let newestKnown = (resume.map(\.userData?.lastPlayedDate) + nextUp.map(\.userData?.lastPlayedDate))
             .compactMap { parseDate($0) }
             .max()
+        // A NextUp item's own date can be stale: an episode opened weeks ago
+        // keeps that date while the user binges the season before it. So it
+        // ranks by its own date or its series' last watch, whichever is newer.
         var carried = newestKnown ?? Date()
         for item in nextUp {
-            if let played = parseDate(item.userData?.lastPlayedDate) {
-                carried = played
-            } else if let seriesId = item.seriesId, let played = seriesLastPlayed[seriesId] {
+            let own = parseDate(item.userData?.lastPlayedDate)
+            let series = item.seriesId.flatMap { seriesLastPlayed[$0] }
+            if let played = [own, series].compactMap({ $0 }).max() {
                 carried = played
             } else {
                 carried = carried.addingTimeInterval(-1)

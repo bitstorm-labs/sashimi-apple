@@ -336,4 +336,50 @@ final class HomeViewModelTests: XCTestCase {
 
         XCTAssertEqual(row.map(\.id), ["the100-s4e11", "exploring-video", "gcn-video", "insidejob-e2"])
     }
+
+    /// Live case (2026-10-12): The 100's next episode had been opened weeks ago, so it carried
+    /// that stale date while the user binged the season before it — and sank below every show
+    /// touched since. A NextUp item ranks by its own date or its series' last watch, whichever
+    /// is newer; a stale part-watched episode of the same series must not take its place.
+    @MainActor
+    func testNextUpWithAStaleDateStillRanksByItsSeriesLastWatch() throws {
+        func episode(_ id: String, series: String, played: String?) -> BaseItemDto {
+            BaseItemDto(
+                id: id, name: id, type: .episode,
+                seriesName: series, seriesId: series, seasonId: nil, parentId: nil,
+                indexNumber: nil, parentIndexNumber: nil, overview: nil,
+                runTimeTicks: nil, userData: UserItemDataDto(
+                    playbackPositionTicks: played == nil ? 0 : 1_000, playCount: 0, isFavorite: false, played: false,
+                    lastPlayedDate: played, unplayedItemCount: nil
+                ), imageTags: nil,
+                backdropImageTags: nil, parentBackdropImageTags: nil,
+                primaryImageAspectRatio: nil, mediaType: nil, libraryName: nil, productionYear: nil,
+                communityRating: nil, officialRating: nil, genres: nil,
+                taglines: nil, people: nil, criticRating: nil,
+                premiereDate: nil, chapters: nil, path: nil, remoteTrailers: nil, localTrailerCount: nil, mediaStreams: nil
+            )
+        }
+        let resume = [
+            episode("gcn-video", series: "gcn", played: "2026-10-12T01:12:39Z"),
+            episode("exploring-video", series: "exploring", played: "2026-10-10T02:03:13Z"),
+            episode("sabrina-e2", series: "sabrina", played: "2026-10-01T17:35:26Z"),
+            episode("the100-s1e13", series: "the100", played: "2026-09-22T01:32:59Z")
+        ]
+        let nextUp = [
+            episode("the100-s5e1", series: "the100", played: "2026-09-22T02:11:50Z"),
+            episode("gcn-video", series: "gcn", played: "2026-10-12T01:12:39Z"),
+            episode("darkmatter-s2e5", series: "darkmatter", played: "2026-10-02T18:13:24Z")
+        ]
+        let iso = ISO8601DateFormatter()
+        let lastWatched = [
+            "the100": try XCTUnwrap(iso.date(from: "2026-10-12T05:41:44Z")),
+            "gcn": try XCTUnwrap(iso.date(from: "2026-10-12T01:05:36Z"))
+        ]
+
+        let row = HomeViewModel().mergeAndSortContinueItems(
+            resume: resume, nextUp: nextUp, seriesLastPlayed: lastWatched
+        )
+
+        XCTAssertEqual(row.map(\.id), ["the100-s5e1", "gcn-video", "exploring-video", "darkmatter-s2e5", "sabrina-e2"])
+    }
 }
