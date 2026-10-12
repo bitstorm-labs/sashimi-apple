@@ -113,7 +113,17 @@ When adding new views that display media items, pass `libraryName` to `MediaPost
 
 - Add or update focused tests in `SashimiTests/` for model decoding, validation, URL construction, playback selection, session behavior, downloads, and view-model state transitions. Tests must exercise the production path and assert the behavior that changed, not merely echo mock data.
 - For target-specific changes, build and test the affected Xcode scheme. For `Shared/` changes, validate both tvOS and iOS when the environment permits. Run SwiftLint in strict mode and use `swift build` only as a package-level check, not as a substitute for an affected Xcode build.
+- Behaviour that depends on server responses is testable without a server: set `JellyfinClient.testURLProtocolClasses` to a `URLProtocol` stub before creating the client (see `SashimiTests/ServerContinueWatchingTests.swift`). "No way to mock the network" is no longer a reason to skip a test.
 - Report exactly what was and was not verified. Distinguish simulator/build results from hardware-only behavior such as tvOS remote focus, offline playback, AVPlayer codec behavior, Picture-in-Picture, and physical-remote interaction.
+
+### Fix what you find
+
+If you come across a problem while working (a missing test, a red or flaky CI job, a
+bug, dead code, a broken workflow), fix it as part of the work. Don't just mention
+it in a summary and move on. If the fix doesn't belong in the current PR, open a
+follow-up issue and do it next. Only hand something back when it truly needs the
+user: credentials, a paid account, a product decision, or physical hardware. Say
+exactly what's needed.
 
 ### Generated project, dependencies, and assets
 
