@@ -1022,6 +1022,28 @@ actor JellyfinClient {
         return response.items
     }
 
+    /// The Continue Watching row ranked by the server's Continue Watching plugin
+    /// (bitstorm-labs/jellyfin-plugin-continue-watching), or nil when the server
+    /// doesn't have it (404) — the caller then builds the row itself.
+    func getContinueWatching(limit: Int = 20) async throws -> [BaseItemDto]? {
+        guard let userId else { throw JellyfinError.notConfigured }
+
+        do {
+            let data = try await request(
+                path: "/ContinueWatching",
+                queryItems: [
+                    URLQueryItem(name: "userId", value: userId),
+                    URLQueryItem(name: "limit", value: "\(limit)"),
+                    URLQueryItem(name: "fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ParentBackdropImageTags,UserData,Path,MediaStreams"),
+                    URLQueryItem(name: "enableImageTypes", value: "Primary,Backdrop,Thumb")
+                ]
+            )
+            return try JSONDecoder().decode(ItemsResponse.self, from: data).items
+        } catch JellyfinError.httpError(statusCode: 404) {
+            return nil
+        }
+    }
+
     /// Most recently finished episodes, newest first. Continue Watching dates
     /// an unstarted Next Up episode by its series' latest one: Jellyfin gives
     /// neither the episode nor the Series item a LastPlayedDate.
