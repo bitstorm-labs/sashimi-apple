@@ -17,7 +17,11 @@ final class HomeViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: Error?
 
-    private let client = JellyfinClient.shared
+    private let client: JellyfinClient
+
+    init(client: JellyfinClient = .shared) {
+        self.client = client
+    }
 
     /// When Home last loaded successfully, so a return to Home (or to the
     /// app) can tell whether what it shows may be out of date.
@@ -68,7 +72,7 @@ final class HomeViewModel: ObservableObject {
 
     /// The server's ranked row when it has the Continue Watching plugin, so every
     /// client shows the same order; otherwise the row is merged here.
-    private func loadContinueWatching() async throws -> [BaseItemDto] {
+    func loadContinueWatching() async throws -> [BaseItemDto] {
         if let row = try? await client.getContinueWatching() {
             return row.filter(\.isPlayable)
         }
