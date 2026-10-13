@@ -161,6 +161,7 @@ struct MediaDetailView: View {
                                 serverID: serverID
                             )
                             .id(refreshID)
+                            .heroTrailer(for: item, serverID: serverID)
                             // Fill the top-right section rather than floating in
                             // it. The soft edge mask below means the extra width
                             // reaching left under the text reads as a blend, not

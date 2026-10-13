@@ -95,7 +95,7 @@ struct MobileLibraryBrowseView: View {
             mode: PlaybackSettings.shared.tvShuffleMode,
             source: JellyfinClient.shared
         ) {
-            ThemeSongPlayer.shared.stopForPlayback()
+            DetailAmbience.stopForPlayback()
             shuffleItem = item
         }
     }

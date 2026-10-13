@@ -65,6 +65,10 @@ struct ThemeSongTimings {
 final class ThemeSongPlayer: ObservableObject {
     static let shared = ThemeSongPlayer()
 
+    /// True from the moment a theme starts until it is torn down. The hero
+    /// trailer reads this to stay silent under a theme (#658).
+    @Published private(set) var isPlaying = false
+
     private var visit = ThemeSongVisitState()
     private var player: AVPlayer?
     private var fadeTimer: Timer?
@@ -252,6 +256,7 @@ final class ThemeSongPlayer: ObservableObject {
         let p = AVPlayer(playerItem: item)
         p.volume = 0
         player = p
+        isPlaying = true
 
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
@@ -390,6 +395,7 @@ final class ThemeSongPlayer: ObservableObject {
         endFadeBoundaryObserver = nil
         player?.pause()
         player = nil
+        isPlaying = false
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
     }

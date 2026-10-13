@@ -297,7 +297,7 @@ struct OfflineHomeView: View {
     }
 
     private func play(_ entry: OfflineEntry) {
-        ThemeSongPlayer.shared.stopForPlayback()
+        DetailAmbience.stopForPlayback()
         playingServerID = entry.serverID
         playingItem = entry.item
     }

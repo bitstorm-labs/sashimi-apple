@@ -655,6 +655,7 @@ struct PlaybackSettingsView: View {
                     SettingsToggleRow(title: "Auto-Skip Intro", isOn: $settings.autoSkipIntro)
                     SettingsToggleRow(title: "Auto-Skip Credits", isOn: $settings.autoSkipCredits)
                     SettingsToggleRow(title: "Play Theme Songs", isOn: $settings.playThemeSongs)
+                    SettingsToggleRow(title: "Play Trailers on Detail Pages", isOn: $settings.playHeroTrailers)
                     SettingsNavigationRow(title: "TV Shuffle", subtitle: settings.tvShuffleMode.title) {
                         TVShuffleSettingsView()
                     }
