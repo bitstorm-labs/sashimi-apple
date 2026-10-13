@@ -313,13 +313,15 @@ private struct HeroTrailerOverlay: View {
     @ObservedObject private var controller = HeroTrailerController.shared
 
     var body: some View {
-        ZStack {
-            if controller.activeOwner == owner, let player = controller.player {
-                HeroTrailerVideo(player: player)
-                    .opacity(controller.isVisible ? 1 : 0)
-                    .animation(.easeInOut(duration: HeroTrailerTimings().crossFade), value: controller.isVisible)
-            }
-        }
+        let isOwner = controller.activeOwner == owner
+        // The video view stays in the hierarchy for the screen's whole life
+        // and only its player and opacity change. The iPad and Apple TV heroes
+        // mask the image and this overlay together; removing a UIKit view from
+        // inside a SwiftUI mask left the image underneath undrawn, a blank
+        // spot where the image should come back.
+        HeroTrailerVideo(player: isOwner ? controller.player : nil)
+            .opacity(isOwner && controller.isVisible ? 1 : 0)
+            .animation(.easeInOut(duration: HeroTrailerTimings().crossFade), value: controller.isVisible)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onAppear { controller.screenAppeared(owner: owner, item: item, serverID: serverID) }
@@ -329,7 +331,7 @@ private struct HeroTrailerOverlay: View {
 
 /// An `AVPlayerLayer` filling its frame, cropped like the image it covers.
 private struct HeroTrailerVideo: UIViewRepresentable {
-    let player: AVPlayer
+    let player: AVPlayer?
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
