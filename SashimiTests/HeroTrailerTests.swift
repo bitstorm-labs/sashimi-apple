@@ -48,6 +48,25 @@ final class HeroTrailerPolicyTests: XCTestCase {
         XCTAssertTrue(HeroTrailerPolicy.shouldMute(themeIsPlaying: true))
         XCTAssertFalse(HeroTrailerPolicy.shouldMute(themeIsPlaying: false))
     }
+
+    func testAFullTrailerSkipsItsOpeningAndPlaysThirtySeconds() {
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 121), HeroTrailerClip(start: 10, end: 40))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 45), HeroTrailerClip(start: 10, end: 40),
+                       "the threshold itself counts as a full trailer")
+    }
+
+    func testAShortClipOrUnknownLengthPlaysFromTheStart() {
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 44.9), HeroTrailerClip(start: 0, end: 30))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: nil), HeroTrailerClip(start: 0, end: 30))
+    }
+
+    func testTheSourceIsTheFirstTrailerWithItsLengthInSeconds() throws {
+        let first = try item(#"{"Id":"t1","Name":"T","Type":"Trailer","RunTimeTicks":1215000000}"#)
+        let second = try item(#"{"Id":"t2","Name":"T","Type":"Trailer"}"#)
+        XCTAssertEqual(HeroTrailerSource(trailers: [first, second]), HeroTrailerSource(id: "t1", seconds: 121.5))
+        XCTAssertEqual(HeroTrailerSource(trailers: [second]), HeroTrailerSource(id: "t2", seconds: nil))
+        XCTAssertNil(HeroTrailerSource(trailers: []))
+    }
 }
 
 final class HeroTrailerOwnersTests: XCTestCase {
@@ -112,7 +131,7 @@ final class HeroTrailerControllerTests: XCTestCase {
     private var stopped: [String] = []
     private var themePlaying = false
     private var eligible = true
-    private var trailers: [String: String?] = ["m1": "t1"]
+    private var trailers: [String: HeroTrailerSource?] = ["m1": HeroTrailerSource(id: "t1", seconds: 121)]
 
     private func controller() throws -> HeroTrailerController {
         let c = HeroTrailerController(timings: HeroTrailerTimings(startDelay: 0, crossFade: 0))
@@ -160,6 +179,14 @@ final class HeroTrailerControllerTests: XCTestCase {
         XCTAssertEqual(c.player?.isMuted, true)
         c.themeStateChanged(isPlaying: false)
         XCTAssertEqual(c.player?.isMuted, true, "no sound out of nowhere when the theme ends")
+    }
+
+    func testItPlaysTheClipNotTheWholeTrailer() async throws {
+        let c = try controller()
+        c.screenAppeared(owner: UUID(), item: try movie(), serverID: nil)
+        await c.waitForStartForTest()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 40))
+        XCTAssertEqual(c.player?.currentItem?.forwardPlaybackEndTime.seconds, 40)
     }
 
     func testNoTrailerMeansNoPlayer() async throws {
