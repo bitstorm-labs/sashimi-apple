@@ -37,15 +37,18 @@ final class HeroTrailerController: ObservableObject {
     private var startTask: Task<Void, Never>?
     private var endObserver: Any?
     private var timeObserver: Any?
+    private var fadeObserver: Any?
+    private var clip: HeroTrailerClip?
+    private var isFinishing = false
     private var themeSubscription: AnyCancellable?
     private let timings: HeroTrailerTimings
 
-    /// sourceId -> trailer item id, or nil for "no trailer". Misses are cached
-    /// so a trailerless show isn't asked again; thrown errors are not.
-    private var cache: [String: String?] = [:]
+    /// sourceId -> its trailer, or nil for "no trailer". Misses are cached so
+    /// a trailerless show isn't asked again; thrown errors are not.
+    private var cache: [String: HeroTrailerSource?] = [:]
 
     /// Overridden in tests; production goes through `JellyfinClient`.
-    var resolver: (String) async throws -> String?
+    var resolver: (String) async throws -> HeroTrailerSource?
     var streamBuilder: (String) async -> HeroTrailerStream?
     var encodingStopper: (String) async -> Void
     var themeIsPlaying: () -> Bool
@@ -54,7 +57,7 @@ final class HeroTrailerController: ObservableObject {
     init(timings: HeroTrailerTimings = HeroTrailerTimings()) {
         self.timings = timings
         resolver = { sourceId in
-            try await JellyfinClient.shared.getLocalTrailers(itemId: sourceId).first?.id
+            HeroTrailerSource(trailers: try await JellyfinClient.shared.getLocalTrailers(itemId: sourceId))
         }
         streamBuilder = { trailerId in
             await JellyfinClient.shared.heroTrailerStream(trailerId: trailerId)
@@ -140,32 +143,34 @@ final class HeroTrailerController: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
             }
             guard !Task.isCancelled, activeOwner == owner else { return }
-            guard let trailerId = await resolveTrailerId(sourceId: sourceId) else { return }
+            guard let trailer = await resolveTrailer(sourceId: sourceId) else { return }
             guard !Task.isCancelled, activeOwner == owner else { return }
-            guard let stream = await streamBuilder(trailerId) else { return }
+            guard let stream = await streamBuilder(trailer.id) else { return }
             guard !Task.isCancelled, activeOwner == owner else {
                 if let session = stream.playSessionId { await encodingStopper(session) }
                 return
             }
-            play(stream: stream, sourceId: sourceId)
+            play(stream: stream, sourceId: sourceId, clip: HeroTrailerPolicy.clip(trailerSeconds: trailer.seconds))
         }
     }
 
-    private func resolveTrailerId(sourceId: String) async -> String? {
+    private func resolveTrailer(sourceId: String) async -> HeroTrailerSource? {
         if let cached = cache[sourceId] { return cached }
         do {
-            let trailerId = try await resolver(sourceId)
+            let trailer = try await resolver(sourceId)
             guard !Task.isCancelled else { return nil }
-            cache[sourceId] = trailerId
-            return trailerId
+            cache[sourceId] = trailer
+            return trailer
         } catch {
             logger.debug("trailer lookup failed: \(String(describing: type(of: error)), privacy: .public)")
             return nil
         }
     }
 
-    private func play(stream: HeroTrailerStream, sourceId: String) {
+    private func play(stream: HeroTrailerStream, sourceId: String, clip: HeroTrailerClip) {
         let item = AVPlayerItem(url: stream.url)
+        // The hard stop; the fade below starts just before it.
+        item.forwardPlaybackEndTime = CMTime(seconds: clip.end, preferredTimescale: 600)
         let p = AVPlayer(playerItem: item)
         p.isMuted = HeroTrailerPolicy.shouldMute(themeIsPlaying: themeIsPlaying())
         // Background video must never take over Now Playing or AirPlay.
@@ -173,6 +178,7 @@ final class HeroTrailerController: ObservableObject {
         player = p
         playingSourceId = sourceId
         playSessionId = stream.playSessionId
+        self.clip = clip
 
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
@@ -185,21 +191,49 @@ final class HeroTrailerController: ObservableObject {
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
         ) { [weak self, weak p] time in
             MainActor.assumeIsolated {
-                guard let self, let p, self.player === p, time.seconds > 0.1, !self.isVisible else { return }
+                guard let self, let p, self.player === p, !self.isVisible,
+                      time.seconds > clip.start + 0.1 else { return }
                 self.isVisible = true
             }
+        }
+        // Fade out while the last moments still play rather than on a frozen
+        // frame with the sound cut mid-word.
+        let fadeAt = max(clip.start, clip.end - timings.crossFade)
+        fadeObserver = p.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: CMTime(seconds: fadeAt, preferredTimescale: 600))], queue: .main
+        ) { [weak self, weak p] in
+            MainActor.assumeIsolated {
+                guard let self, let p, self.player === p else { return }
+                self.finish()
+            }
+        }
+        if clip.start > 0 {
+            p.seek(
+                to: CMTime(seconds: clip.start, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600)
+            )
         }
         p.play()
         logger.debug("hero trailer started")
     }
 
-    /// End of the trailer: fade back to the image, then let go of the player.
+    /// End of the clip: fade picture and sound back to the image, then let go
+    /// of the player. Reached from the fade point and again from the hard
+    /// stop; the second call finds the fade already under way.
     private func finish() {
+        guard let finishing = player, !isFinishing else { return }
+        isFinishing = true
         isVisible = false
-        let finishing = player
         let delay = timings.crossFade
         Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            let steps = 6
+            let startVolume = finishing.volume
+            for step in 1...steps where delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay / Double(steps) * 1_000_000_000))
+                guard self?.player === finishing else { return }
+                finishing.volume = startVolume * Float(steps - step) / Float(steps)
+            }
             guard let self, self.player === finishing else { return }
             self.teardown()
         }
@@ -215,8 +249,12 @@ final class HeroTrailerController: ObservableObject {
     private func teardown() {
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        if let fadeObserver { player?.removeTimeObserver(fadeObserver) }
+        fadeObserver = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        clip = nil
+        isFinishing = false
         player?.pause()
         player = nil
         playingSourceId = nil
@@ -231,6 +269,7 @@ final class HeroTrailerController: ObservableObject {
 
     #if DEBUG
     var playingSourceIdForTest: String? { playingSourceId }
+    var clipForTest: HeroTrailerClip? { clip }
     func finishForTest() { finish() }
     func waitForStartForTest() async { await startTask?.value }
     #endif
