@@ -48,6 +48,49 @@ enum HeroTrailerPolicy {
     static func shouldMute(themeIsPlaying: Bool) -> Bool {
         themeIsPlaying
     }
+
+    /// The part of a trailer the hero plays.
+    ///
+    /// A full trailer runs about two minutes (median 2:01 across the server's
+    /// trailers), which is far more than a background preview should run.
+    /// Like Netflix's billboard previews, the hero plays a short stretch and
+    /// fades back to the image. The first seconds of a full trailer are
+    /// almost always the green rating card or a studio logo, so they're
+    /// skipped; a short clip has no such opening and plays from the start.
+    static func clip(trailerSeconds: Double?) -> HeroTrailerClip {
+        guard let trailerSeconds, trailerSeconds >= HeroTrailerClip.minimumForSkip else {
+            return HeroTrailerClip(start: 0, end: HeroTrailerClip.length)
+        }
+        let start = HeroTrailerClip.openingSkip
+        return HeroTrailerClip(start: start, end: start + HeroTrailerClip.length)
+    }
+}
+
+/// Seconds into the trailer where the hero starts and stops it.
+struct HeroTrailerClip: Equatable, Sendable {
+    static let openingSkip: Double = 10
+    static let length: Double = 30
+    static let minimumForSkip: Double = 45
+
+    let start: Double
+    let end: Double
+}
+
+/// A title's trailer: its item id and, when the server knows it, its length.
+struct HeroTrailerSource: Equatable, Sendable {
+    let id: String
+    let seconds: Double?
+
+    /// The first of a title's local trailers, or nil when it has none.
+    init?(trailers: [BaseItemDto]) {
+        guard let first = trailers.first else { return nil }
+        self.init(id: first.id, seconds: first.runTimeTicks.map { Double($0) / 10_000_000 })
+    }
+
+    init(id: String, seconds: Double?) {
+        self.id = id
+        self.seconds = seconds
+    }
 }
 
 /// A playable hero-trailer stream and the server session behind it.
