@@ -156,11 +156,13 @@ none of the `MATCH_*` secrets.
 
 - The API key must have the **Admin** role (cloud-managed distribution
   certificates require it).
-- A fresh runner has no signing identity, so automatic signing may create an
-  Apple Development certificate to sign the archive. The workflow's last step
-  (`fastlane mac revoke_runner_certificates`) revokes exactly the certificates
-  whose private key is in that runner's keychain, so they don't pile up against
-  the account limit.
+- The archive is signed ad-hoc ("Sign to Run Locally") and only the export
+  signs for real, so a run creates no certificate. (Automatic signing at
+  archive time used to create an Apple Development certificate on every fresh
+  runner; revoking it afterwards sent Apple's "has revoked your certificate"
+  email on every release.) The workflow's last step
+  (`fastlane mac revoke_runner_certificates`) stays as a safety net: it revokes
+  only certificates whose private key is in that runner's keychain.
 
 One-time account setup (already done for 1.6.40):
 

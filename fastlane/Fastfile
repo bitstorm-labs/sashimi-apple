@@ -317,11 +317,23 @@ platform :mac do
       "-configuration", "Release",
       "-destination", "generic/platform=macOS,variant=Mac Catalyst",
       "-archivePath", archive,
-      *xcode_auth_args,
-      "CODE_SIGN_STYLE=Automatic",
+      # Ad-hoc ("Sign to Run Locally"): the export below re-signs everything
+      # with the cloud-managed distribution certificate, so the archive needs
+      # no real identity. Automatic signing here made a fresh runner create an
+      # Apple Development certificate on every run, and revoking it afterwards
+      # emailed the account holder each time. Ad-hoc still embeds the
+      # entitlements (sandbox, network client), which the export keeps.
+      "CODE_SIGN_STYLE=Manual",
+      "CODE_SIGN_IDENTITY=-",
+      "PROVISIONING_PROFILE_SPECIFIER=",
       "DEVELOPMENT_TEAM=#{team_id}",
       "CURRENT_PROJECT_VERSION=#{build_number}"
     )
+
+    app = Dir[File.join(archive, "Products", "Applications", "*.app")].first
+    UI.user_error!("Archive has no .app") unless app
+    entitlements = sh("codesign", "-d", "--entitlements", "-", "--xml", app, log: false)
+    UI.user_error!("Archived app lost the App Sandbox entitlement") unless entitlements.include?("com.apple.security.app-sandbox")
 
     File.write(export_options, <<~PLIST)
       <?xml version="1.0" encoding="UTF-8"?>
@@ -354,11 +366,10 @@ platform :mac do
     pkg
   end
 
-  # An ephemeral runner has no signing identity, so xcodebuild's automatic
-  # signing may create a fresh Apple Development certificate (private key on the
-  # runner only) to sign the archive before the export re-signs it with the
-  # cloud-managed distribution certificate. Left alone, one of those piles up
-  # per run until the account hits its certificate limit. Revoke exactly the
+  # A safety net: the archive is signed ad-hoc, so a run should create no
+  # certificate. Should automatic signing ever make one on an ephemeral runner
+  # (private key on the runner only), it would pile up per run until the
+  # account hits its certificate limit. Revoke exactly the
   # certificates whose private key is in THIS runner's keychain -- they are
   # unusable anywhere else once the runner is gone.
   desc "CI only: revoke signing certificates created on this throwaway runner"
