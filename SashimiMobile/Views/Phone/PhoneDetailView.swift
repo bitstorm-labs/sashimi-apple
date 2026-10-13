@@ -362,6 +362,7 @@ struct PhoneDetailView: View {
                             }
                         }
                     }
+                    .heroTrailer(for: item, serverID: serverID)
                     .clipped()
 
                 LinearGradient(
@@ -708,7 +709,7 @@ struct PhoneDetailView: View {
         // Matches tvOS: stopped before the network round-trip, not after —
         // otherwise the theme keeps playing through the whole
         // getLocalTrailers() fetch and never stops at all if it fails.
-        ThemeSongPlayer.shared.stopForPlayback()
+        DetailAmbience.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             playingItem = trailer
         }
@@ -717,7 +718,7 @@ struct PhoneDetailView: View {
     /// Shuffle: play a random episode of this series.
     private func shuffleEpisode() async {
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: contentSeriesId, itemTypes: [.episode]) {
-            ThemeSongPlayer.shared.stopForPlayback()
+            DetailAmbience.stopForPlayback()
             playingItem = ep
         }
     }
@@ -760,7 +761,7 @@ struct PhoneDetailView: View {
                 }()
 
                 Button {
-                    ThemeSongPlayer.shared.stopForPlayback()
+                    DetailAmbience.stopForPlayback()
                     playingItem = nextEp
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
@@ -797,7 +798,7 @@ struct PhoneDetailView: View {
                     if let nextEp = nextEpisodeToPlay,
                        (nextEp.userData?.playbackPositionTicks ?? 0) > 0 {
                         Button {
-                            ThemeSongPlayer.shared.stopForPlayback()
+                            DetailAmbience.stopForPlayback()
                             startOverItem = nextEp
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")
@@ -820,7 +821,7 @@ struct PhoneDetailView: View {
     private var episodeActionButtons: some View {
         HStack(spacing: MobileSpacing.sm) {
             Button {
-                ThemeSongPlayer.shared.stopForPlayback()
+                DetailAmbience.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -838,7 +839,7 @@ struct PhoneDetailView: View {
                 overflowMenu {
                     if hasProgress {
                         Button {
-                            ThemeSongPlayer.shared.stopForPlayback()
+                            DetailAmbience.stopForPlayback()
                             startOverItem = item
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")
@@ -862,7 +863,7 @@ struct PhoneDetailView: View {
     private var movieActionButtons: some View {
         HStack(spacing: MobileSpacing.sm) {
             Button {
-                ThemeSongPlayer.shared.stopForPlayback()
+                DetailAmbience.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -880,7 +881,7 @@ struct PhoneDetailView: View {
                 overflowMenu {
                     if hasProgress {
                         Button {
-                            ThemeSongPlayer.shared.stopForPlayback()
+                            DetailAmbience.stopForPlayback()
                             startOverItem = item
                         } label: {
                             Label("Start Over", systemImage: "arrow.counterclockwise")

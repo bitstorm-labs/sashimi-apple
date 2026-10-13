@@ -22,6 +22,7 @@ struct PersonDetailView: View {
             .padding(.vertical, MobileSpacing.md)
         }
         .background(MobileColors.background)
+        .silencesHeroTrailer()
         .navigationTitle(person.name)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)

@@ -47,7 +47,7 @@ struct SashimiApp: App {
         // than relying on the view hierarchy.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
-                ThemeSongPlayer.shared.appDidBackground()
+                DetailAmbience.appDidBackground()
             }
             if newPhase == .active {
                 Task { await PlaybackReportDelivery.shared.flush() }

@@ -99,6 +99,7 @@ struct MobileSettingsView: View {
                 Toggle("Auto-Skip Intro", isOn: $playbackSettings.autoSkipIntro)
                 Toggle("Auto-Skip Credits", isOn: $playbackSettings.autoSkipCredits)
                 Toggle("Play Theme Songs", isOn: $playbackSettings.playThemeSongs)
+                Toggle("Play Trailers on Detail Pages", isOn: $playbackSettings.playHeroTrailers)
                 Toggle("Always Play Original", isOn: $playbackSettings.forceDirectPlay)
                 // tvOS parity — same values as the tvOS Resume Threshold screen
                 Picker("Resume Threshold", selection: $playbackSettings.resumeThresholdSeconds) {

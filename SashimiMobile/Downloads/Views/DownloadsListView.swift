@@ -539,7 +539,7 @@ struct DownloadsListView: View {
     }
 
     private func play(_ item: DownloadedItem) {
-        ThemeSongPlayer.shared.stopForPlayback()
+        DetailAmbience.stopForPlayback()
         playingServerID = item.serverID
         playingItem = item.asBaseItemDto
     }

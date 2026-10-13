@@ -172,6 +172,7 @@ struct MobileDetailView: View {
                                 }
                             }
                             .frame(width: geometry.size.width * (isYouTubeSeriesStyle ? 0.65 : (isSeries ? 0.55 : 0.5)))
+                            .heroTrailer(for: item, serverID: serverID)
                             .mask(
                                 LinearGradient(
                                     colors: [.clear, .white, .white, .clear],
@@ -785,7 +786,7 @@ struct MobileDetailView: View {
     private func shuffleEpisode() async {
         let seriesId = isSeries ? item.id : (item.seriesId ?? item.id)
         if let ep = try? await JellyfinClient.shared.getRandomItem(parentId: seriesId, itemTypes: [.episode]) {
-            ThemeSongPlayer.shared.stopForPlayback()
+            DetailAmbience.stopForPlayback()
             playingItem = ep
         }
     }
@@ -809,7 +810,7 @@ struct MobileDetailView: View {
                 }()
 
                 Button {
-                    ThemeSongPlayer.shared.stopForPlayback()
+                    DetailAmbience.stopForPlayback()
                     playingItem = nextEp
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
@@ -819,7 +820,7 @@ struct MobileDetailView: View {
 
                 if epHasProgress {
                     Button {
-                        ThemeSongPlayer.shared.stopForPlayback()
+                        DetailAmbience.stopForPlayback()
                         startOverItem = nextEp
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
@@ -875,7 +876,7 @@ struct MobileDetailView: View {
     private var episodeActionButtons: some View {
         HStack(spacing: MobileSpacing.md) {
             Button {
-                ThemeSongPlayer.shared.stopForPlayback()
+                DetailAmbience.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -885,7 +886,7 @@ struct MobileDetailView: View {
 
             if hasProgress {
                 Button {
-                    ThemeSongPlayer.shared.stopForPlayback()
+                    DetailAmbience.stopForPlayback()
                     startOverItem = item
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
@@ -930,7 +931,7 @@ struct MobileDetailView: View {
     private var movieActionButtons: some View {
         HStack(spacing: MobileSpacing.md) {
             Button {
-                ThemeSongPlayer.shared.stopForPlayback()
+                DetailAmbience.stopForPlayback()
                 playingItem = item
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
@@ -940,7 +941,7 @@ struct MobileDetailView: View {
 
             if hasProgress {
                 Button {
-                    ThemeSongPlayer.shared.stopForPlayback()
+                    DetailAmbience.stopForPlayback()
                     startOverItem = item
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
@@ -981,7 +982,7 @@ struct MobileDetailView: View {
         // Matches tvOS: stopped before the network round-trip, not after —
         // otherwise the theme keeps playing through the whole
         // getLocalTrailers() fetch and never stops at all if it fails.
-        ThemeSongPlayer.shared.stopForPlayback()
+        DetailAmbience.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             playingItem = trailer
         }

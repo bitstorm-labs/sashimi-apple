@@ -23,6 +23,10 @@ class PlaybackSettings: ObservableObject {
     // when nothing is stored yet, so this only affects a fresh install —
     // an iPhone user who explicitly turns it on keeps that choice.
     @AppStorage("playThemeSongs") var playThemeSongs = PlaybackSettings.defaultPlayThemeSongs()
+    // The detail-screen hero trailer (#658). Same per-idiom default as theme
+    // songs and for the same reason: off on iPhone, where unrequested video
+    // with sound reads as noise (and costs data), on for TV and iPad.
+    @AppStorage("playHeroTrailers") var playHeroTrailers = PlaybackSettings.defaultPlayThemeSongs()
     // How a TV library's Shuffle picks (roku#141). Random Episode is what
     // Shuffle always did, so an existing install is unchanged.
     static let defaultTVShuffleMode = TVShuffleMode.randomEpisode
