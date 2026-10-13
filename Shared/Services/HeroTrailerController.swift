@@ -35,7 +35,7 @@ final class HeroTrailerController: ObservableObject {
     private var playingSourceId: String?
     private var playSessionId: String?
     private var startTask: Task<Void, Never>?
-    private var endObserver: Any?
+    private var endObservers: [Any] = []
     private var timeObserver: Any?
     private var fadeObserver: Any?
     private var clip: HeroTrailerClip?
@@ -169,8 +169,10 @@ final class HeroTrailerController: ObservableObject {
 
     private func play(stream: HeroTrailerStream, sourceId: String, clip: HeroTrailerClip) {
         let item = AVPlayerItem(url: stream.url)
-        // The hard stop; the fade below starts just before it.
-        item.forwardPlaybackEndTime = CMTime(seconds: clip.end, preferredTimescale: 600)
+        // No forwardPlaybackEndTime: set past the real end of a short trailer,
+        // it suppresses the end-of-item notification and the player sits on
+        // the last frame. The fade point below ends the clip; the item's own
+        // end (or failure) is the fallback.
         let p = AVPlayer(playerItem: item)
         p.isMuted = HeroTrailerPolicy.shouldMute(themeIsPlaying: themeIsPlaying())
         // Background video must never take over Now Playing or AirPlay.
@@ -180,10 +182,10 @@ final class HeroTrailerController: ObservableObject {
         playSessionId = stream.playSessionId
         self.clip = clip
 
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.finish() }
+        endObservers = [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.finish() }
+            }
         }
         // Reveal only once frames are actually flowing, so a slow transcode
         // start never fades the image out to black.
@@ -191,7 +193,9 @@ final class HeroTrailerController: ObservableObject {
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
         ) { [weak self, weak p] time in
             MainActor.assumeIsolated {
-                guard let self, let p, self.player === p, !self.isVisible,
+                // Not while finishing: the observer keeps firing during the
+                // fade-out and would snap the picture back.
+                guard let self, let p, self.player === p, !self.isVisible, !self.isFinishing,
                       time.seconds > clip.start + 0.1 else { return }
                 self.isVisible = true
             }
@@ -219,8 +223,8 @@ final class HeroTrailerController: ObservableObject {
     }
 
     /// End of the clip: fade picture and sound back to the image, then let go
-    /// of the player. Reached from the fade point and again from the hard
-    /// stop; the second call finds the fade already under way.
+    /// of the player. Reached from the fade point or the item's own end,
+    /// whichever comes first; a later call finds the fade already under way.
     private func finish() {
         guard let finishing = player, !isFinishing else { return }
         isFinishing = true
@@ -251,8 +255,8 @@ final class HeroTrailerController: ObservableObject {
         timeObserver = nil
         if let fadeObserver { player?.removeTimeObserver(fadeObserver) }
         fadeObserver = nil
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        endObserver = nil
+        endObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        endObservers = []
         clip = nil
         isFinishing = false
         player?.pause()

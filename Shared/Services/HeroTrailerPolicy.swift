@@ -57,9 +57,12 @@ enum HeroTrailerPolicy {
     /// fades back to the image. The first seconds of a full trailer are
     /// almost always the green rating card or a studio logo, so they're
     /// skipped; a short clip has no such opening and plays from the start.
+    /// The end never runs past the trailer's own end, so the fade always has
+    /// a moment of video left to fade.
     static func clip(trailerSeconds: Double?) -> HeroTrailerClip {
         guard let trailerSeconds, trailerSeconds >= HeroTrailerClip.minimumForSkip else {
-            return HeroTrailerClip(start: 0, end: HeroTrailerClip.length)
+            let end = min(HeroTrailerClip.length, trailerSeconds ?? .infinity)
+            return HeroTrailerClip(start: 0, end: end)
         }
         let start = HeroTrailerClip.openingSkip
         return HeroTrailerClip(start: start, end: start + HeroTrailerClip.length)
