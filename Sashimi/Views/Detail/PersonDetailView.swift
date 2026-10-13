@@ -23,6 +23,7 @@ struct PersonDetailView: View {
             .padding(.vertical, 40)
         }
         .background(SashimiTheme.background.ignoresSafeArea())
+        .silencesHeroTrailer()
         .sheet(item: $selectedGroup) { group in
             ServerMediaSourcePickerView(group: group) { source in
                 selectedGroup = nil

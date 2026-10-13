@@ -71,3 +71,6 @@ Vendor/
 
 # Superpowers SDD scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Agent worktrees from Claude Code sessions
+.claude/worktrees/

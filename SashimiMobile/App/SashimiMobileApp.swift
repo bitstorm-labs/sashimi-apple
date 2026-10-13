@@ -56,7 +56,7 @@ struct SashimiMobileApp: App {
         // rather than relying on a detail screen's `onDisappear`.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
-                ThemeSongPlayer.shared.appDidBackground()
+                DetailAmbience.appDidBackground()
             }
             if newPhase == .active {
                 Task { await PlaybackReportDelivery.shared.flush() }

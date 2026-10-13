@@ -1796,6 +1796,31 @@ actor JellyfinClient {
         return components?.url
     }
 
+    /// A small HLS stream of a local trailer for the detail-screen hero (#658).
+    ///
+    /// Trailarr writes MKV/VP9/Opus trailers, which AVPlayer can't open, so
+    /// this always asks for a transcode (no direct play, no video stream copy)
+    /// capped at 4 Mbps / 1280 wide: it's a background picture, not the
+    /// feature. Nil on any failure — a hero trailer is never worth an error.
+    func heroTrailerStream(trailerId: String) async -> HeroTrailerStream? {
+        do {
+            let info = try await getPlaybackInfo(
+                itemId: trailerId,
+                engine: .avFoundation,
+                maxBitrate: HeroTrailerStream.maxBitrate,
+                maxWidth: HeroTrailerStream.maxWidth,
+                forceTranscode: true,
+                allowVideoStreamCopy: false
+            )
+            guard let path = info.mediaSources?.first?.transcodingUrl,
+                  let resolved = await resolveHLSStreamURL(transcodingPath: path) else { return nil }
+            return HeroTrailerStream(url: resolved.url, playSessionId: info.playSessionId)
+        } catch {
+            logger.debug("hero trailer stream unavailable: \(String(describing: type(of: error)), privacy: .public)")
+            return nil
+        }
+    }
+
     /// A channel's logo (plugin 0.8.0+). The key is in the URL so a seasonal
     /// swap is a new URL rather than a stale cached image; `mono` is the white
     /// version laid over the picture.

@@ -240,7 +240,7 @@ struct OfflineShowView: View {
 
                 if resumes {
                     Button {
-                        ThemeSongPlayer.shared.stopForPlayback()
+                        DetailAmbience.stopForPlayback()
                         startOverItem = target.item
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
@@ -325,7 +325,7 @@ struct OfflineShowView: View {
     }
 
     private func play(_ item: BaseItemDto) {
-        ThemeSongPlayer.shared.stopForPlayback()
+        DetailAmbience.stopForPlayback()
         playingItem = item
     }
 }
