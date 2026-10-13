@@ -138,7 +138,7 @@ final class HeroTrailerControllerTests: XCTestCase {
         let url = try XCTUnwrap(URL(string: "http://stub.local/videos/t1/main.m3u8"))
         c.resolver = { [unowned self] id in
             resolved.append(id)
-            return trailers[id] ?? nil
+            return trailers[id].flatMap { $0 }
         }
         c.streamBuilder = { _ in HeroTrailerStream(url: url, playSessionId: "ps1") }
         c.encodingStopper = { [unowned self] id in stopped.append(id) }
@@ -257,8 +257,8 @@ private final class RecordingServer: URLProtocol {
     nonisolated(unsafe) static var routes: [String: (Int, String)] = [:]
     private static let lock = NSLock()
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let url = request.url ?? URL(fileURLWithPath: "/")
