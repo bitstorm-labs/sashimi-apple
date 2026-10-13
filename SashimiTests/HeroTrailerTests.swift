@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import Sashimi
 
 private func item(_ json: String) throws -> BaseItemDto {
@@ -58,6 +59,10 @@ final class HeroTrailerPolicyTests: XCTestCase {
     func testAShortClipOrUnknownLengthPlaysFromTheStart() {
         XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 44.9), HeroTrailerClip(start: 0, end: 30))
         XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: nil), HeroTrailerClip(start: 0, end: 30))
+    }
+
+    func testTheClipNeverRunsPastTheTrailer() {
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 20), HeroTrailerClip(start: 0, end: 20))
     }
 
     func testTheSourceIsTheFirstTrailerWithItsLengthInSeconds() throws {
@@ -186,7 +191,6 @@ final class HeroTrailerControllerTests: XCTestCase {
         c.screenAppeared(owner: UUID(), item: try movie(), serverID: nil)
         await c.waitForStartForTest()
         XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 40))
-        XCTAssertEqual(c.player?.currentItem?.forwardPlaybackEndTime.seconds, 40)
     }
 
     func testNoTrailerMeansNoPlayer() async throws {
@@ -351,5 +355,46 @@ final class ThemeSongIsPlayingTests: XCTestCase {
         XCTAssertTrue(player.isPlaying)
         player.stopForPlayback()
         XCTAssertFalse(player.isPlaying)
+    }
+}
+
+/// Real playback of a two-second video, so the end of a trailer is exercised
+/// by AVPlayer itself rather than a test seam.
+@MainActor
+final class HeroTrailerPlaybackTests: XCTestCase {
+    private func play(trailerSeconds: Double?) async throws -> (HeroTrailerController, [Bool]) {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "hero-trailer-2s", withExtension: "mp4"))
+        let c = HeroTrailerController(timings: HeroTrailerTimings(startDelay: 0, crossFade: 0.3))
+        c.resolver = { _ in HeroTrailerSource(id: "t1", seconds: trailerSeconds) }
+        c.streamBuilder = { _ in HeroTrailerStream(url: url, playSessionId: nil) }
+        c.encodingStopper = { _ in }
+        c.themeIsPlaying = { true }
+        c.isEligible = { _ in true }
+        var visibility: [Bool] = []
+        let subscription = c.$isVisible.removeDuplicates().sink { visibility.append($0) }
+        c.screenAppeared(owner: UUID(), item: try item(#"{"Id":"m1","Name":"M","Type":"Movie"}"#), serverID: nil)
+        await c.waitForStartForTest()
+        XCTAssertNotNil(c.player)
+        let deadline = Date().addingTimeInterval(8)
+        while c.player != nil, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        // Long enough for a stray periodic callback to land after the fade.
+        try await Task.sleep(nanoseconds: 500_000_000)
+        subscription.cancel()
+        return (c, visibility)
+    }
+
+    func testAShortTrailerFadesBackToTheImageAtItsEnd() async throws {
+        let (c, visibility) = try await play(trailerSeconds: 2)
+        XCTAssertNil(c.player, "the video must be gone once the trailer ends")
+        XCTAssertFalse(c.isVisible)
+        XCTAssertEqual(visibility, [false, true, false], "shown once, hidden once, never snapped back")
+    }
+
+    func testATrailerOfUnknownLengthStillEndsAtItsOwnEnd() async throws {
+        let (c, _) = try await play(trailerSeconds: nil)
+        XCTAssertNil(c.player, "a clip window longer than the trailer must not hold the last frame")
+        XCTAssertFalse(c.isVisible)
     }
 }
