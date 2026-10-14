@@ -159,8 +159,9 @@ struct MobileDetailView: View {
                     // Dark background base
                     MobileColors.background
 
-                    // Backdrop image - top right (Plex-style)
-                    HStack {
+                    // Backdrop image: flush top-right, fading into the page on
+                    // its left and bottom, the same way the home hero does.
+                    HStack(spacing: 0) {
                         Spacer()
                         if let backdropURL = backdropImageURL {
                             LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
@@ -171,23 +172,30 @@ struct MobileDetailView: View {
                                     Color.clear
                                 }
                             }
-                            .frame(width: geometry.size.width * (isYouTubeSeriesStyle ? 0.65 : (isSeries ? 0.55 : 0.5)))
+                            .frame(width: geometry.size.width * (isYouTubeSeriesStyle ? 0.65 : 0.55))
                             .heroTrailer(for: item, serverID: serverID)
+                            // Only the left and bottom edges fade; the top and
+                            // right run off the screen like the home hero's.
                             .mask(
                                 LinearGradient(
-                                    colors: [.clear, .white, .white, .clear],
+                                    stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: .white, location: 0.35)
+                                    ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                                 .mask(
                                     LinearGradient(
-                                        colors: [.white, .white, .white, .clear],
+                                        stops: [
+                                            .init(color: .white, location: 0.6),
+                                            .init(color: .clear, location: 1.0)
+                                        ],
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
                                 )
                             )
-                            .padding(.trailing, 20)
                         }
                     }
                     .frame(maxHeight: .infinity, alignment: .top)
