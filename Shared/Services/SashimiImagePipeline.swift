@@ -87,6 +87,12 @@ enum SashimiImagePipeline {
         }
     }()
 
+    /// Discards every cached image (disk and memory) once per
+    /// `ImageCacheReset.currentVersion`. Call at launch, before any image loads.
+    static func resetCachesIfNeeded() {
+        ImageCacheReset.runIfNeeded { shared.cache.removeAll() }
+    }
+
     /// Make even plain `LazyImage(url:)` calls use the authenticated loader.
     /// This keeps older mobile and shared views from silently bypassing the
     /// app's certificate and Jellyfin authentication policy.
@@ -176,5 +182,29 @@ enum SashimiImagePipeline {
         ImageCache.shared.costLimit = 128 * 1024 * 1024
         #endif
         ImageCache.shared.countLimit = 300
+    }
+}
+
+/// One-time image cache reset, guarded by a stored version number.
+///
+/// The disk cache is keyed by URL. Until image URLs carried Jellyfin's `tag`
+/// query parameter, a picture replaced on the server (e.g. re-fetched in
+/// higher resolution) kept its URL, so devices showed the old cached copy
+/// forever. Tagged URLs fix that going forward, but untagged entries already
+/// on disk would still be served wherever a tag is unknown, so the cache is
+/// cleared once. Bump `currentVersion` to force another clear in a future
+/// release.
+enum ImageCacheReset {
+    static let currentVersion = 1
+    static let defaultsKey = "imageCacheVersion"
+
+    /// Runs `clear` and records `currentVersion` if the stored version is
+    /// older (absent counts as 0). Returns whether it cleared.
+    @discardableResult
+    static func runIfNeeded(defaults: UserDefaults = .standard, clear: () -> Void) -> Bool {
+        guard defaults.integer(forKey: defaultsKey) < currentVersion else { return false }
+        clear()
+        defaults.set(currentVersion, forKey: defaultsKey)
+        return true
     }
 }

@@ -508,7 +508,8 @@ struct PlayerContentOverlay: View {
                     imageType: "Primary",
                     maxWidth: 160,
                     contentMode: .fill,
-                    fallbackImageTypes: ["Thumb"]
+                    fallbackImageTypes: ["Thumb"],
+                    tagSource: item
                 )
             case .seriesLogo(let seriesId):
                 AsyncItemImage(
@@ -516,7 +517,8 @@ struct PlayerContentOverlay: View {
                     imageType: "Logo",
                     maxWidth: 800,
                     contentMode: .fit,
-                    fallbackImageTypes: []
+                    fallbackImageTypes: [],
+                    tagSource: item
                 )
             }
         }

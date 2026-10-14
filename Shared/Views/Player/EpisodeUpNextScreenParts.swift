@@ -57,6 +57,7 @@ extension EpisodeUpNextScreen {
                     itemId: $0,
                     imageType: type,
                     maxWidth: role == .thumbnail ? 960 : 1280,
+                    tag: item.imageTag(for: type, itemId: $0),
                     serverURL: serverURL
                 )
             }

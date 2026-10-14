@@ -154,7 +154,8 @@ struct MediaDetailView: View {
                                 maxWidth: Int(geometry.size.width * backdropWidthFraction * 2),
                                 contentMode: .fit,
                                 fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"],
-                                serverID: serverID
+                                serverID: serverID,
+                                tagSource: item
                             )
                             .id(refreshID)
                             .heroTrailer(for: item, serverID: serverID)
