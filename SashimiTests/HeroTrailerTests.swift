@@ -241,6 +241,33 @@ final class HeroTrailerControllerTests: XCTestCase {
         XCTAssertNil(c.player)
     }
 
+    /// #668: opening the episode before the series' trailer has started used
+    /// to cancel it for the rest of the visit.
+    func testDrillingInBeforeTheTrailerStartsHandsOverTheStart() async throws {
+        trailers = ["s1": HeroTrailerSource(id: "t1", seconds: 121)]
+        let c = try controller()
+        c.screenAppeared(owner: UUID(), item: try item(#"{"Id":"s1","Name":"S","Type":"Series"}"#), serverID: nil)
+        let episode = UUID()
+        c.screenAppeared(owner: episode, item: try item(#"{"Id":"e1","Name":"E","Type":"Episode","SeriesId":"s1"}"#), serverID: nil)
+        await c.waitForStartForTest()
+
+        XCTAssertEqual(c.activeOwner, episode)
+        XCTAssertNotNil(c.player)
+        XCTAssertEqual(c.playingSourceIdForTest, "s1")
+    }
+
+    func testClosingTheScreenBeforeTheTrailerStartsCancelsIt() async throws {
+        let c = try controller()
+        let owner = UUID()
+        c.screenAppeared(owner: owner, item: try movie(), serverID: nil)
+        c.screenDismissed(owner: owner)
+        // Closing clears the start task, so give a stray one time to run.
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertNil(c.player)
+        XCTAssertEqual(resolved, [])
+    }
+
     func testATrailerlessTitleIsOnlyLookedUpOnce() async throws {
         trailers = ["m1": nil]
         let c = try controller()
