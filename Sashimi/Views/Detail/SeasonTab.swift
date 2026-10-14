@@ -21,7 +21,7 @@ struct SeasonTab: View {
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(isFocused ? Color.white.opacity(0.5) : .clear, lineWidth: 3)
+                        .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
                 )
                 .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 10)
                 .scaleEffect(isFocused ? 1.05 : 1.0)

@@ -23,6 +23,10 @@ struct GuideChip: View {
             .background(Capsule().fill(
                 focused ? Color.white : (selected ? SashimiTheme.accent : SashimiTheme.cardBackground)
             ))
+            // The white platter keeps a focused chip distinct from the
+            // selected (purple-filled) one; the accent ring marks it as focus,
+            // like every other focused control.
+            .overlay(Capsule().stroke(focused ? SashimiTheme.focus : .clear, lineWidth: 3))
             .scaleEffect(focused ? 1.08 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.8), value: focused)
         }
