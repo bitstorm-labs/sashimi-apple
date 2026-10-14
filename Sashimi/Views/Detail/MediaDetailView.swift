@@ -112,18 +112,15 @@ struct MediaDetailView: View {
         return "Backdrop"
     }
 
-    /// Fraction of the layout width the backdrop fills in its top-right section.
+    /// Fraction of the layout width the backdrop fills in the top-right corner.
     /// Single source of truth: the frame and the image request both derive from
     /// it, so resizing the layout can't silently leave the request undersized.
     ///
-    /// Sized so the backdrop's left edge clears the info column rather than
-    /// sitting under it. The poster is 200pt at x=60, so text runs from ~300;
-    /// at 0.45 the backdrop starts near x=1010, leaving ~700pt of clean space
-    /// for the title — a two-column composition instead of an overlap rescued
-    /// by a scrim. Series run slightly wider (logo, less body text) and YouTube
-    /// wider still (low-detail banners, short info column).
+    /// About half the screen, flush to the top and right edges like the home
+    /// hero. Its left third fades out, so the part under the info column is a
+    /// blend into the background rather than picture behind the title.
     private var backdropWidthFraction: CGFloat {
-        isYouTubeSeriesStyle ? 0.58 : (isSeries ? 0.50 : 0.45)
+        isYouTubeSeriesStyle ? 0.6 : 0.55
     }
 
     var body: some View {
@@ -140,13 +137,10 @@ struct MediaDetailView: View {
                     SashimiTheme.background
                         .ignoresSafeArea()
 
-                    // Background image - top right (Plex-style)
+                    // Background image: flush top-right, fading into the page on
+                    // its left and bottom, the same way the home hero does.
                     VStack(spacing: 0) {
-                        // Half the 120pt right inset: the artwork sits higher than
-                        // it is inset from the right, which reads better than an
-                        // equal inset because the page's weight is along the top.
-                        Spacer().frame(height: 60)
-                        HStack {
+                        HStack(spacing: 0) {
                             Spacer()
                             AsyncItemImage(
                                 itemId: backdropId,
@@ -162,39 +156,29 @@ struct MediaDetailView: View {
                             )
                             .id(refreshID)
                             .heroTrailer(for: item, serverID: serverID)
-                            // Fill the top-right section rather than floating in
-                            // it. The soft edge mask below means the extra width
-                            // reaching left under the text reads as a blend, not
-                            // a collision, so a little overlap is fine.
                             .frame(width: geometry.size.width * backdropWidthFraction, alignment: .topTrailing)
-                            // Soft edge gradients fading into background
+                            // Only the left and bottom edges fade; the top and
+                            // right run off the screen like the home hero's.
                             .mask(
-                                // Use a combined gradient mask for smooth edges on all sides
                                 LinearGradient(
-                                    colors: [.clear, .white, .white, .clear],
+                                    stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: .white, location: 0.35)
+                                    ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                                 .mask(
                                     LinearGradient(
-                                        colors: [.clear, .white, .white, .white],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .mask(
-                                    LinearGradient(
-                                        colors: [.white, .white, .white, .clear],
+                                        stops: [
+                                            .init(color: .white, location: 0.6),
+                                            .init(color: .clear, location: 1.0)
+                                        ],
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
                                 )
                             )
-                            // Deliberately wider than the content column's 60pt
-                            // gutter: the artwork is a background element, and
-                            // pulling it in off the right edge stops it reading as
-                            // pinned to the corner.
-                            .padding(.trailing, 120)
                         }
                         Spacer()
                     }
