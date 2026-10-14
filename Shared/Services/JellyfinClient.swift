@@ -1835,15 +1835,25 @@ actor JellyfinClient {
         return components.url
     }
 
-    func imageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400) -> URL? {
+    /// Query for an `/Items/{id}/Images/{type}` URL. `tag` is the image's
+    /// Jellyfin tag (`ImageTags[type]`, `BackdropImageTags[0]`, …): it changes
+    /// when the server's picture changes, so including it makes the URL — and
+    /// the image cache key — change too. Omitted when unknown.
+    nonisolated static func imageQueryItems(maxWidth: Int, tag: String?) -> [URLQueryItem] {
+        var items = [URLQueryItem(name: "maxWidth", value: "\(maxWidth)")]
+        if let tag, !tag.isEmpty {
+            items.append(URLQueryItem(name: "tag", value: tag))
+        }
+        return items
+    }
+
+    func imageURL(itemId: String, imageType: String = "Primary", maxWidth: Int = 400, tag: String? = nil) -> URL? {
         guard let serverURL else { return nil }
 
         guard var components = URLComponents(url: serverURL.appendingPathComponent("/Items/\(itemId)/Images/\(imageType)"), resolvingAgainstBaseURL: false) else {
             return nil
         }
-        components.queryItems = [
-            URLQueryItem(name: "maxWidth", value: "\(maxWidth)")
-        ]
+        components.queryItems = Self.imageQueryItems(maxWidth: maxWidth, tag: tag)
 
         return components.url
     }
@@ -1865,6 +1875,7 @@ actor JellyfinClient {
     nonisolated func personImageURL(
         personId: String,
         maxWidth: Int = 150,
+        tag: String? = nil,
         serverURL overrideServerURL: URL? = nil
     ) -> URL? {
         let url: URL
@@ -1879,9 +1890,7 @@ actor JellyfinClient {
         guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(personId)/Images/Primary"), resolvingAgainstBaseURL: false) else {
             return nil
         }
-        components.queryItems = [
-            URLQueryItem(name: "maxWidth", value: "\(maxWidth)")
-        ]
+        components.queryItems = Self.imageQueryItems(maxWidth: maxWidth, tag: tag)
 
         return components.url
     }
@@ -1891,6 +1900,7 @@ actor JellyfinClient {
         itemId: String,
         imageType: String = "Primary",
         maxWidth: Int = 400,
+        tag: String? = nil,
         serverURL overrideServerURL: URL? = nil
     ) -> URL? {
         let url: URL
@@ -1905,9 +1915,7 @@ actor JellyfinClient {
         guard var components = URLComponents(url: url.appendingPathComponent("/Items/\(itemId)/Images/\(imageType)"), resolvingAgainstBaseURL: false) else {
             return nil
         }
-        components.queryItems = [
-            URLQueryItem(name: "maxWidth", value: "\(maxWidth)")
-        ]
+        components.queryItems = Self.imageQueryItems(maxWidth: maxWidth, tag: tag)
 
         return components.url
     }

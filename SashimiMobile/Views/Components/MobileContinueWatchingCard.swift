@@ -66,8 +66,12 @@ struct MobileContinueWatchingCard: View {
     }
 
     private var imageURL: URL? {
-        guard let serverURL = UserDefaults.standard.string(forKey: "serverURL") else { return nil }
-        return URL(string: "\(serverURL)/Items/\(imageId)/Images/\(imageType)?maxWidth=\(Int(width * 3))")
+        JellyfinClient.shared.syncImageURL(
+            itemId: imageId,
+            imageType: imageType,
+            maxWidth: Int(width * 3),
+            tag: item.imageTag(for: imageType, itemId: imageId)
+        )
     }
 
     private var displayTitle: String {

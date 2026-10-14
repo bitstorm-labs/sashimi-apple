@@ -138,7 +138,8 @@ struct MediaPosterButton: View {
                                     imageTypes: imageTypes,
                                     contentMode: .fit,
                                     serverURL: serverURL,
-                                    serverID: serverID
+                                    serverID: serverID,
+                                    tagSource: item
                                 )
                                 .clipShape(Circle())
                             )
@@ -149,7 +150,8 @@ struct MediaPosterButton: View {
                             imageTypes: imageTypes,
                             contentMode: .fill,
                             serverURL: serverURL,
-                            serverID: serverID
+                            serverID: serverID,
+                            tagSource: item
                         )
                         .frame(width: cardWidth, height: cardHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))

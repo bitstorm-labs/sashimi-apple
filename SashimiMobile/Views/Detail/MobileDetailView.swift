@@ -1399,24 +1399,31 @@ struct MobileDetailView: View {
 
         guard let serverURL = detailServerURL else { return nil }
 
+        // Tagged so a changed server image is a new cache key.
+        func url(_ itemId: String, _ type: String, _ maxWidth: Int) -> URL? {
+            JellyfinClient.shared.syncImageURL(
+                itemId: itemId,
+                imageType: type,
+                maxWidth: maxWidth,
+                tag: item.imageTag(for: type, itemId: itemId),
+                serverURL: serverURL
+            )
+        }
+
         if isEpisode {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
+            return url(item.id, "Primary", 1280)
         }
 
         if isYouTubeSeriesStyle {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Banner?maxWidth=1920")
+            return url(item.id, "Banner", 1920)
         }
 
-        let imageId: String
         if item.backdropImageTags?.isEmpty == false {
-            imageId = item.id
+            return url(item.id, "Backdrop", 1280)
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            imageId = seriesId
-        } else {
-            return URL(string: "\(serverURL)/Items/\(item.id)/Images/Primary?maxWidth=1280")
+            return url(seriesId, "Backdrop", 1280)
         }
-
-        return URL(string: "\(serverURL)/Items/\(imageId)/Images/Backdrop?maxWidth=1280")
+        return url(item.id, "Primary", 1280)
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
@@ -1427,16 +1434,21 @@ struct MobileDetailView: View {
             itemId: itemId,
             imageType: "Logo",
             maxWidth: 500,
+            // Deliberately untagged: OfflineShowView looks this exact URL up
+            // cache-only (`returnCacheDataDontLoad`) with no tag to hand.
             serverURL: detailServerURL
         )
     }
 
     private func channelArtURL(for itemId: String) -> URL? {
         guard NetworkMonitor.shared.isOnline else { return nil }
-        guard let serverURL = detailServerURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(itemId)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "240")])
+        return JellyfinClient.shared.syncImageURL(
+            itemId: itemId,
+            imageType: "Primary",
+            maxWidth: 240,
+            tag: item.imageTag(for: "Primary", itemId: itemId),
+            serverURL: detailServerURL
+        )
     }
 
     private var detailServerURL: URL? {
@@ -1483,9 +1495,13 @@ struct MobileEpisodeCard: View {
             serverURL = SessionManager.shared.serverURL
         }
         guard let serverURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(episode.id)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "400")])
+        return JellyfinClient.shared.syncImageURL(
+            itemId: episode.id,
+            imageType: "Primary",
+            maxWidth: 400,
+            tag: episode.imageTag(for: "Primary", itemId: episode.id),
+            serverURL: serverURL
+        )
     }
 
     var body: some View {
@@ -1595,6 +1611,7 @@ struct MobileCastCard: View {
         return JellyfinClient.shared.personImageURL(
             personId: person.id,
             maxWidth: 150,
+            tag: person.primaryImageTag,
             serverURL: serverURL
         )
     }
