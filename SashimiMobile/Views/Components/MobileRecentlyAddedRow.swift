@@ -238,6 +238,7 @@ struct MobileRecentlyAddedCard: View {
             itemId: imageId,
             imageType: imageType,
             maxWidth: Int(width * 2),
+            tag: item.imageTag(for: imageType, itemId: imageId),
             serverURL: serverURL
         )
     }

@@ -153,8 +153,13 @@ final class HomeViewModel: ObservableObject {
                 imageType = "Backdrop"
             }
 
-            let imageURLString = "\(serverURL)/Items/\(imageId)/Images/\(imageType)?maxWidth=1920"
-            guard let imageURL = URL(string: imageURLString) else { return nil }
+            guard let imageURL = JellyfinClient.shared.syncImageURL(
+                itemId: imageId,
+                imageType: imageType,
+                maxWidth: 1920,
+                tag: item.imageTag(for: imageType, itemId: imageId),
+                serverURL: URL(string: serverURL)
+            ) else { return nil }
 
             var subtitle = ""
             if item.type == .episode {

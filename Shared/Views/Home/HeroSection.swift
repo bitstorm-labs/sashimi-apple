@@ -441,7 +441,8 @@ extension HeroSection {
                 maxWidth: 1920,
                 imageTypes: heroImageTypes,
                 contentMode: .fit,
-                serverID: serverID
+                serverID: serverID,
+                tagSource: currentItem
             )
         }
     }

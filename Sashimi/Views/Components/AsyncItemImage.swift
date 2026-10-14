@@ -8,6 +8,10 @@ struct AsyncItemImage: View {
     var contentMode: ContentMode = .fill
     var fallbackImageTypes: [String] = []
     var serverID: String?
+    /// The item whose image tags describe `itemId`'s images (the item itself,
+    /// or a child such as the episode whose series backdrop is shown). Each
+    /// fallback type gets its own tag, so a changed server image busts the cache.
+    var tagSource: BaseItemDto?
 
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
@@ -19,10 +23,12 @@ struct AsyncItemImage: View {
 
     private var currentURL: URL? {
         guard currentTypeIndex < allImageTypes.count else { return nil }
+        let type = allImageTypes[currentTypeIndex]
         return JellyfinClient.shared.syncImageURL(
             itemId: itemId,
-            imageType: allImageTypes[currentTypeIndex],
+            imageType: type,
             maxWidth: maxWidth,
+            tag: tagSource?.imageTag(for: type, itemId: itemId),
             serverURL: resolvedServerURL
         )
     }
