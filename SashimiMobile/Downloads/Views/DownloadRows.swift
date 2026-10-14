@@ -113,7 +113,7 @@ struct DownloadPoster: View {
 
     var body: some View {
         if let url = DownloadArtwork.serverImageURL(
-            itemId: item.seriesId ?? item.itemId, serverID: item.serverID, maxWidth: 200
+            itemId: item.seriesId ?? item.itemId, serverID: item.serverID, maxWidth: ImageSizing.pixelWidth(points: 60)
         ) {
             LazyImage(request: SashimiImagePipeline.request(url: url, serverID: item.serverID)) { state in
                 if let image = state.image {
@@ -149,7 +149,7 @@ struct DownloadEpisodeThumbnail: View {
 
     var body: some View {
         let url = OfflineImageHelper.thumbnailURL(for: item.itemId, serverID: item.serverID)
-            ?? DownloadArtwork.serverImageURL(itemId: item.itemId, serverID: item.serverID, maxWidth: 320)
+            ?? DownloadArtwork.serverImageURL(itemId: item.itemId, serverID: item.serverID, maxWidth: ImageSizing.pixelWidth(points: 112))
         Group {
             if let url {
                 LazyImage(request: SashimiImagePipeline.request(url: url, serverID: item.serverID)) { state in

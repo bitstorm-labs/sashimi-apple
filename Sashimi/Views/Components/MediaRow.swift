@@ -134,7 +134,7 @@ struct MediaPosterButton: View {
                             .overlay(
                                 SmartPosterImage(
                                     itemIds: imageFallbackIds,
-                                    maxWidth: 400,
+                                    maxWidth: ImageSizing.pixelWidth(points: cardWidth),
                                     imageTypes: imageTypes,
                                     contentMode: .fit,
                                     serverURL: serverURL,
@@ -146,7 +146,7 @@ struct MediaPosterButton: View {
                     } else {
                         SmartPosterImage(
                             itemIds: imageFallbackIds,
-                            maxWidth: isLandscape ? 640 : 400,
+                            maxWidth: ImageSizing.pixelWidth(points: cardWidth),
                             imageTypes: imageTypes,
                             contentMode: .fill,
                             serverURL: serverURL,

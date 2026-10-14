@@ -34,6 +34,19 @@ enum EpisodeUpNextImageRole {
     case backdrop
 }
 
+extension EpisodeUpNextImageRole {
+    /// The widest the up-next thumbnail is drawn, in points (see
+    /// `EpisodeUpNextScreen.Metrics`): 740 on tvOS, up to 520 on iPhone and
+    /// 620 on iPad.
+    static func maxThumbnailPoints(isPhone: Bool) -> CGFloat {
+        #if os(tvOS)
+        return 740
+        #else
+        return isPhone ? 520 : 620
+        #endif
+    }
+}
+
 extension EpisodeUpNextScreen {
     /// Server artwork for the card. The episode still first; the show's
     /// backdrop behind it.
@@ -47,7 +60,10 @@ extension EpisodeUpNextScreen {
         let candidates: [(String?, String)]
         switch role {
         case .thumbnail:
-            candidates = [(item.id, "Primary"), (series, "Thumb"), (series, "Backdrop")]
+            // Series Backdrop before series Thumb: Thumbs are mostly 500–1000px
+            // wide and this card is up to 740pt (1480px on a 4K TV), so a Thumb
+            // is visibly upscaled; Backdrops are 1920–3840px.
+            candidates = [(item.id, "Primary"), (series, "Backdrop"), (series, "Thumb")]
         case .backdrop:
             candidates = [(series, "Backdrop"), (item.id, "Primary")]
         }
@@ -56,7 +72,10 @@ extension EpisodeUpNextScreen {
                 JellyfinClient.shared.syncImageURL(
                     itemId: $0,
                     imageType: type,
-                    maxWidth: role == .thumbnail ? 960 : 1280,
+                    maxWidth: role == .thumbnail
+                        ? ImageSizing.pixelWidth(points: EpisodeUpNextImageRole.maxThumbnailPoints(isPhone: ImageSizing.isPhone))
+                        // Shown blurred behind everything; detail is lost anyway.
+                        : 1280,
                     tag: item.imageTag(for: type, itemId: $0),
                     serverURL: serverURL
                 )

@@ -192,7 +192,7 @@ struct OfflineShowView: View {
         guard let url = JellyfinClient.shared.syncImageURL(
             itemId: seriesId,
             imageType: "Logo",
-            maxWidth: 500,
+            maxWidth: ImageSizing.mobileLogoWidth,
             serverURL: serverURL
         ) else { return nil }
         // Same URL as the online page, so the request hits its cache entry.

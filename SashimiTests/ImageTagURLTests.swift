@@ -111,9 +111,9 @@ final class ImageTagURLTests: XCTestCase {
 
         let thumbs = EpisodeUpNextScreen.serverImageURLs(for: episode, role: .thumbnail, serverID: nil)
         XCTAssertEqual(thumbs.map(\.path), [
-            "/Items/ep1/Images/Primary", "/Items/series1/Images/Thumb", "/Items/series1/Images/Backdrop"
+            "/Items/ep1/Images/Primary", "/Items/series1/Images/Backdrop", "/Items/series1/Images/Thumb"
         ])
-        XCTAssertEqual(thumbs.map(tagQuery), ["epPrimaryTag", "seriesThumbTag", "seriesBackdropTag"])
+        XCTAssertEqual(thumbs.map(tagQuery), ["epPrimaryTag", "seriesBackdropTag", "seriesThumbTag"])
     }
 
     // MARK: - One-time cache reset

@@ -1410,8 +1410,10 @@ struct MobileDetailView: View {
             )
         }
 
+        // The backdrop spans up to 65% of a 13" iPad in landscape (1376pt).
+        let heroWidth = ImageSizing.pixelWidth(points: 1376 * 0.65)
         if isEpisode {
-            return url(item.id, "Primary", 1280)
+            return url(item.id, "Primary", heroWidth)
         }
 
         if isYouTubeSeriesStyle {
@@ -1419,11 +1421,11 @@ struct MobileDetailView: View {
         }
 
         if item.backdropImageTags?.isEmpty == false {
-            return url(item.id, "Backdrop", 1280)
+            return url(item.id, "Backdrop", heroWidth)
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            return url(seriesId, "Backdrop", 1280)
+            return url(seriesId, "Backdrop", heroWidth)
         }
-        return url(item.id, "Primary", 1280)
+        return url(item.id, "Primary", heroWidth)
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
@@ -1433,7 +1435,7 @@ struct MobileDetailView: View {
         JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: "Logo",
-            maxWidth: 500,
+            maxWidth: ImageSizing.mobileLogoWidth,
             // Deliberately untagged: OfflineShowView looks this exact URL up
             // cache-only (`returnCacheDataDontLoad`) with no tag to hand.
             serverURL: detailServerURL
@@ -1445,7 +1447,7 @@ struct MobileDetailView: View {
         return JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: "Primary",
-            maxWidth: 240,
+            maxWidth: ImageSizing.pixelWidth(points: 80),
             tag: item.imageTag(for: "Primary", itemId: itemId),
             serverURL: detailServerURL
         )
@@ -1498,7 +1500,7 @@ struct MobileEpisodeCard: View {
         return JellyfinClient.shared.syncImageURL(
             itemId: episode.id,
             imageType: "Primary",
-            maxWidth: 400,
+            maxWidth: ImageSizing.pixelWidth(points: 180),
             tag: episode.imageTag(for: "Primary", itemId: episode.id),
             serverURL: serverURL
         )
@@ -1610,7 +1612,7 @@ struct MobileCastCard: View {
         } ?? SessionManager.shared.serverURL
         return JellyfinClient.shared.personImageURL(
             personId: person.id,
-            maxWidth: 150,
+            maxWidth: ImageSizing.pixelWidth(points: 70),
             tag: person.primaryImageTag,
             serverURL: serverURL
         )
