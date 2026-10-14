@@ -62,8 +62,9 @@ final class HeroTrailerController: ObservableObject {
         resolver = { sourceId in
             HeroTrailerSource(trailers: try await JellyfinClient.shared.getLocalTrailers(itemId: sourceId))
         }
+        let screen = HeroTrailerStream.Screen.current
         streamBuilder = { trailerId in
-            await JellyfinClient.shared.heroTrailerStream(trailerId: trailerId)
+            await JellyfinClient.shared.heroTrailerStream(trailerId: trailerId, screen: screen)
         }
         encodingStopper = { playSessionId in
             try? await JellyfinClient.shared.stopActiveEncoding(playSessionId: playSessionId)
