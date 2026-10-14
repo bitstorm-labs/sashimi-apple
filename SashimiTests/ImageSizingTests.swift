@@ -36,6 +36,21 @@ final class ImageSizingTests: XCTestCase {
         XCTAssertEqual(ImageSizing.pixelWidth(points: layout.displayedImagePoints(in: size), scale: 2), 1680)
     }
 
+    /// iPad detail picture: 70% of the width, like the home hero, requested at
+    /// its drawn size (was a flat 1280 at 55%).
+    func testPadDetailPictureRequestsItsDrawnWidth() {
+        XCTAssertEqual(ImageSizing.padDetailPictureFraction, 0.7)
+        // iPad (10th gen) landscape, 1180pt: 826pt drawn → 1680px.
+        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: 1180 * ImageSizing.padDetailPictureFraction, scale: 2), 1680)
+        // 13" iPad landscape, 1376pt: 963pt drawn → 1960px.
+        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: 1376 * ImageSizing.padDetailPictureFraction, scale: 2), 1960)
+    }
+
+    func testBackdropRequestsAreCapped() {
+        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: 956, scale: 3), ImageSizing.maxBackdropWidth)
+        XCTAssertEqual(ImageSizing.maxBackdropWidth, 2560)
+    }
+
     /// The up-next card is 740pt on tvOS; it used to request 960px.
     func testUpNextThumbnailRequestsFullTVResolution() throws {
         let json = #"{"Id":"ep1","Name":"Pilot","Type":"Episode","SeriesId":"s1"}"#

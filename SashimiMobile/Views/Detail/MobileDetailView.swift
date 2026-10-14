@@ -165,7 +165,10 @@ struct MobileDetailView: View {
                     // its left and bottom, the same way the home hero does.
                     HStack(spacing: 0) {
                         Spacer()
-                        if let backdropURL = backdropImageURL {
+                        let pictureWidth = geometry.size.width * ImageSizing.padDetailPictureFraction
+                        if let backdropURL = backdropImageURL(
+                            maxWidth: ImageSizing.backdropPixelWidth(points: pictureWidth)
+                        ) {
                             LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
                                 if let image = state.image {
                                     image
@@ -174,7 +177,7 @@ struct MobileDetailView: View {
                                     Color.clear
                                 }
                             }
-                            .frame(width: geometry.size.width * (isYouTubeSeriesStyle ? 0.65 : 0.55))
+                            .frame(width: pictureWidth)
                             .heroTrailer(for: item, serverID: serverID)
                             // Only the left and bottom edges fade; the top and
                             // right run off the screen like the home hero's.
@@ -1382,7 +1385,8 @@ struct MobileDetailView: View {
 
     // MARK: - URLs
 
-    private var backdropImageURL: URL? {
+    /// `heroWidth` is the picture's drawn width in pixels (frame x scale).
+    private func backdropImageURL(maxWidth heroWidth: Int) -> URL? {
         // Offline: use local files
         if !NetworkMonitor.shared.isOnline {
             // For series, check first downloaded episode's backdrop
@@ -1410,14 +1414,12 @@ struct MobileDetailView: View {
             )
         }
 
-        // The backdrop spans up to 65% of a 13" iPad in landscape (1376pt).
-        let heroWidth = ImageSizing.pixelWidth(points: 1376 * 0.65)
         if isEpisode {
             return url(item.id, "Primary", heroWidth)
         }
 
         if isYouTubeSeriesStyle {
-            return url(item.id, "Banner", 1920)
+            return url(item.id, "Banner", heroWidth)
         }
 
         if item.backdropImageTags?.isEmpty == false {
