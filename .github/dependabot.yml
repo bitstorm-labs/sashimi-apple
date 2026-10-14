@@ -1,8 +1,56 @@
+# Dependency updates. Policy (same across the bitstorm-labs repos):
+#   - weekly, Monday 05:00 America/Denver
+#   - minor + patch grouped into one PR per ecosystem; majors get their own PRs
+#   - .github/workflows/dependabot-automerge.yml queues patch/minor PRs on the
+#     merge queue once the required checks pass; majors wait for review
+# Actions are pinned to commit SHAs with a "# vX.Y.Z" comment (they run with
+# signing secrets); Dependabot bumps the SHA and the comment together.
+#
+# Note: a swift bump changes Package.resolved, which auto-release.yml counts as
+# app code, so the next release after it merges ships it to TestFlight.
 version: 2
 updates:
-  # Third-party actions are pinned to commit SHAs (they run with signing
-  # secrets); Dependabot bumps the SHA and the version comment together.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  # Nuke/NukeUI (Package.swift + Package.resolved; project.yml mirrors the
+  # same "from: 12.0.0" requirement, so a major bump needs project.yml too).
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      swift-minor-patch:
+        update-types: [minor, patch]
+
+  # fastlane (Gemfile / Gemfile.lock)
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      bundler-minor-patch:
+        update-types: [minor, patch]

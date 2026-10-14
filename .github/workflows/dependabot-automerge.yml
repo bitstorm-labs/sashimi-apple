@@ -1,0 +1,31 @@
+name: Dependabot auto-merge
+
+# Queues Dependabot's patch/minor PRs (including grouped ones) on the merge
+# queue. The queue still waits for the required checks ("Build tvOS App",
+# "SwiftLint"), so nothing lands red. Major bumps are left for a human.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Queue patch/minor updates
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        # No --squash: the merge queue's own merge method applies.
+        run: gh pr merge --auto "$PR_URL"
