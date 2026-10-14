@@ -437,8 +437,9 @@ struct MobileDetailView: View {
                     .foregroundStyle(MobileColors.textPrimary)
             }
 
-            // Metadata + ratings row
-            HStack(spacing: MobileSpacing.sm) {
+            // Metadata + ratings row. Wraps rather than clipping in a narrow
+            // split-view column.
+            WrappingHStack(spacing: MobileSpacing.sm) {
                 let metaParts = seriesMetadataParts
                 if !metaParts.isEmpty {
                     Text(metaParts.joined(separator: " • "))
@@ -469,15 +470,18 @@ struct MobileDetailView: View {
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(MobileColors.textPrimary)
 
-            HStack(spacing: MobileSpacing.sm) {
+            WrappingHStack(spacing: MobileSpacing.sm) {
                 if let seriesName = item.seriesName {
                     Text(seriesName)
                 }
                 if let year = item.productionYear {
-                    if item.seriesName != nil {
-                        Text("•")
+                    // Kept together so a wrap never strands the bullet.
+                    HStack(spacing: MobileSpacing.sm) {
+                        if item.seriesName != nil {
+                            Text("•")
+                        }
+                        Text(String(year))
                     }
-                    Text(String(year))
                 }
                 if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
                     SeriesStatusBadge(status: status)
@@ -569,8 +573,8 @@ struct MobileDetailView: View {
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
 
-            // Ratings + media info
-            HStack(spacing: MobileSpacing.sm) {
+            // Ratings + media info (wraps in a narrow split-view column)
+            WrappingHStack(spacing: MobileSpacing.sm) {
                 ratingsRow
                 mediaInfoBadges
                 if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
@@ -626,7 +630,7 @@ struct MobileDetailView: View {
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
 
-            HStack(spacing: MobileSpacing.sm) {
+            WrappingHStack(spacing: MobileSpacing.sm) {
                 ratingsRow
                 mediaInfoBadges
             }

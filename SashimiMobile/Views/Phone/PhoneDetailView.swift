@@ -583,8 +583,9 @@ struct PhoneDetailView: View {
         .font(MobileTypography.caption)
         .lineLimit(1)
 
-        // Ratings + media (quality) chips on a single line
-        HStack(spacing: MobileSpacing.sm) {
+        // Ratings + media (quality) chips + status: one line when they fit,
+        // wrapping on narrow phones (375pt) instead of clipping the badge.
+        WrappingHStack(spacing: MobileSpacing.sm) {
             ratingsRow
             if !isSeries {
                 mediaInfoBadges
