@@ -33,6 +33,9 @@ final class HeroTrailerController: ObservableObject {
 
     private var owners = HeroTrailerOwners()
     private var playingSourceId: String?
+    /// The source of a trailer that's waiting out its start delay. Until it
+    /// plays, this is what a screen for the same show takes over (#668).
+    private var pendingSourceId: String?
     private var playSessionId: String?
     private var startTask: Task<Void, Never>?
     private var endObservers: [Any] = []
@@ -87,17 +90,17 @@ final class HeroTrailerController: ObservableObject {
 
     func screenAppeared(owner: UUID, item: BaseItemDto, serverID: String?) {
         let sourceId = isEligible(serverID) ? HeroTrailerPolicy.trailerSourceId(for: item) : nil
-        apply(owners.appeared(owner: owner, sourceId: sourceId, playingSourceId: playingSourceId))
+        apply(owners.appeared(owner: owner, sourceId: sourceId, playingSourceId: currentSourceId))
     }
 
     /// A screen with no hero of its own (a person page) covering a detail
     /// screen: the trailer underneath must not keep playing behind it.
     func coveringScreenAppeared(owner: UUID) {
-        apply(owners.appeared(owner: owner, sourceId: nil, playingSourceId: playingSourceId))
+        apply(owners.appeared(owner: owner, sourceId: nil, playingSourceId: currentSourceId))
     }
 
     func screenDismissed(owner: UUID) {
-        apply(owners.dismissed(owner: owner, playingSourceId: playingSourceId))
+        apply(owners.dismissed(owner: owner, playingSourceId: currentSourceId))
     }
 
     /// Play, Trailer or Shuffle pressed: the trailer must be gone before the
@@ -120,12 +123,15 @@ final class HeroTrailerController: ObservableObject {
 
     // MARK: - Internals
 
+    /// The trailer this visit has, playing or about to.
+    private var currentSourceId: String? { playingSourceId ?? pendingSourceId }
+
     private func apply(_ decision: HeroTrailerOwners.Decision) {
         switch decision {
         case .start(let sourceId):
             stop()
             activeOwner = owners.topOwner
-            scheduleStart(sourceId: sourceId, owner: owners.topOwner)
+            scheduleStart(sourceId: sourceId)
         case .handOff:
             activeOwner = owners.topOwner
         case .stop:
@@ -136,22 +142,30 @@ final class HeroTrailerController: ObservableObject {
         }
     }
 
-    private func scheduleStart(sourceId: String, owner: UUID?) {
+    /// Waits, then plays. A screen for the same show that opens meanwhile is
+    /// handed the start, so only a stop (which cancels this task) ends it.
+    private func scheduleStart(sourceId: String) {
+        pendingSourceId = sourceId
         startTask = Task { [weak self] in
-            guard let self else { return }
-            if timings.startDelay > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
-            }
-            guard !Task.isCancelled, activeOwner == owner else { return }
-            guard let trailer = await resolveTrailer(sourceId: sourceId) else { return }
-            guard !Task.isCancelled, activeOwner == owner else { return }
-            guard let stream = await streamBuilder(trailer.id) else { return }
-            guard !Task.isCancelled, activeOwner == owner else {
-                if let session = stream.playSessionId { await encodingStopper(session) }
-                return
-            }
-            play(stream: stream, sourceId: sourceId, clip: HeroTrailerPolicy.clip(trailerSeconds: trailer.seconds))
+            await self?.start(sourceId: sourceId)
+            guard let self, !Task.isCancelled else { return }
+            pendingSourceId = nil
         }
+    }
+
+    private func start(sourceId: String) async {
+        if timings.startDelay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
+        }
+        guard !Task.isCancelled else { return }
+        guard let trailer = await resolveTrailer(sourceId: sourceId) else { return }
+        guard !Task.isCancelled else { return }
+        guard let stream = await streamBuilder(trailer.id) else { return }
+        guard !Task.isCancelled else {
+            if let session = stream.playSessionId { await encodingStopper(session) }
+            return
+        }
+        play(stream: stream, sourceId: sourceId, clip: HeroTrailerPolicy.clip(trailerSeconds: trailer.seconds))
     }
 
     private func resolveTrailer(sourceId: String) async -> HeroTrailerSource? {
@@ -246,6 +260,7 @@ final class HeroTrailerController: ObservableObject {
     private func stop() {
         startTask?.cancel()
         startTask = nil
+        pendingSourceId = nil
         isVisible = false
         teardown()
     }
