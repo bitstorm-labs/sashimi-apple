@@ -472,10 +472,15 @@ struct MainTabView: View {
         .prefersDefaultFocus(id == selection, in: railScope)
     }
 
-    /// Soft accent highlight in place of the tvOS default white focus platter.
+    /// Soft accent highlight in place of the tvOS default white focus platter:
+    /// the same tinted fill + accent ring the settings rows use.
     private func focusHighlight(_ isFocused: Bool) -> some View {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(isFocused ? 0.14 : 0))
+            .fill(SashimiTheme.focus.opacity(isFocused ? 0.18 : 0))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(SashimiTheme.focus.opacity(isFocused ? 1 : 0), lineWidth: 3)
+            )
     }
 
     /// Jellyfin purple, sampled from the logo — the selected-item highlight.

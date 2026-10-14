@@ -7,19 +7,21 @@ enum SashimiTheme {
     static let cardBackground = Color(white: 0.12)
     static let accent = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
     static let accentSecondary = Color(red: 0.95, green: 0.65, blue: 0.25)
-    static let highlight = Color(red: 140 / 255, green: 92 / 255, blue: 199 / 255)
     // Interactive links / action glyphs (See All, Show More, the Continue
     // Watching play symbol) — the original sky-blue accent, kept distinct from
     // the purple brand accent so tappable affordances read as links.
     static let link = Color(red: 0.36, green: 0.68, blue: 0.90)
-    // Neutral focus/selection color — kept separate from the purple accent so
-    // the ever-present focus ring stays quiet (native-tvOS feel) while purple
-    // is reserved for deliberate accents (scrubber, progress, selected state).
-    static let focus = Color.white
+    // Focus rings, borders and focus tints: the brand accent, matching the
+    // Roku app's purple focus rings. Draw it as a stroke or a low-opacity
+    // fill; where a focused control is a solid white platter (primary Play,
+    // guide day chips) the ring around it carries the accent instead. Keep
+    // "current"/"selected" markers in a different colour (the current-episode
+    // ring is white) so they never read as focus.
+    static let focus = accent
     static let textPrimary = Color.white
     static let textSecondary = Color(white: 0.75)
     static let textTertiary = Color(white: 0.55)
-    static let focusGlow = Color.white.opacity(0.45)
+    static let focusGlow = accent.opacity(0.45)
     static let progressBackground = Color(white: 0.25)
     static let success = Color.green
     static let warning = Color.orange
