@@ -27,12 +27,20 @@ struct EpisodeCard: View {
                 ZStack(alignment: .bottomLeading) {
                     if showEpisodeThumbnail {
                         // Try episode thumbnail first, fall back to season/series poster
-                        SmartPosterImage(itemIds: fallbackImageIds, maxWidth: 400, tagSource: episode)
+                        SmartPosterImage(
+                            itemIds: fallbackImageIds,
+                            maxWidth: ImageSizing.pixelWidth(points: 240),
+                            tagSource: episode
+                        )
                             .frame(width: 240, height: 135)
                             .background(Color.black)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        SmartPosterImage(itemIds: fallbackImageIds, maxWidth: 400, tagSource: episode)
+                        SmartPosterImage(
+                            itemIds: fallbackImageIds,
+                            maxWidth: ImageSizing.pixelWidth(points: 150),
+                            tagSource: episode
+                        )
                             .frame(width: 150, height: 225)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }

@@ -118,8 +118,10 @@ struct MobileChannelCard: View {
                 .overlay {
                     if let item = card.item {
                         let art = item.channelArtwork
-                        LazyImage(url: JellyfinClient.shared.imageURL(
-                            itemId: art.itemId, imageType: art.imageType, maxWidth: 800
+                        LazyImage(url: JellyfinClient.shared.syncImageURL(
+                            itemId: art.itemId, imageType: art.imageType,
+                            maxWidth: ImageSizing.pixelWidth(points: width),
+                            tag: item.imageTag(for: art.imageType, itemId: art.itemId)
                         )) { state in
                             if let image = state.image {
                                 image.resizable().aspectRatio(contentMode: .fill)

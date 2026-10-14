@@ -378,12 +378,12 @@ struct PhoneDetailView: View {
     }
 
     private var channelAvatarURL: URL? {
-        serverImageURL(item.id, "Primary", maxWidth: 240)
+        serverImageURL(item.id, "Primary", maxWidth: ImageSizing.pixelWidth(points: 72))
     }
 
     /// Channel avatar for a YouTube EPISODE's header — the series' Primary.
     private func seriesAvatarURL(for seriesId: String) -> URL? {
-        serverImageURL(seriesId, "Primary", maxWidth: 120)
+        serverImageURL(seriesId, "Primary", maxWidth: ImageSizing.pixelWidth(points: 28))
     }
 
     /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
@@ -501,7 +501,7 @@ struct PhoneDetailView: View {
         JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: "Logo",
-            maxWidth: 500,
+            maxWidth: ImageSizing.mobileLogoWidth,
             serverURL: detailServerURL
         )
     }
@@ -1377,8 +1377,10 @@ struct PhoneDetailView: View {
                 ?? OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
         }
 
+        // Full width on the largest iPhone (440pt).
+        let heroWidth = ImageSizing.pixelWidth(points: 440)
         if isEpisode {
-            return serverImageURL(item.id, "Primary", maxWidth: 1280)
+            return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
         }
 
         if isYouTubeSeriesStyle {
@@ -1386,18 +1388,18 @@ struct PhoneDetailView: View {
         }
 
         if item.backdropImageTags?.isEmpty == false {
-            return serverImageURL(item.id, "Backdrop", maxWidth: 1280)
+            return serverImageURL(item.id, "Backdrop", maxWidth: heroWidth)
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            return serverImageURL(seriesId, "Backdrop", maxWidth: 1280)
+            return serverImageURL(seriesId, "Backdrop", maxWidth: heroWidth)
         }
-        return serverImageURL(item.id, "Primary", maxWidth: 1280)
+        return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
         if !NetworkMonitor.shared.isOnline {
             return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
-        return serverImageURL(episode.id, "Primary", maxWidth: 400, owner: episode)
+        return serverImageURL(episode.id, "Primary", maxWidth: ImageSizing.pixelWidth(points: 120), owner: episode)
     }
 
     // MARK: - Formatting

@@ -110,7 +110,7 @@ struct ContinueWatchingCard: View {
                     AsyncItemImage(
                         itemId: imageId,
                         imageType: imageType,
-                        maxWidth: 600,
+                        maxWidth: ImageSizing.pixelWidth(points: 440),
                         fallbackImageTypes: fallbackImageTypes,
                         tagSource: item
                     )

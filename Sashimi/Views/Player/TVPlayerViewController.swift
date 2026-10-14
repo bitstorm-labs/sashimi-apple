@@ -515,7 +515,7 @@ struct PlayerContentOverlay: View {
                 AsyncItemImage(
                     itemId: seriesId,
                     imageType: "Logo",
-                    maxWidth: 800,
+                    maxWidth: ImageSizing.pixelWidth(points: PlayerInfoBarMetrics.tv.logoMaxWidth),
                     contentMode: .fit,
                     fallbackImageTypes: [],
                     tagSource: item
