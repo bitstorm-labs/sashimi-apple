@@ -174,10 +174,9 @@ struct SettingsOptionRow: View {
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 24)
-            // Neutral focus: subtle white fill + white stroke (matches every
-            // other row — HomeRowToggleButton, etc.). A solid
-            // SashimiTheme.focus (Color.white) fill made the focused row a
-            // white box with the white-on-focus text vanishing into it.
+            // Shared focus treatment: a faint accent fill + accent ring
+            // (matches every other row — HomeRowToggleButton, etc.). A solid
+            // focus fill would swallow the white-on-focus text.
             .focusHighlight(isFocused, cornerRadius: 16)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
