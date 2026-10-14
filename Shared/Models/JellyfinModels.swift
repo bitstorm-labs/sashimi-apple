@@ -113,6 +113,10 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     /// Present only when the item query requests Fields=MediaStreams. Used for
     /// the resolution badge on cover art; nil for series/seasons (no stream).
     let mediaStreams: [MediaStream]?
+    /// A series' airing status ("Continuing", "Ended", "Unreleased"). Jellyfin
+    /// returns it on full item fetches. A `var` with a default so the
+    /// memberwise initialiser used for offline items doesn't need it.
+    var status: String?
 
     /// Resolution chip for cover art: "4K", "HD", or "SD". Nil when the item
     /// has no video stream (series/season) or dimensions are unknown.
@@ -158,6 +162,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case path = "Path"
         case remoteTrailers = "RemoteTrailers"
         case localTrailerCount = "LocalTrailerCount"
+        case status = "Status"
     }
 
     func hash(into hasher: inout Hasher) {

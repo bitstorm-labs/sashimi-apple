@@ -85,6 +85,7 @@ extension MediaDetailView {
             // Get series ratings for episode fallback
             seriesCommunityRating = series?.communityRating
             seriesCriticRating = series?.criticRating
+            seriesStatus = series?.status
 
             seasons = try await JellyfinClient.shared.getSeasons(seriesId: seriesId)
 
