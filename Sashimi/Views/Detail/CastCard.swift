@@ -15,6 +15,7 @@ struct CastCard: View {
         return JellyfinClient.shared.personImageURL(
             personId: person.id,
             maxWidth: 200,
+            tag: person.primaryImageTag,
             serverURL: serverURL
         )
     }

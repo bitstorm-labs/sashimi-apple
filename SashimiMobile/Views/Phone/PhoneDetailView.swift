@@ -378,18 +378,12 @@ struct PhoneDetailView: View {
     }
 
     private var channelAvatarURL: URL? {
-        guard let serverURL = detailServerURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(item.id)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "240")])
+        serverImageURL(item.id, "Primary", maxWidth: 240)
     }
 
     /// Channel avatar for a YouTube EPISODE's header — the series' Primary.
     private func seriesAvatarURL(for seriesId: String) -> URL? {
-        guard let serverURL = detailServerURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(seriesId)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "120")])
+        serverImageURL(seriesId, "Primary", maxWidth: 120)
     }
 
     /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
@@ -502,11 +496,32 @@ struct PhoneDetailView: View {
     }
 
     private func logoImageURL(for itemId: String) -> URL? {
+        // Deliberately untagged: OfflineShowView looks this exact URL up
+        // cache-only (`returnCacheDataDontLoad`) with no tag to hand.
         JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: "Logo",
             maxWidth: 500,
             serverURL: detailServerURL
+        )
+    }
+
+    /// A server image URL carrying the image's tag (looked up on `owner`,
+    /// the page's item by default), so a changed server image is a new
+    /// cache key rather than the stale cached picture.
+    private func serverImageURL(
+        _ itemId: String,
+        _ imageType: String,
+        maxWidth: Int,
+        owner: BaseItemDto? = nil
+    ) -> URL? {
+        guard let serverURL = detailServerURL else { return nil }
+        return JellyfinClient.shared.syncImageURL(
+            itemId: itemId,
+            imageType: imageType,
+            maxWidth: maxWidth,
+            tag: (owner ?? item).imageTag(for: imageType, itemId: itemId),
+            serverURL: serverURL
         )
     }
 
@@ -1362,44 +1377,27 @@ struct PhoneDetailView: View {
                 ?? OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
         }
 
-        guard let serverURL = detailServerURL else { return nil }
-
         if isEpisode {
-            return serverURL
-                .appendingPathComponent("Items/\(item.id)/Images/Primary")
-                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
+            return serverImageURL(item.id, "Primary", maxWidth: 1280)
         }
 
         if isYouTubeSeriesStyle {
-            return serverURL
-                .appendingPathComponent("Items/\(item.id)/Images/Banner")
-                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1920")])
+            return serverImageURL(item.id, "Banner", maxWidth: 1920)
         }
 
-        let imageId: String
         if item.backdropImageTags?.isEmpty == false {
-            imageId = item.id
+            return serverImageURL(item.id, "Backdrop", maxWidth: 1280)
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            imageId = seriesId
-        } else {
-            return serverURL
-                .appendingPathComponent("Items/\(item.id)/Images/Primary")
-                .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
+            return serverImageURL(seriesId, "Backdrop", maxWidth: 1280)
         }
-
-        return serverURL
-            .appendingPathComponent("Items/\(imageId)/Images/Backdrop")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "1280")])
+        return serverImageURL(item.id, "Primary", maxWidth: 1280)
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
         if !NetworkMonitor.shared.isOnline {
             return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
-        guard let serverURL = detailServerURL else { return nil }
-        return serverURL
-            .appendingPathComponent("Items/\(episode.id)/Images/Primary")
-            .appending(queryItems: [URLQueryItem(name: "maxWidth", value: "400")])
+        return serverImageURL(episode.id, "Primary", maxWidth: 400, owner: episode)
     }
 
     // MARK: - Formatting

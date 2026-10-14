@@ -18,7 +18,8 @@ extension MediaDetailView {
                                     maxWidth: 240,
                                     contentMode: .fill,
                                     fallbackImageTypes: ["Thumb"],
-                                    serverID: serverID
+                                    serverID: serverID,
+                                    tagSource: item
                                 )
                                 .clipShape(Circle())
                             )
@@ -39,7 +40,8 @@ extension MediaDetailView {
                         maxWidth: 1400,
                         contentMode: .fit,
                         fallbackImageTypes: [],
-                        serverID: serverID
+                        serverID: serverID,
+                        tagSource: item
                     )
                     .frame(maxHeight: 220, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -70,7 +72,8 @@ extension MediaDetailView {
                     maxWidth: 1400,
                     contentMode: .fit,
                     fallbackImageTypes: [],
-                    serverID: serverID
+                    serverID: serverID,
+                    tagSource: item
                 )
                 .frame(maxHeight: 220, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,7 +125,8 @@ extension MediaDetailView {
                         maxWidth: 400,
                         imageTypes: ["Primary", "Thumb"],
                         contentMode: .fit,
-                        serverID: serverID
+                        serverID: serverID,
+                        tagSource: item
                     )
                     .clipShape(Circle())
                 )
@@ -132,7 +136,8 @@ extension MediaDetailView {
                 itemIds: posterFallbackIds,
                 maxWidth: isYouTubeStyle ? 640 : 400,
                 imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"],
-                serverID: serverID
+                serverID: serverID,
+                tagSource: item
             )
             .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -171,7 +176,8 @@ extension MediaDetailView {
                                 maxWidth: 120,
                                 contentMode: .fill,
                                 fallbackImageTypes: ["Thumb"],
-                                serverID: serverID
+                                serverID: serverID,
+                                tagSource: item
                             )
                             .clipShape(Circle())
                         )

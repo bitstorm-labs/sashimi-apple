@@ -117,6 +117,16 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     /// returns it on full item fetches. A `var` with a default so the
     /// memberwise initialiser used for offline items doesn't need it.
     var status: String?
+    // Parent/series image tags. Optional `var`s (not `let`) so the synthesised
+    // memberwise init keeps working for callers that predate them. Jellyfin
+    // includes them on item responses by default; they feed `imageTag(for:itemId:)`.
+    var parentBackdropItemId: String?
+    var parentThumbItemId: String?
+    var parentThumbImageTag: String?
+    var parentLogoItemId: String?
+    var parentLogoImageTag: String?
+    var seriesPrimaryImageTag: String?
+    var seriesThumbImageTag: String?
 
     /// Resolution chip for cover art: "4K", "HD", or "SD". Nil when the item
     /// has no video stream (series/season) or dimensions are unknown.
@@ -163,6 +173,13 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case remoteTrailers = "RemoteTrailers"
         case localTrailerCount = "LocalTrailerCount"
         case status = "Status"
+        case parentBackdropItemId = "ParentBackdropItemId"
+        case parentThumbItemId = "ParentThumbItemId"
+        case parentThumbImageTag = "ParentThumbImageTag"
+        case parentLogoItemId = "ParentLogoItemId"
+        case parentLogoImageTag = "ParentLogoImageTag"
+        case seriesPrimaryImageTag = "SeriesPrimaryImageTag"
+        case seriesThumbImageTag = "SeriesThumbImageTag"
     }
 
     func hash(into hasher: inout Hasher) {

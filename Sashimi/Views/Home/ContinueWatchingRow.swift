@@ -111,7 +111,8 @@ struct ContinueWatchingCard: View {
                         itemId: imageId,
                         imageType: imageType,
                         maxWidth: 600,
-                        fallbackImageTypes: fallbackImageTypes
+                        fallbackImageTypes: fallbackImageTypes,
+                        tagSource: item
                     )
                     .frame(width: 440, height: 248)
                     .overlay(

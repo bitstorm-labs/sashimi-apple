@@ -69,6 +69,7 @@ struct PersonDetailView: View {
            let imageURL = JellyfinClient.shared.personImageURL(
                personId: person.id,
                maxWidth: 220,
+               tag: person.primaryImageTag,
                serverURL: personServerURL
            ) {
             LazyImage(request: SashimiImagePipeline.request(url: imageURL, serverID: originatingServerID)) { state in

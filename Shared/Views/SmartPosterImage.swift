@@ -10,6 +10,9 @@ struct SmartPosterImage: View {
     var contentMode: ContentMode = .fill
     var serverURL: URL?
     var serverID: String?
+    /// Item whose image tags describe the `itemIds` (itself and/or its
+    /// parents); see `BaseItemDto.imageTag(for:itemId:)`.
+    var tagSource: BaseItemDto?
 
     @State private var currentIndex: Int = 0
     @State private var currentTypeIndex: Int = 0
@@ -18,10 +21,13 @@ struct SmartPosterImage: View {
 
     private var currentURL: URL? {
         guard currentIndex < itemIds.count, currentTypeIndex < imageTypes.count else { return nil }
+        let itemId = itemIds[currentIndex]
+        let type = imageTypes[currentTypeIndex]
         return JellyfinClient.shared.syncImageURL(
-            itemId: itemIds[currentIndex],
-            imageType: imageTypes[currentTypeIndex],
+            itemId: itemId,
+            imageType: type,
             maxWidth: maxWidth,
+            tag: tagSource?.imageTag(for: type, itemId: itemId),
             serverURL: resolvedServerURL
         )
     }
