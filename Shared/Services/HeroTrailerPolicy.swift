@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The pure rules behind the detail-screen hero trailer (#658), kept apart from
 /// `HeroTrailerController`'s AVPlayer plumbing so every decision is unit-testable.
@@ -98,8 +101,28 @@ struct HeroTrailerSource: Equatable, Sendable {
 
 /// A playable hero-trailer stream and the server session behind it.
 struct HeroTrailerStream: Equatable, Sendable {
-    static let maxBitrate = 4_000_000
-    static let maxWidth = 1280
+    /// Where the trailer is shown, which decides how sharp it needs to be.
+    enum Screen: Equatable, Sendable {
+        case tv, tablet, phone
+
+        @MainActor static var current: Screen {
+            #if os(tvOS)
+            return .tv
+            #else
+            return UIDevice.current.userInterfaceIdiom == .phone ? .phone : .tablet
+            #endif
+        }
+    }
+
+    /// The transcode cap. On a TV or tablet the hero is about half the screen,
+    /// where 720p reads soft, and most trailers are 1080p; a phone's hero is
+    /// small enough that 720p is plenty and saves data.
+    static func limits(for screen: Screen) -> (maxBitrate: Int, maxWidth: Int) {
+        switch screen {
+        case .tv, .tablet: return (8_000_000, 1920)
+        case .phone: return (4_000_000, 1280)
+        }
+    }
 
     let url: URL
     /// Nil when the server didn't report one; the encoding then simply ends on
