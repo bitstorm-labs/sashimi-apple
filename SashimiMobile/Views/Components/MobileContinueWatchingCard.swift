@@ -69,7 +69,7 @@ struct MobileContinueWatchingCard: View {
         JellyfinClient.shared.syncImageURL(
             itemId: imageId,
             imageType: imageType,
-            maxWidth: Int(width * 3),
+            maxWidth: ImageSizing.pixelWidth(points: width),
             tag: item.imageTag(for: imageType, itemId: imageId)
         )
     }

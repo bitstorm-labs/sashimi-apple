@@ -142,7 +142,7 @@ struct HeroSection: View {
                     // mid-hero. Image-relative, the ramp always covers the edge.
                     HStack(spacing: 0) {
                         Spacer()
-                        heroImage
+                        heroImage(maxWidth: layout.imagePixelWidth(in: geometry.size))
                         .mask(
                             LinearGradient(
                                 stops: [
@@ -423,7 +423,7 @@ extension HeroSection {
     /// The slide's backdrop: local artwork when the caller has it, otherwise
     /// the server's, by the same fallback chain as always.
     @ViewBuilder
-    private var heroImage: some View {
+    private func heroImage(maxWidth: Int) -> some View {
         if let local = localBackdrop?(currentItem) {
             local
                 .resizable()
@@ -431,14 +431,11 @@ extension HeroSection {
         } else {
             SmartPosterImage(
                 itemIds: heroFallbackIds,
-                // 1920, not 3840. tvOS lays out in a 1920x1080 space
-                // and this slot renders ~910x512pt, so a 4K request
-                // was a 33 MB RGBA decode (3840*2160*4) for an image
-                // that is downsampled on sight. Jellyfin treats
-                // maxWidth as a cap, so any item with 4K artwork
-                // really did return 4K -- and the hero rotates every
-                // 6 seconds.
-                maxWidth: 1920,
+                // Sized to the picture actually drawn, never a flat 4K:
+                // Jellyfin treats maxWidth as a cap, so a 3840 request
+                // on tvOS (whose slot draws ~850pt) was a 33 MB decode
+                // downsampled on sight, every 6-second rotation.
+                maxWidth: maxWidth,
                 imageTypes: heroImageTypes,
                 contentMode: .fit,
                 serverID: serverID,
@@ -482,6 +479,23 @@ struct HeroLayout {
         let base = size.width * 0.7
         guard widensImageToFillHeight else { return base }
         return min(size.width, max(base, size.height * 16 / 9))
+    }
+
+    /// Points a 16:9 backdrop actually occupies: it is drawn `.fit` in a
+    /// box `imageWidth` wide and `height - imageTopInset` tall.
+    func displayedImagePoints(in size: CGSize) -> CGFloat {
+        let boxHeight = max(0, size.height - imageTopInset)
+        return min(imageWidth(in: size), boxHeight * 16 / 9)
+    }
+
+    /// The pixel width to request for the backdrop.
+    @MainActor
+    func imagePixelWidth(in size: CGSize) -> Int {
+        let points = displayedImagePoints(in: size)
+        // Before layout settles the proposal can be zero; don't cache a
+        // 40px placeholder request for it.
+        guard points >= 1 else { return 1920 }
+        return ImageSizing.pixelWidth(points: points)
     }
 }
 
