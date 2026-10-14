@@ -1800,15 +1800,17 @@ actor JellyfinClient {
     ///
     /// Trailarr writes MKV/VP9/Opus trailers, which AVPlayer can't open, so
     /// this always asks for a transcode (no direct play, no video stream copy)
-    /// capped at 4 Mbps / 1280 wide: it's a background picture, not the
-    /// feature. Nil on any failure — a hero trailer is never worth an error.
-    func heroTrailerStream(trailerId: String) async -> HeroTrailerStream? {
+    /// capped by `HeroTrailerStream.limits(for:)`: 1080p on a TV or tablet,
+    /// 720p on a phone. Nil on any failure — a hero trailer is never worth an
+    /// error.
+    func heroTrailerStream(trailerId: String, screen: HeroTrailerStream.Screen) async -> HeroTrailerStream? {
+        let limits = HeroTrailerStream.limits(for: screen)
         do {
             let info = try await getPlaybackInfo(
                 itemId: trailerId,
                 engine: .avFoundation,
-                maxBitrate: HeroTrailerStream.maxBitrate,
-                maxWidth: HeroTrailerStream.maxWidth,
+                maxBitrate: limits.maxBitrate,
+                maxWidth: limits.maxWidth,
                 forceTranscode: true,
                 allowVideoStreamCopy: false
             )

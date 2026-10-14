@@ -342,7 +342,7 @@ final class HeroTrailerClientTests: XCTestCase {
         {"MediaSources":[{"Id":"t1","TranscodingUrl":"/videos/t1/master.m3u8?MediaSourceId=t1"}],"PlaySessionId":"ps9"}
         """#)
 
-        let stream = await (try client()).heroTrailerStream(trailerId: "t1")
+        let stream = await (try client()).heroTrailerStream(trailerId: "t1", screen: .tv)
 
         XCTAssertEqual(stream?.playSessionId, "ps9")
         XCTAssertEqual(stream?.url.path, "/videos/t1/master.m3u8")
@@ -350,12 +350,28 @@ final class HeroTrailerClientTests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(post.body)) as? [String: Any])
         XCTAssertEqual(body["EnableDirectPlay"] as? Bool, false, "MKV/VP9 trailers can't direct play")
         XCTAssertEqual(body["AllowVideoStreamCopy"] as? Bool, false, "VP9 must be re-encoded for AVPlayer")
-        XCTAssertEqual(body["MaxStreamingBitrate"] as? Int, HeroTrailerStream.maxBitrate)
+        XCTAssertEqual(body["MaxStreamingBitrate"] as? Int, 8_000_000, "a TV gets the 1080p cap")
+    }
+
+    func testAPhoneAsksForASmallerTrailer() async throws {
+        RecordingServer.routes["/Items/t1/PlaybackInfo"] = (200, #"{"MediaSources":[{"Id":"t1","TranscodingUrl":"/videos/t1/master.m3u8?MediaSourceId=t1"}],"PlaySessionId":"ps9"}"#)
+
+        _ = await (try client()).heroTrailerStream(trailerId: "t1", screen: .phone)
+
+        let post = try XCTUnwrap(RecordingServer.seen.first { $0.url.path == "/Items/t1/PlaybackInfo" })
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(post.body)) as? [String: Any])
+        XCTAssertEqual(body["MaxStreamingBitrate"] as? Int, 4_000_000)
+    }
+
+    func testTVsAndTabletsGetA1080pTrailerPhones720p() {
+        XCTAssertEqual(HeroTrailerStream.limits(for: .tv).maxWidth, 1920)
+        XCTAssertEqual(HeroTrailerStream.limits(for: .tablet).maxWidth, 1920)
+        XCTAssertEqual(HeroTrailerStream.limits(for: .phone).maxWidth, 1280)
     }
 
     func testNoStreamWhenTheServerOffersNoTranscode() async throws {
         RecordingServer.routes["/Items/t1/PlaybackInfo"] = (200, #"{"MediaSources":[{"Id":"t1"}],"PlaySessionId":"ps9"}"#)
-        let stream = await (try client()).heroTrailerStream(trailerId: "t1")
+        let stream = await (try client()).heroTrailerStream(trailerId: "t1", screen: .tv)
         XCTAssertNil(stream)
     }
 
