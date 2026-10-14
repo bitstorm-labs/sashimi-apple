@@ -30,6 +30,8 @@ struct MobileDetailView: View {
     @State private var isWatched: Bool = false
     @State private var hasProgress: Bool = false
     @State private var seriesCommunityRating: Double?
+    /// The show's airing status, for a season's or episode's status pill.
+    @State private var seriesStatus: String?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingPersonDetail: PersonInfo?
@@ -440,6 +442,10 @@ struct MobileDetailView: View {
                 }
 
                 ratingsRow
+
+                if let status = SeriesStatus(item: item) {
+                    SeriesStatusBadge(status: status)
+                }
             }
             .font(MobileTypography.caption)
             .foregroundStyle(MobileColors.textSecondary)
@@ -469,6 +475,9 @@ struct MobileDetailView: View {
                         Text("•")
                     }
                     Text(String(year))
+                }
+                if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
+                    SeriesStatusBadge(status: status)
                 }
             }
             .font(MobileTypography.caption)
@@ -561,6 +570,9 @@ struct MobileDetailView: View {
             HStack(spacing: MobileSpacing.sm) {
                 ratingsRow
                 mediaInfoBadges
+                if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
+                    SeriesStatusBadge(status: status)
+                }
             }
 
             // Action buttons
@@ -1184,6 +1196,7 @@ struct MobileDetailView: View {
         let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
         seriesCommunityRating = series?.communityRating
         seriesCriticRating = series?.criticRating
+        seriesStatus = series?.status
         seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
 
         let selected = seasons.first { $0.id == item.id } ?? item
@@ -1242,6 +1255,7 @@ struct MobileDetailView: View {
             let series = try? await JellyfinClient.shared.getItem(itemId: seriesId)
             seriesCommunityRating = series?.communityRating
             seriesCriticRating = series?.criticRating
+            seriesStatus = series?.status
 
             // Full season list so episode detail gets the season selector
             // (phone parity), defaulting to this episode's own season.

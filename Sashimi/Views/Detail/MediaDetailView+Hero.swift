@@ -216,6 +216,9 @@ extension MediaDetailView {
                         }
                         .foregroundStyle(SashimiTheme.textPrimary)
                     }
+                    if let status = SeriesStatus(item: item) {
+                        SeriesStatusBadge(status: status, fontSize: 18)
+                    }
                 } else if let finishTime = finishTimeString {
                     Text("•")
                         .foregroundStyle(SashimiTheme.textTertiary)
@@ -245,6 +248,9 @@ extension MediaDetailView {
                         ratingsRow
                     }
                     qualityBadges
+                    if isEpisode, let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
+                        SeriesStatusBadge(status: status, fontSize: 18)
+                    }
                 }
             }
 

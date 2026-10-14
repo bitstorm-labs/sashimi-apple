@@ -33,6 +33,8 @@ struct PhoneDetailView: View {
     @State private var isWatched: Bool = false
     @State private var hasProgress: Bool = false
     @State private var seriesCommunityRating: Double?
+    /// The show's airing status, for a season's or episode's status pill.
+    @State private var seriesStatus: String?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
     @State private var showingPersonDetail: PersonInfo?
@@ -564,6 +566,9 @@ struct PhoneDetailView: View {
             ratingsRow
             if !isSeries {
                 mediaInfoBadges
+            }
+            if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
+                SeriesStatusBadge(status: status)
             }
         }
 
@@ -1165,6 +1170,7 @@ struct PhoneDetailView: View {
         let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
         seriesCommunityRating = series?.communityRating
         seriesCriticRating = series?.criticRating
+        seriesStatus = series?.status
         seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
 
         let selected = seasons.first { $0.id == item.id } ?? item
@@ -1219,6 +1225,7 @@ struct PhoneDetailView: View {
             let series = try? await JellyfinClient.shared.getItem(itemId: seriesId)
             seriesCommunityRating = series?.communityRating
             seriesCriticRating = series?.criticRating
+            seriesStatus = series?.status
 
             seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesId)) ?? []
             if let seasonId = item.seasonId {

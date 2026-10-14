@@ -25,6 +25,8 @@ struct MediaDetailView: View {
     @State var seriesOfficialRating: String?
     @State var seriesGenres: [String]?
     @State var seriesCommunityRating: Double?
+    /// The show's airing status, for an episode's status pill.
+    @State var seriesStatus: String?
     @State var seriesCriticRating: Int?
     @State var nextEpisodeToPlay: BaseItemDto?
     @State var isLoadingEpisodes = false
