@@ -146,9 +146,11 @@ struct ChannelLogoGrid: View {
                 }
                 .frame(width: 150, height: 150)
                 .focusHighlight(isFocused, cornerRadius: 18)
+                // The chosen logo's ring is white so it can't be mistaken for
+                // the purple focus ring on a neighbouring tile.
                 .overlay(
                     RoundedRectangle(cornerRadius: 18)
-                        .stroke(SashimiTheme.accent, lineWidth: isSelected && !isFocused ? 3 : 0)
+                        .stroke(Color.white.opacity(0.6), lineWidth: isSelected && !isFocused ? 3 : 0)
                 )
             }
             .buttonStyle(PlainNoHighlightButtonStyle())
