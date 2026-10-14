@@ -29,7 +29,7 @@ final class HomeViewModel: ObservableObject {
     /// Injectable clock for tests.
     var now: () -> Date = Date.init
     /// Older than this, Home reloads when it comes back on screen.
-    static let staleAfter: TimeInterval = 15
+    nonisolated static let staleAfter: TimeInterval = 15
     #if os(tvOS)
     /// Shared with the Top Shelf extension. iOS has no such extension and no
     /// app-group entitlement, so the write is tvOS-only (#311).
