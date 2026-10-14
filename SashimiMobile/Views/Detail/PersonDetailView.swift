@@ -68,7 +68,7 @@ struct PersonDetailView: View {
         if person.primaryImageTag != nil,
            let imageURL = JellyfinClient.shared.personImageURL(
                personId: person.id,
-               maxWidth: 220,
+               maxWidth: ImageSizing.pixelWidth(points: 96),
                tag: person.primaryImageTag,
                serverURL: personServerURL
            ) {

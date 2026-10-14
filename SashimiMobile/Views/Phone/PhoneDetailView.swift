@@ -306,7 +306,7 @@ struct PhoneDetailView: View {
             VStack(spacing: 0) {
                 // Banner
                 ZStack(alignment: .bottom) {
-                    LazyImage(request: imageRequest(for: backdropImageURL)) { state in
+                    LazyImage(request: imageRequest(for: backdropImageURL(widthPoints: 0))) { state in
                         if let image = state.image {
                             image.resizable().scaledToFill()
                         } else {
@@ -351,17 +351,24 @@ struct PhoneDetailView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 220)
                     .overlay {
-                        LazyImage(request: imageRequest(for: backdropImageURL)) { state in
-                            if let image = state.image {
-                                // No real backdrop → the URL falls back to the
-                                // portrait poster; blur + darken it so it reads
-                                // as an ambient backdrop, not a sliced strip.
-                                image.resizable().scaledToFill()
-                                    .blur(radius: hasRealBackdrop ? 0 : 32)
-                                    .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
-                            } else {
-                                Rectangle().fill(MobileColors.cardBackground)
+                        // Read the drawn width so the request matches it: full
+                        // width is 440pt in portrait but ~950pt in landscape.
+                        GeometryReader { geo in
+                            LazyImage(
+                                request: imageRequest(for: backdropImageURL(widthPoints: geo.size.width))
+                            ) { state in
+                                if let image = state.image {
+                                    // No real backdrop → the URL falls back to the
+                                    // portrait poster; blur + darken it so it reads
+                                    // as an ambient backdrop, not a sliced strip.
+                                    image.resizable().scaledToFill()
+                                        .blur(radius: hasRealBackdrop ? 0 : 32)
+                                        .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
+                                } else {
+                                    Rectangle().fill(MobileColors.cardBackground)
+                                }
                             }
+                            .frame(width: geo.size.width, height: geo.size.height)
                         }
                     }
                     .heroTrailer(for: item, serverID: serverID)
@@ -378,12 +385,12 @@ struct PhoneDetailView: View {
     }
 
     private var channelAvatarURL: URL? {
-        serverImageURL(item.id, "Primary", maxWidth: 240)
+        serverImageURL(item.id, "Primary", maxWidth: ImageSizing.pixelWidth(points: 72))
     }
 
     /// Channel avatar for a YouTube EPISODE's header — the series' Primary.
     private func seriesAvatarURL(for seriesId: String) -> URL? {
-        serverImageURL(seriesId, "Primary", maxWidth: 120)
+        serverImageURL(seriesId, "Primary", maxWidth: ImageSizing.pixelWidth(points: 28))
     }
 
     /// Whether a genuine landscape backdrop exists. When false, `backdropImageURL`
@@ -501,7 +508,7 @@ struct PhoneDetailView: View {
         JellyfinClient.shared.syncImageURL(
             itemId: itemId,
             imageType: "Logo",
-            maxWidth: 500,
+            maxWidth: ImageSizing.mobileLogoWidth,
             serverURL: detailServerURL
         )
     }
@@ -1364,7 +1371,9 @@ struct PhoneDetailView: View {
 
     // MARK: - URLs
 
-    private var backdropImageURL: URL? {
+    /// `widthPoints` is the picture's drawn width; before layout (0) it
+    /// assumes a portrait iPhone's full width.
+    private func backdropImageURL(widthPoints: CGFloat) -> URL? {
         if !NetworkMonitor.shared.isOnline {
             if isSeries {
                 let downloaded = offlineEpisodes(for: item.id)
@@ -1377,8 +1386,9 @@ struct PhoneDetailView: View {
                 ?? OfflineImageHelper.thumbnailURL(for: item.id, serverID: serverID)
         }
 
+        let heroWidth = ImageSizing.backdropPixelWidth(points: widthPoints >= 1 ? widthPoints : 440)
         if isEpisode {
-            return serverImageURL(item.id, "Primary", maxWidth: 1280)
+            return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
         }
 
         if isYouTubeSeriesStyle {
@@ -1386,18 +1396,18 @@ struct PhoneDetailView: View {
         }
 
         if item.backdropImageTags?.isEmpty == false {
-            return serverImageURL(item.id, "Backdrop", maxWidth: 1280)
+            return serverImageURL(item.id, "Backdrop", maxWidth: heroWidth)
         } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            return serverImageURL(seriesId, "Backdrop", maxWidth: 1280)
+            return serverImageURL(seriesId, "Backdrop", maxWidth: heroWidth)
         }
-        return serverImageURL(item.id, "Primary", maxWidth: 1280)
+        return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
     }
 
     private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
         if !NetworkMonitor.shared.isOnline {
             return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
         }
-        return serverImageURL(episode.id, "Primary", maxWidth: 400, owner: episode)
+        return serverImageURL(episode.id, "Primary", maxWidth: ImageSizing.pixelWidth(points: 120), owner: episode)
     }
 
     // MARK: - Formatting

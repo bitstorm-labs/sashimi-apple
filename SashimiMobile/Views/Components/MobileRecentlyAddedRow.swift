@@ -237,7 +237,7 @@ struct MobileRecentlyAddedCard: View {
         return JellyfinClient.shared.syncImageURL(
             itemId: imageId,
             imageType: imageType,
-            maxWidth: Int(width * 2),
+            maxWidth: ImageSizing.pixelWidth(points: width),
             tag: item.imageTag(for: imageType, itemId: imageId),
             serverURL: serverURL
         )
