@@ -42,6 +42,25 @@ enum ImageSizing {
         pixelWidth(points: points, scale: screenScale)
     }
 
+    /// Largest backdrop request: past this a big-screen picture gains nothing
+    /// visible and decodes are expensive (2560x1440x4 is about 15 MB).
+    static let maxBackdropWidth = 2560
+
+    /// Pixel width for a backdrop drawn `points` wide, capped at
+    /// `maxBackdropWidth`.
+    static func backdropPixelWidth(points: CGFloat, scale: CGFloat) -> Int {
+        min(pixelWidth(points: points, scale: scale), maxBackdropWidth)
+    }
+
+    @MainActor static func backdropPixelWidth(points: CGFloat) -> Int {
+        backdropPixelWidth(points: points, scale: screenScale)
+    }
+
+    /// Share of the screen width the iPad detail picture fills, flush
+    /// top-right: the home hero's rule (`HeroLayout.imageWidth`, 70%), so the
+    /// detail page reads like the hero it was opened from.
+    static let padDetailPictureFraction: CGFloat = 0.7
+
     /// Series/movie logo on the mobile detail pages (≤300pt wide on iPad @2x,
     /// a ~70pt-tall full-width slot on iPhone @3x). One constant because
     /// `OfflineShowView` looks the exact same URL up cache-only.
