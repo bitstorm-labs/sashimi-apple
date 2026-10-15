@@ -99,15 +99,20 @@ extension PlayerViewModel {
             self.endObserver = nil
         }
         player = nil
+        // Loading from the same moment the old player goes, as changeQuality
+        // and recovery already do. Set after the await below, it left a
+        // window — the whole transcode DELETE round trip — with no player,
+        // no Up Next and no loading state: the tvOS player drew nothing but
+        // black between the Up Next screen and the spinner, a visible flicker
+        // on every next-episode start.
+        isLoading = true
+        error = nil
+        errorMessage = nil
 
         // Kill the previous episode's transcode session, same as
         // changeQuality — auto-play-next otherwise leaves the old encode
         // running until the server times it out.
         await stopActiveEncodingIfNeeded(reason: .newItem)
-
-        isLoading = true
-        error = nil
-        errorMessage = nil
 
         do {
             let freshItem: BaseItemDto

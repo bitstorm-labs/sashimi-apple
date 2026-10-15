@@ -8,6 +8,8 @@ struct TVPlayerView: UIViewControllerRepresentable {
     @ObservedObject var viewModel: PlayerViewModel
     let item: BaseItemDto
     let onDismiss: () -> Void
+    /// Reports AVKit's `isReadyForDisplay`: whether the first frame is up.
+    var onReadyForDisplay: (Bool) -> Void = { _ in }
     @ObservedObject var playbackSettings = PlaybackSettings.shared
     /// Observed so a view-mode pick re-runs `updateUIViewController`, which
     /// applies it to the live picture without restarting playback.
@@ -55,6 +57,15 @@ struct TVPlayerView: UIViewControllerRepresentable {
         playerVC.didMove(toParent: container)
 
         context.coordinator.playerVC = playerVC
+        context.coordinator.onReadyForDisplay = onReadyForDisplay
+        context.coordinator.readyForDisplayObservation = playerVC.observe(
+            \.isReadyForDisplay,
+            options: [.initial, .new]
+        ) { [weak coordinator = context.coordinator] controller, _ in
+            let ready = controller.isReadyForDisplay
+            // Never during a SwiftUI update: the callback sets view state.
+            DispatchQueue.main.async { coordinator?.onReadyForDisplay(ready) }
+        }
         context.coordinator.currentViewModel = viewModel
         context.coordinator.currentItem = viewModel.currentItem ?? item
 
@@ -83,6 +94,8 @@ struct TVPlayerView: UIViewControllerRepresentable {
 
         // Rebuild menus when selection state changes
         playerVC.transportBarCustomMenuItems = buildMenus()
+
+        context.coordinator.onReadyForDisplay = onReadyForDisplay
 
         // Update stored state and overlay
         let displayItem = viewModel.currentItem ?? item
@@ -228,6 +241,8 @@ struct TVPlayerView: UIViewControllerRepresentable {
         var hostingController: UIHostingController<PlayerContentOverlay>?
         var skipVC: SkipButtonViewController?
         var navigationVC: EpisodeNavigationViewController?
+        var onReadyForDisplay: (Bool) -> Void = { _ in }
+        var readyForDisplayObservation: NSKeyValueObservation?
         var controlsVisible = false
         weak var currentViewModel: PlayerViewModel?
         var currentItem: BaseItemDto?
