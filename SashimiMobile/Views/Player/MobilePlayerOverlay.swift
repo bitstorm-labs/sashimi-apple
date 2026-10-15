@@ -231,28 +231,21 @@ struct MobilePlayerOverlay: View {
                 Button {
                     viewModel.skipCurrentSegment()
                 } label: {
-                    Label(Self.skipLabel(for: segment.type), systemImage: "forward.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
+                    LiveSkipSegmentPill(
+                        segment: segment,
+                        accent: MobileColors.accent,
+                        metrics: layout == .pad ? .pad : .phone,
+                        currentTime: { [weak viewModel] in
+                            viewModel?.player?.currentTime().seconds ?? .nan
+                        }
+                    )
                 }
+                .buttonStyle(SkipSegmentPillButtonStyle())
                 .padding(.trailing, layout.edgePadding)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .animation(.easeInOut, value: viewModel.showingSkipButton)
-    }
-
-    static func skipLabel(for type: MediaSegmentType) -> String {
-        switch type {
-        case .intro: return "Skip Intro"
-        case .outro: return "Skip Credits"
-        case .recap: return "Skip Recap"
-        case .preview: return "Skip Preview"
-        default: return "Skip"
-        }
     }
 
     // MARK: - Playback actions
