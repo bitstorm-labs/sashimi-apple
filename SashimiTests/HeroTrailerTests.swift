@@ -50,19 +50,27 @@ final class HeroTrailerPolicyTests: XCTestCase {
         XCTAssertFalse(HeroTrailerPolicy.shouldMute(themeIsPlaying: false))
     }
 
-    func testAFullTrailerSkipsItsOpeningAndPlaysThirtySeconds() {
-        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 121), HeroTrailerClip(start: 10, end: 40))
-        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 45), HeroTrailerClip(start: 10, end: 40),
+    func testOnlyMoviesFollowTheMovieRules() throws {
+        XCTAssertEqual(HeroTrailerPolicy.kind(for: try item(#"{"Id":"m1","Name":"M","Type":"Movie"}"#)), .movie)
+        XCTAssertEqual(HeroTrailerPolicy.kind(for: try item(#"{"Id":"s1","Name":"S","Type":"Series"}"#)), .series)
+        XCTAssertEqual(HeroTrailerPolicy.kind(for: try item(#"{"Id":"z1","Name":"Z","Type":"Season","SeriesId":"s1"}"#)), .series)
+        XCTAssertEqual(HeroTrailerPolicy.kind(for: try item(#"{"Id":"e1","Name":"E","Type":"Episode","SeriesId":"s1"}"#)), .series)
+    }
+
+    func testASeriesTrailerSkipsItsOpeningAndPlaysThirtySeconds() {
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 121, kind: .series), HeroTrailerClip(start: 10, end: 40))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 45, kind: .series), HeroTrailerClip(start: 10, end: 40),
                        "the threshold itself counts as a full trailer")
     }
 
     func testAShortClipOrUnknownLengthPlaysFromTheStart() {
-        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 44.9), HeroTrailerClip(start: 0, end: 30))
-        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: nil), HeroTrailerClip(start: 0, end: 30))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 44.9, kind: .series), HeroTrailerClip(start: 0, end: 30))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: nil, kind: .series), HeroTrailerClip(start: 0, end: 30))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 44.9, kind: .movie).start, 0)
     }
 
     func testTheClipNeverRunsPastTheTrailer() {
-        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 20), HeroTrailerClip(start: 0, end: 20))
+        XCTAssertEqual(HeroTrailerPolicy.clip(trailerSeconds: 20, kind: .series), HeroTrailerClip(start: 0, end: 20))
     }
 
     func testTheSourceIsTheFirstTrailerWithItsLengthInSeconds() throws {
@@ -148,6 +156,7 @@ final class HeroTrailerControllerTests: XCTestCase {
         c.streamBuilder = { _ in HeroTrailerStream(url: url, playSessionId: "ps1") }
         c.encodingStopper = { [unowned self] id in stopped.append(id) }
         c.themeIsPlaying = { [unowned self] in themePlaying }
+        c.themeIsEnding = { false }
         c.isEligible = { [unowned self] _ in eligible }
         return c
     }
@@ -186,11 +195,86 @@ final class HeroTrailerControllerTests: XCTestCase {
         XCTAssertEqual(c.player?.isMuted, true, "no sound out of nowhere when the theme ends")
     }
 
-    func testItPlaysTheClipNotTheWholeTrailer() async throws {
+    private func series() throws -> BaseItemDto {
+        try item(#"{"Id":"s1","Name":"S","Type":"Series"}"#)
+    }
+
+    private func startSeries() async throws -> HeroTrailerController {
+        trailers = ["s1": HeroTrailerSource(id: "t1", seconds: 121)]
+        let c = try controller()
+        c.screenAppeared(owner: UUID(), item: try series(), serverID: nil)
+        await c.waitForStartForTest()
+        XCTAssertNotNil(c.player)
+        return c
+    }
+
+    func testAMovieTrailerPlaysToItsEndNotAClip() async throws {
         let c = try controller()
         c.screenAppeared(owner: UUID(), item: try movie(), serverID: nil)
         await c.waitForStartForTest()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 121))
+    }
+
+    func testAMovieTrailerIgnoresTheTheme() async throws {
+        themePlaying = true
+        let c = try controller()
+        c.screenAppeared(owner: UUID(), item: try movie(), serverID: nil)
+        await c.waitForStartForTest()
+        c.themeEndedNaturally()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 121))
+        XCTAssertNotNil(c.player)
+    }
+
+    func testASeriesTrailerWithoutAThemePlaysTheThirtySecondClip() async throws {
+        let c = try await startSeries()
         XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 40))
+    }
+
+    func testAnEpisodeUsesTheSeriesRules() async throws {
+        trailers = ["s1": HeroTrailerSource(id: "t1", seconds: 121)]
+        let c = try controller()
+        c.screenAppeared(owner: UUID(), item: try item(#"{"Id":"e1","Name":"E","Type":"Episode","SeriesId":"s1"}"#), serverID: nil)
+        await c.waitForStartForTest()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 40))
+    }
+
+    func testASeriesTrailerStartingUnderAThemeFollowsIt() async throws {
+        themePlaying = true
+        let c = try await startSeries()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 121))
+        c.themeEndedNaturally()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 30),
+                       "a theme ending early still leaves 20 s of video")
+    }
+
+    func testAThemeStartingDuringASeriesTrailerLiftsTheClip() async throws {
+        let c = try await startSeries()
+        c.themeStateChanged(isPlaying: true)
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 121))
+    }
+
+    func testOnlyTheThemesNaturalEndEndsASeriesTrailer() async throws {
+        themePlaying = true
+        let c = try await startSeries()
+        c.themeStateChanged(isPlaying: false)
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 121),
+                       "a theme stopped for another reason says nothing about the trailer")
+    }
+
+    func testANaturalEndWithoutAFollowedThemeChangesNothing() async throws {
+        let c = try await startSeries()
+        c.themeEndedNaturally()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 40))
+    }
+
+    func testATrailerStartingAsTheThemeFadesOutEndsAtTheMinimum() async throws {
+        themePlaying = true
+        let c = try controller()
+        c.themeIsEnding = { true }
+        trailers = ["s1": HeroTrailerSource(id: "t1", seconds: 121)]
+        c.screenAppeared(owner: UUID(), item: try series(), serverID: nil)
+        await c.waitForStartForTest()
+        XCTAssertEqual(c.clipForTest, HeroTrailerClip(start: 10, end: 30))
     }
 
     func testNoTrailerMeansNoPlayer() async throws {
@@ -398,6 +482,26 @@ final class ThemeSongIsPlayingTests: XCTestCase {
         XCTAssertTrue(player.isPlaying)
         player.stopForPlayback()
         XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(player.isEndingNaturally, "a stop for playback is not the theme's natural end")
+    }
+
+    /// A series' hero trailer ends with the theme on this flag, so it must
+    /// rise at the theme's own end and never on a stop.
+    func testTheNaturalEndIsReported() async throws {
+        let player = ThemeSongPlayer(timings: ThemeSongTimings(
+            startDelay: 0, volume: 0.6, fadeIn: 0, fadeOutEnding: 0.5, fadeOutShowChange: 0, fadeOutHard: 0
+        ))
+        var seen: [Bool] = []
+        let subscription = player.$isEndingNaturally.removeDuplicates().sink { seen.append($0) }
+        defer { subscription.cancel() }
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "hero-trailer-2s", withExtension: "mp4"))
+        player.playForTest(url: url)
+        let deadline = Date().addingTimeInterval(8)
+        while player.isPlaying, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(seen, [false, true, false], "raised at the end, cleared on teardown")
     }
 }
 

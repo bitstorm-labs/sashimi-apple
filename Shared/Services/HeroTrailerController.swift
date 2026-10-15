@@ -42,8 +42,14 @@ final class HeroTrailerController: ObservableObject {
     private var timeObserver: Any?
     private var fadeObserver: Any?
     private var clip: HeroTrailerClip?
+    /// The playing trailer's length rules and reported length.
+    private var kind: HeroTrailerPolicy.Kind?
+    private var trailerSeconds: Double?
+    /// A series' trailer that a theme song has lifted off its fixed length:
+    /// it now ends with the theme.
+    private var isFollowingTheme = false
     private var isFinishing = false
-    private var themeSubscription: AnyCancellable?
+    private var themeSubscriptions: Set<AnyCancellable> = []
     private let timings: HeroTrailerTimings
 
     /// sourceId -> its trailer, or nil for "no trailer". Misses are cached so
@@ -55,6 +61,8 @@ final class HeroTrailerController: ObservableObject {
     var streamBuilder: (String) async -> HeroTrailerStream?
     var encodingStopper: (String) async -> Void
     var themeIsPlaying: () -> Bool
+    /// True while the theme is fading out at its natural end.
+    var themeIsEnding: () -> Bool
     var isEligible: (_ screenServerId: String?) -> Bool
 
     init(timings: HeroTrailerTimings = HeroTrailerTimings()) {
@@ -70,6 +78,7 @@ final class HeroTrailerController: ObservableObject {
             try? await JellyfinClient.shared.stopActiveEncoding(playSessionId: playSessionId)
         }
         themeIsPlaying = { ThemeSongPlayer.shared.isPlaying }
+        themeIsEnding = { ThemeSongPlayer.shared.isEndingNaturally }
         isEligible = { screenServerId in
             let network = NetworkMonitor.shared
             return HeroTrailerPolicy.Conditions(
@@ -81,17 +90,31 @@ final class HeroTrailerController: ObservableObject {
                 activeServerId: SessionManager.shared.activeServerId
             ).isEligible
         }
-        themeSubscription = ThemeSongPlayer.shared.$isPlaying
+        ThemeSongPlayer.shared.$isPlaying
             .sink { [weak self] playing in
                 Task { @MainActor in self?.themeStateChanged(isPlaying: playing) }
             }
+            .store(in: &themeSubscriptions)
+        // Only the theme's natural end ends a series' trailer: a theme stopped
+        // for navigation, playback or the background already stops the
+        // trailer through the same path.
+        ThemeSongPlayer.shared.$isEndingNaturally
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.themeEndedNaturally() }
+            }
+            .store(in: &themeSubscriptions)
     }
 
     // MARK: - Intent from views
 
     func screenAppeared(owner: UUID, item: BaseItemDto, serverID: String?) {
         let sourceId = isEligible(serverID) ? HeroTrailerPolicy.trailerSourceId(for: item) : nil
-        apply(owners.appeared(owner: owner, sourceId: sourceId, playingSourceId: currentSourceId))
+        apply(
+            owners.appeared(owner: owner, sourceId: sourceId, playingSourceId: currentSourceId),
+            kind: HeroTrailerPolicy.kind(for: item)
+        )
     }
 
     /// A screen with no hero of its own (a person page) covering a detail
@@ -116,10 +139,28 @@ final class HeroTrailerController: ObservableObject {
 
     /// A theme that starts after the trailer silences it; one that ends
     /// doesn't bring the sound back, so audio never appears out of nowhere.
+    /// A series' trailer then ends with the theme instead of after its fixed
+    /// length.
     func themeStateChanged(isPlaying: Bool) {
         if HeroTrailerPolicy.shouldMute(themeIsPlaying: isPlaying) {
             player?.isMuted = true
         }
+        guard isPlaying, kind == .series, !isFollowingTheme, !isFinishing, player != nil else { return }
+        isFollowingTheme = true
+        setClip(HeroTrailerPolicy.followingTheme(trailerSeconds: trailerSeconds))
+    }
+
+    /// The theme a series' trailer follows has begun its natural end: the
+    /// trailer fades out with it, once it has played its minimum.
+    func themeEndedNaturally() {
+        guard kind == .series, isFollowingTheme, !isFinishing, let player else { return }
+        isFollowingTheme = false
+        let position = player.currentTime().seconds
+        setClip(HeroTrailerPolicy.afterThemeEnded(
+            trailerSeconds: trailerSeconds,
+            position: position.isFinite ? position : 0,
+            crossFade: timings.crossFade
+        ))
     }
 
     // MARK: - Internals
@@ -127,12 +168,14 @@ final class HeroTrailerController: ObservableObject {
     /// The trailer this visit has, playing or about to.
     private var currentSourceId: String? { playingSourceId ?? pendingSourceId }
 
-    private func apply(_ decision: HeroTrailerOwners.Decision) {
+    /// `kind` is the appearing screen's; only an appearing screen can start
+    /// a trailer.
+    private func apply(_ decision: HeroTrailerOwners.Decision, kind: HeroTrailerPolicy.Kind? = nil) {
         switch decision {
         case .start(let sourceId):
             stop()
             activeOwner = owners.topOwner
-            scheduleStart(sourceId: sourceId)
+            scheduleStart(sourceId: sourceId, kind: kind ?? .series)
         case .handOff:
             activeOwner = owners.topOwner
         case .stop:
@@ -145,16 +188,16 @@ final class HeroTrailerController: ObservableObject {
 
     /// Waits, then plays. A screen for the same show that opens meanwhile is
     /// handed the start, so only a stop (which cancels this task) ends it.
-    private func scheduleStart(sourceId: String) {
+    private func scheduleStart(sourceId: String, kind: HeroTrailerPolicy.Kind) {
         pendingSourceId = sourceId
         startTask = Task { [weak self] in
-            await self?.start(sourceId: sourceId)
+            await self?.start(sourceId: sourceId, kind: kind)
             guard let self, !Task.isCancelled else { return }
             pendingSourceId = nil
         }
     }
 
-    private func start(sourceId: String) async {
+    private func start(sourceId: String, kind: HeroTrailerPolicy.Kind) async {
         if timings.startDelay > 0 {
             try? await Task.sleep(nanoseconds: UInt64(timings.startDelay * 1_000_000_000))
         }
@@ -166,7 +209,7 @@ final class HeroTrailerController: ObservableObject {
             if let session = stream.playSessionId { await encodingStopper(session) }
             return
         }
-        play(stream: stream, sourceId: sourceId, clip: HeroTrailerPolicy.clip(trailerSeconds: trailer.seconds))
+        play(stream: stream, sourceId: sourceId, kind: kind, trailerSeconds: trailer.seconds)
     }
 
     private func resolveTrailer(sourceId: String) async -> HeroTrailerSource? {
@@ -182,20 +225,23 @@ final class HeroTrailerController: ObservableObject {
         }
     }
 
-    private func play(stream: HeroTrailerStream, sourceId: String, clip: HeroTrailerClip) {
+    private func play(stream: HeroTrailerStream, sourceId: String, kind: HeroTrailerPolicy.Kind, trailerSeconds: Double?) {
         let item = AVPlayerItem(url: stream.url)
         // No forwardPlaybackEndTime: set past the real end of a short trailer,
         // it suppresses the end-of-item notification and the player sits on
         // the last frame. The fade point below ends the clip; the item's own
         // end (or failure) is the fallback.
         let p = AVPlayer(playerItem: item)
-        p.isMuted = HeroTrailerPolicy.shouldMute(themeIsPlaying: themeIsPlaying())
+        let themePlaying = themeIsPlaying()
+        p.isMuted = HeroTrailerPolicy.shouldMute(themeIsPlaying: themePlaying)
         // Background video must never take over Now Playing or AirPlay.
         p.allowsExternalPlayback = false
         player = p
         playingSourceId = sourceId
         playSessionId = stream.playSessionId
-        self.clip = clip
+        self.kind = kind
+        self.trailerSeconds = trailerSeconds
+        let clip = initialClip(kind: kind, trailerSeconds: trailerSeconds, themePlaying: themePlaying)
 
         endObservers = [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification].map { name in
             NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
@@ -215,17 +261,7 @@ final class HeroTrailerController: ObservableObject {
                 self.isVisible = true
             }
         }
-        // Fade out while the last moments still play rather than on a frozen
-        // frame with the sound cut mid-word.
-        let fadeAt = max(clip.start, clip.end - timings.crossFade)
-        fadeObserver = p.addBoundaryTimeObserver(
-            forTimes: [NSValue(time: CMTime(seconds: fadeAt, preferredTimescale: 600))], queue: .main
-        ) { [weak self, weak p] in
-            MainActor.assumeIsolated {
-                guard let self, let p, self.player === p else { return }
-                self.finish()
-            }
-        }
+        setClip(clip)
         if clip.start > 0 {
             p.seek(
                 to: CMTime(seconds: clip.start, preferredTimescale: 600),
@@ -235,6 +271,48 @@ final class HeroTrailerController: ObservableObject {
         }
         p.play()
         logger.debug("hero trailer started")
+    }
+
+    /// Where a trailer starting now ends. A series' trailer starting under a
+    /// theme follows it; one starting as the theme fades out ends with it.
+    private func initialClip(kind: HeroTrailerPolicy.Kind, trailerSeconds: Double?, themePlaying: Bool) -> HeroTrailerClip {
+        guard kind == .series, themePlaying else {
+            return HeroTrailerPolicy.clip(trailerSeconds: trailerSeconds, kind: kind)
+        }
+        if themeIsEnding() {
+            let start = HeroTrailerPolicy.clip(trailerSeconds: trailerSeconds, kind: kind).start
+            return HeroTrailerPolicy.afterThemeEnded(
+                trailerSeconds: trailerSeconds, position: start, crossFade: timings.crossFade
+            )
+        }
+        isFollowingTheme = true
+        return HeroTrailerPolicy.followingTheme(trailerSeconds: trailerSeconds)
+    }
+
+    /// Moves the clip's end, replacing the fade point. Fades out while the
+    /// last moments still play rather than on a frozen frame with the sound
+    /// cut mid-word. An infinite end has no fade point: the item's own end
+    /// finishes it. An end already reached finishes now.
+    private func setClip(_ clip: HeroTrailerClip) {
+        guard let p = player else { return }
+        self.clip = clip
+        if let fadeObserver { p.removeTimeObserver(fadeObserver) }
+        fadeObserver = nil
+        guard clip.end.isFinite else { return }
+        let fadeAt = max(clip.start, clip.end - timings.crossFade)
+        let position = p.currentTime().seconds
+        if position.isFinite, position > clip.start, position >= fadeAt {
+            finish()
+            return
+        }
+        fadeObserver = p.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: CMTime(seconds: fadeAt, preferredTimescale: 600))], queue: .main
+        ) { [weak self, weak p] in
+            MainActor.assumeIsolated {
+                guard let self, let p, self.player === p else { return }
+                self.finish()
+            }
+        }
     }
 
     /// End of the clip: fade picture and sound back to the image, then let go
@@ -274,6 +352,9 @@ final class HeroTrailerController: ObservableObject {
         endObservers.forEach { NotificationCenter.default.removeObserver($0) }
         endObservers = []
         clip = nil
+        kind = nil
+        trailerSeconds = nil
+        isFollowingTheme = false
         isFinishing = false
         player?.pause()
         player = nil

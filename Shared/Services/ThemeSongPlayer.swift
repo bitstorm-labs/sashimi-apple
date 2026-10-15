@@ -69,6 +69,13 @@ final class ThemeSongPlayer: ObservableObject {
     /// trailer reads this to stay silent under a theme (#658).
     @Published private(set) var isPlaying = false
 
+    /// True from the moment the theme starts its natural end, its end fade
+    /// or (for a track too short to fade) its last frame, until it is torn
+    /// down. A stop for navigation, playback or backgrounding never sets it.
+    /// A series' hero trailer ends with the theme on this, not on
+    /// `isPlaying` going false, which can't tell the two apart.
+    @Published private(set) var isEndingNaturally = false
+
     private var visit = ThemeSongVisitState()
     private var player: AVPlayer?
     private var fadeTimer: Timer?
@@ -261,7 +268,10 @@ final class ThemeSongPlayer: ObservableObject {
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.stop(fadeOver: 0) }
+            Task { @MainActor in
+                self?.isEndingNaturally = true
+                self?.stop(fadeOver: 0)
+            }
         }
 
         scheduleEndOfTrackFade(item: item, player: p)
@@ -347,6 +357,7 @@ final class ThemeSongPlayer: ObservableObject {
                 // `fade(to:over:completion:)` exists to prevent.
                 MainActor.assumeIsolated {
                     guard let self, let player, self.player === player else { return }
+                    self.isEndingNaturally = true
                     // The end-of-track fade must tear itself down on
                     // completion: if the item stalls right after this
                     // boundary (dropped connection, server hiccup),
@@ -396,6 +407,7 @@ final class ThemeSongPlayer: ObservableObject {
         player?.pause()
         player = nil
         isPlaying = false
+        isEndingNaturally = false
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
     }
