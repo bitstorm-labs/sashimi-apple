@@ -115,8 +115,9 @@ struct TVPlayerView: UIViewControllerRepresentable {
         if let skipVC = context.coordinator.skipVC {
             let wasHidden = skipVC.view.isHidden
             if viewModel.showingSkipButton, let segment = viewModel.currentSegment {
-                let title = "Skip \(segment.type.displayName)"
-                skipVC.updateTitle(title)
+                skipVC.update(segment: segment) { [weak viewModel] in
+                    viewModel?.player?.currentTime().seconds ?? .nan
+                }
                 if wasHidden {
                     skipVC.view.isHidden = false
                     skipVC.setGuideEnabled(true)
@@ -125,6 +126,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 }
             } else if !wasHidden {
                 skipVC.view.isHidden = true
+                skipVC.update(segment: nil)
                 skipVC.setGuideEnabled(false)
                 container.setNeedsFocusUpdate()
                 container.updateFocusIfNeeded()
@@ -303,99 +305,6 @@ class PlayerContainerVC: UIViewController {
             return [playerVC]
         }
         return super.preferredFocusEnvironments
-    }
-}
-
-// MARK: - Skip Button (sibling overlay inside the container, not a child of AVPVC)
-
-class SkipButtonViewController: UIViewController {
-    var onSkip: (() -> Void)?
-    private let button: UIButton = {
-        // Use modern UIButton.Configuration so contentInsets isn't ignored on
-        // tvOS 15+. The old setTitleColor / contentEdgeInsets API is deprecated
-        // when a configuration is set, and the build emits a warning.
-        var config = UIButton.Configuration.filled()
-        config.baseBackgroundColor = UIColor.black.withAlphaComponent(0.65)
-        config.baseForegroundColor = .white
-        config.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 36, bottom: 16, trailing: 36)
-        config.cornerStyle = .capsule
-        var titleAttr = AttributedString("Skip")
-        titleAttr.font = .systemFont(ofSize: 32, weight: .bold)
-        config.attributedTitle = titleAttr
-        let btn = UIButton(configuration: config)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        return btn
-    }()
-
-    override func loadView() {
-        // Use a passthrough container view so taps in empty space go through
-        // to the player below. Only the button itself is interactive.
-        let passthrough = PassthroughView()
-        passthrough.backgroundColor = .clear
-        view = passthrough
-    }
-
-    /// Creates a navigation path BACK to the skip button.
-    ///
-    /// `preferredFocusEnvironments` only decides where focus goes when the
-    /// engine asks the container -- initial focus, or an explicit
-    /// setNeedsFocusUpdate. It is not bidirectional navigation. So once the
-    /// user swiped up to the transport bar there was no way to return to the
-    /// skip button: it stayed on screen, visibly unfocused, and no remote
-    /// direction could reach it.
-    ///
-    /// The guide occupies the band to the button's left, at the button's own
-    /// height, so a move that lands anywhere in that strip is redirected to the
-    /// button.
-    private let focusGuide = UIFocusGuide()
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        button.addTarget(self, action: #selector(tapped), for: .primaryActionTriggered)
-        view.addSubview(button)
-
-        view.addLayoutGuide(focusGuide)
-        focusGuide.preferredFocusEnvironments = [button]
-
-        NSLayoutConstraint.activate([
-            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -80),
-            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
-
-            focusGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            focusGuide.trailingAnchor.constraint(equalTo: button.leadingAnchor),
-            focusGuide.topAnchor.constraint(equalTo: button.topAnchor),
-            focusGuide.bottomAnchor.constraint(equalTo: button.bottomAnchor),
-        ])
-
-        // Disabled until a segment is actually showing, or the guide would
-        // silently swallow focus moves toward the transport bar whenever no
-        // skip button exists.
-        focusGuide.isEnabled = false
-    }
-
-    /// Keeps the focus guide in step with the button's visibility.
-    func setGuideEnabled(_ enabled: Bool) {
-        focusGuide.isEnabled = enabled
-    }
-
-    func updateTitle(_ title: String) {
-        var config = button.configuration
-        var titleAttr = AttributedString(title)
-        titleAttr.font = .systemFont(ofSize: 32, weight: .bold)
-        config?.attributedTitle = titleAttr
-        button.configuration = config
-    }
-
-    @objc private func tapped() {
-        onSkip?()
-    }
-
-    // The button must be the preferred focus when this VC is asked, so the
-    // container's preferredFocusEnvironments → [skipVC.view] chain lands on
-    // the actual button rather than the empty passthrough wrapper.
-    override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        [button]
     }
 }
 
