@@ -50,6 +50,10 @@ on:
         description: 'TestFlight notes, all platforms ("\n" = new line). Blank = generated per platform from commits'
         type: string
         default: ''
+      only_if_changed:
+        description: 'Stop without releasing if no app code changed since the last release (Auto release sets this)'
+        type: boolean
+        default: false
       dry_run:
         description: 'Dry run: no PR, merge, tags or uploads (builds and signs only)'
         type: boolean
@@ -77,6 +81,7 @@ jobs:
       mac_tag: ${{ steps.plan.outputs.mac_tag }}
       notes: ${{ steps.plan.outputs.notes }}
       dry_run_branch: ${{ steps.commit.outputs.dry_run_branch }}
+      skip: ${{ steps.changed.outputs.skip }}
     env:
       VERSION_IN: ${{ inputs.version }}
       BETA_IN: ${{ inputs.beta }}
@@ -105,8 +110,23 @@ jobs:
           # a real release, GITHUB_TOKEN for a dry run's throwaway branch.
           token: ${{ (!inputs.dry_run && secrets.RELEASE_TOKEN) || github.token }}
 
+      # Auto release starts this on a merge, but the run can queue behind a
+      # release that was already in progress and has since shipped that merge
+      # (1.6.52 went out with nothing new that way). Check again now.
+      - name: Anything new to ship?
+        id: changed
+        if: inputs.only_if_changed
+        run: |
+          code=0; out=$(scripts/app-changed.sh) || code=$?
+          echo "$out" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != 0 ]; then
+            echo "Nothing new since the last release: stopping without a release." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Plan
         id: plan
+        if: steps.changed.outputs.skip != 'true'
         run: |
           set -euo pipefail
           echo "Releasing from $GITHUB_REF @ $(git rev-parse --short HEAD)"
@@ -165,7 +185,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Require RELEASE_TOKEN
-        if: inputs.dry_run == false && steps.plan.outputs.current != steps.plan.outputs.version
+        if: steps.changed.outputs.skip != 'true' && inputs.dry_run == false && steps.plan.outputs.current != steps.plan.outputs.version
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
@@ -176,6 +196,7 @@ jobs:
 
       - name: Bump, PR, wait for merge
         id: commit
+        if: steps.changed.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.plan.outputs.version }}
           CURRENT: ${{ steps.plan.outputs.current }}
@@ -236,7 +257,7 @@ jobs:
   tag:
     name: Tag
     needs: prepare
-    if: inputs.dry_run == false
+    if: inputs.dry_run == false && needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -271,7 +292,7 @@ jobs:
   deploy-tvos:
     name: tvOS
     needs: [prepare, tag]
-    if: ${{ always() && inputs.tvos && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    if: ${{ always() && inputs.tvos && needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     uses: ./.github/workflows/deploy.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
@@ -283,7 +304,7 @@ jobs:
   deploy-ios:
     name: iOS
     needs: [prepare, tag]
-    if: ${{ always() && inputs.ios && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    if: ${{ always() && inputs.ios && needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     uses: ./.github/workflows/deploy-ios.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
@@ -295,7 +316,7 @@ jobs:
   deploy-mac:
     name: macOS
     needs: [prepare, tag]
-    if: ${{ always() && inputs.macos && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    if: ${{ always() && inputs.macos && needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     uses: ./.github/workflows/deploy-mac.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
