@@ -52,30 +52,72 @@ enum HeroTrailerPolicy {
         themeIsPlaying
     }
 
-    /// The part of a trailer the hero plays.
+    /// Which length rules a screen's trailer follows: a movie's own, or the
+    /// series' (seasons and episodes play their series' trailer).
+    enum Kind: Equatable, Sendable {
+        case movie, series
+    }
+
+    static func kind(for item: BaseItemDto) -> Kind {
+        item.type == .movie ? .movie : .series
+    }
+
+    /// The part of a trailer the hero plays before anything else is known.
     ///
-    /// A full trailer runs about two minutes (median 2:01 across the server's
-    /// trailers), which is far more than a background preview should run.
-    /// Like Netflix's billboard previews, the hero plays a short stretch and
-    /// fades back to the image. The first seconds of a full trailer are
-    /// almost always the green rating card or a studio logo, so they're
-    /// skipped; a short clip has no such opening and plays from the start.
-    /// The end never runs past the trailer's own end, so the fade always has
-    /// a moment of video left to fade.
-    static func clip(trailerSeconds: Double?) -> HeroTrailerClip {
-        guard let trailerSeconds, trailerSeconds >= HeroTrailerClip.minimumForSkip else {
-            let end = min(HeroTrailerClip.length, trailerSeconds ?? .infinity)
-            return HeroTrailerClip(start: 0, end: end)
+    /// The first seconds of a full trailer are almost always the green rating
+    /// card or a studio logo, so they're skipped; a short clip has no such
+    /// opening and plays from the start.
+    ///
+    /// A movie's trailer plays to its natural end; with no known length the
+    /// item's own end stops it (`end` is infinite). A series' trailer plays a
+    /// short stretch, like Netflix's billboard previews, unless a theme song
+    /// is playing: then it ends with the theme (`followingTheme`,
+    /// `afterThemeEnded`). The end never runs past the trailer's own end, so
+    /// the fade always has a moment of video left to fade.
+    static func clip(trailerSeconds: Double?, kind: Kind) -> HeroTrailerClip {
+        let start = openingStart(trailerSeconds: trailerSeconds)
+        let trailerEnd = trailerSeconds ?? .infinity
+        switch kind {
+        case .movie:
+            return HeroTrailerClip(start: start, end: trailerEnd)
+        case .series:
+            return HeroTrailerClip(start: start, end: min(start + HeroTrailerClip.length, trailerEnd))
         }
-        let start = HeroTrailerClip.openingSkip
-        return HeroTrailerClip(start: start, end: start + HeroTrailerClip.length)
+    }
+
+    /// A series' trailer while a theme song plays: it runs until the theme
+    /// ends (see `afterThemeEnded`), but never past its own end; a theme that
+    /// outlasts the trailer finishes alone.
+    static func followingTheme(trailerSeconds: Double?) -> HeroTrailerClip {
+        HeroTrailerClip(start: openingStart(trailerSeconds: trailerSeconds), end: trailerSeconds ?? .infinity)
+    }
+
+    /// A series' trailer once the theme it followed has ended naturally (or
+    /// begun its end fade) with the trailer at `position`: it fades out with
+    /// the theme, so the fade starts now and the clip ends `crossFade` later,
+    /// but not before the trailer has shown `HeroTrailerClip.seriesMinimum`
+    /// seconds of video, and never past its own end.
+    static func afterThemeEnded(trailerSeconds: Double?, position: Double, crossFade: Double) -> HeroTrailerClip {
+        let start = openingStart(trailerSeconds: trailerSeconds)
+        let withTheme = max(position, start) + crossFade
+        let end = min(max(withTheme, start + HeroTrailerClip.seriesMinimum), trailerSeconds ?? .infinity)
+        return HeroTrailerClip(start: start, end: end)
+    }
+
+    private static func openingStart(trailerSeconds: Double?) -> Double {
+        guard let trailerSeconds, trailerSeconds >= HeroTrailerClip.minimumForSkip else { return 0 }
+        return HeroTrailerClip.openingSkip
     }
 }
 
-/// Seconds into the trailer where the hero starts and stops it.
+/// Seconds into the trailer where the hero starts and stops it. An infinite
+/// `end` means the trailer's own end, whenever that turns out to be.
 struct HeroTrailerClip: Equatable, Sendable {
     static let openingSkip: Double = 10
+    /// A series' trailer without a theme song.
     static let length: Double = 30
+    /// The least a series' trailer plays when the theme it follows ends early.
+    static let seriesMinimum: Double = 20
     static let minimumForSkip: Double = 45
 
     let start: Double
