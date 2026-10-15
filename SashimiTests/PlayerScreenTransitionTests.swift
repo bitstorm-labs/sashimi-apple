@@ -1,4 +1,5 @@
 import AVFoundation
+import Network
 import SwiftUI
 import XCTest
 @testable import Sashimi
@@ -56,7 +57,7 @@ final class PlayerScreenTransitionTests: XCTestCase {
         try JSONDecoder().decode(type, from: Data(json.utf8))
     }
 
-    private func phase(_ viewModel: PlayerViewModel) -> PlayerScreenPhase {
+    private static func phase(_ viewModel: PlayerViewModel) -> PlayerScreenPhase {
         PlayerScreenPhase.resolve(
             isLoading: viewModel.isLoading,
             hasError: viewModel.error != nil || viewModel.errorMessage != nil,
@@ -79,9 +80,17 @@ final class PlayerScreenTransitionTests: XCTestCase {
         SlowStubServer.routes["/Items/e2/PlaybackInfo"] = (200,
             "{\"MediaSources\":[{\"Id\":\"e2\",\"Container\":\"mp4\",\"SupportsDirectPlay\":true}],\"PlaySessionId\":\"ps2\"}")
         SlowStubServer.routes["/Videos/ActiveEncodings"] = (204, "")
-        // Nothing listens on port 9: AVPlayer's own requests fail at once.
+        // AVPlayer fetches the stream itself, past the URLProtocol stub, so
+        // the server it is pointed at has to really answer with media. This
+        // used to be a dead port: the stream then failed while `loadMedia`
+        // was still awaiting the asset's tracks, and whether that failure
+        // landed before or after `isLoading` cleared was a coin toss — the
+        // phases read [upNext, loading, error] about half the time.
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "hero-trailer-2s", withExtension: "mp4"))
+        let streamServer = try await LocalMediaServer.start(serving: Data(contentsOf: media))
+        defer { streamServer.stop() }
         let client = JellyfinClient(
-            serverURL: try XCTUnwrap(URL(string: "http://127.0.0.1:9")),
+            serverURL: try XCTUnwrap(URL(string: "http://127.0.0.1:\(streamServer.port)")),
             accessToken: "token",
             userId: user
         )
@@ -106,7 +115,7 @@ final class PlayerScreenTransitionTests: XCTestCase {
         viewModel.presentEpisodeUpNext(upNext)
 
         var emptyFrames = 0
-        var phases: [PlayerScreenPhase] = [phase(viewModel)]
+        var phases: [PlayerScreenPhase] = [Self.phase(viewModel)]
         let sampler = Timer.scheduledTimer(withTimeInterval: 0.002, repeats: true) { _ in
             MainActor.assumeIsolated {
                 // Nothing to show: no player, no Up Next, no error, not loading.
@@ -114,7 +123,7 @@ final class PlayerScreenTransitionTests: XCTestCase {
                    viewModel.error == nil, viewModel.errorMessage == nil {
                     emptyFrames += 1
                 }
-                let current = self.phase(viewModel)
+                let current = Self.phase(viewModel)
                 if phases.last != current { phases.append(current) }
             }
         }
@@ -124,6 +133,9 @@ final class PlayerScreenTransitionTests: XCTestCase {
         XCTAssertEqual(emptyFrames, 0, "the player had nothing to show while the next episode loaded")
         XCTAssertEqual(Array(phases.prefix(3)), [.upNext, .loading, .playing])
         XCTAssertEqual(viewModel.currentItem?.id, "e2")
+        XCTAssertNil(viewModel.errorMessage, "the next episode's stream is playable")
+        XCTAssertGreaterThan(streamServer.requestCount, 0, "AVPlayer fetched the stream from the local server")
+        viewModel.player?.pause()
     }
 
     /// The real AVKit controller inside the real `TVPlayerView`: the cover
@@ -193,4 +205,102 @@ private final class NullReporter: PlayerPlaybackReporting {
     func progress(itemID: String, positionTicks: Int64, isPaused: Bool, playSessionID: String?) async {}
     func stopped(itemID: String, positionTicks: Int64, playSessionID: String?) async {}
     func completed(itemID: String, positionTicks: Int64, playSessionID: String?) async {}
+}
+
+/// A localhost HTTP server for one media file, with the byte-range support
+/// AVFoundation needs to play an mp4 over HTTP.
+private final class LocalMediaServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let body: Data
+    private let queue: DispatchQueue
+    private let lock = NSLock()
+    private var requests = 0
+    let port: UInt16
+
+    var requestCount: Int { lock.withLock { requests } }
+
+    private init(listener: NWListener, body: Data, queue: DispatchQueue, port: UInt16) {
+        self.listener = listener
+        self.body = body
+        self.queue = queue
+        self.port = port
+    }
+
+    static func start(serving body: Data) async throws -> LocalMediaServer {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+        let listener = try NWListener(using: parameters)
+        let queue = DispatchQueue(label: "LocalMediaServer")
+        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            let once = NSLock()
+            nonisolated(unsafe) var resumed = false
+            listener.stateUpdateHandler = { state in
+                once.lock(); defer { once.unlock() }
+                guard !resumed else { return }
+                switch state {
+                case .ready:
+                    resumed = true
+                    continuation.resume(returning: listener.port?.rawValue ?? 0)
+                case .failed(let error):
+                    resumed = true
+                    continuation.resume(throwing: error)
+                default:
+                    break
+                }
+            }
+            listener.newConnectionHandler = { $0.cancel() }
+            listener.start(queue: queue)
+        }
+        let server = LocalMediaServer(listener: listener, body: body, queue: queue, port: port)
+        listener.newConnectionHandler = { [server] connection in
+            connection.start(queue: queue)
+            server.readRequest(on: connection, buffered: Data())
+        }
+        return server
+    }
+
+    func stop() { listener.cancel() }
+
+    private func readRequest(on connection: NWConnection, buffered: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [self] data, _, isComplete, error in
+            var request = buffered
+            if let data { request.append(data) }
+            guard let end = request.range(of: Data("\r\n\r\n".utf8)) else {
+                if isComplete || error != nil {
+                    connection.cancel()
+                } else {
+                    readRequest(on: connection, buffered: request)
+                }
+                return
+            }
+            let head = String(data: request[..<end.lowerBound], encoding: .utf8) ?? ""
+            lock.withLock { requests += 1 }
+            respond(to: head, on: connection)
+        }
+    }
+
+    private func respond(to head: String, on connection: NWConnection) {
+        let lines = head.components(separatedBy: "\r\n")
+        let isHead = lines.first?.hasPrefix("HEAD ") ?? false
+        let rangeSpec = lines.lazy
+            .first { $0.lowercased().hasPrefix("range:") }
+            .map { $0.dropFirst("range:".count).trimmingCharacters(in: .whitespaces) }
+        var status = "200 OK"
+        var slice = 0..<body.count
+        var extra = ""
+        if let spec = rangeSpec, spec.hasPrefix("bytes=") {
+            let bounds = spec.dropFirst("bytes=".count).split(separator: "-", omittingEmptySubsequences: false)
+            let start = Int(bounds.first ?? "") ?? 0
+            let last = min(Int(bounds.dropFirst().first ?? "") ?? body.count - 1, body.count - 1)
+            if start <= last {
+                slice = start..<(last + 1)
+                status = "206 Partial Content"
+                extra = "Content-Range: bytes \(start)-\(last)/\(body.count)\r\n"
+            }
+        }
+        let header = "HTTP/1.1 \(status)\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\n"
+            + extra + "Content-Length: \(slice.count)\r\nConnection: close\r\n\r\n"
+        let payload = Data(header.utf8) + (isHead ? Data() : body.subdata(in: slice))
+        connection.send(content: payload, completion: .contentProcessed { _ in connection.cancel() })
+    }
 }
