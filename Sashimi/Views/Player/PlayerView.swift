@@ -39,45 +39,54 @@ struct PlayerView: View {
     /// so a retry is cancelled with the view exactly like the first load.
     @State private var loadAttempt = 0
 
+    /// The new player's first frame is on screen (AVKit's `isReadyForDisplay`).
+    @State private var pictureReady = false
+    /// The item is ready but no frame has come: stop waiting for one (an
+    /// audio-only stream never produces one) rather than cover it for good.
+    @State private var coverGaveUp = false
+
+    private var phase: PlayerScreenPhase {
+        PlayerScreenPhase.resolve(
+            isLoading: viewModel.isLoading,
+            hasError: viewModel.error != nil || viewModel.errorMessage != nil,
+            hasEpisodeUpNext: viewModel.episodeUpNext != nil,
+            hasPlayer: viewModel.player != nil
+        )
+    }
+
+    private var coversPlayer: Bool {
+        PlayerScreenPhase.coversPlayer(phase: phase, isReadyForDisplay: pictureReady, gaveUp: coverGaveUp)
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if viewModel.isLoading {
-                VStack(spacing: 28) {
-                    ProgressView().scaleEffect(1.5)
-                    if let notice = viewModel.playbackNotice {
-                        Text(notice)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                    }
-                }
-            } else if viewModel.error != nil || viewModel.errorMessage != nil {
+            switch phase {
+            case .loading:
+                EmptyView()
+            case .error:
                 errorView
-            } else if let upNext = viewModel.episodeUpNext {
-                // In place of the player rather than over it: AVKit's view
-                // would otherwise keep the remote's focus and Menu press.
-                upNextScreen(upNext)
+            case .upNext:
+                if let upNext = viewModel.episodeUpNext {
+                    // In place of the player rather than over it: AVKit's view
+                    // would otherwise keep the remote's focus and Menu press.
+                    upNextScreen(upNext)
+                        .transition(.opacity)
+                }
+            case .playing:
+                if let player = viewModel.player {
+                    playerSurface(player)
+                }
+            }
+
+            // One loading layer for both the load itself and the wait for the
+            // new player's first frame, so the spinner never hands over to a
+            // black AVKit screen on the way to the picture.
+            if phase == .loading || coversPlayer {
+                loadingView
                     .transition(.opacity)
-            } else if let player = viewModel.player {
-                TVPlayerView(
-                    player: player,
-                    viewModel: viewModel,
-                    item: item,
-                    onDismiss: {
-                        PlayerDiagnostics.event(.viewDismiss, [
-                            PlayerDiagnostics.field("view", viewTag),
-                            PlayerDiagnostics.field("trigger", "menu-button")
-                        ])
-                        // Close first; the stopped report and transcode
-                        // cleanup carry on behind the dismissal (#591).
-                        viewModel.beginStop(reason: .userStop)
-                        dismiss()
-                    }
-                )
-                .ignoresSafeArea()
-                .onAppear { viewModel.loadAllTracks() }
-                .onChange(of: viewModel.tracksVersion) { _, _ in viewModel.loadAllTracks() }
+                    .zIndex(5)
             }
 
             // A channel's break between slots. Up here rather than in the
@@ -92,10 +101,22 @@ struct PlayerView: View {
 
             // "Lowering quality for your connection", "Quality: 480p · 4 Mbps":
             // over the picture, so it shows without bringing up the controls.
-            if !viewModel.isLoading, viewModel.player != nil, let notice = viewModel.playbackNotice {
+            if phase == .playing, !coversPlayer, let notice = viewModel.playbackNotice {
                 PlaybackNoticeBanner(text: notice)
                     .zIndex(11)
             }
+        }
+        .animation(.easeInOut(duration: 0.25), value: coversPlayer)
+        .onChange(of: viewModel.player) { _, _ in
+            // A new player is a new AVPlayerViewController: wait for its frame.
+            pictureReady = false
+            coverGaveUp = false
+        }
+        .task(id: viewModel.isPlayerReady) {
+            guard viewModel.isPlayerReady else { return }
+            try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
+            guard !Task.isCancelled else { return }
+            coverGaveUp = true
         }
         .animation(.easeInOut(duration: 0.5), value: viewModel.upNext)
         .animation(.easeInOut(duration: 0.4), value: viewModel.episodeUpNext == nil)
@@ -156,6 +177,43 @@ struct PlayerView: View {
                 PlayerDiagnostics.field("message", message)
             ])
         }
+    }
+
+    private var loadingView: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 28) {
+                ProgressView().scaleEffect(1.5)
+                if let notice = viewModel.playbackNotice {
+                    Text(notice)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func playerSurface(_ player: AVPlayer) -> some View {
+        TVPlayerView(
+            player: player,
+            viewModel: viewModel,
+            item: item,
+            onDismiss: {
+                PlayerDiagnostics.event(.viewDismiss, [
+                    PlayerDiagnostics.field("view", viewTag),
+                    PlayerDiagnostics.field("trigger", "menu-button")
+                ])
+                // Close first; the stopped report and transcode
+                // cleanup carry on behind the dismissal (#591).
+                viewModel.beginStop(reason: .userStop)
+                dismiss()
+            },
+            onReadyForDisplay: { ready in pictureReady = ready }
+        )
+        .ignoresSafeArea()
+        .onAppear { viewModel.loadAllTracks() }
+        .onChange(of: viewModel.tracksVersion) { _, _ in viewModel.loadAllTracks() }
     }
 
     private func upNextScreen(_ upNext: EpisodeUpNext) -> some View {
