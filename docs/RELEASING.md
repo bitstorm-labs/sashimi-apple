@@ -53,7 +53,12 @@ What it does, in order:
 2. waits 15 minutes — a newer merge cancels the wait and starts its own, so a
    burst of merges ships as one build;
 3. starts the Release workflow with the defaults (next patch, beta 1, all three
-   platforms, generated notes).
+   platforms, generated notes) and `only_if_changed`: if that run queues behind a
+   release already in progress, it checks again when it starts and stops quietly
+   when the release ahead of it already shipped the change.
+
+Both checks use `scripts/app-changed.sh`; only a `MARKETING_VERSION` change in
+`project.yml` doesn't count.
 
 To pause it: Actions → Auto release → ⋯ → Disable workflow. The Release button
 still works either way.
