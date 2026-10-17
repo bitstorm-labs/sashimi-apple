@@ -228,6 +228,8 @@ extension PlayerViewModel {
             ? await startSpatialAudio(for: item, mediaSource: mediaSource, tracks: tracks, startTicks: startTicks)
             : nil
         do {
+            // A cancelled start returns nil rather than throwing.
+            try Task.checkCancellation()
             try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
         } catch {
             spatialAudio?.stop()
