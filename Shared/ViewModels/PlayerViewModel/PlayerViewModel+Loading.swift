@@ -164,7 +164,10 @@ extension PlayerViewModel {
                     try audioSession.setCategory(.playback, mode: .moviePlayback)
                     try audioSession.setActive(true)
 
-                    try await self.setupPlayer(for: resolved)
+                    try await self.setupPlayer(
+                        for: resolved,
+                        startPositionTicks: self.startPositionTicks(for: resolved, startFromBeginning: startFromBeginning)
+                    )
                 }
                 guard let resolved = currentItem else { throw PlayerError.noMediaSource }
                 freshItem = resolved
@@ -196,7 +199,7 @@ extension PlayerViewModel {
             }
 
             // Check if there's saved progress to resume from
-            let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
+            let startTicks = startPositionTicks(for: freshItem, startFromBeginning: startFromBeginning)
             if let channel = channelContext {
                 // A channel supplies where the broadcast already is, which is
                 // not the same question as where this viewer stopped. Taking the
@@ -231,7 +234,7 @@ extension PlayerViewModel {
                 setupSegmentTracking()
                 playbackStartDate = Date()
                 logAndPlay(positionTicks: resumePositionTicks)
-            } else if let startTicks = freshItem.userData?.playbackPositionTicks, startTicks > thresholdTicks {
+            } else if startTicks > 0 {
                 // Auto-resume from saved position (no dialog)
                 resumePositionTicks = startTicks
                 pendingResumeTicks = startTicks
@@ -290,6 +293,16 @@ extension PlayerViewModel {
             self.errorMessage = error.localizedDescription
             isLoading = false
         }
+    }
+
+    /// Where a fresh load starts: the channel's position, else the saved
+    /// position once it passes the resume threshold, unless the viewer chose
+    /// to start over.
+    func startPositionTicks(for item: BaseItemDto, startFromBeginning: Bool) -> Int64 {
+        if let channel = channelContext { return channel.startPositionTicks }
+        let saved = item.userData?.playbackPositionTicks ?? 0
+        let thresholdTicks = Int64(playbackSettings.resumeThresholdSeconds) * 10_000_000
+        return !startFromBeginning && saved > thresholdTicks ? saved : 0
     }
 
     /// Starts playback and records the position it starts from, so a stream

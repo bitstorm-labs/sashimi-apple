@@ -58,6 +58,14 @@ extension PlayerViewModel {
             isRecovering = false
             finishTransition()
         }
+        // A spatial audio stream that ended itself would fail again at the
+        // same place, so its track keeps the server's audio from here on.
+        // Read before teardown stops it. Anything else, a stall included,
+        // gets a fresh stream: a new item clears AVPlayer's wait after rapid seeks.
+        if let spatialAudio, await spatialAudio.hasFailed {
+            refusedSpatialAudio.insert(spatialAudio.trackKey)
+        }
+        guard isCurrentPlaybackGeneration(sourceGeneration) else { return }
         let recoveryNumber = recoveryAttempts + qualityStepDowns
         if case .stepDown(let lower) = decision {
             selectedQuality = lower
@@ -235,6 +243,8 @@ extension PlayerViewModel {
     /// down and is re-armed when they resume (see `playbackPauseStateChanged`).
     func armStallWatchdog(for generation: PlaybackGeneration, grace: Double = 8) {
         guard isCurrentPlaybackGeneration(generation), let watchedPlayer = player else { return }
+        // Spatial audio converts after every seek before playback resumes.
+        let grace = spatialAudio == nil ? grace : max(grace, Self.spatialAudioStallGrace)
         stallWatchdogTask?.cancel()
         stallWatchdogAwaitingResume = false
         let stalledAt = watchedPlayer.currentTime().seconds

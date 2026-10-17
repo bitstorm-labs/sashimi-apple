@@ -337,6 +337,13 @@ final class PlayerViewModel: ObservableObject {
     /// stream-copy only, #449). `AVAssetResourceLoader` holds its delegate
     /// weakly, so it lives here for as long as the asset it feeds.
     var hlsPlaylistLoader: HLSPlaylistResourceLoader?
+    /// The TrueHD Atmos or DTS:X track the current player plays as APAC
+    /// (tvOS 26, see `PlayerViewModel+SpatialAudio`). Stopped with the player.
+    var spatialAudio: (any SpatialAudioPlaying)?
+    /// Tracks that keep the server's audio this session, by
+    /// `SpatialAudioPlaying.trackKey`: ones the library will never play
+    /// (`SpatialAudioError.unsupported`) and streams that ended mid-playback.
+    var refusedSpatialAudio: Set<String> = []
     let client: JellyfinClient
     let navigationClient: any PlayerEpisodeNavigationClient
     let transitionLoader: (any PlayerTransitionLoader)?

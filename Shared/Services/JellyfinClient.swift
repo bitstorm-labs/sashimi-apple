@@ -1778,6 +1778,33 @@ actor JellyfinClient {
         return components?.url
     }
 
+    /// The original file and the headers that authorize reading it, for
+    /// SpatialAudioBridge's range requests. The token goes in a header, not
+    /// the URL: the library logs network errors, which carry their URL.
+    func staticStreamRequest(itemId: String, mediaSourceId: String) -> (url: URL, headers: [String: String])? {
+        guard let serverURL, accessToken != nil else { return nil }
+        var components = URLComponents(string: serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        components?.path += "/Videos/\(itemId)/stream"
+        components?.queryItems = [
+            URLQueryItem(name: "Static", value: "true"),
+            URLQueryItem(name: "MediaSourceId", value: mediaSourceId)
+        ]
+        guard let url = components?.url else { return nil }
+        return (url, ["Authorization": authorizationHeader])
+    }
+
+    /// A session for one spatial audio stream's file reads and playlist,
+    /// under the same certificate trust as the API. Its own, so the API's
+    /// requests never queue ahead of a start or seek, and invalidating it
+    /// cancels everything the stream has in flight.
+    func makeSpatialAudioSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.waitsForConnectivity = false
+        config.urlCache = nil
+        return URLSession(configuration: config, delegate: certificateDelegate, delegateQueue: nil)
+    }
+
     /// Direct audio stream for a theme. `/Audio/{id}/universal` returns 400
     /// without a full device profile; `stream.mp3` serves the file as-is,
     /// which is what a theme is.

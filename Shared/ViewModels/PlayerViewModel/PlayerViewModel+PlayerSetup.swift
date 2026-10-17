@@ -8,13 +8,16 @@ extension PlayerViewModel {
     /// Shared player setup: resolves stream URL, creates AVPlayer with observers.
     /// `allowVideoStreamCopy` is only ever false on the second recovery
     /// attempt (see attemptPlaybackRecovery) — the normal path always permits
-    /// the server to copy the video stream untouched.
+    /// the server to copy the video stream untouched. `startPositionTicks` is
+    /// where playback will start, for a caller that has not armed
+    /// `pendingResumeTicks` yet (a fresh load); spatial audio starts there.
     func setupPlayer( // swiftlint:disable:this function_body_length
         for item: BaseItemDto,
         maxBitrate: Int? = nil,
         maxWidth: Int? = nil,
         forceTranscode: Bool = false,
         allowVideoStreamCopy: Bool = true,
+        startPositionTicks: Int64? = nil,
         expectedPlaybackGeneration: PlaybackGeneration? = nil
     ) async throws {
         // Bitrate precedence: explicit override (quality menu change) →
@@ -218,7 +221,18 @@ extension PlayerViewModel {
             throw PlayerError.noStreamURL
         }
 
-        try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+        // TrueHD Atmos and DTS:X play as APAC beside the same stream-copy
+        // video. Anything else, or a refusal, keeps the server's audio.
+        let startTicks = startPositionTicks ?? pendingResumeTicks
+        let spatialAudio = allowVideoStreamCopy
+            ? await startSpatialAudio(for: item, mediaSource: mediaSource, tracks: tracks, startTicks: startTicks)
+            : nil
+        do {
+            try requireCurrentPlaybackGeneration(expectedPlaybackGeneration)
+        } catch {
+            spatialAudio?.stop()
+            throw error
+        }
         playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
         activeTrackRequest = tracks
@@ -249,9 +263,12 @@ extension PlayerViewModel {
         // nothing ever read — a credential (`api_key`) parked in view-model
         // state, one `Text(...)` away from being on screen.
         let asset: AVURLAsset
-        let playlistLoader = Self.pinnedPlaylistLoader(for: pinnedMultivariantPlaylist)
+        // The spatial playlist keeps the image stream and drops the fallbacks itself.
+        let playlistLoader = spatialAudio == nil ? Self.pinnedPlaylistLoader(for: pinnedMultivariantPlaylist) : nil
         hlsPlaylistLoader = playlistLoader
-        if let playlistLoader {
+        if let spatialAudio {
+            asset = AVURLAsset(url: spatialAudio.playlistURL)
+        } else if let playlistLoader {
             asset = playlistLoader.makeAsset()
         } else {
             asset = AVURLAsset(url: resolvedURL)
@@ -259,7 +276,8 @@ extension PlayerViewModel {
         diag(.assetCreated, [
             PlayerDiagnostics.field("kind", streamKind.rawValue),
             PlayerDiagnostics.field("chapters", item.chapters?.count ?? 0),
-            PlayerDiagnostics.field("pinnedMasterWithImageStream", playlistLoader != nil)
+            PlayerDiagnostics.field("pinnedMasterWithImageStream", playlistLoader != nil),
+            PlayerDiagnostics.field("spatialAudio", spatialAudio != nil)
         ])
         let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
 
@@ -270,6 +288,16 @@ extension PlayerViewModel {
         }
 
         makePlayerAndObservers(for: playerItem)
+        if let spatialAudio, let player {
+            self.spatialAudio = spatialAudio
+            spatialAudio.attach(to: player)
+            // Seeked before the item loads, so AVPlayer asks for the start's
+            // segments first instead of converting from the beginning. The
+            // resume seek at .readyToPlay then finds it there.
+            if startTicks > 0 {
+                player.seek(to: CMTime(value: startTicks / 10000, timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+            }
+        }
         if activeCapIsUnmeasuredDefault {
             watchForMeasuredBandwidth(generation: PlaybackGeneration(itemID: item.id, attempt: playbackAttempt))
         }

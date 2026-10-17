@@ -491,6 +491,9 @@ struct MediaStream: Codable {
     /// How the server intends the stream to reach the client
     /// ("Embed", "External", "Encode", "Hls", "Drop").
     let deliveryMethod: String?
+    /// The codec profile, e.g. "Dolby TrueHD + Dolby Atmos" or
+    /// "DTS-HD MA + DTS:X". Defaulted so existing call sites need not pass it.
+    var profile: String?
 
     enum CodingKeys: String, CodingKey {
         case type = "Type"
@@ -509,6 +512,7 @@ struct MediaStream: Codable {
         case bitRate = "BitRate"
         case deliveryUrl = "DeliveryUrl"
         case deliveryMethod = "DeliveryMethod"
+        case profile = "Profile"
     }
 }
 

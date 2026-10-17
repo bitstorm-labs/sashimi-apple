@@ -178,6 +178,9 @@ extension PlayerViewModel {
             Task { @MainActor in
                 guard let generation, self?.isCurrentPlaybackGeneration(generation) == true else { return }
                 self?.logSeekLanding(on: item, cause: "time-jumped")
+                // After rapid seeks into spatial audio AVPlayer can wait for
+                // good, with no stall notification to arm the watchdog.
+                if self?.spatialAudio != nil { self?.armStallWatchdog(for: generation) }
             }
         })
 
@@ -287,5 +290,8 @@ extension PlayerViewModel {
         // A replacement built on a default starts its own (setupPlayer).
         bandwidthUpgradeTask?.cancel()
         bandwidthUpgradeTask = nil
+        // The spatial audio stream feeds this player, so it goes with it.
+        spatialAudio?.stop()
+        spatialAudio = nil
     }
 }
