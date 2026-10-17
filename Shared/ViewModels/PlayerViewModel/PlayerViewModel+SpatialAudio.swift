@@ -30,12 +30,6 @@ extension PlayerViewModel {
     /// Starts took 2–3 s; a busy server can take far longer, and the load's
     /// own no-progress deadline (`PlaybackLoadPolicy`) must not fire first.
     static let spatialAudioStartDeadline: Duration = .seconds(10)
-    /// How far before the start position the stream starts converting. Seeked
-    /// there, AVPlayer first asks for audio from the start of the video segment
-    /// before it, up to 20 s earlier; converting from the position itself put
-    /// that request behind the stream's run, and a resume 90 minutes into a
-    /// film never started on Apple TV.
-    static let spatialAudioStartLead: Int64 = 20 * 10_000_000
 
     /// Starts SpatialAudioBridge for the selected audio stream when it is
     /// TrueHD Atmos or DTS:X (`PlaybackSelection.spatialAudioTrackPosition`).
@@ -63,7 +57,7 @@ extension PlayerViewModel {
         else { return nil }
 
         let started = ContinuousClock.now
-        let startTime = CMTime(value: max(0, startTicks - Self.spatialAudioStartLead) / 10000, timescale: 1000)
+        let startTime = CMTime(value: startTicks / 10000, timescale: 1000)
         let session = await client.makeSpatialAudioSession()
         // Cancels the session's requests, which fails the start.
         let deadline = Task {
