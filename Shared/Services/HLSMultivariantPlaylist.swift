@@ -34,6 +34,10 @@ enum HLSMultivariantPlaylist {
         var isStreamCopyFallback: Bool {
             uri.range(of: "AllowVideoStreamCopy=false", options: .caseInsensitive) != nil
         }
+        /// `VIDEO-RANGE=PQ` (HDR10, Dolby Vision's HDR10 base) or `HLG`.
+        var isHDR: Bool {
+            attributes.range(of: #"(^|,)VIDEO-RANGE=(PQ|HLG)(,|$)"#, options: [.regularExpression, .caseInsensitive]) != nil
+        }
     }
 
     /// Every `#EXT-X-STREAM-INF` entry with its URI. `#EXT-X-IMAGE-STREAM-INF`
@@ -96,10 +100,19 @@ enum HLSMultivariantPlaylist {
     /// AVPlayer fetches the media playlist, segments and tiles over HTTP as
     /// before. Any tag whose URI is a fallback (`AllowVideoStreamCopy=false`)
     /// is dropped too, so no fallback is reachable from the result.
+    ///
+    /// Not for an HDR primary (`VIDEO-RANGE=PQ` or `HLG`): tvOS refuses a
+    /// stream-copied HDR variant reached through this rewritten master --
+    /// "Cannot open" (AVFoundation -11868 / CoreMedia -17223) before it
+    /// requests a single segment -- while the same variant's media playlist,
+    /// pinned plainly, plays and resumes (a DV Profile 8.1 film on an HDR10
+    /// Apple TV, Oct 2026). Those streams go without scrub thumbnails rather
+    /// than falling back to an SDR re-encode.
     static func primaryVariantPlaylistKeepingImageStreams(playlist: String, multivariantURL: URL) -> String? {
         let allVariants = variants(in: playlist)
         guard allVariants.contains(where: \.isStreamCopyFallback),
-              let primary = allVariants.first(where: { !$0.isStreamCopyFallback })
+              let primary = allVariants.first(where: { !$0.isStreamCopyFallback }),
+              !primary.isHDR
         else { return nil }
 
         let lines = playlist.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
