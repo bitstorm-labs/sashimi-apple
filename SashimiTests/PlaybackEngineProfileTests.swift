@@ -142,17 +142,19 @@ final class PlaybackEngineProfileTests: XCTestCase {
         XCTAssertEqual(ranges?.isSuperset(of: ["SDR", "HDR10", "HLG"]), true)
     }
 
-    func testNonDolbyVisionDisplayPlaysDolbyVisionWithABaseLayerAsThatBase() async {
-        // DOVIWithHDR10/HLG/SDR stay OFF the list: the server then copies them
-        // as their HDR10/HLG/SDR base (CanStreamCopyVideo allows exactly that
-        // for a client listing the base range) instead of direct-playing a
-        // dvh1 file a non-DV player may refuse.
+    func testNonDolbyVisionDisplayStillAcceptsDolbyVisionWithABaseLayer() async {
+        // DOVIWithHDR10/HLG/SDR must be ON the list for a non-DV display. Off
+        // it, Jellyfin does not copy them as their base: it re-encodes them
+        // (VideoRangeTypeNotSupported) and relabels the HDR as SDR. Measured
+        // on the server with a DV Profile 8.1 MKV: off the list → transcode;
+        // on it → remux (video copy, hvc1, fMP4).
         let profile = await JellyfinClient.shared.videoDeviceProfile(
             engine: .avFoundation, streamingBitrate: 100_000_000, maxWidth: nil, supportsDolbyVision: false
         )
         let ranges = hevcRangeTypes(profile) ?? []
-        XCTAssertTrue(ranges.isDisjoint(with: ["DOVIWithHDR10", "DOVIWithHLG", "DOVIWithSDR"]))
+        XCTAssertTrue(ranges.isSuperset(of: ["DOVIWithHDR10", "DOVIWithHLG", "DOVIWithSDR"]))
         XCTAssertTrue(ranges.isSuperset(of: ["HDR10", "HLG", "SDR"]))
+        XCTAssertFalse(ranges.contains("DOVI"), "single-layer DV still needs a DV display")
     }
 
     func testDolbyVisionDisplayKeepsDolbyVision() async {
