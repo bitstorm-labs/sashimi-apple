@@ -19,8 +19,8 @@ Then install the same built product to each device:
 
 | Device | ID |
 | --- | --- |
-| Living Room | `3DEAD265-908E-5316-B8C4-A29524449F94` |
-| Bedroom | `097AEE6F-7257-56FF-9247-2C4C2FFE238F` |
+| Living Room | `00008110-001C58991188401E` |
+| Bedroom | `00008110-00194D901A63801E` |
 
 ```bash
 xcrun devicectl device install app --device <ID> \

@@ -17,6 +17,7 @@ struct SashimiMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sessionManager = SessionManager.shared
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var networkMonitor = NetworkMonitor.shared
 
     let modelContainer: ModelContainer
 
@@ -65,6 +66,18 @@ struct SashimiMobileApp: App {
                     SashimiMediaSpotlightIndexer.shared.refresh()
                 }
             }
+        }
+        // The dashboard's Stop and Message reach this device over a socket
+        // held open while signed in and in front (#723).
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            RemoteControlCoordinator.shared.setForeground(newPhase != .background)
+        }
+        .onChange(of: sessionManager.remoteControlIdentity, initial: true) { _, identity in
+            RemoteControlCoordinator.shared.setSession(isAuthenticated: identity != nil, identity: identity ?? "")
+        }
+        .onChange(of: networkMonitor.isConnected) { _, isConnected in
+            guard isConnected else { return }
+            RemoteControlCoordinator.shared.networkDidReconnect()
         }
     }
 }

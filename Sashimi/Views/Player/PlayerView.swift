@@ -158,6 +158,17 @@ struct PlayerView: View {
             viewModel.beginStop(reason: .sceneBackground)
             dismiss()
         }
+        // The server dashboard's Stop: leave exactly as Back does, so the
+        // position is reported and the transcode ended (#723).
+        .onReceive(NotificationCenter.default.publisher(for: .remotePlaybackStopRequested)) { _ in
+            PlayerDiagnostics.event(.viewDismiss, [
+                PlayerDiagnostics.field("view", viewTag),
+                PlayerDiagnostics.field("trigger", "remote-stop")
+            ])
+            viewModel.player?.pause()
+            viewModel.beginStop(reason: .remoteStop)
+            dismiss()
+        }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             // The view model shows the Up Next card whenever there is
             // anything to offer; with nothing to offer the player closes.

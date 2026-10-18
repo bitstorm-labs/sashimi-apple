@@ -257,6 +257,12 @@ final class SessionManager: ObservableObject {
         "\(activeServerId ?? "none"):\(serverConnectionRevision)"
     }
 
+    /// The session a remote-control socket belongs to, nil while signed out
+    /// (#723). A new value means the old socket speaks for the wrong session.
+    var remoteControlIdentity: String? {
+        isAuthenticated ? activeSessionIdentity : nil
+    }
+
 #if DEBUG
     /// The production singleton uses the private initializer below. This
     /// debug-only initializer lets the hosted unit-test target create an
