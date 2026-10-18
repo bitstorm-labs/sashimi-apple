@@ -60,6 +60,15 @@ struct SashimiApp: App {
         .onChange(of: networkMonitor.isConnected) { _, isConnected in
             guard isConnected else { return }
             Task { await PlaybackReportDelivery.shared.flush() }
+            RemoteControlCoordinator.shared.networkDidReconnect()
+        }
+        // The dashboard's Stop and Message reach this device over a socket
+        // held open while signed in and in front (#723).
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            RemoteControlCoordinator.shared.setForeground(newPhase != .background)
+        }
+        .onChange(of: sessionManager.remoteControlIdentity, initial: true) { _, identity in
+            RemoteControlCoordinator.shared.setSession(isAuthenticated: identity != nil, identity: identity ?? "")
         }
     }
 }

@@ -133,6 +133,8 @@ enum PlayerDiagnostics {
         case playbackEnded = "playback-ended"
         /// The app moved to the background while a player was presented.
         case sceneBackground = "scene-background"
+        /// The server's dashboard sent Playstate Stop over the socket (#723).
+        case remoteStop = "remote-stop"
         /// The view model was deallocated.
         case deallocated = "deallocated"
         /// Caller did not say. Should not appear; if it does, a call site is
