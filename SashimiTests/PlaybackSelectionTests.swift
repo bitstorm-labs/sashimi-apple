@@ -270,6 +270,69 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertEqual(PlaybackSelection.wirelessCeiling(cap: 50_000_000, sustainedBitrate: 0), PlaybackSelection.smooth4KBitrate)
     }
 
+    private func upgradeContext(
+        sustained: Int? = 378_000_000, active: Int? = 24_000_000, source: Int? = 44_268_472
+    ) -> PlaybackSelection.SustainedUpgradeContext {
+        PlaybackSelection.SustainedUpgradeContext(
+            isAuto: true, isWired: false, autoCap: 100_000_000, activeCap: active, sourceBitrate: source,
+            sustainedBitrate: sustained, isTranscoding: true, isBusy: false, secondsSinceRecovery: nil,
+            secondsSinceQualityChange: nil, failedUpgrades: 0)
+    }
+
+    func testHeldDownWifiStreamUpgradesOnceTheLinkProvesItself() {
+        // 300 on the Bedroom Apple TV: started on the 24 Mbps clamp; playback
+        // reads ~378 Mbps, so the 44 Mbps source now fits -- rebuild to copy.
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(upgradeContext()), .now)
+    }
+
+    func testAStepDownRecoversWhenTheLinkDoes() {
+        // A stall dropped Auto to 1080p at 8 Mbps; the link has since read
+        // 60 Mbps (ceiling 30): twice the cap, so step back up -- partway,
+        // since the 44 Mbps source still doesn't fit.
+        var context = upgradeContext(sustained: 60_000_000, active: 8_000_000)
+        context.secondsSinceQualityChange = 300
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .now)
+    }
+
+    func testNoUpgradeWhenTheLinkHasNotProvedEnough() {
+        // Ceiling 40 Mbps over a 24 Mbps stream: neither the source nor double.
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(upgradeContext(sustained: 80_000_000)), .none)
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(upgradeContext(sustained: nil)), .none)
+    }
+
+    func testNoUpgradeForAStreamNotHeldDown() {
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(upgradeContext(active: 100_000_000)), .none)
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(upgradeContext(source: nil)), .none)
+    }
+
+    func testUpgradesWaitOutTheCooldownWhichDoublesAfterEachFailedOne() {
+        var context = upgradeContext()
+        context.secondsSinceQualityChange = 30
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .after(90))
+        context.secondsSinceQualityChange = 130
+        context.failedUpgrades = 1
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .after(110), "240 s after one failed upgrade")
+        context.secondsSinceQualityChange = 241
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .now)
+        XCTAssertEqual(PlaybackSelection.adaptiveCooldown(failedUpgrades: 99), PlaybackSelection.adaptiveCooldown(failedUpgrades: 5),
+                       "the back-off stops growing")
+    }
+
+    func testUpgradeRespectsPicksAndRecoveries() {
+        var context = upgradeContext(); context.isAuto = false
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .none, "the viewer's quality pick stands")
+        context = upgradeContext(); context.secondsSinceRecovery = 5
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .after(10))
+        context = upgradeContext(); context.isBusy = true
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .after(PlaybackSelection.upwardRenegotiationRecoveryQuietPeriod))
+    }
+
+    func testWiredUpgradeUsesTheMeasuredRateDirectly() {
+        var context = upgradeContext(sustained: 50_000_000)
+        context.isWired = true
+        XCTAssertEqual(PlaybackSelection.sustainedUpgrade(context), .now, "wired 50 Mbps carries the 44 Mbps source")
+    }
+
     func testWirelessSafeSourceIsNotConstrained() {
         // A source already under the smooth-4K ceiling is Wi-Fi-safe: copy it
         // untouched rather than pointlessly transcoding.

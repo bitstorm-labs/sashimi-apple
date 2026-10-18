@@ -158,7 +158,10 @@ extension PlayerViewModel {
                 // readings over too little video to mean anything).
                 let observed = event.observedBitrate
                 let bytes = event.numberOfBytesTransferred
-                Task { await self.client.recordSustainedThroughput(bitsPerSecond: observed, bytesTransferred: bytes) }
+                Task {
+                    await self.client.recordSustainedThroughput(bitsPerSecond: observed, bytesTransferred: bytes)
+                    self.considerSustainedUpgrade()
+                }
                 // A stall is the exception: promote it, because "numberOfStalls
                 // climbing" is the difference between "the link can't carry
                 // this" and "the stream itself is broken".

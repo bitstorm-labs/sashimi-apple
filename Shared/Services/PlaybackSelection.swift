@@ -150,6 +150,68 @@ enum PlaybackSelection {
         return .now
     }
 
+    // MARK: - Step back up when the link allows (adaptive Auto)
+
+    /// What the player knows when a fresh speed reading arrives mid-stream.
+    struct SustainedUpgradeContext: Equatable {
+        /// The viewer chose Auto. A stall step-down keeps this true: the lower
+        /// tier was the player's choice, not the viewer's.
+        var isAuto: Bool
+        var isWired: Bool
+        /// The Auto cap now (the probe's measurement or its default).
+        var autoCap: Int
+        /// The cap the current stream was requested with.
+        var activeCap: Int?
+        var sourceBitrate: Int?
+        /// The lowest recent reading for this link. A stall's slow reading
+        /// stays in it until five newer ones replace it, so the link has to
+        /// recover for a while before anything moves back up.
+        var sustainedBitrate: Int?
+        var isTranscoding: Bool
+        var isBusy: Bool
+        var secondsSinceRecovery: TimeInterval?
+        /// Since the last automatic quality change, either way.
+        var secondsSinceQualityChange: TimeInterval?
+        /// Upgrades this session that ran straight into a stall.
+        var failedUpgrades: Int
+    }
+
+    /// Time between automatic quality changes. Each one restarts the server's
+    /// stream (a second or two of interruption), so they must not see-saw;
+    /// every upgrade that stalled straight back down doubles it.
+    static let adaptiveCooldown: TimeInterval = 120
+
+    static func adaptiveCooldown(failedUpgrades: Int) -> TimeInterval {
+        adaptiveCooldown * pow(2, Double(min(max(failedUpgrades, 0), 5)))
+    }
+
+    /// Whether to rebuild a stream Auto (or a stall step-down) held below its
+    /// source, now that playback itself shows the link carries much more --
+    /// the way other players start conservative and step up, for the whole
+    /// session. Up only when it pays: the link now carries the source
+    /// untouched, or at least twice the current cap.
+    static func sustainedUpgrade(_ context: SustainedUpgradeContext) -> UpwardRenegotiation {
+        guard context.isAuto, context.isTranscoding,
+              let sourceBitrate = context.sourceBitrate, sourceBitrate > 0,
+              let activeCap = context.activeCap, activeCap > 0, activeCap < sourceBitrate,
+              let sustainedBitrate = context.sustainedBitrate, sustainedBitrate > 0
+        else { return .none }
+        let ceiling = context.isWired
+            ? min(context.autoCap, sustainedBitrate)
+            : wirelessCeiling(cap: context.autoCap, sustainedBitrate: sustainedBitrate)
+        guard ceiling >= sourceBitrate || ceiling >= activeCap * upwardRenegotiationMinimumRatio else { return .none }
+
+        var wait: TimeInterval = 0
+        if context.isBusy { wait = upwardRenegotiationRecoveryQuietPeriod }
+        if let elapsed = context.secondsSinceRecovery {
+            wait = max(wait, upwardRenegotiationRecoveryQuietPeriod - elapsed)
+        }
+        if let elapsed = context.secondsSinceQualityChange {
+            wait = max(wait, adaptiveCooldown(failedUpgrades: context.failedUpgrades) - elapsed)
+        }
+        return wait > 0 ? .after(wait) : .now
+    }
+
     /// Width cap to pair with a bitrate cap when the caller did not pick a
     /// resolution tier of its own.
     ///
