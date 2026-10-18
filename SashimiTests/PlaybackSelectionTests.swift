@@ -279,6 +279,29 @@ final class PlaybackSelectionTests: XCTestCase {
             secondsSinceQualityChange: nil, failedUpgrades: 0)
     }
 
+    func testOnlyCopiedVideoReadingsMeasureTheLink() {
+        // #717: direct play and a remux deliver the file's own video, so a
+        // reading is the link's rate.
+        XCTAssertTrue(PlaybackSelection.readingsMeasureLink(
+            isTranscode: false, transcodeReasons: nil, burnsInSubtitle: false, allowVideoStreamCopy: true))
+        XCTAssertTrue(PlaybackSelection.readingsMeasureLink(
+            isTranscode: true, transcodeReasons: ["ContainerNotSupported", "AudioCodecNotSupported"],
+            burnsInSubtitle: false, allowVideoStreamCopy: true))
+        // A re-encode, a burn-in or a copy-disallowed rebuild is encoder-paced.
+        XCTAssertFalse(PlaybackSelection.readingsMeasureLink(
+            isTranscode: true, transcodeReasons: ["VideoCodecNotSupported"],
+            burnsInSubtitle: false, allowVideoStreamCopy: true))
+        XCTAssertFalse(PlaybackSelection.readingsMeasureLink(
+            isTranscode: true, transcodeReasons: ["ContainerBitrateExceedsLimit"],
+            burnsInSubtitle: false, allowVideoStreamCopy: true))
+        XCTAssertFalse(PlaybackSelection.readingsMeasureLink(
+            isTranscode: true, transcodeReasons: ["SubtitleCodecNotSupported"],
+            burnsInSubtitle: true, allowVideoStreamCopy: true))
+        XCTAssertFalse(PlaybackSelection.readingsMeasureLink(
+            isTranscode: true, transcodeReasons: ["ContainerNotSupported"],
+            burnsInSubtitle: false, allowVideoStreamCopy: false))
+    }
+
     func testHeldDownWifiStreamUpgradesOnceTheLinkProvesItself() {
         // 300 on the Bedroom Apple TV: started on the 24 Mbps clamp; playback
         // reads ~378 Mbps, so the 44 Mbps source now fits -- rebuild to copy.

@@ -154,12 +154,12 @@ extension PlayerViewModel {
                 // periodically during playback, so the raw sample is .debug.
                 self.diagDetail(.accessLog, PlayerDiagnostics.summarize(accessEvent: event))
                 // What this link really carries, remembered for the next
-                // stream's copy-or-transcode decision (the store ignores
-                // readings over too little video to mean anything).
+                // stream's copy-or-transcode decision when the stream
+                // measures it (see noteSustainedReading).
                 let observed = event.observedBitrate
                 let bytes = event.numberOfBytesTransferred
                 Task {
-                    await self.client.recordSustainedThroughput(bitsPerSecond: observed, bytesTransferred: bytes)
+                    await self.noteSustainedReading(bitsPerSecond: observed, bytesTransferred: bytes)
                     self.considerSustainedUpgrade()
                 }
                 // A stall is the exception: promote it, because "numberOfStalls

@@ -29,6 +29,7 @@ extension PlayerViewModel {
         lastAdaptiveChangeAt = nil
         lastAdaptiveUpgradeAt = nil
         failedAdaptiveUpgrades = 0
+        itemSustainedReadings = []
         activeBitrateCap = nil
         activeTrackRequest = nil
         stallWatchdogTask?.cancel()
