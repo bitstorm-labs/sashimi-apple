@@ -39,15 +39,27 @@ final class BandwidthMeasurementStore: @unchecked Sendable {
     /// Records one access-log reading (AVPlayerItemAccessLogEvent's
     /// observedBitrate over `bytesTransferred`). Kept across launches.
     func recordSustained(bitsPerSecond: Double, bytesTransferred: Int64, for url: URL, isWired: Bool) {
-        guard bitsPerSecond.isFinite, bitsPerSecond > 0, bytesTransferred >= Self.sustainedMinimumBytes else { return }
+        guard Self.isUsableSustainedReading(bitsPerSecond: bitsPerSecond, bytesTransferred: bytesTransferred) else { return }
         let key = Self.sustainedKey(for: url, isWired: isWired)
         locked {
             var all = defaults.dictionary(forKey: Self.sustainedDefaultsKey) as? [String: [Int]] ?? [:]
-            var samples = all[key] ?? []
-            samples.append(Int(bitsPerSecond))
-            all[key] = Array(samples.suffix(Self.sustainedSampleLimit))
+            all[key] = Self.addingSustainedSample(
+                to: all[key] ?? [], bitsPerSecond: bitsPerSecond, bytesTransferred: bytesTransferred
+            )
             defaults.set(all, forKey: Self.sustainedDefaultsKey)
         }
+    }
+
+    /// `samples` with one more reading, newest last, at most
+    /// `sustainedSampleLimit` of them. A reading over too little video is
+    /// dropped. Shared by the remembered samples and a player's per-item ones.
+    static func addingSustainedSample(to samples: [Int], bitsPerSecond: Double, bytesTransferred: Int64) -> [Int] {
+        guard isUsableSustainedReading(bitsPerSecond: bitsPerSecond, bytesTransferred: bytesTransferred) else { return samples }
+        return Array((samples + [Int(bitsPerSecond)]).suffix(sustainedSampleLimit))
+    }
+
+    private static func isUsableSustainedReading(bitsPerSecond: Double, bytesTransferred: Int64) -> Bool {
+        bitsPerSecond.isFinite && bitsPerSecond > 0 && bytesTransferred >= sustainedMinimumBytes
     }
 
     /// The lowest recent reading for this server over this kind of link, or
