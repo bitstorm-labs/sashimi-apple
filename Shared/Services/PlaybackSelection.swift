@@ -329,6 +329,18 @@ enum PlaybackSelection {
         }
     }
 
+    /// Whether access-log readings from this stream measure the link (#717).
+    /// Only when the video arrives as the file has it: direct play, or a
+    /// remux. A live re-encode or a subtitle burn-in hands out segments no
+    /// faster than the encoder makes them, so its readings are encode speed
+    /// times stream bitrate -- floors, not the link's rate.
+    static func readingsMeasureLink(
+        isTranscode: Bool, transcodeReasons: [String]?, burnsInSubtitle: Bool, allowVideoStreamCopy: Bool
+    ) -> Bool {
+        guard isTranscode else { return true }
+        return !burnsInSubtitle && allowVideoStreamCopy && !reencodesVideo(transcodeReasons)
+    }
+
     /// Viewer-facing bitrate: "20 Mbps", "9.5 Mbps", "720 kbps".
     static func bitrateLabel(_ bitsPerSecond: Int) -> String {
         guard bitsPerSecond >= 1_000_000 else {

@@ -254,3 +254,88 @@ final class AutoQualityHomeNetworkTests: XCTestCase {
         XCTAssertEqual(model.upwardRenegotiation(measuredCap: 100_000_000), .none)
     }
 }
+
+/// #717: a live re-encode's segments arrive no faster than the encoder makes
+/// them, so its access-log readings measure encode speed, not the link. One
+/// of them (a 10 Mbps re-encode reading 14 Mbps on an ~80 Mbps link) became
+/// the remembered sustained rate and held the next Wi-Fi stream below the
+/// 24 Mbps fallback. Such readings count for the current item only.
+@MainActor
+final class EncoderPacedThroughputTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: BandwidthMeasurementStore!
+    private let server = URL(string: "https://fin-717.example.com")!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "EncoderPacedThroughputTests-\(UUID().uuidString)")
+        store = BandwidthMeasurementStore(defaults: defaults)
+    }
+
+    private func model() -> PlayerViewModel {
+        PlayerViewModel(client: JellyfinClient(serverURL: server, accessToken: "token", userId: "user", bandwidthStore: store))
+    }
+
+    private var remembered: Int? {
+        store.sustainedBitrate(for: server, isWired: NetworkConnectionMonitor.shared.isWired)
+    }
+
+    func testAReencodeReadingIsNeverRemembered() async {
+        let model = model()
+        model.readingsMeasureLink = false
+
+        await model.noteSustainedReading(bitsPerSecond: 14_000_000, bytesTransferred: 20_000_000)
+
+        XCTAssertNil(remembered, "an encoder-paced reading must not become the link's rate")
+        XCTAssertEqual(model.itemSustainedReadings, [14_000_000])
+    }
+
+    func testACopiedStreamsReadingIsRemembered() async {
+        let model = model()
+        model.readingsMeasureLink = true
+
+        await model.noteSustainedReading(bitsPerSecond: 80_000_000, bytesTransferred: 20_000_000)
+
+        XCTAssertEqual(remembered, 80_000_000)
+        XCTAssertEqual(model.itemSustainedReadings, [80_000_000])
+    }
+
+    func testAnOfflineReadingIsNeverRemembered() async {
+        // A downloaded file reads at disk speed: nothing about the server's link.
+        let model = model()
+        model.readingsMeasureLink = true
+        model.isOfflinePlayback = true
+
+        await model.noteSustainedReading(bitsPerSecond: 900_000_000, bytesTransferred: 20_000_000)
+
+        XCTAssertNil(remembered)
+    }
+
+    func testTooLittleVideoCountsForNeither() async {
+        let model = model()
+        model.readingsMeasureLink = false
+
+        await model.noteSustainedReading(bitsPerSecond: 3_000_000, bytesTransferred: 1_000_000)
+
+        XCTAssertEqual(model.itemSustainedReadings, [])
+    }
+
+    func testAReencodeUpgradesOnItsOwnReadingsAndACopyOnTheRememberedOnes() {
+        let model = model()
+        model.itemSustainedReadings = [55_000_000, 14_000_000, 30_000_000]
+
+        model.readingsMeasureLink = false
+        XCTAssertEqual(model.sustainedBitrateForUpgrade(remembered: 90_000_000), 14_000_000)
+        model.readingsMeasureLink = true
+        XCTAssertEqual(model.sustainedBitrateForUpgrade(remembered: 90_000_000), 90_000_000)
+    }
+
+    func testItemReadingsKeepOnlyTheMostRecentFew() {
+        var samples: [Int] = []
+        for reading in 1...7 {
+            samples = BandwidthMeasurementStore.addingSustainedSample(
+                to: samples, bitsPerSecond: Double(reading * 10_000_000), bytesTransferred: 20_000_000)
+        }
+        XCTAssertEqual(samples, [30, 40, 50, 60, 70].map { $0 * 1_000_000 })
+    }
+}

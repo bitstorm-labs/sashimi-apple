@@ -229,6 +229,12 @@ extension PlayerViewModel {
         playSessionId = playbackInfo.playSessionId
         currentMediaSource = mediaSource
         activeTrackRequest = tracks
+        readingsMeasureLink = PlaybackSelection.readingsMeasureLink(
+            isTranscode: mediaSource.transcodingUrl?.isEmpty == false,
+            transcodeReasons: mediaSource.transcodeReasons,
+            burnsInSubtitle: tracks.burnsInSubtitle,
+            allowVideoStreamCopy: allowVideoStreamCopy
+        )
         videoResolution = mediaSource.videoResolution
         streamInfo = nil   // stale for the new session; refreshed when the overlay opens
 
