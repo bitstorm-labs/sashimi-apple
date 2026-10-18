@@ -254,6 +254,26 @@ extension PlayerViewModel {
         playbackSettings.maxBitrate == 0 && (selectedQuality == .auto || autoSteppedDown)
     }
 
+    /// One access-log reading. It always counts for this item; it is
+    /// remembered as the link's rate only when the stream copies the file's
+    /// video (#717) and comes from the server, not a download. Readings over
+    /// too little video are dropped either way.
+    func noteSustainedReading(bitsPerSecond: Double, bytesTransferred: Int64) async {
+        itemSustainedReadings = BandwidthMeasurementStore.addingSustainedSample(
+            to: itemSustainedReadings, bitsPerSecond: bitsPerSecond, bytesTransferred: bytesTransferred
+        )
+        guard readingsMeasureLink, !isOfflinePlayback else { return }
+        await client.recordSustainedThroughput(bitsPerSecond: bitsPerSecond, bytesTransferred: bytesTransferred)
+    }
+
+    /// The sustained rate an upgrade decision trusts: the remembered one
+    /// while the stream copies its video, this item's own readings during a
+    /// re-encode (they are only floors, but the remembered rate says nothing
+    /// about what the encoder can keep up with).
+    func sustainedBitrateForUpgrade(remembered: Int?) -> Int? {
+        readingsMeasureLink ? remembered : itemSustainedReadings.min()
+    }
+
     /// After a fresh speed reading: when the link now carries much more than
     /// the stream Auto (or its step-down) is playing, go back to Auto at the
     /// current position; the rebuild's PlaybackInfo pass then picks the best
@@ -273,13 +293,14 @@ extension PlayerViewModel {
                 self.adaptiveUpgradeInFlight = false
                 return
             }
+            let sustained = self.sustainedBitrateForUpgrade(remembered: status.sustainedBitrate)
             let decision = PlaybackSelection.sustainedUpgrade(PlaybackSelection.SustainedUpgradeContext(
                 isAuto: self.isViewerOnAuto,
                 isWired: status.isWired,
                 autoCap: status.cap,
                 activeCap: self.activeBitrateCap,
                 sourceBitrate: self.currentMediaSource?.bitrate,
-                sustainedBitrate: status.sustainedBitrate,
+                sustainedBitrate: sustained,
                 isTranscoding: self.currentMediaSource?.transcodingUrl?.isEmpty == false,
                 isBusy: self.isRecovering || self.transitionState.isTransitioning || self.stallWatchdogTask != nil,
                 secondsSinceRecovery: self.lastRecoveryAt.map { now.timeIntervalSince($0) },
@@ -295,7 +316,8 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("trigger", "sustained-throughput"),
                 PlayerDiagnostics.field("fromCap", self.activeBitrateCap),
                 PlayerDiagnostics.field("fromQuality", self.selectedQuality.rawValue),
-                PlayerDiagnostics.field("sustainedBitrate", status.sustainedBitrate),
+                PlayerDiagnostics.field("sustainedBitrate", sustained),
+                PlayerDiagnostics.field("readingsMeasureLink", self.readingsMeasureLink),
                 PlayerDiagnostics.field("failedUpgrades", self.failedAdaptiveUpgrades)
             ])
             self.selectedQuality = .auto

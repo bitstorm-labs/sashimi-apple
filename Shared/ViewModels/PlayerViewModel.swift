@@ -247,6 +247,13 @@ final class PlayerViewModel: ObservableObject {
     /// Upgrades this item that stalled straight back down; each doubles the
     /// cool-down. Reset per item.
     var failedAdaptiveUpgrades = 0
+    /// The current stream copies the file's video, so its access-log readings
+    /// measure the link and are remembered (see
+    /// PlaybackSelection.readingsMeasureLink). Set per stream in setupPlayer.
+    var readingsMeasureLink = true
+    /// This item's readings, remembered or not: during a re-encode only they
+    /// say anything about the stream that is playing. Reset per item.
+    var itemSustainedReadings: [Int] = []
     /// An adaptive upgrade decision or rebuild is in flight.
     var adaptiveUpgradeInFlight = false
     /// Re-entrancy guard: a failed item can fire status + error-log + stall
