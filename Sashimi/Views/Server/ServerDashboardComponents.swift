@@ -25,19 +25,6 @@ extension DashboardTone {
     }
 }
 
-struct PlayModeBadge: View {
-    let mode: PlayMode
-
-    var body: some View {
-        Text(mode.title)
-            .font(Typography.captionSmall.weight(.bold))
-            .foregroundStyle(mode.tint)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(mode.tint.opacity(0.18), in: Capsule())
-    }
-}
-
 /// "3 streaming" in the header.
 struct ServerCountPill: View {
     let value: String
@@ -56,58 +43,101 @@ struct ServerCountPill: View {
     }
 }
 
-/// One stream. Selecting it opens the stream sheet (Details, Stop, Message).
+extension DashboardStreamState {
+    var color: Color {
+        switch self {
+        case .playing: return SashimiTheme.success
+        case .paused: return SashimiTheme.accentSecondary
+        case .other: return SashimiTheme.textTertiary
+        }
+    }
+}
+
+/// One pill on a stream card. The play-mode pill takes the badge's colour.
+struct ServerStreamPill: View {
+    let pill: DashboardPill
+    let mode: PlayMode
+
+    var body: some View {
+        let tint = pill.kind.foreground ?? mode.tint
+        Text(pill.text)
+            .font(Typography.captionSmall.weight(.heavy))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(pill.kind.background ?? mode.tint.opacity(0.18), in: Capsule())
+    }
+}
+
+/// The pills, wrapping onto a second line rather than clipping.
+struct ServerStreamPills: View {
+    let session: DashboardSession
+
+    var body: some View {
+        let mode = ServerDashboardLogic.playMode(session.transcodingInfo)
+        WrappingHStack(spacing: 8, lineSpacing: 8) {
+            ForEach(ServerDashboardLogic.pills(session)) { pill in
+                ServerStreamPill(pill: pill, mode: mode)
+            }
+        }
+    }
+}
+
+/// One stream, OpsDec style: poster with a state dot, title, viewer, progress,
+/// pills, then why and where. Selecting it opens the stream sheet (Details,
+/// Stop, Message).
 struct ServerSessionCard: View {
     let session: DashboardSession
     let action: () -> Void
     @FocusState private var isFocused: Bool
 
     private var item: DashboardNowPlaying? { session.nowPlayingItem }
+    private var title: DashboardCardTitle { ServerDashboardLogic.cardTitle(item) }
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 20) {
-                    SmartPosterImage(itemIds: item?.posterItemIds ?? [], maxWidth: 240, imageTypes: ["Primary"])
-                        .frame(width: 120, height: 180)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.medium))
-
+                    poster
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(item?.displayTitle ?? "")
+                        Text(title.title)
                             .font(Typography.title)
                             .foregroundStyle(SashimiTheme.textPrimary)
                             .lineLimit(2)
-                        Text(ServerDashboardLogic.viewerLine(session))
-                            .font(Typography.bodySmall)
-                            .foregroundStyle(SashimiTheme.textSecondary)
-                            .lineLimit(1)
-                        PlayModeBadge(mode: ServerDashboardLogic.playMode(session.transcodingInfo))
-                        Text(ServerDashboardLogic.detailLine(for: session))
+                        titleLine
+                        viewer
+                        Text(ServerDashboardLogic.deviceLine(session))
                             .font(Typography.caption)
-                            .foregroundStyle(SashimiTheme.textSecondary)
-                            .lineLimit(2)
+                            .foregroundStyle(SashimiTheme.textTertiary)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }
 
-                SashimiProgressBar(
-                    progress: ServerDashboardLogic.progressFraction(
-                        positionTicks: session.playState?.positionTicks,
-                        runTimeTicks: item?.runTimeTicks
-                    ),
-                    height: 8
-                )
-
-                HStack {
-                    Text(ServerDashboardLogic.progressText(
-                        positionTicks: session.playState?.positionTicks,
-                        runTimeTicks: item?.runTimeTicks
-                    ) ?? "")
-                    Spacer()
-                    Text(ServerDashboardLogic.rateLine(session))
+                VStack(spacing: 6) {
+                    SashimiProgressBar(
+                        progress: ServerDashboardLogic.progressFraction(
+                            positionTicks: session.playState?.positionTicks,
+                            runTimeTicks: item?.runTimeTicks
+                        ),
+                        height: 8
+                    )
+                    HStack {
+                        Text(ServerDashboardLogic.progressText(
+                            positionTicks: session.playState?.positionTicks,
+                            runTimeTicks: item?.runTimeTicks
+                        ) ?? "")
+                        Spacer()
+                        Text(ServerDashboardLogic.percentText(session))
+                    }
+                    .font(Typography.caption)
+                    .foregroundStyle(SashimiTheme.textSecondary)
                 }
-                .font(Typography.caption)
-                .foregroundStyle(SashimiTheme.textSecondary)
+
+                ServerStreamPills(session: session)
+
+                footer
             }
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,7 +145,67 @@ struct ServerSessionCard: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
-        .accessibilityLabel("\(item?.displayTitle ?? ""), \(ServerDashboardLogic.viewerLine(session))")
+        .accessibilityLabel("\(title.title), \(ServerDashboardLogic.viewerLine(session))")
+    }
+
+    private var poster: some View {
+        SmartPosterImage(itemIds: item?.posterItemIds ?? [], maxWidth: 240, imageTypes: ["Primary"])
+            .frame(width: 120, height: 180)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.medium))
+            .overlay(alignment: .topTrailing) {
+                Circle()
+                    .fill(ServerDashboardLogic.streamState(session).color)
+                    .frame(width: 16, height: 16)
+                    .overlay(Circle().stroke(SashimiTheme.background, lineWidth: 2))
+                    .padding(8)
+            }
+    }
+
+    private var titleLine: some View {
+        HStack(spacing: 10) {
+            if !title.sub.isEmpty {
+                Text(title.sub).lineLimit(1)
+            }
+            if !title.ep.isEmpty {
+                Text(title.ep)
+                    .fontWeight(.heavy)
+                    .foregroundStyle(SashimiTheme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(SashimiTheme.accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .font(Typography.bodySmall)
+        .foregroundStyle(SashimiTheme.textSecondary)
+    }
+
+    private var viewer: some View {
+        HStack(spacing: 10) {
+            Text(ServerDashboardLogic.initial(of: session.userName))
+                .font(Typography.captionSmall.weight(.heavy))
+                .foregroundStyle(SashimiTheme.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(SashimiTheme.textTertiary.opacity(0.45), in: Circle())
+            Text(session.userName ?? "")
+                .font(Typography.bodySmall.weight(.semibold))
+                .foregroundStyle(SashimiTheme.textPrimary)
+                .lineLimit(1)
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 10) {
+            Rectangle()
+                .fill(SashimiTheme.textTertiary.opacity(0.3))
+                .frame(height: 2)
+            HStack(alignment: .firstTextBaseline) {
+                Text(ServerDashboardLogic.footerReason(session)).lineLimit(1)
+                Spacer(minLength: 12)
+                Text(ServerDashboardLogic.whereLabel(session))
+            }
+            .font(Typography.caption)
+            .foregroundStyle(SashimiTheme.textTertiary)
+        }
     }
 }
 

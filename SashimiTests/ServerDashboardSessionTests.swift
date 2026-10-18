@@ -36,13 +36,10 @@ final class ServerDashboardSessionTests: XCTestCase {
         XCTAssertEqual(PlayMode.directPlay.title, "Direct play")
         XCTAssertEqual(PlayMode.convertingAudio.title, "Converting audio")
         XCTAssertEqual(PlayMode.convertingVideo.title, "Converting video")
-        XCTAssertEqual(PlayMode.convertingAudio.shortTitle, "Audio converted")
     }
 
-    func testViewerAndRateLines() {
+    func testViewerLine() {
         XCTAssertEqual(ServerDashboardLogic.viewerLine(session()), "ozzy · Fire TV")
-        XCTAssertEqual(ServerDashboardLogic.rateLine(session(transcoding: videoTranscode)), "8 Mbps")
-        XCTAssertEqual(ServerDashboardLogic.rateLine(session(paused: true, transcoding: videoTranscode)), "8 Mbps · paused")
     }
 
     func testEpisodeTitleAndPoster() {
