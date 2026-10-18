@@ -501,6 +501,10 @@ actor JellyfinClient {
     /// Session for reachability probes: never waits for connectivity (the
     /// API session does, which turns a dead server into a two-minute hang).
     private lazy var probeSession: URLSession = Self.makeProbeSession(delegate: certificateDelegate)
+    /// Session for the remote-control WebSocket: the API's certificate trust,
+    /// but none of its 120 s resource timeout, which would cut a socket that
+    /// is meant to stay open for as long as the app is in front.
+    private lazy var socketSession: URLSession = Self.makeSocketSession(delegate: certificateDelegate)
     private let maxRetries = 3
     private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "JellyfinClient")
 
@@ -566,6 +570,15 @@ actor JellyfinClient {
     /// Tests only: URLProtocol classes put in front of every client created
     /// afterwards, so a test can answer requests without a server.
     nonisolated(unsafe) static var testURLProtocolClasses: [AnyClass] = []
+
+    private static func makeSocketSession(delegate: CertificateValidationDelegate) -> URLSession {
+        let config = URLSessionConfiguration.default
+        // Idle limit between frames; the keep-alive runs every 30 s.
+        config.timeoutIntervalForRequest = 90
+        config.waitsForConnectivity = false
+        config.urlCache = nil
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }
 
     private static func makeProbeSession(delegate: CertificateValidationDelegate) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -2113,6 +2126,53 @@ actor JellyfinClient {
                 URLQueryItem(name: "playSessionId", value: playSessionId)
             ]
         )
+    }
+
+    // MARK: - Remote control (#723)
+
+    /// What this device tells the server it accepts from a remote controller
+    /// (the admin dashboard's Stop and Message). `SupportsMediaControl` plus an
+    /// open `/socket` is what makes Jellyfin report `SupportsRemoteControl`.
+    /// Playstate `Stop` needs no entry: `SupportedCommands` lists only
+    /// GeneralCommand names. `PlayableMediaTypes` stays empty so Sashimi is
+    /// not offered as a "Play on" cast target it cannot honour.
+    static let remoteControlCapabilities: [String: Any] = [
+        "PlayableMediaTypes": [String](),
+        "SupportedCommands": ["DisplayMessage"],
+        "SupportsMediaControl": true,
+        "SupportsPersistentIdentifier": true
+    ]
+
+    func registerRemoteControlCapabilities() async throws {
+        let body = try JSONSerialization.data(withJSONObject: Self.remoteControlCapabilities)
+        _ = try await request(path: "/Sessions/Capabilities/Full", method: "POST", body: body)
+    }
+
+    /// The `/socket` request for this client's server, or nil while signed out.
+    ///
+    /// The token travels in the Authorization header, never the URL: the live
+    /// Jellyfin 12.2 server answers `/socket?api_key=` with 403, and a URL is
+    /// what ends up in proxy logs.
+    func remoteControlSocketRequest() -> URLRequest? {
+        guard let serverURL, accessToken != nil,
+              var components = URLComponents(
+                url: serverURL.appendingPathComponent("socket"),
+                resolvingAgainstBaseURL: false
+              ) else { return nil }
+        switch components.scheme?.lowercased() {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        default: return nil
+        }
+        components.query = nil
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    func makeRemoteControlSocket(_ request: URLRequest) -> URLSessionWebSocketTask {
+        socketSession.webSocketTask(with: request)
     }
 
     func getSeasons(seriesId: String) async throws -> [BaseItemDto] {

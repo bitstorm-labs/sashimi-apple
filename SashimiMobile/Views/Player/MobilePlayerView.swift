@@ -266,6 +266,11 @@ struct MobilePlayerView: View {
                 finishedDownloadItemIDs.append(itemID)
             }
         }
+        // The server dashboard's Stop: leave exactly as the close button
+        // does, offline position included (#723).
+        .onReceive(NotificationCenter.default.publisher(for: .remotePlaybackStopRequested)) { _ in
+            closePlayer(reason: .remoteStop)
+        }
         .onChange(of: viewModel.playbackEnded) { _, ended in
             // The view model shows the Up Next card whenever there is anything
             // to offer. Offline with no further download there is none (the
@@ -314,7 +319,7 @@ struct MobilePlayerView: View {
             onSkip: { viewModel.skipUpNextEpisode() },
             onCancel: { viewModel.cancelUpNext() },
             onReplay: { Task { await viewModel.replayCurrentItem() } },
-            onDone: closePlayer
+            onDone: { closePlayer() }
         )
     }
 
@@ -354,13 +359,13 @@ struct MobilePlayerView: View {
                 isScrubbing = scrubbing
                 scheduleAutoHide()
             },
-            onClose: closePlayer
+            onClose: { closePlayer() }
         )
     }
 
     // MARK: - Helpers
 
-    private func closePlayer() {
+    private func closePlayer(reason: PlayerDiagnostics.TeardownReason = .userStop) {
         viewModel.player?.pause()
         // Capture BEFORE stop(): stop() nils the player, and for
         // offline playback it hits no await first, so it completes long
@@ -372,7 +377,7 @@ struct MobilePlayerView: View {
         // persisted before beginStop returns; delivery carries on behind the
         // dismissal, and onDisappear waits on the same task for the work that
         // has to follow it (delete-after-watching, .playbackDidStop).
-        viewModel.beginStop(reason: .userStop)
+        viewModel.beginStop(reason: reason)
         dismiss()
     }
 
