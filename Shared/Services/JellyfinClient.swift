@@ -1370,19 +1370,24 @@ actor JellyfinClient {
     /// `VideoRangeType` vocabulary.
     ///
     /// SDR, HDR10 (HDR10+ satisfies it server-side) and HLG always: Apple
-    /// devices tone-map HDR for an SDR display. Dolby Vision only when this
-    /// device *and its current display* can render it
-    /// (`AVPlayer.availableHDRModes`). Without it, single-layer DV
-    /// (Profile 5, `DOVI`) has no base layer to fall back to and plays with
-    /// green/purple colours, so it must not be direct-played or copied — the
-    /// server re-encodes it. DV with an HDR10/HLG/SDR base layer is left off
-    /// the list on purpose: Jellyfin then stream-copies it as that base
-    /// (`CanStreamCopyVideo` allows DOVIWithHDR10 for an HDR10 client) instead
-    /// of direct-playing a `dvh1` file a non-DV player may refuse.
+    /// devices tone-map HDR for an SDR display. Dolby Vision with an
+    /// HDR10/HLG/SDR base layer always too: a player without DV shows the
+    /// base. Single-layer DV (Profile 5, `DOVI`) only when this device *and
+    /// its current display* can render it (`AVPlayer.availableHDRModes`):
+    /// it has no base layer to fall back to and plays with green/purple
+    /// colours, so without DV it must not be direct-played or copied — the
+    /// server re-encodes it.
+    ///
+    /// The DV-with-base types were once left off for a non-DV display on the
+    /// theory that Jellyfin would then copy them as their base. It doesn't:
+    /// it calls the stream VideoRangeTypeNotSupported and re-encodes it, and
+    /// its QSV pipeline relabels the HDR as SDR without tone mapping (a 4K
+    /// DV Profile 8.1 film, Oct 2026: dull picture, a 4K re-encode restarted
+    /// on every resume, black screen and stutter). Listed, the same file is
+    /// remuxed: video copied, tagged `hvc1`, fMP4 segments.
     static func supportedHEVCRangeTypes(supportsDolbyVision: Bool) -> [String] {
-        let base = ["SDR", "HDR10", "HDR10Plus", "HLG"]
-        guard supportsDolbyVision else { return base }
-        return base + ["DOVI", "DOVIWithHDR10", "DOVIWithHDR10Plus", "DOVIWithHLG", "DOVIWithSDR"]
+        let base = ["SDR", "HDR10", "HDR10Plus", "HLG", "DOVIWithHDR10", "DOVIWithHDR10Plus", "DOVIWithHLG", "DOVIWithSDR"]
+        return supportsDolbyVision ? base + ["DOVI"] : base
     }
 
     /// The VideoRangeType condition on HEVC. `IsRequired: false` so a stream
