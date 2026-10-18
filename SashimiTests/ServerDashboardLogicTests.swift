@@ -235,6 +235,14 @@ final class ServerDashboardLogicTests: XCTestCase {
         XCTAssertFalse(row.text.contains("220"))
     }
 
+    func testAnErrorSeverityEntryIsRedWhateverItsType() {
+        let entry = ActivityLogEntry(
+            id: 3, name: "Subtitles could not be downloaded", shortOverview: nil,
+            type: "SubtitleDownloadFailure", date: Date(timeIntervalSince1970: 0), severity: "Error"
+        )
+        XCTAssertEqual(ServerDashboardLogic.activityRow(entry, now: Date(timeIntervalSince1970: 30)).tone, .failure)
+    }
+
     func testPluginVersionOverviewIsNotShown() {
         let entry = ActivityLogEntry(
             id: 2, name: "TheIntroDB was installed", shortOverview: "Version 1.2.0.0",

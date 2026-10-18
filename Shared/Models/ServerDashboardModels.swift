@@ -453,15 +453,10 @@ struct EncodingOptionsSummary: Decodable, Equatable {
 
 // MARK: - Dates
 
-/// Jellyfin writes seven fractional digits ("2026-10-18T19:46:07.6650781Z").
+/// Jellyfin writes seven fractional digits ("2026-10-18T19:46:07.6650781Z");
+/// the shared ISO parser reads them.
 enum ServerDate {
     static func parse(_ string: String?) -> Date? {
-        guard let string else { return nil }
-        if let date = DateFormatting.parseDate(string) { return date }
-        // Trim the fraction to milliseconds and try again.
-        guard let dot = string.firstIndex(of: ".") else { return nil }
-        let fraction = string[string.index(after: dot)...].prefix { $0.isNumber }
-        let rest = string[string.index(after: dot)...].dropFirst(fraction.count)
-        return DateFormatting.parseDate(String(string[..<dot]) + "." + fraction.prefix(3) + rest)
+        DateFormatting.parseDate(string)
     }
 }
