@@ -176,6 +176,18 @@ enum PlaybackSelection {
     /// smoothly).
     static let smooth4KBitrate = 24_000_000
 
+    /// Headroom a wireless link needs over its remembered sustained rate: a
+    /// 4K remux's VBR peaks run to about twice its average bitrate.
+    static let wirelessSustainedHeadroom = 2.0
+
+    /// The most a wireless link is trusted to carry: half its remembered
+    /// sustained rate (never more than the cap), or the smooth-4K bitrate
+    /// while nothing has been remembered for it.
+    static func wirelessCeiling(cap: Int, sustainedBitrate: Int?) -> Int {
+        guard let sustainedBitrate, sustainedBitrate > 0 else { return min(cap, smooth4KBitrate) }
+        return min(cap, Int(Double(sustainedBitrate) / wirelessSustainedHeadroom))
+    }
+
     /// Below this the picture is better spent on 1080p than a blocky 4K encode.
     static let keep4KMinimumBitrate = 12_000_000
 
@@ -201,9 +213,21 @@ enum PlaybackSelection {
     /// 1080p spends the bits better. Returns nil when the source is unknown or
     /// the ceiling already covers it (a Wi-Fi-safe source under ~24 Mbps copies
     /// untouched).
-    static func constrainedAutoOverride(cap: Int, sourceBitrate: Int?, isWired: Bool) -> (maxWidth: Int, maxBitrate: Int)? {
+    ///
+    /// `sustainedBitrate` is what the player itself has downloaded at on this
+    /// link before (the lowest recent access-log reading, see
+    /// `BandwidthMeasurementStore.sustainedBitrate`). It replaces the blanket
+    /// Wi-Fi clamp once known: a link that has proven it carries several
+    /// times a source copies it untouched (an HDR10 Bedroom Apple TV read
+    /// ~378 Mbps and was still re-encoding a 44 Mbps 4K film to 24 Mbps).
+    static func constrainedAutoOverride(
+        cap: Int,
+        sourceBitrate: Int?,
+        isWired: Bool,
+        sustainedBitrate: Int? = nil
+    ) -> (maxWidth: Int, maxBitrate: Int)? {
         guard let sourceBitrate, sourceBitrate > 0 else { return nil }
-        let ceiling = isWired ? cap : min(cap, smooth4KBitrate)
+        let ceiling = isWired ? cap : wirelessCeiling(cap: cap, sustainedBitrate: sustainedBitrate)
         guard ceiling < sourceBitrate else { return nil }
         if ceiling >= keep4KMinimumBitrate {
             // Keep 4K (3840 keeps UHD; the source is already <= this so it is

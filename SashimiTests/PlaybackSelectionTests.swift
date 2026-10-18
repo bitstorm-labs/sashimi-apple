@@ -237,6 +237,39 @@ final class PlaybackSelectionTests: XCTestCase {
         XCTAssertNil(PlaybackSelection.constrainedAutoOverride(cap: 68_818_483, sourceBitrate: 68_818_483, isWired: true))
     }
 
+    func testWirelessLinkThatProvedItselfCopiesHeavy4K() {
+        // The Bedroom Apple TV's player downloaded at ~378 Mbps; a 44 Mbps 4K
+        // film was still re-encoded to 24 Mbps by the blanket clamp. Half the
+        // remembered rate (189 Mbps) covers it: copy it untouched.
+        XCTAssertNil(PlaybackSelection.constrainedAutoOverride(
+            cap: 100_000_000, sourceBitrate: 44_268_472, isWired: false, sustainedBitrate: 378_085_836))
+    }
+
+    func testWirelessRememberedRateStillNeedsDoubleTheSource() {
+        // The Living Room case with a memory: a link that sustained 90 Mbps
+        // can't take a 68.8 Mbps remux's peaks (ceiling 45 Mbps), so it keeps
+        // getting the smooth 24 Mbps 4K encode.
+        let override = PlaybackSelection.constrainedAutoOverride(
+            cap: 90_000_000, sourceBitrate: 68_818_483, isWired: false, sustainedBitrate: 90_000_000)
+        XCTAssertEqual(override?.maxWidth, 3840)
+        XCTAssertEqual(override?.maxBitrate, PlaybackSelection.smooth4KBitrate)
+    }
+
+    func testWirelessSlowMemoryLowersTheCeiling() {
+        // A link remembered at 20 Mbps (ceiling 10 Mbps) is below the keep-4K
+        // floor: a 30 Mbps source gets a 1080p encode, not a 24 Mbps 4K one.
+        let override = PlaybackSelection.constrainedAutoOverride(
+            cap: 100_000_000, sourceBitrate: 30_000_000, isWired: false, sustainedBitrate: 20_000_000)
+        XCTAssertEqual(override?.maxWidth, 1920)
+        XCTAssertEqual(override?.maxBitrate, 8_000_000)
+    }
+
+    func testWirelessCeilingNeverExceedsTheCap() {
+        XCTAssertEqual(PlaybackSelection.wirelessCeiling(cap: 50_000_000, sustainedBitrate: 400_000_000), 50_000_000)
+        XCTAssertEqual(PlaybackSelection.wirelessCeiling(cap: 50_000_000, sustainedBitrate: nil), PlaybackSelection.smooth4KBitrate)
+        XCTAssertEqual(PlaybackSelection.wirelessCeiling(cap: 50_000_000, sustainedBitrate: 0), PlaybackSelection.smooth4KBitrate)
+    }
+
     func testWirelessSafeSourceIsNotConstrained() {
         // A source already under the smooth-4K ceiling is Wi-Fi-safe: copy it
         // untouched rather than pointlessly transcoding.
