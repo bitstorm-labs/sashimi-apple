@@ -2362,6 +2362,60 @@ actor JellyfinClient {
         return components.url
     }
 
+    // MARK: - Server dashboard (admin)
+
+    /// Sessions active in the last 16 minutes, as jellyfin-web's dashboard asks.
+    func getActiveSessions() async throws -> [DashboardSession] {
+        let data = try await request(
+            path: "/Sessions",
+            queryItems: [URLQueryItem(name: "activeWithinSeconds", value: "960")]
+        )
+        return try JSONDecoder().decode([DashboardSession].self, from: data)
+    }
+
+    func getActivityLog(limit: Int) async throws -> [ActivityLogEntry] {
+        let data = try await request(
+            path: "/System/ActivityLog/Entries",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return try JSONDecoder().decode(ActivityLogPage.self, from: data).items
+    }
+
+    func getScheduledTasks() async throws -> [ScheduledTaskInfo] {
+        try JSONDecoder().decode([ScheduledTaskInfo].self, from: try await request(path: "/ScheduledTasks"))
+    }
+
+    func getDashboardSystemInfo() async throws -> DashboardSystemInfo {
+        try JSONDecoder().decode(DashboardSystemInfo.self, from: try await request(path: "/System/Info"))
+    }
+
+    /// Nil on a server without the storage endpoint (it is newer than 10.10).
+    func getStorageInfo() async throws -> SystemStorageInfo? {
+        do {
+            return try JSONDecoder().decode(SystemStorageInfo.self, from: try await request(path: "/System/Info/Storage"))
+        } catch JellyfinError.httpError(statusCode: 404) {
+            return nil
+        }
+    }
+
+    func getEncodingOptions() async throws -> EncodingOptionsSummary {
+        try JSONDecoder().decode(EncodingOptionsSummary.self, from: try await request(path: "/System/Configuration/encoding"))
+    }
+
+    func stopPlayback(sessionId: String) async throws {
+        _ = try await request(path: "/Sessions/\(sessionId)/Playing/Stop", method: "POST")
+    }
+
+    /// A short message on the viewer's screen, gone after ten seconds.
+    func sendMessage(sessionId: String, text: String) async throws {
+        let body: [String: Any] = ["Header": "Sashimi", "Text": text, "TimeoutMs": 10_000]
+        _ = try await request(
+            path: "/Sessions/\(sessionId)/Message",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: body)
+        )
+    }
+
     // MARK: - Channel management (admin)
 
     /// The user in full, including the policy that says whether they

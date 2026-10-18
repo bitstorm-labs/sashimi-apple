@@ -41,6 +41,18 @@ struct SettingsView: View {
                             }
                             .defaultFocus(in: focusNamespace)
 
+                            // Administrators only: who is streaming what,
+                            // and whether anything on the server is failing.
+                            if sessionManager.canViewServerDashboard {
+                                SettingsOptionRow(
+                                    icon: "gauge.with.dots.needle.67percent",
+                                    title: "Server",
+                                    subtitle: "Now playing, activity and health"
+                                ) {
+                                    navigationPath.append(SettingsDestination.serverDashboard)
+                                }
+                            }
+
                             SettingsOptionRow(
                                 icon: "house",
                                 title: "Home Screen",
@@ -108,6 +120,8 @@ struct SettingsView: View {
                     CertificateSettingsView()
                 case .appIcon:
                     AppIconSettingsView()
+                case .serverDashboard:
+                    ServerDashboardView()
                 }
             }
         }
@@ -139,6 +153,7 @@ enum SettingsDestination: Hashable {
     case playback
     case certificates
     case appIcon
+    case serverDashboard
 }
 
 struct SettingsOptionRow: View {
