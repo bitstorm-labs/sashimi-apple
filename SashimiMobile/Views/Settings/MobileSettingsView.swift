@@ -22,6 +22,17 @@ struct MobileSettingsView: View {
 
     var body: some View {
         List {
+            // Administrators only: the server's own view of who is watching.
+            if sessionManager.canViewServerDashboard {
+                Section("Server") {
+                    NavigationLink {
+                        MobileServerDashboardView()
+                    } label: {
+                        Label("Server Dashboard", systemImage: "server.rack")
+                    }
+                }
+            }
+
             // Servers (multi-server switcher; swipe to remove)
             Section("Servers") {
                 ForEach(sessionManager.servers) { server in

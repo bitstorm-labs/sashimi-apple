@@ -183,6 +183,9 @@ final class SessionManager: ObservableObject {
     /// server has said so — admin-only UI (channel management) stays hidden
     /// while it is being asked, and on any failure to ask.
     @Published private(set) var isAdministrator = false
+    /// The server refused one of the Server dashboard's requests since the
+    /// last time it was asked who this user is; the dashboard hides until then.
+    @Published private(set) var serverDashboardDenied = false
     @Published private(set) var serverURL: URL?
     @Published private(set) var servers: [ServerConfig] = []
     @Published private(set) var activeServerId: String?
@@ -562,6 +565,7 @@ final class SessionManager: ObservableObject {
         policyGeneration += 1
         let generation = policyGeneration
         isAdministrator = false
+        serverDashboardDenied = false
         guard let client = makeClient(for: server.id) else { return }
         Task { @MainActor [weak self] in
             let user = try? await client.getUser(userId: server.userId)
@@ -573,6 +577,12 @@ final class SessionManager: ObservableObject {
     private func clearAdministratorFlag() {
         policyGeneration += 1
         isAdministrator = false
+        serverDashboardDenied = false
+    }
+
+    /// A Server dashboard request came back 401/403: stop offering it.
+    func noteServerDashboardDenied() {
+        serverDashboardDenied = true
     }
 
     // MARK: - Add / switch / remove
