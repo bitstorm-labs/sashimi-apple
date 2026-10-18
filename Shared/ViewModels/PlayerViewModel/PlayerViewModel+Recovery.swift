@@ -46,6 +46,15 @@ extension PlayerViewModel {
         case .stepDown(let lower):
             qualityStepDowns += 1
             recoveryQuality = lower
+            // Auto stepping itself down may step back up later; an upgrade
+            // that stalled straight back down makes the next one wait longer.
+            if isViewerOnAuto { autoSteppedDown = true }
+            let now = Date()
+            if let upgradedAt = lastAdaptiveUpgradeAt,
+               now.timeIntervalSince(upgradedAt) < PlaybackSelection.adaptiveCooldown(failedUpgrades: failedAdaptiveUpgrades) {
+                failedAdaptiveUpgrades += 1
+            }
+            lastAdaptiveChangeAt = now
             // A real encode at the lower bitrate: a copy of a source that is
             // already under the new cap would be the same stream that stalled.
             allowVideoStreamCopy = false

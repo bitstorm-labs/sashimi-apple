@@ -25,6 +25,10 @@ extension PlayerViewModel {
         // player must not fire into the new one.
         recoveryAttempts = 0
         qualityStepDowns = 0
+        autoSteppedDown = false
+        lastAdaptiveChangeAt = nil
+        lastAdaptiveUpgradeAt = nil
+        failedAdaptiveUpgrades = 0
         activeBitrateCap = nil
         activeTrackRequest = nil
         stallWatchdogTask?.cancel()

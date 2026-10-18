@@ -248,6 +248,67 @@ extension PlayerViewModel {
         }
     }
 
+    /// The viewer chose Auto: Auto itself, or a tier a stall step-down put in
+    /// place of it. A quality the viewer picked is never overridden.
+    var isViewerOnAuto: Bool {
+        playbackSettings.maxBitrate == 0 && (selectedQuality == .auto || autoSteppedDown)
+    }
+
+    /// After a fresh speed reading: when the link now carries much more than
+    /// the stream Auto (or its step-down) is playing, go back to Auto at the
+    /// current position; the rebuild's PlaybackInfo pass then picks the best
+    /// stream the link carries -- the untouched source if it fits. Runs for
+    /// the whole session, behind the adaptive cool-down. "Not yet" waits for
+    /// the next reading.
+    func considerSustainedUpgrade(now: Date = Date()) {
+        guard !adaptiveUpgradeInFlight,
+              let generation = currentItem.map({ PlaybackGeneration(itemID: $0.id, attempt: playbackAttempt) })
+        else { return }
+        adaptiveUpgradeInFlight = true
+        let client = self.client
+        Task { [weak self] in
+            let status = await client.bandwidthStatus
+            guard let self else { return }
+            guard self.isCurrentPlaybackGeneration(generation) else {
+                self.adaptiveUpgradeInFlight = false
+                return
+            }
+            let decision = PlaybackSelection.sustainedUpgrade(PlaybackSelection.SustainedUpgradeContext(
+                isAuto: self.isViewerOnAuto,
+                isWired: status.isWired,
+                autoCap: status.cap,
+                activeCap: self.activeBitrateCap,
+                sourceBitrate: self.currentMediaSource?.bitrate,
+                sustainedBitrate: status.sustainedBitrate,
+                isTranscoding: self.currentMediaSource?.transcodingUrl?.isEmpty == false,
+                isBusy: self.isRecovering || self.transitionState.isTransitioning || self.stallWatchdogTask != nil,
+                secondsSinceRecovery: self.lastRecoveryAt.map { now.timeIntervalSince($0) },
+                secondsSinceQualityChange: self.lastAdaptiveChangeAt.map { now.timeIntervalSince($0) },
+                failedUpgrades: self.failedAdaptiveUpgrades
+            ))
+            guard decision == .now else {
+                self.adaptiveUpgradeInFlight = false
+                return
+            }
+            self.diag(.qualityChange, [
+                PlayerDiagnostics.field("change", StreamChange.bandwidthMeasured.diagnosticName),
+                PlayerDiagnostics.field("trigger", "sustained-throughput"),
+                PlayerDiagnostics.field("fromCap", self.activeBitrateCap),
+                PlayerDiagnostics.field("fromQuality", self.selectedQuality.rawValue),
+                PlayerDiagnostics.field("sustainedBitrate", status.sustainedBitrate),
+                PlayerDiagnostics.field("failedUpgrades", self.failedAdaptiveUpgrades)
+            ])
+            self.selectedQuality = .auto
+            self.autoSteppedDown = false
+            self.lastAdaptiveChangeAt = now
+            self.lastAdaptiveUpgradeAt = now
+            Task {
+                await self.rebuildStream(for: .bandwidthMeasured)
+                self.adaptiveUpgradeInFlight = false
+            }
+        }
+    }
+
     /// The upward-rebuild decision for the stream that is playing now.
     func upwardRenegotiation(measuredCap: Int?, now: Date = Date()) -> PlaybackSelection.UpwardRenegotiation {
         PlaybackSelection.upwardRenegotiation(PlaybackSelection.UpwardRenegotiationContext(

@@ -19,13 +19,57 @@ final class BandwidthMeasurementStore: @unchecked Sendable {
         let measuredAt: Date
     }
 
+    // MARK: Sustained throughput (what playback itself achieved)
+
+    /// Access-log readings kept per server and link kind. Few, recent: a link
+    /// that changes (a new router, a move to another room) should not be
+    /// judged by last month.
+    static let sustainedSampleLimit = 5
+    /// A reading counts only after this much video: the first segments of a
+    /// stream arrive in a burst that says little about the link.
+    static let sustainedMinimumBytes: Int64 = 16_000_000
+    static let sustainedDefaultsKey = "playback.sustainedThroughput"
+
+    private let defaults: UserDefaults
+
+    private static func sustainedKey(for url: URL, isWired: Bool) -> String {
+        key(for: url) + (isWired ? "|wired" : "|wireless")
+    }
+
+    /// Records one access-log reading (AVPlayerItemAccessLogEvent's
+    /// observedBitrate over `bytesTransferred`). Kept across launches.
+    func recordSustained(bitsPerSecond: Double, bytesTransferred: Int64, for url: URL, isWired: Bool) {
+        guard bitsPerSecond.isFinite, bitsPerSecond > 0, bytesTransferred >= Self.sustainedMinimumBytes else { return }
+        let key = Self.sustainedKey(for: url, isWired: isWired)
+        locked {
+            var all = defaults.dictionary(forKey: Self.sustainedDefaultsKey) as? [String: [Int]] ?? [:]
+            var samples = all[key] ?? []
+            samples.append(Int(bitsPerSecond))
+            all[key] = Array(samples.suffix(Self.sustainedSampleLimit))
+            defaults.set(all, forKey: Self.sustainedDefaultsKey)
+        }
+    }
+
+    /// The lowest recent reading for this server over this kind of link, or
+    /// nil when there is none. The lowest, not the average: one slow stretch
+    /// (a stall) is the evidence that matters.
+    func sustainedBitrate(for url: URL?, isWired: Bool) -> Int? {
+        guard let url else { return nil }
+        let key = Self.sustainedKey(for: url, isWired: isWired)
+        return locked {
+            (defaults.dictionary(forKey: Self.sustainedDefaultsKey) as? [String: [Int]])?[key]?.min()
+        }
+    }
+
     private let lock = NSLock()
     private var measurements: [String: Measurement] = [:]
     private var probes: [String: Task<Void, Never>] = [:]
     private var skippedOnMeteredNetwork: Set<String> = []
 
     /// Internal so tests can use an isolated store.
-    init() {}
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     /// One key per server: scheme, host and port, plus any base path
     /// (a server under a path prefix is still one server). The host is

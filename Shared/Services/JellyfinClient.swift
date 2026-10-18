@@ -694,6 +694,9 @@ actor JellyfinClient {
         let isWired: Bool
         /// The probe was skipped because the link costs the viewer data.
         var skippedOnMeteredNetwork = false
+        /// The lowest recent rate playback itself downloaded at over this
+        /// kind of link (wired or not). Raises the wireless ceiling once known.
+        var sustainedBitrate: Int?
 
         var isMeasured: Bool { measuredBitrate != nil }
 
@@ -710,7 +713,22 @@ actor JellyfinClient {
             cap: autoBitrateCap(),
             isLocalServer: PlaybackSelection.isLocalServer(serverURL),
             isWired: NetworkConnectionMonitor.shared.isWired,
-            skippedOnMeteredNetwork: bandwidthStore.skippedOnMeteredNetwork(for: serverURL)
+            skippedOnMeteredNetwork: bandwidthStore.skippedOnMeteredNetwork(for: serverURL),
+            sustainedBitrate: bandwidthStore.sustainedBitrate(
+                for: serverURL, isWired: NetworkConnectionMonitor.shared.isWired
+            )
+        )
+    }
+
+    /// Remembers what playback actually downloaded at from this server over
+    /// the current kind of link (an access-log reading).
+    func recordSustainedThroughput(bitsPerSecond: Double, bytesTransferred: Int64) {
+        guard let serverURL else { return }
+        bandwidthStore.recordSustained(
+            bitsPerSecond: bitsPerSecond,
+            bytesTransferred: bytesTransferred,
+            for: serverURL,
+            isWired: NetworkConnectionMonitor.shared.isWired
         )
     }
 

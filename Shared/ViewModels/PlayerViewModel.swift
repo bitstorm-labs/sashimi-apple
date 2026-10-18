@@ -236,6 +236,19 @@ final class PlayerViewModel: ObservableObject {
     /// don't spend the rebuild budget: each one lowers the bitrate, so they
     /// end at the 720 kbps floor. Reset per item in loadMedia.
     var qualityStepDowns = 0
+    /// The lower tier in force came from a stall step-down while the viewer
+    /// was on Auto, so adaptive Auto may take it back up (see
+    /// PlaybackSelection.sustainedUpgrade). Reset per item in loadMedia.
+    var autoSteppedDown = false
+    /// Last automatic quality change (a step-down or an upgrade), and the
+    /// last upgrade, for the adaptive cool-down. Reset per item.
+    var lastAdaptiveChangeAt: Date?
+    var lastAdaptiveUpgradeAt: Date?
+    /// Upgrades this item that stalled straight back down; each doubles the
+    /// cool-down. Reset per item.
+    var failedAdaptiveUpgrades = 0
+    /// An adaptive upgrade decision or rebuild is in flight.
+    var adaptiveUpgradeInFlight = false
     /// Re-entrancy guard: a failed item can fire status + error-log + stall
     /// notifications for the same underlying failure in one runloop.
     var isRecovering = false

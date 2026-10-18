@@ -50,6 +50,7 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("capSource", effectiveBitrate != nil ? "explicit" : bandwidth.capSource),
             PlayerDiagnostics.field("measuredBitrate", bandwidth.measuredBitrate),
             PlayerDiagnostics.field("localServer", bandwidth.isLocalServer),
+            PlayerDiagnostics.field("sustainedBitrate", bandwidth.sustainedBitrate),
             PlayerDiagnostics.field("maxWidth", maxWidth),
             PlayerDiagnostics.field("forceTranscode", forceTranscode),
             PlayerDiagnostics.field("forceDirectPlay", playbackSettings.forceDirectPlay),
@@ -124,7 +125,12 @@ extension PlayerViewModel {
         if effectiveBitrate == nil, maxWidth == nil, !forceTranscode,
            let source = playbackInfo.mediaSources?.first,
            source.transcodingUrl?.isEmpty == false,
-           let override = PlaybackSelection.constrainedAutoOverride(cap: bandwidth.cap, sourceBitrate: source.bitrate, isWired: bandwidth.isWired)
+           let override = PlaybackSelection.constrainedAutoOverride(
+                cap: bandwidth.cap,
+                sourceBitrate: source.bitrate,
+                isWired: bandwidth.isWired,
+                sustainedBitrate: bandwidth.sustainedBitrate
+            )
             ?? PlaybackSelection.autoReencodeOverride(
                 cap: bandwidth.cap,
                 sourceWidth: source.mediaStreams?.first(where: { $0.type == "Video" })?.width,
@@ -135,6 +141,7 @@ extension PlayerViewModel {
                 PlayerDiagnostics.field("sourceBitrate", source.bitrate),
                 PlayerDiagnostics.field("cap", bandwidth.cap),
                 PlayerDiagnostics.field("isWired", bandwidth.isWired),
+                PlayerDiagnostics.field("sustainedBitrate", bandwidth.sustainedBitrate),
                 PlayerDiagnostics.field("retryWidth", override.maxWidth),
                 PlayerDiagnostics.field("retryBitrate", override.maxBitrate)
             ])
