@@ -335,14 +335,26 @@ struct MediaSourceInfo: Codable {
     let transcodingUrl: String?
     let mediaStreams: [MediaStream]?
     let bitrate: Int?
-    /// Why the server decided this source cannot be played as-is
-    /// (e.g. "ContainerNotSupported", "ContainerBitrateExceedsLimit").
-    /// Decoded purely so the player's diagnostics can record it: without it,
-    /// an unexplained transcode had to be reconstructed from server logs.
-    let transcodeReasons: [String]?
     /// The audio stream the server will play for this source: the requested
     /// `AudioStreamIndex` when one was sent, otherwise the user's default.
     let defaultAudioStreamIndex: Int?
+
+    /// Why the server decided this source cannot be played as-is
+    /// (e.g. "ContainerNotSupported", "VideoCodecNotSupported"). Jellyfin
+    /// marks the `TranscodeReasons` property `[JsonIgnore]`, so PlaybackInfo
+    /// never sends it as a field; the reasons travel only as the
+    /// `TranscodeReasons` query parameter of `TranscodingUrl`. Nil when there
+    /// is no transcoding URL or it names no reasons.
+    var transcodeReasons: [String]? {
+        guard let transcodingUrl,
+              let value = URLComponents(string: transcodingUrl)?.queryItems?
+                .first(where: { $0.name.caseInsensitiveCompare("TranscodeReasons") == .orderedSame })?
+                .value else { return nil }
+        let reasons = value.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return reasons.isEmpty ? nil : reasons
+    }
 
     var videoCodec: String? {
         mediaStreams?.first(where: { $0.type == "Video" })?.codec
@@ -404,7 +416,6 @@ struct MediaSourceInfo: Codable {
         case transcodingUrl = "TranscodingUrl"
         case mediaStreams = "MediaStreams"
         case bitrate = "Bitrate"
-        case transcodeReasons = "TranscodeReasons"
         case defaultAudioStreamIndex = "DefaultAudioStreamIndex"
     }
 }
