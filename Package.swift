@@ -22,7 +22,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/kean/Nuke.git", from: "12.0.0"),
+        .package(url: "https://github.com/kean/Nuke.git", from: "13.2.0"),
     ],
     targets: [
         // Nuke is deliberately absent here: every import lives in

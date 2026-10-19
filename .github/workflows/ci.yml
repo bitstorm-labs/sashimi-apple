@@ -377,5 +377,8 @@ jobs:
       - name: CI and deploy toolchains match
         run: ruby scripts/check-toolchains.rb
 
+      - name: Package pins match (Package.swift vs project.yml)
+        run: ruby scripts/check-package-pins.rb
+
       - name: Version check script
         run: scripts/check-version.sh ""
