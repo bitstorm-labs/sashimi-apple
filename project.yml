@@ -308,4 +308,4 @@ targets:
 packages:
   Nuke:
     url: https://github.com/kean/Nuke.git
-    from: "12.0.0"
+    from: "13.2.0"

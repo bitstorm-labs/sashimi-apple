@@ -2,6 +2,7 @@ import AppIntents
 import CoreSpotlight
 import CoreTransferable
 import Foundation
+import Nuke
 import UniformTypeIdentifiers
 
 /// The server-aware media record shared by Sashimi App Intents.
@@ -162,6 +163,14 @@ struct SashimiMediaEntity: AppEntity, Codable, Transferable, Hashable, Sendable 
         hasher.combine(id)
     }
 
+    /// A cancelled poster load yields no image rather than the fallback.
+    /// Nuke 13 reports cancellation as `ImagePipeline.Error.cancelled`, not
+    /// `CancellationError`, so both count.
+    static func isCancellation(_ error: Error) -> Bool {
+        if case ImagePipeline.Error.cancelled = error { return true }
+        return error is CancellationError
+    }
+
 #if compiler(>=6.4)
     @available(iOS 27.0, *)
     private static func posterImage(
@@ -189,10 +198,8 @@ struct SashimiMediaEntity: AppEntity, Codable, Transferable, Hashable, Sendable 
             let (data, _) = try await SashimiImagePipeline.shared.data(for: request)
             guard !data.isEmpty else { return fallback }
             return DisplayRepresentation.Image(data: data, displayStyle: .default)
-        } catch is CancellationError {
-            return nil
         } catch {
-            return fallback
+            return isCancellation(error) ? nil : fallback
         }
     }
 
