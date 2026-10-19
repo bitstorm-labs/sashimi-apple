@@ -72,10 +72,12 @@ docs: update installation instructions
 
 ### Testing
 
-While we don't have tests yet (see [issue #4](https://github.com/bitstorm-labs/sashimi-apple/issues/4)), please:
-- Test your changes on tvOS Simulator
-- Test on a physical Apple TV if possible
-- Verify existing functionality still works
+Unit tests live in `SashimiTests/` (tvOS host) and `SashimiMobileTests/` (iOS).
+Add or update a test for the behavior you change. CI builds and tests each
+platform. Please also:
+- Run the app on the simulator for the platform you changed (tvOS, iPhone or iPad)
+- Say in the PR what you checked on a real device, and what you could not
+- Check that changes in `Shared/` still work on both tvOS and iOS
 
 ## Architecture Guidelines
 
@@ -97,23 +99,20 @@ While we don't have tests yet (see [issue #4](https://github.com/bitstorm-labs/s
 
 ### Models
 - `Codable` structs matching Jellyfin API
-- Located in `Models/JellyfinModels.swift`
+- Located in `Shared/Models/`
 
 ## Releasing
 
-Maintainers only. See **[docs/RELEASING.md](docs/RELEASING.md)** for the full
-runbook.
-
-The one thing worth knowing even if you never cut a release: a plain `vX.Y.Z` tag
-does **not** ship to TestFlight, and tvOS and iOS need separate tags
-(`vX.Y.Z-beta1` and `ios-vX.Y.Z-beta1`). Using the wrong tag produces a green CI
-run that ships nothing.
+Maintainers only. You don't need to do anything: when a PR that changes app
+code merges to `main`, an automatic workflow ships a TestFlight build for tvOS,
+iOS and Mac. Don't bump `MARKETING_VERSION` in your PR or push release tags. See
+**[docs/RELEASING.md](docs/RELEASING.md)** for the runbook.
 
 ## Security
 
 If you discover a security vulnerability, please:
 1. **Do not** open a public issue
-2. Email the maintainers directly
+2. Report it privately through the repository's GitHub Security tab (Report a vulnerability)
 3. Provide details about the vulnerability
 4. Allow time for a fix before public disclosure
 
