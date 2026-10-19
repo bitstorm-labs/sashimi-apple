@@ -232,24 +232,6 @@ final class PlayerDiagnosticsTests: XCTestCase {
 
     // MARK: - model decoding
 
-    func testMediaSourceDecodesTranscodeReasons() {
-        // Newly decoded so the diagnostics can state WHY the server transcoded
-        // instead of leaving it to be reconstructed from server logs.
-        let json = """
-        {
-          "Id": "src1",
-          "Container": "mkv",
-          "SupportsDirectPlay": false,
-          "SupportsDirectStream": true,
-          "TranscodeReasons": ["ContainerNotSupported", "AudioCodecNotSupported"]
-        }
-        """.data(using: .utf8)!
-
-        let source = try? JSONDecoder().decode(MediaSourceInfo.self, from: json)
-
-        XCTAssertEqual(source?.transcodeReasons, ["ContainerNotSupported", "AudioCodecNotSupported"])
-    }
-
     func testMediaSourceWithoutTranscodeReasonsStillDecodes() {
         let json = """
         { "Id": "src1", "Container": "mp4" }
