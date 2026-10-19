@@ -25,17 +25,34 @@ extension DashboardTone {
     }
 }
 
-struct MobilePlayModeBadge: View {
-    let mode: PlayMode
-    var short = false
+extension DashboardStreamState {
+    var mobileColor: Color {
+        switch self {
+        case .playing: return MobileColors.success
+        case .paused: return MobileColors.accentSecondary
+        case .other: return MobileColors.textTertiary
+        }
+    }
+}
+
+/// A stream's pills, wrapping as the row narrows. The play-mode pill takes the badge's colour.
+struct MobileStreamPills: View {
+    let session: DashboardSession
 
     var body: some View {
-        Text(short ? mode.shortTitle : mode.title)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(mode.mobileTint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(mode.mobileTint.opacity(0.18), in: Capsule())
+        let mode = ServerDashboardLogic.playMode(session.transcodingInfo)
+        WrappingHStack(spacing: 6, lineSpacing: 4) {
+            ForEach(ServerDashboardLogic.pills(session)) { pill in
+                let tint = pill.kind.foreground ?? mode.mobileTint
+                Text(pill.text)
+                    .font(.caption2.weight(.heavy))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(pill.kind.background ?? mode.mobileTint.opacity(0.18), in: Capsule())
+            }
+        }
     }
 }
 
@@ -112,8 +129,8 @@ struct MobileStreamDetailsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(session.nowPlayingItem?.displayTitle ?? "")
                         .font(.headline)
-                    MobilePlayModeBadge(mode: ServerDashboardLogic.playMode(session.transcodingInfo))
-                    Text(ServerDashboardLogic.detailLine(for: session))
+                    MobileStreamPills(session: session)
+                    Text(ServerDashboardLogic.footerReason(session))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

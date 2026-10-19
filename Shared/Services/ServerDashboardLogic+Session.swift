@@ -1,21 +1,12 @@
 import Foundation
 
 extension PlayMode {
-    /// The badge on TV and iPad cards.
+    /// The mode in words, as Details shows it.
     var title: String {
         switch self {
         case .directPlay: return "Direct play"
         case .convertingAudio: return "Converting audio"
         case .convertingVideo: return "Converting video"
-        }
-    }
-
-    /// The badge in the iPhone's narrower rows.
-    var shortTitle: String {
-        switch self {
-        case .directPlay: return "Direct"
-        case .convertingAudio: return "Audio converted"
-        case .convertingVideo: return "Converting"
         }
     }
 }
@@ -34,14 +25,6 @@ extension ServerDashboardLogic {
         [session.userName, session.deviceName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    /// "61 Mbps", "8 Mbps · paused"
-    static func rateLine(_ session: DashboardSession) -> String {
-        var parts: [String] = []
-        if let rate = bitrate(of: session) { parts.append(formatBitrate(rate)) }
-        if session.playState?.isPaused == true { parts.append("paused") }
-        return parts.joined(separator: " · ")
-    }
-
     /// Everything Details shows. No addresses, paths or ids by construction.
     static func detailRows(for session: DashboardSession) -> [DashboardDetailRow] {
         let info = session.transcodingInfo
@@ -55,7 +38,7 @@ extension ServerDashboardLogic {
             ("Progress", progressText(positionTicks: session.playState?.positionTicks, runTimeTicks: item?.runTimeTicks)),
             ("Play mode", playMode(info).title),
             ("Why", plainReasons(info?.transcodeReasons ?? []).joined(separator: ", ")),
-            ("Source video", video?.displayTitle ?? resolutionLabel(video?.width)),
+            ("Source video", video?.displayTitle ?? resolutionLabel(width: video?.width, height: video?.height)),
             ("Source audio", selectedAudioTitle(session))
         ]
         if let info {
