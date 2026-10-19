@@ -104,6 +104,21 @@ final class ServerDashboardLogicTests: XCTestCase {
         XCTAssertEqual(ServerDashboardLogic.playMode(info), .convertingVideo)
     }
 
+    /// HDR → SDR tone-mapping re-encodes the picture whatever the flags say.
+    func testToneMappingIsConvertingVideoEvenWhenFlagsSayDirect() {
+        let info = transcoding(video: true, audio: true, reasons: ["VideoRangeTypeNotSupported"])
+        XCTAssertEqual(ServerDashboardLogic.playMode(info), .convertingVideo)
+        let withAudio = transcoding(video: true, audio: false, reasons: ["AudioCodecNotSupported", "VideoRangeTypeNotSupported"])
+        XCTAssertEqual(ServerDashboardLogic.playMode(withAudio), .convertingVideo)
+    }
+
+    func testReasonsSentAsOneStringStillDecode() throws {
+        let json = #"{"IsVideoDirect":true,"IsAudioDirect":true,"TranscodeReasons":"ContainerNotSupported, SubtitleCodecNotSupported"}"#
+        let info = try JSONDecoder().decode(DashboardTranscodingInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(info.transcodeReasons, ["ContainerNotSupported", "SubtitleCodecNotSupported"])
+        XCTAssertEqual(ServerDashboardLogic.playMode(info), .convertingVideo)
+    }
+
     func testMissingVideoFlagIsTreatedAsConverting() throws {
         let json = #"{"IsAudioDirect":true,"TranscodeReasons":[]}"#
         let info = try JSONDecoder().decode(DashboardTranscodingInfo.self, from: Data(json.utf8))
@@ -121,53 +136,55 @@ final class ServerDashboardLogicTests: XCTestCase {
 
     func testUnknownReasonIsDeCamelCasedNeverRaw() {
         XCTAssertEqual(ServerDashboardLogic.plainReasons(["FooBarNotSupported"]), ["Foo bar not supported"])
+        XCTAssertEqual(ServerDashboardLogic.reasonText("VideoWobbleNotSupported"), "Video wobble not supported")
+        XCTAssertEqual(ServerDashboardLogic.reasonText(""), "")
     }
 
-    func testDuplicateReasonWordsAppearOnce() {
+    func testDuplicateReasonsAppearOnce() {
         XCTAssertEqual(
-            ServerDashboardLogic.plainReasons(["ContainerBitrateExceedsLimit", "VideoBitrateNotSupported"]),
-            ["Bitrate cap"]
+            ServerDashboardLogic.plainReasons(["VideoResolutionNotSupported", "SubtitleCodecNotSupported", "VideoResolutionNotSupported"]),
+            ["Resolution too high", "Subtitles burned in"]
         )
     }
 
-    // MARK: - Detail line
-
-    func testDirectPlayDetailIsTheSourceFormat() {
-        let item = session(streams: [stream("Video", codec: "hevc", width: 3840, range: "DOVIWithHDR10")], transcoding: nil)
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: item), "4K Dolby Vision")
-    }
-
-    func testRemuxDetailSaysRemux() {
-        let item = session(
-            streams: [stream("Video", codec: "h264", width: 1920, range: "SDR")],
-            transcoding: transcoding(video: true, audio: true, reasons: ["ContainerNotSupported"])
-        )
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: item), "1080p · Remux")
-    }
-
-    func testConvertingAudioDetailNamesBothCodecs() {
-        let item = session(
-            streams: [stream("Video", width: 3840, range: "HDR10"), stream("Audio", codec: "dts", index: 1)],
-            transcoding: transcoding(video: true, audio: false, reasons: ["AudioCodecNotSupported"], audioCodec: "ac3")
-        )
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: item), "4K HDR10 · Video copied · DTS → AC3 · Audio format not supported")
-    }
-
-    func testConvertingAudioUsesTheSelectedAudioTrack() {
-        let item = session(
-            streams: [stream("Video", width: 1920), stream("Audio", codec: "aac", index: 1), stream("Audio", codec: "truehd", index: 2)],
-            transcoding: transcoding(video: true, audio: false, audioCodec: "eac3"),
-            audioIndex: 2
-        )
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: item), "1080p · Video copied · TRUEHD → EAC3")
-    }
-
-    func testConvertingVideoListsEveryReasonAndTheResolutionDrop() {
-        let item = session(
-            streams: [stream("Video", width: 3840, range: "SDR")],
-            transcoding: transcoding(video: false, audio: true, reasons: ["ContainerBitrateExceedsLimit", "VideoRangeTypeNotSupported"], width: 1920)
-        )
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: item), "4K · Bitrate cap, HDR not supported · 4K → 1080p")
+    /// The words are sashimi-roku's `AdminDash.reasonText` table letter for
+    /// letter (Android's `TranscodeReasonWords` is too), so every client says
+    /// the same thing about the same stream.
+    func testEveryReasonReadsAsOnRoku() {
+        let roku: [String: String] = [
+            "ContainerNotSupported": "Container not supported",
+            "VideoCodecNotSupported": "Video format not supported",
+            "AudioCodecNotSupported": "Audio format not supported",
+            "SubtitleCodecNotSupported": "Subtitles burned in",
+            "AudioIsExternal": "External audio track",
+            "SecondaryAudioNotSupported": "Extra audio track not supported",
+            "VideoProfileNotSupported": "Video profile not supported",
+            "VideoLevelNotSupported": "Video level not supported",
+            "VideoResolutionNotSupported": "Resolution too high",
+            "VideoBitDepthNotSupported": "Bit depth not supported",
+            "VideoFramerateNotSupported": "Frame rate not supported",
+            "RefFramesNotSupported": "Too many reference frames",
+            "AnamorphicVideoNotSupported": "Anamorphic video not supported",
+            "InterlacedVideoNotSupported": "Interlaced video",
+            "AudioChannelsNotSupported": "Too many audio channels",
+            "AudioProfileNotSupported": "Audio profile not supported",
+            "AudioSampleRateNotSupported": "Sample rate not supported",
+            "AudioBitDepthNotSupported": "Audio bit depth not supported",
+            "ContainerBitrateExceedsLimit": "Bitrate cap",
+            "VideoBitrateNotSupported": "Video bitrate too high",
+            "AudioBitrateNotSupported": "Audio bitrate too high",
+            "UnknownVideoStreamInfo": "Unknown video stream",
+            "UnknownAudioStreamInfo": "Unknown audio stream",
+            "DirectPlayError": "Direct play failed",
+            "VideoRangeTypeNotSupported": "HDR → SDR",
+            "VideoCodecTagNotSupported": "Video codec tag not supported",
+            "StreamCountExceedsLimit": "Too many streams"
+        ]
+        for (reason, words) in roku {
+            XCTAssertEqual(ServerDashboardLogic.reasonText(reason), words, reason)
+        }
+        // Roku's lookup is case-insensitive (BrightScript keys), so this is too.
+        XCTAssertEqual(ServerDashboardLogic.reasonText("containerbitrateexceedslimit"), "Bitrate cap")
     }
 
     // MARK: - Bitrate
@@ -195,6 +212,12 @@ final class ServerDashboardLogicTests: XCTestCase {
         XCTAssertEqual(ServerDashboardLogic.formatBitrate(61_200_000), "61 Mbps")
         XCTAssertEqual(ServerDashboardLogic.formatBitrate(8_400_000), "8.4 Mbps")
         XCTAssertEqual(ServerDashboardLogic.formatBitrate(640_000), "640 kbps")
+    }
+
+    /// A zero delivered rate is unknown, not free: the file's rate stands in.
+    func testZeroTranscodeBitrateFallsBackToTheSource() {
+        let item = session(streams: [stream("Video", bitRate: 9_000_000)], transcoding: transcoding(video: false, audio: true, bitrate: 0))
+        XCTAssertEqual(ServerDashboardLogic.bitrate(of: item), 9_000_000)
     }
 
     // MARK: - Redaction
@@ -330,12 +353,25 @@ final class ServerDashboardHealthTests: XCTestCase {
     }
 
     func testHardwareTranscodingRow() {
-        let converting = session(transcoding: transcoding(video: false, audio: true))
-        let on = ServerDashboardLogic.healthRows(
-            tasks: [], storage: nil, encoding: EncodingOptionsSummary(hardwareAccelerationType: "qsv"), sessions: [converting], now: Date()
-        )
+        func info(videoDirect: Bool, audioDirect: Bool) -> DashboardTranscodingInfo {
+            DashboardTranscodingInfo(
+                audioCodec: nil, videoCodec: nil, container: nil, isVideoDirect: videoDirect, isAudioDirect: audioDirect,
+                bitrate: nil, width: nil, height: nil, hardwareAccelerationType: "qsv", transcodeReasons: []
+            )
+        }
+        let qsv = EncodingOptionsSummary(hardwareAccelerationType: "qsv")
+        let encoding = session(transcoding: info(videoDirect: false, audioDirect: true))
+        let on = ServerDashboardLogic.healthRows(tasks: [], storage: nil, encoding: qsv, sessions: [encoding, encoding], now: Date())
         XCTAssertEqual(on.map(\.title), ["Hardware transcoding (QSV)"])
-        XCTAssertEqual(on.first?.value, "On · 1 converting")
+        XCTAssertEqual(on.first?.value, "In use · 2 streams")
+        // The server names its accelerator on remuxes and audio conversions
+        // too; only a video conversion uses it (Roku 1.6.22 finding).
+        let audioOnly = session(transcoding: info(videoDirect: true, audioDirect: false))
+        let remux = session(transcoding: info(videoDirect: true, audioDirect: true))
+        let ready = ServerDashboardLogic.healthRows(tasks: [], storage: nil, encoding: qsv, sessions: [audioOnly, remux], now: Date())
+        XCTAssertEqual(ready.first?.value, "Ready")
+        let one = ServerDashboardLogic.healthRows(tasks: [], storage: nil, encoding: qsv, sessions: [encoding, audioOnly], now: Date())
+        XCTAssertEqual(one.first?.value, "In use · 1 stream")
         let off = ServerDashboardLogic.healthRows(
             tasks: [], storage: nil, encoding: EncodingOptionsSummary(hardwareAccelerationType: "none"), sessions: [], now: Date()
         )
@@ -391,7 +427,9 @@ final class ServerDashboardHealthTests: XCTestCase {
         XCTAssertEqual(first.nowPlayingItem?.displayTitle, "The 100 · S6:E10 · Matryoshka")
         XCTAssertEqual(first.playState?.isPaused, true)
         XCTAssertEqual(ServerDashboardLogic.playMode(first.transcodingInfo), .directPlay)
-        XCTAssertEqual(ServerDashboardLogic.detailLine(for: first), "1080p · Remux")
+        XCTAssertEqual(ServerDashboardLogic.footerReason(first), "Remux")
+        XCTAssertEqual(first.network, .local)
+        XCTAssertEqual(first.nowPlayingItem?.mediaStreams.first?.width, 1920)
     }
 
     func testDecodesActivityDatesWithFractionalSeconds() throws {

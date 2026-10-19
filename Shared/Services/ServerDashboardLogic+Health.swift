@@ -131,12 +131,14 @@ extension ServerDashboardLogic {
             return DashboardHealthRow(title: "Hardware transcoding", value: "Off", tone: .neutral)
         }
         let name = accelerationName(type)
-        let converting = sessions.filter { playMode($0.transcodingInfo) != .directPlay }.count
-        return DashboardHealthRow(
-            title: "Hardware transcoding (\(name))",
-            value: converting > 0 ? "On · \(converting) converting" : "On",
-            tone: .ok
-        )
+        let inUse = sessions.filter(isHardware).count
+        let value: String
+        switch inUse {
+        case 0: value = "Ready"
+        case 1: value = "In use · 1 stream"
+        default: value = "In use · \(inUse) streams"
+        }
+        return DashboardHealthRow(title: "Hardware transcoding (\(name))", value: value, tone: .ok)
     }
 
     // MARK: - Needs attention (phone)

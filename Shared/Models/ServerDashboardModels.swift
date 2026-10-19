@@ -1,8 +1,10 @@
 import Foundation
 
 // The slices of Jellyfin's admin endpoints the Server dashboard reads, checked
-// against a live 12.2.0 server. Fields the dashboard must never show
-// (RemoteEndPoint, paths, DeviceIds, tokens) are deliberately not decoded.
+// against a live 12.2.0 server. Fields the dashboard must never show (paths,
+// DeviceIds, tokens) are deliberately not decoded. RemoteEndPoint is read only
+// to decide Local or Remote and is dropped at decode time: the address itself
+// never reaches a view.
 
 // MARK: - Sessions (`/Sessions`)
 
@@ -16,6 +18,8 @@ struct DashboardSession: Decodable, Identifiable, Equatable {
     let nowPlayingItem: DashboardNowPlaying?
     let playState: DashboardPlayState?
     let transcodingInfo: DashboardTranscodingInfo?
+    /// Where the viewer is, from `RemoteEndPoint`; nil when the server didn't say.
+    let network: DashboardNetwork?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -27,6 +31,7 @@ struct DashboardSession: Decodable, Identifiable, Equatable {
         case nowPlayingItem = "NowPlayingItem"
         case playState = "PlayState"
         case transcodingInfo = "TranscodingInfo"
+        case remoteEndPoint = "RemoteEndPoint"
     }
 
     init(
@@ -38,7 +43,8 @@ struct DashboardSession: Decodable, Identifiable, Equatable {
         supportsRemoteControl: Bool,
         nowPlayingItem: DashboardNowPlaying?,
         playState: DashboardPlayState?,
-        transcodingInfo: DashboardTranscodingInfo?
+        transcodingInfo: DashboardTranscodingInfo?,
+        network: DashboardNetwork? = nil
     ) {
         self.id = id
         self.userName = userName
@@ -49,6 +55,7 @@ struct DashboardSession: Decodable, Identifiable, Equatable {
         self.nowPlayingItem = nowPlayingItem
         self.playState = playState
         self.transcodingInfo = transcodingInfo
+        self.network = network
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +69,18 @@ struct DashboardSession: Decodable, Identifiable, Equatable {
         nowPlayingItem = try container.decodeIfPresent(DashboardNowPlaying.self, forKey: .nowPlayingItem)
         playState = try container.decodeIfPresent(DashboardPlayState.self, forKey: .playState)
         transcodingInfo = try container.decodeIfPresent(DashboardTranscodingInfo.self, forKey: .transcodingInfo)
+        network = DashboardNetwork(remoteEndPoint: try container.decodeIfPresent(String.self, forKey: .remoteEndPoint))
+    }
+}
+
+/// Local or Remote: all the card says about where a viewer is.
+enum DashboardNetwork: Equatable {
+    case local, remote
+
+    /// Nil for a missing or blank address.
+    init?(remoteEndPoint: String?) {
+        guard let remoteEndPoint, !remoteEndPoint.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        self = ServerDashboardLogic.isLocalAddress(remoteEndPoint) ? .local : .remote
     }
 }
 
@@ -76,6 +95,7 @@ struct DashboardNowPlaying: Decodable, Equatable {
     let runTimeTicks: Int64?
     let container: String?
     let mediaStreams: [DashboardMediaStream]
+    let productionYear: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id"
@@ -88,6 +108,7 @@ struct DashboardNowPlaying: Decodable, Equatable {
         case runTimeTicks = "RunTimeTicks"
         case container = "Container"
         case mediaStreams = "MediaStreams"
+        case productionYear = "ProductionYear"
     }
 
     init(
@@ -100,7 +121,8 @@ struct DashboardNowPlaying: Decodable, Equatable {
         indexNumber: Int?,
         runTimeTicks: Int64?,
         container: String?,
-        mediaStreams: [DashboardMediaStream]
+        mediaStreams: [DashboardMediaStream],
+        productionYear: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -112,6 +134,7 @@ struct DashboardNowPlaying: Decodable, Equatable {
         self.runTimeTicks = runTimeTicks
         self.container = container
         self.mediaStreams = mediaStreams
+        self.productionYear = productionYear
     }
 
     init(from decoder: Decoder) throws {
@@ -126,6 +149,7 @@ struct DashboardNowPlaying: Decodable, Equatable {
         runTimeTicks = try container.decodeIfPresent(Int64.self, forKey: .runTimeTicks)
         self.container = try container.decodeIfPresent(String.self, forKey: .container)
         mediaStreams = try container.decodeIfPresent([DashboardMediaStream].self, forKey: .mediaStreams) ?? []
+        productionYear = try container.decodeIfPresent(Int.self, forKey: .productionYear)
     }
 
     /// "The 100 · S6:E10 · Matryoshka" for an episode, the name otherwise.
@@ -156,6 +180,9 @@ struct DashboardMediaStream: Decodable, Equatable {
     let index: Int?
     let isDefault: Bool
     let displayTitle: String?
+    let channels: Int?
+    let realFrameRate: Double?
+    let averageFrameRate: Double?
 
     enum CodingKeys: String, CodingKey {
         case type = "Type"
@@ -167,6 +194,9 @@ struct DashboardMediaStream: Decodable, Equatable {
         case index = "Index"
         case isDefault = "IsDefault"
         case displayTitle = "DisplayTitle"
+        case channels = "Channels"
+        case realFrameRate = "RealFrameRate"
+        case averageFrameRate = "AverageFrameRate"
     }
 
     init(
@@ -178,7 +208,10 @@ struct DashboardMediaStream: Decodable, Equatable {
         bitRate: Int?,
         index: Int?,
         isDefault: Bool,
-        displayTitle: String?
+        displayTitle: String?,
+        channels: Int? = nil,
+        realFrameRate: Double? = nil,
+        averageFrameRate: Double? = nil
     ) {
         self.type = type
         self.codec = codec
@@ -189,6 +222,9 @@ struct DashboardMediaStream: Decodable, Equatable {
         self.index = index
         self.isDefault = isDefault
         self.displayTitle = displayTitle
+        self.channels = channels
+        self.realFrameRate = realFrameRate
+        self.averageFrameRate = averageFrameRate
     }
 
     init(from decoder: Decoder) throws {
@@ -202,12 +238,17 @@ struct DashboardMediaStream: Decodable, Equatable {
         index = try container.decodeIfPresent(Int.self, forKey: .index)
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         displayTitle = try container.decodeIfPresent(String.self, forKey: .displayTitle)
+        channels = try container.decodeIfPresent(Int.self, forKey: .channels)
+        realFrameRate = try container.decodeIfPresent(Double.self, forKey: .realFrameRate)
+        averageFrameRate = try container.decodeIfPresent(Double.self, forKey: .averageFrameRate)
     }
 }
 
 struct DashboardPlayState: Decodable, Equatable {
     let positionTicks: Int64?
     let isPaused: Bool
+    /// False when the server sent no IsPaused: the card's dot goes grey, not green.
+    let reportsPause: Bool
     /// "DirectPlay" | "DirectStream" | "Transcode"
     let playMethod: String?
     let audioStreamIndex: Int?
@@ -219,9 +260,10 @@ struct DashboardPlayState: Decodable, Equatable {
         case audioStreamIndex = "AudioStreamIndex"
     }
 
-    init(positionTicks: Int64?, isPaused: Bool, playMethod: String?, audioStreamIndex: Int?) {
+    init(positionTicks: Int64?, isPaused: Bool, playMethod: String?, audioStreamIndex: Int?, reportsPause: Bool = true) {
         self.positionTicks = positionTicks
         self.isPaused = isPaused
+        self.reportsPause = reportsPause
         self.playMethod = playMethod
         self.audioStreamIndex = audioStreamIndex
     }
@@ -229,7 +271,9 @@ struct DashboardPlayState: Decodable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         positionTicks = try container.decodeIfPresent(Int64.self, forKey: .positionTicks)
-        isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
+        let paused = try container.decodeIfPresent(Bool.self, forKey: .isPaused)
+        isPaused = paused == true
+        reportsPause = paused != nil
         playMethod = try container.decodeIfPresent(String.self, forKey: .playMethod)
         audioStreamIndex = try container.decodeIfPresent(Int.self, forKey: .audioStreamIndex)
     }
@@ -247,6 +291,9 @@ struct DashboardTranscodingInfo: Decodable, Equatable {
     let height: Int?
     let hardwareAccelerationType: String?
     let transcodeReasons: [String]
+    let audioChannels: Int?
+    /// Frames encoded per second; over the source's fps it is the speed ("1.8x").
+    let framerate: Double?
 
     enum CodingKeys: String, CodingKey {
         case audioCodec = "AudioCodec"
@@ -259,6 +306,8 @@ struct DashboardTranscodingInfo: Decodable, Equatable {
         case height = "Height"
         case hardwareAccelerationType = "HardwareAccelerationType"
         case transcodeReasons = "TranscodeReasons"
+        case audioChannels = "AudioChannels"
+        case framerate = "Framerate"
     }
 
     init(
@@ -271,7 +320,9 @@ struct DashboardTranscodingInfo: Decodable, Equatable {
         width: Int?,
         height: Int?,
         hardwareAccelerationType: String?,
-        transcodeReasons: [String]
+        transcodeReasons: [String],
+        audioChannels: Int? = nil,
+        framerate: Double? = nil
     ) {
         self.audioCodec = audioCodec
         self.videoCodec = videoCodec
@@ -283,6 +334,8 @@ struct DashboardTranscodingInfo: Decodable, Equatable {
         self.height = height
         self.hardwareAccelerationType = hardwareAccelerationType
         self.transcodeReasons = transcodeReasons
+        self.audioChannels = audioChannels
+        self.framerate = framerate
     }
 
     init(from decoder: Decoder) throws {
@@ -296,7 +349,15 @@ struct DashboardTranscodingInfo: Decodable, Equatable {
         width = try container.decodeIfPresent(Int.self, forKey: .width)
         height = try container.decodeIfPresent(Int.self, forKey: .height)
         hardwareAccelerationType = try container.decodeIfPresent(String.self, forKey: .hardwareAccelerationType)
-        transcodeReasons = try container.decodeIfPresent([String].self, forKey: .transcodeReasons) ?? []
+        // An array on current servers; older ones sent one comma-separated string.
+        if let list = try? container.decodeIfPresent([String].self, forKey: .transcodeReasons) {
+            transcodeReasons = list
+        } else {
+            let joined = try? container.decodeIfPresent(String.self, forKey: .transcodeReasons)
+            transcodeReasons = (joined ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        audioChannels = try container.decodeIfPresent(Int.self, forKey: .audioChannels)
+        framerate = try container.decodeIfPresent(Double.self, forKey: .framerate)
     }
 }
 

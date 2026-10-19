@@ -83,11 +83,9 @@ struct MobileServerDashboardView: View {
     }
 
     private var summary: String {
-        let parts = [
-            "\(model.sessions.count) streaming",
-            "\(model.convertingCount) converting",
-            "\(ServerDashboardLogic.formatBitrate(model.totalBitrate)) out"
-        ]
+        var parts = ["\(model.sessions.count) streaming", "\(model.convertingCount) converting"]
+        let out = ServerDashboardLogic.formatBitrate(model.totalBitrate)
+        if !out.isEmpty { parts.append("\(out) out") }
         return parts.joined(separator: " · ")
     }
 
@@ -139,47 +137,69 @@ struct MobileServerDashboardView: View {
     }
 }
 
-/// One stream: poster, title, who and where, badge, rate, progress, actions.
+/// One stream, the TV card's fields compacted into a row: poster with its
+/// state dot, title, viewer and device, pills (wrapping), progress, then why
+/// and where, with the actions menu at the end.
 private struct MobileSessionRow: View {
     let session: DashboardSession
     let onStop: () -> Void
     let onMessage: () -> Void
     let onDetails: () -> Void
-    @Environment(\.horizontalSizeClass) private var sizeClass
 
-    private var mode: PlayMode { ServerDashboardLogic.playMode(session.transcodingInfo) }
     private var item: DashboardNowPlaying? { session.nowPlayingItem }
+    private var title: DashboardCardTitle { ServerDashboardLogic.cardTitle(item) }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             SmartPosterImage(itemIds: item?.posterItemIds ?? [], maxWidth: 120, imageTypes: ["Primary"])
                 .frame(width: 44, height: 66)
                 .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(ServerDashboardLogic.streamState(session).mobileColor)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().stroke(Color.black.opacity(0.6), lineWidth: 1))
+                        .padding(3)
+                }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(item?.displayTitle ?? "")
+                Text(title.title)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
-                Text(ServerDashboardLogic.viewerLine(session))
+                HStack(spacing: 6) {
+                    if !title.sub.isEmpty {
+                        Text(title.sub).lineLimit(1)
+                    }
+                    if !title.ep.isEmpty {
+                        Text(title.ep)
+                            .fontWeight(.heavy)
+                            .foregroundStyle(MobileColors.accent)
+                            .padding(.horizontal, 5)
+                            .background(MobileColors.accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text(viewerLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                HStack(spacing: 8) {
-                    MobilePlayModeBadge(mode: mode, short: sizeClass == .compact)
-                    Text(ServerDashboardLogic.rateLine(session))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if sizeClass == .regular {
-                    Text(ServerDashboardLogic.detailLine(for: session))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                MobileStreamPills(session: session)
+                    .padding(.vertical, 2)
                 ProgressView(value: ServerDashboardLogic.progressFraction(
                     positionTicks: session.playState?.positionTicks,
                     runTimeTicks: item?.runTimeTicks
                 ))
                 .tint(MobileColors.accent)
+                HStack {
+                    Text(ServerDashboardLogic.footerReason(session)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text([ServerDashboardLogic.percentText(session), ServerDashboardLogic.whereLabel(session)]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: " · "))
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
 
             Menu {
@@ -195,5 +215,10 @@ private struct MobileSessionRow: View {
             }
             .accessibilityLabel("Stream actions")
         }
+    }
+
+    /// "mom · Sashimi · Living Room Roku"
+    private var viewerLine: String {
+        [session.userName ?? "", ServerDashboardLogic.deviceLine(session)].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }

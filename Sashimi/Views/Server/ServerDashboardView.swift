@@ -110,7 +110,10 @@ struct ServerDashboardView: View {
             HStack(spacing: 20) {
                 ServerCountPill(value: "\(model.sessions.count)", label: "streaming", tint: SashimiTheme.accent)
                 ServerCountPill(value: "\(model.convertingCount)", label: "converting", tint: SashimiTheme.accentSecondary)
-                ServerCountPill(value: ServerDashboardLogic.formatBitrate(model.totalBitrate), label: "out")
+                let out = ServerDashboardLogic.formatBitrate(model.totalBitrate)
+                if !out.isEmpty {
+                    ServerCountPill(value: out, label: "out")
+                }
             }
         }
     }
@@ -165,12 +168,10 @@ struct ServerStreamSheet: View {
                     .font(Typography.headline)
                     .foregroundStyle(SashimiTheme.textPrimary)
                     .lineLimit(2)
-                HStack(spacing: 16) {
-                    PlayModeBadge(mode: ServerDashboardLogic.playMode(session.transcodingInfo))
-                    Text(ServerDashboardLogic.detailLine(for: session))
-                        .font(Typography.bodySmall)
-                        .foregroundStyle(SashimiTheme.textSecondary)
-                }
+                ServerStreamPills(session: session)
+                Text(ServerDashboardLogic.footerReason(session))
+                    .font(Typography.bodySmall)
+                    .foregroundStyle(SashimiTheme.textSecondary)
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(ServerDashboardLogic.detailRows(for: session)) { row in
                         HStack(alignment: .firstTextBaseline, spacing: 24) {
