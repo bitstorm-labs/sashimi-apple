@@ -5,11 +5,12 @@
 </p>
 
 <p align="center">
-  <strong>A native Jellyfin client for Apple TV, iPhone, and iPad</strong>
+  <strong>A native Jellyfin client for Apple TV, iPhone, iPad and Mac</strong>
 </p>
 
 <p align="center">
   <a href="#features">Features</a> •
+  <a href="#get-more-out-of-sashimi">Add-ons</a> •
   <a href="#requirements">Requirements</a> •
   <a href="#installation">Installation</a> •
   <a href="#development">Development</a> •
@@ -18,42 +19,80 @@
 
 ---
 
-Sashimi is a SwiftUI Jellyfin client that ships as a single universal app across
-Apple TV, iPhone, and iPad (Universal Purchase). The Apple TV and mobile apps
-share their networking, authentication, and playback logic.
+Sashimi is a SwiftUI Jellyfin client for Apple TV, iPhone, iPad and Mac. One
+App Store purchase covers all of them (Universal Purchase). The apps share their
+networking, sign-in and playback code. The Mac app is the iPad app built with
+Mac Catalyst.
 
 ## Features
 
 **All platforms**
-- Native SwiftUI interface tailored per device (Apple TV, iPhone tabs, iPad sidebar)
-- Browse and stream your Jellyfin media library
-- Support for movies, TV shows, and YouTube-style content
-- Continue watching with playback progress sync
-- Audio/subtitle track selection, quality switching, and skip intro/credits
-- **View modes** on Apple TV — Normal, Zoom or Stretch from the player's View Mode menu (hold OK on a channel), kept for the session; *Use for All Videos* or Settings → Playback sets the default
-- **Shuffle** — play one random item from a library or a single show
-- **Trailers** — plays a local trailer inline when one exists
-  (`LocalTrailerCount > 0`, e.g. downloaded by [Trailarr](https://github.com/nandyalu/trailarr))
-- **Quality badges** (4K / HD / SD) on cover art, with a toggle
-- **Stream bitrate** shown on the playback overlay
-- Secure credential storage using Keychain
+- Browse and stream your Jellyfin library: movies, shows, and YouTube-style channels
+- Continue Watching, with progress synced to the server
+- Several servers on one device, with sign-in by server discovery or address
+- Audio and subtitle track selection, plus a quality menu. **Auto** quality picks
+  a bitrate from what your connection has proven it can carry, and copies the
+  original 4K stream when the link is fast enough
+- HDR and Dolby Vision play as HDR. A Dolby Vision file the screen can't show is
+  transcoded rather than played with wrong colors
+- **Up Next** countdown at the end of an episode, with Auto-Play Next Episode
+- **Skip Intro / Skip Credits** buttons, with optional auto-skip
+- **Theme songs** on series pages, and **trailers** that play behind a title's
+  detail page (both need the server add-ons below)
+- **Channels** row and a TV-style **guide** for the 24/7 channels on your server
+- Shuffle one random item from a library or a show
+- Quality badges (4K / HD / SD) on cover art, and the stream bitrate on the player
+- **Server dashboard** for Jellyfin administrators: who is watching, with Stop and
+  Send message
+- Administrators can also add a title to a channel or manage channels from the app
+- Credentials kept in the Keychain
 
 **Apple TV**
-- Top Shelf integration for quick access to recent content
+- Top Shelf shows recent items and opens them (or starts playback) through
+  `sashimi://` links
+- Player View Mode: Normal, Zoom or Stretch
 
 **iPhone & iPad**
-- Offline mode: download media and watch without a connection
-- Picture-in-Picture playback
-- Adaptive layouts for phone (tabs) and tablet (sidebar)
+- Offline mode: download movies and episodes and watch without a connection
+- Picture-in-Picture
+- Siri, Shortcuts and Spotlight: search your library, play a title, or ask for
+  the latest additions
+- Tabs on iPhone, a sidebar on iPad
+
+**Mac**
+- The iPad app in a window, with menu-bar commands and keyboard shortcuts
+
+## Get more out of Sashimi
+
+Sashimi works with a plain Jellyfin server. These add-ons make it better. All of
+them are optional, and each one only adds to the app, so nothing breaks without it.
+
+| Add-on | What it does | In Sashimi | Without it |
+| --- | --- | --- | --- |
+| [Continue Watching](https://github.com/bitstorm-labs/jellyfin-plugin-continue-watching) plugin | Merges Resume and Next Up into one ranked row on the server | The Home row comes straight from the server (`GET /ContinueWatching`) | Sashimi builds the row itself from Resume and Next Up |
+| [Channels](https://github.com/bitstorm-labs/jellyfin-plugin-channels) plugin | 24/7 virtual channels made from your library | Channels row and guide on Home. Administrators can add titles and manage channels from the app | No channels row or guide |
+| [Theme Songs](https://github.com/bitstorm-labs/jellyfin-theme-songs) plugin | Downloads a `theme.mp3` for each series | Theme music on series pages (Settings, Play Theme Songs). Apple TV, iPhone and iPad | Series pages stay quiet |
+| [Intro Skipper](https://github.com/intro-skipper/intro-skipper) plugin (third party) | Finds intros and credits and writes them to Jellyfin's Media Segments | Skip Intro and Skip Credits buttons (Skip Credits goes straight to Up Next). Sashimi reads `/MediaSegments`, and falls back to Intro Skipper's own route on servers older than 10.10 | No skip buttons. Up Next still appears when the episode ends |
+| [Trailarr](https://github.com/nandyalu/trailarr) (separate app) | Downloads trailers next to your movies and shows | A trailer button, and the trailer playing behind the detail page (Settings, Play Trailers on Detail Pages) | No trailer button |
+
+The Theme Songs plugin installs from a Jellyfin plugin repository. Add
+`https://raw.githubusercontent.com/bitstorm-labs/jellyfin-theme-songs/main/manifest.json`
+under Dashboard, Plugins, Repositories. For the others, follow the install notes in
+their repositories.
+
+Two more things on the server help:
+- **Hardware transcoding.** Auto quality works best when the server can transcode
+  quickly, because it falls back to a transcode when the original won't fit.
+- **Administrator account.** The Server dashboard and channel management only
+  appear for Jellyfin administrators.
 
 ## Requirements
 
-- tvOS 17.0+ / iOS 17.0+
-- Jellyfin server (local or remote)
-- Xcode 16.0+ for development (Xcode 26+ required for TestFlight/App Store builds —
-  Apple mandates building with the current SDK)
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (the Xcode project is generated
-  from `project.yml`)
+- tvOS 17+, iOS / iPadOS 17+, macOS with Mac Catalyst support
+- A Jellyfin server (local or remote). Skip segments need Jellyfin 10.10 or newer
+- To build: Xcode 26 or newer (the Mac and iOS builds ship with Xcode 27, tvOS
+  with Xcode 26) and [XcodeGen](https://github.com/yonaskolb/XcodeGen), which
+  generates the Xcode project from `project.yml`
 
 ## Installation
 
@@ -62,7 +101,7 @@ share their networking, authentication, and playback logic.
 1. Clone the repository:
    ```bash
    git clone https://github.com/bitstorm-labs/sashimi-apple.git
-   cd sashimi
+   cd sashimi-apple
    ```
 
 2. Run the setup script (installs hooks, generates the project):
@@ -76,7 +115,7 @@ share their networking, authentication, and playback logic.
 
 5. Choose a scheme and run:
    - **Sashimi** → Apple TV (tvOS)
-   - **SashimiMobile** → iPhone / iPad (iOS)
+   - **SashimiMobile** → iPhone / iPad (iOS), or "My Mac (Mac Catalyst)"
 
 ### Dependencies
 
@@ -89,9 +128,11 @@ share their networking, authentication, and playback logic.
 ```
 sashimi/
 ├── Sashimi/          # tvOS app (SwiftUI)
-├── SashimiMobile/    # iPhone + iPad app (SwiftUI)
+├── SashimiMobile/    # iPhone, iPad and Mac Catalyst app (SwiftUI)
 │   ├── Views/        # Phone/iPad layouts, player, downloads
-│   └── Downloads/    # Background downloads & offline storage
+│   ├── Downloads/    # Background downloads & offline storage
+│   ├── AppIntents/   # Siri, Shortcuts, Spotlight
+│   └── Mac/          # Mac menu commands and window handling
 ├── TopShelf/         # tvOS Top Shelf extension
 ├── Shared/           # Code shared by tvOS + iOS
 │   ├── Services/     # JellyfinClient, SessionManager, server discovery
@@ -110,20 +151,18 @@ xcodegen generate
 xcodebuild -project Sashimi.xcodeproj -scheme Sashimi \
   -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)'
 
-# Build the iOS app (iPhone/iPad)
+# Build the iOS app (iPhone/iPad). Run `xcrun simctl list devices` for names
 xcodebuild -project Sashimi.xcodeproj -scheme SashimiMobile \
-  -destination 'platform=iOS Simulator,name=iPhone 16'
+  -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
-### Distribution
+### Releases
 
-Both apps ship to TestFlight via fastlane + GitHub Actions (full runbook: [docs/RELEASING.md](docs/RELEASING.md)):
-
-- tvOS: push a tag matching `v*-beta*` (e.g. `v1.0.0-beta.1`)
-- iOS: push a tag matching `ios-v*-beta*` (e.g. `ios-v1.0.1-beta.1`)
-
-Code signing uses fastlane `match`. The version comes from `MARKETING_VERSION` in
-`project.yml`; the build number is set automatically at build time.
+Merging app code to `main` ships a TestFlight build of tvOS, iOS and Mac
+automatically: `auto-release.yml` waits 15 minutes for more merges, then runs the
+Release workflow, which bumps the version through a PR, tags it and deploys.
+Docs, tests, CI and fastlane changes ship nothing. Maintainers can also run
+**Actions → Release** by hand. Full runbook: [docs/RELEASING.md](docs/RELEASING.md).
 
 ### Git Hooks
 
