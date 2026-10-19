@@ -17,7 +17,8 @@
 <!-- Describe how you tested your changes -->
 
 - [ ] tvOS Simulator
-- [ ] Physical Apple TV
+- [ ] iPhone / iPad Simulator
+- [ ] Physical Apple TV, iPhone or iPad
 - [ ] Other (please describe)
 
 ## Checklist

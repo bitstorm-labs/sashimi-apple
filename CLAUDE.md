@@ -4,17 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sashimi is a native SwiftUI Jellyfin client for Apple TV, iPhone, and iPad. It targets tvOS 17+ and iOS 17+ and uses Swift 5.9. The tvOS and iOS apps share networking, authentication, media models, and playback logic where the behavior is genuinely cross-platform.
+Sashimi is a native SwiftUI Jellyfin client for Apple TV, iPhone, iPad and Mac. It targets tvOS 17+ and iOS 17+ and uses Swift 5.9. The Mac app is the iOS target built for Mac Catalyst. The tvOS and iOS apps share networking, authentication, media models, and playback logic where the behavior is genuinely cross-platform.
 
 ### Target Taxonomy
 
 - **`Sashimi/`**: tvOS application UI, including remote-focus behavior, the tvOS player, and tvOS settings.
-- **`SashimiMobile/`**: iPhone and iPad application UI, including phone tabs, iPad navigation, offline downloads, and mobile-only playback behavior.
+- **`SashimiMobile/`**: iPhone, iPad and Mac Catalyst application UI, including phone tabs, iPad navigation, offline downloads, Siri/Shortcuts/Spotlight intents (`AppIntents/`), Mac menu commands (`Mac/`), and mobile-only playback behavior.
 - **`Shared/`**: cross-platform Jellyfin models, services, view models, session/authentication, playback selection, and shared components. Put behavior here only when both application targets need the same contract.
 - **`TopShelf/`**: tvOS Top Shelf extension. Keep extension-specific content-provider behavior here.
 - **`SashimiTests/`**: the tvOS-hosted unit-test target for shared and tvOS application behavior. Do not compile `Shared/` into the test bundle a second time; the test host provides those symbols.
+- **`SashimiMobileTests/`**: unit tests for the iOS app.
 
-The project is a single Universal Purchase product with separate tvOS and iOS targets. A feature is not complete if a change to shared behavior silently regresses the other platform.
+The project is a single Universal Purchase product with separate tvOS and iOS (and Mac Catalyst) targets. A feature is not complete if a change to shared behavior silently regresses the other platform.
 
 ## Build Commands
 
@@ -37,7 +38,7 @@ xcodegen generate
 `.claude/` holds this repo's automation (committed; `settings.local.json` is
 personal and gitignored):
 
-- **`/install-tvs`** — build the tvOS app and install it on both Apple TVs
+- **`/install-tvs`** — build the tvOS app and install it on a connected Apple TV
 - A `PostToolUse` hook runs `swiftlint --strict` on each edited `.swift` file, so
   violations surface at the edit rather than failing CI.
 
@@ -72,6 +73,18 @@ personal and gitignored):
 - Supports Up Next feature for continuous episode playback
 - Preserves audio/subtitle selection, quality switching, trailers, and skip-intro/credits behavior when changing playback flows
 - Mobile playback also coordinates Picture-in-Picture and offline downloaded media; tvOS and iOS presentation differences belong in their respective targets
+
+### Server add-ons
+
+The app works against a plain Jellyfin server and adds features when these exist.
+Each one must keep a fallback; never make the app depend on them.
+
+- **Continue Watching plugin**: `GET /ContinueWatching`. A 404 returns nil and `HomeViewModel` builds the row itself.
+- **Channels plugin**: `/VirtualChannels` and `/VirtualChannels/Guide` drive the channels row, guide and admin channel management. The route is not `/Channels`, which Jellyfin already owns.
+- **Theme Songs plugin**: `theme.mp3` per series, played by `ThemeSongPlayer`.
+- **Intro Skipper**: skip segments come from Jellyfin's native `/MediaSegments`; the plugin's private route is only a fallback for servers older than 10.10.
+- **Trailarr**: local trailers (`LocalTrailerCount > 0`) feed the trailer button and `HeroTrailerController`.
+- **Administrator-only**: the Server dashboard (Stop, Send message) and channel management show only for admin users.
 
 ### Dependencies
 - **Nuke/NukeUI**: Image loading and caching (via SPM)
@@ -248,7 +261,7 @@ magick source.png -trim +repage -resize 780x -background '#1a1a2e' \
 
 1. Delete derived data before building:
    ```bash
-   rm -rf /Users/mondo/Library/Developer/Xcode/DerivedData/Sashimi-*
+   rm -rf ~/Library/Developer/Xcode/DerivedData/Sashimi-*
    ```
 
 2. Build fresh:
