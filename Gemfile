@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-gem "fastlane", "~> 2.219"
+gem "fastlane", "~> 2.241"
 
 # A literal path: Dependabot's bundler updater refuses to parse an
 # eval_gemfile with an interpolated argument (fastlane's generated
