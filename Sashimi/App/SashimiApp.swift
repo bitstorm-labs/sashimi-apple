@@ -83,6 +83,9 @@ struct ContentView: View {
     // stashed here and replayed once authentication flips. Latest link wins.
     @State private var pendingDeepLink: DeepLink?
     @State private var deepLinkTask: Task<Void, Never>?
+    // Counts finished dismissals of the deep-link cover, so Home can take
+    // focus back once the cover is fully gone (#725).
+    @State private var deepLinkDismissals = 0
 
     var body: some View {
         Group {
@@ -90,8 +93,11 @@ struct ContentView: View {
                 // Rebuild the entire tab hierarchy when the active server
                 // changes or its connection credentials are edited — every
                 // view model reloads against the current server.
-                MainTabView()
-                    .id(sessionManager.activeSessionIdentity)
+                MainTabView(
+                    deepLinkCovering: deepLinkDestination != nil,
+                    deepLinkDismissals: deepLinkDismissals
+                )
+                .id(sessionManager.activeSessionIdentity)
             } else {
                 ServerConnectionView(
                     prefillServerURL: sessionManager.reauthServer?.url,
@@ -117,14 +123,18 @@ struct ContentView: View {
                 deepLinkDestination = nil
             }
         }
-        .fullScreenCover(item: $deepLinkDestination) { destination in
-            switch destination {
-            case .play(let item, let serverID):
-                PlayerView(item: item, serverID: serverID, startFromBeginning: false)
-            case .detail(let item):
-                MediaDetailView(item: item)
+        .fullScreenCover(
+            item: $deepLinkDestination,
+            onDismiss: { deepLinkDismissals += 1 },
+            content: { destination in
+                switch destination {
+                case .play(let item, let serverID):
+                    PlayerView(item: item, serverID: serverID, startFromBeginning: false)
+                case .detail(let item):
+                    MediaDetailView(item: item)
+                }
             }
-        }
+        )
     }
 
     @MainActor
@@ -182,6 +192,10 @@ private struct SidebarButtonStyle: ButtonStyle {
 
 struct MainTabView: View {
     @EnvironmentObject private var sessionManager: SessionManager
+    /// A deep-linked player or detail is presented over everything.
+    var deepLinkCovering = false
+    /// Bumped each time that cover has finished closing.
+    var deepLinkDismissals = 0
 
     /// A destination in the rail. Libraries are dynamic, so this is an enum
     /// rather than a tab index.
@@ -210,6 +224,12 @@ struct MainTabView: View {
     // steals it while content is still loading). Also gates the edge guard so
     // it doesn't interfere with that initial focus resolution.
     @State private var didInitialHomeFocus = false
+    /// Whether the hero handoff is still due, done, or waiting for a
+    /// deep-link cover to close (#725).
+    @State private var focusHandoff = HomeFocusHandoff()
+    /// Between a hero handoff and the edge guard arming: focus that drifts
+    /// into the rail without a press goes back to the hero.
+    @State private var heroFocusPending = false
     /// Set the moment an arrow press lands while focus is in the rail. The
     /// hero handoff below reads it: a viewer who has started moving through the
     /// rail before the hero finished loading must not have focus yanked back.
@@ -254,11 +274,32 @@ struct MainTabView: View {
         .ignoresSafeArea()
         .focusScope(mainScope)
         .onExitCommand(perform: exitCommandAction)
+        .onChange(of: deepLinkCovering, initial: true) { _, covering in
+            if covering { focusHandoff.coverPresented() }
+        }
+        // Back from a deep-linked player that opened over Home before the
+        // hero had loaded: the handoff was held for this moment.
+        .onChange(of: deepLinkDismissals) { _, _ in
+            if focusHandoff.coverDismissed(onHome: selection == .home || selection == .avatar) {
+                focusHero()
+            } else if focusHandoff.isDone {
+                didInitialHomeFocus = true
+            }
+        }
         .task { await loadLibraries() }
         // Focus-driven: moving focus onto a nav item switches the content
         // behind the blur immediately — no click needed (Plex behavior).
         .onChange(of: focusedNav) { old, newValue in
             guard let newValue else { return }
+            // The rail can take focus on its own just after a handoff (the
+            // engine settling after a cover closes, or the rail claiming focus
+            // while content loads); that is not the viewer's choice, so the
+            // hero gets it back. A viewer's own press in the rail ends this.
+            if heroFocusPending, !viewerNavigatedRail {
+                focusedNav = nil
+                DispatchQueue.main.async { resetFocus(in: mainScope) }
+                return
+            }
             // Entering the rail from content: land on the CURRENT section's
             // row, not whatever geometry picked — otherwise focus-follows-
             // selection immediately switches the content underneath the user.
@@ -326,34 +367,6 @@ struct MainTabView: View {
             } else {
                 HomeView(focusNamespace: mainScope, onHeroReady: handleHeroReady)
             }
-        }
-    }
-
-    /// Cold-launch focus fix: the rail grabs focus while the hero is still
-    /// loading, so once the hero has content, drop rail focus and let the
-    /// hero (the mainScope default-focus target) take it. Runs once; the edge
-    /// guard is armed a beat later so it can't interfere with this handoff.
-    private func handleHeroReady() {
-        guard !didInitialHomeFocus, selection == .home || selection == .avatar else { return }
-        // The hero can arrive seconds after launch, and the selection guard
-        // above cannot tell "parked on Home since launch" from "entered the
-        // rail and is about to move": both read selection == .home. An arrow
-        // press in the rail can. Seen on a real Apple TV: open the rail during
-        // launch and this reset pulled focus back to the hero mid-navigation.
-        if viewerNavigatedRail {
-            didInitialHomeFocus = true
-            return
-        }
-        focusedNav = nil
-        // Clearing focusedNav drops the rail button but the engine keeps focus
-        // parked on the rail — it never re-evaluates the mainScope default. Kick
-        // it (next runloop, so the hero is in the tree) so the hero, the
-        // mainScope prefersDefaultFocus target, actually claims focus.
-        DispatchQueue.main.async {
-            resetFocus(in: mainScope)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            didInitialHomeFocus = true
         }
     }
 
@@ -577,6 +590,49 @@ struct MainTabView: View {
             return { selection = .home }
         }
         return nil
+    }
+}
+
+// The cold-start hero handoff (#725: held while a deep link covers Home).
+extension MainTabView {
+    /// Cold-launch focus fix: the rail grabs focus while the hero is still
+    /// loading, so once the hero has content, drop rail focus and let the
+    /// hero (the mainScope default-focus target) take it. Runs once; the edge
+    /// guard is armed a beat later so it can't interfere with this handoff.
+    private func handleHeroReady() {
+        // The hero can arrive seconds after launch, and the selection alone
+        // cannot tell "parked on Home since launch" from "entered the rail and
+        // is about to move": both read selection == .home. An arrow press in
+        // the rail can. Seen on a real Apple TV: open the rail during launch
+        // and this reset pulled focus back to the hero mid-navigation. And a
+        // deep-linked player covering Home holds the handoff until it closes
+        // (HomeFocusHandoff, #725).
+        guard !didInitialHomeFocus else { return }
+        let onHome = selection == .home || selection == .avatar
+        guard focusHandoff.heroReady(onHome: onHome, viewerNavigatedRail: viewerNavigatedRail) else {
+            if focusHandoff.isDone { didInitialHomeFocus = true }
+            return
+        }
+        focusHero()
+    }
+
+    /// Hands focus from wherever the engine parked it to the hero, the
+    /// mainScope default-focus target, then arms the edge guard a beat later
+    /// so it can't interfere with this handoff.
+    private func focusHero() {
+        heroFocusPending = true
+        focusedNav = nil
+        // Clearing focusedNav drops the rail button but the engine keeps focus
+        // parked on the rail — it never re-evaluates the mainScope default. Kick
+        // it (next runloop, so the hero is in the tree) so the hero, the
+        // mainScope prefersDefaultFocus target, actually claims focus.
+        DispatchQueue.main.async {
+            resetFocus(in: mainScope)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            heroFocusPending = false
+            didInitialHomeFocus = true
+        }
     }
 }
 
