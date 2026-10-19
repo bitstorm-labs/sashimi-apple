@@ -141,4 +141,49 @@ extension PlaybackSelection {
         guard let wanted = resolved.audioStreamIndex, wanted != sent.audioStreamIndex else { return false }
         return wanted != serverAudioStreamIndex
     }
+
+    // MARK: - Spatial audio
+
+    /// The selected audio stream's position among the file's own audio
+    /// tracks, when SpatialAudioBridge should play it as APAC in place of the
+    /// server's audio. Nil keeps the server's audio.
+    ///
+    /// Only a Matroska file whose video the server copies: the library reads
+    /// Matroska, and its audio keeps time with stream-copy video. A re-encoded
+    /// picture (a bitrate cap, a quality pick, a burned-in subtitle) also
+    /// means less than the source should cross the link, while the library
+    /// reads the whole file. Jellyfin and Matroska both list the file's audio
+    /// tracks in file order, so the position names the Matroska track.
+    static func spatialAudioTrackPosition(in source: MediaSourceInfo, tracks: StreamTrackRequest) -> Int? {
+        guard source.container?.split(separator: ",").contains("mkv") == true,
+              !tracks.burnsInSubtitle,
+              let reasons = transcodeReasons(in: source.transcodingUrl),
+              !reencodesVideo(reasons) else { return nil }
+        let embedded = source.audioStreams.filter { $0.isExternal != true }
+        let selected = tracks.audioStreamIndex ?? source.defaultAudioStreamIndex ?? embedded.first?.index
+        guard let position = embedded.firstIndex(where: { $0.index == selected }),
+              isSpatialAudio(embedded[position]) else { return nil }
+        return position
+    }
+
+    /// TrueHD Atmos or DTS:X, by the server's label. The library refuses
+    /// plain TrueHD and DTS-HD MA only once it has read the file, which would
+    /// delay every such title, so unlabelled tracks are not tried.
+    static func isSpatialAudio(_ stream: MediaStream) -> Bool {
+        let profile = stream.profile ?? ""
+        switch stream.codec?.lowercased() {
+        case "truehd": return profile.localizedCaseInsensitiveContains("Atmos")
+        case "dts": return profile.localizedCaseInsensitiveContains("DTS:X")
+        default: return false
+        }
+    }
+
+    /// The `TranscodeReasons` Jellyfin writes into a transcoding URL. Its
+    /// PlaybackInfo JSON leaves them out, so the URL is the place to read them.
+    static func transcodeReasons(in transcodingURL: String?) -> [String]? {
+        guard let transcodingURL,
+              let value = URLComponents(string: transcodingURL)?.queryItems?
+                .first(where: { $0.name == "TranscodeReasons" })?.value else { return nil }
+        return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
 }

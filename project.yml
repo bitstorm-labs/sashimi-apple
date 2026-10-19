@@ -91,6 +91,9 @@ targets:
         # Alternate icons temporarily disabled for the first TestFlight beta —
         # each needs a 1280x768 App Store variant, deferred post-beta.
         ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME: ""
+        # SpatialAudioBridge's core ships arm64 slices only, so a generic
+        # simulator build cannot link an Intel slice.
+        EXCLUDED_ARCHS[sdk=appletvsimulator*]: x86_64
     entitlements:
       path: Sashimi/Sashimi.entitlements
       properties:
@@ -106,6 +109,12 @@ targets:
         products:
           - Nuke
           - NukeUI
+      # TrueHD Atmos and DTS:X as APAC (tvOS 26). tvOS only: on iOS, AirPlay
+      # hands the item to a receiver that cannot reach the loopback server.
+      - package: SpatialAudioBridge
+        products:
+          - SpatialAudioBridge
+          - SpatialAudioPlayback
 
   SashimiMobile:
     type: application
@@ -278,6 +287,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sashimi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sashimi"
         BUNDLE_LOADER: "$(TEST_HOST)"
+        # Matches the host app, which links SpatialAudioBridge's arm64-only core.
+        EXCLUDED_ARCHS[sdk=appletvsimulator*]: x86_64
     dependencies:
       - target: Sashimi
 
@@ -309,3 +320,6 @@ packages:
   Nuke:
     url: https://github.com/kean/Nuke.git
     from: "12.0.0"
+  SpatialAudioBridge:
+    url: https://github.com/kristofferR/SpatialAudioBridge
+    from: "2.0.1"

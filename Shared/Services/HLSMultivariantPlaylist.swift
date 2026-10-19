@@ -32,12 +32,18 @@ enum HLSMultivariantPlaylist {
         /// stream copy produces a master with only such variants — and no
         /// primary — which is why the caller pins nothing in that case.
         var isStreamCopyFallback: Bool {
-            uri.range(of: "AllowVideoStreamCopy=false", options: .caseInsensitive) != nil
+            HLSMultivariantPlaylist.isStreamCopyFallback(uri)
         }
         /// `VIDEO-RANGE=PQ` (HDR10, Dolby Vision's HDR10 base) or `HLG`.
         var isHDR: Bool {
             attributes.range(of: #"(^|,)VIDEO-RANGE=(PQ|HLG)(,|$)"#, options: [.regularExpression, .caseInsensitive]) != nil
         }
+    }
+
+    /// Whether a variant URI is one of Jellyfin's forced re-encodes rather
+    /// than the stream it was asked for (see `Variant.isStreamCopyFallback`).
+    static func isStreamCopyFallback(_ uri: String) -> Bool {
+        uri.range(of: "AllowVideoStreamCopy=false", options: .caseInsensitive) != nil
     }
 
     /// Every `#EXT-X-STREAM-INF` entry with its URI. `#EXT-X-IMAGE-STREAM-INF`
@@ -157,7 +163,7 @@ enum HLSMultivariantPlaylist {
     }
 
     private static func absoluteURI(_ uri: String, relativeTo base: URL) -> String? {
-        guard uri.range(of: "AllowVideoStreamCopy=false", options: .caseInsensitive) == nil else { return nil }
+        guard !isStreamCopyFallback(uri) else { return nil }
         return URL(string: uri, relativeTo: base)?.absoluteURL.absoluteString
     }
 
