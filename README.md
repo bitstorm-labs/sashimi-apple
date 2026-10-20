@@ -66,14 +66,16 @@ Mac Catalyst.
 
 Sashimi works with a plain Jellyfin server. These add-ons make it better. All of
 them are optional, and each one only adds to the app, so nothing breaks without it.
+The first three are made by Bitstorm Labs. The last two are separate projects by
+other people; see [Acknowledgments](#acknowledgments).
 
 | Add-on | What it does | In Sashimi | Without it |
 | --- | --- | --- | --- |
 | [Continue Watching](https://github.com/bitstorm-labs/jellyfin-plugin-continue-watching) plugin | Merges Resume and Next Up into one ranked row on the server | The Home row comes straight from the server (`GET /ContinueWatching`) | Sashimi builds the row itself from Resume and Next Up |
 | [Channels](https://github.com/bitstorm-labs/jellyfin-plugin-channels) plugin | 24/7 virtual channels made from your library | Channels row and guide on Home. Administrators can add titles and manage channels from the app | No channels row or guide |
 | [Theme Songs](https://github.com/bitstorm-labs/jellyfin-theme-songs) plugin | Downloads a `theme.mp3` for each series | Theme music on series pages (Settings, Play Theme Songs). Apple TV, iPhone and iPad | Series pages stay quiet |
-| [Intro Skipper](https://github.com/intro-skipper/intro-skipper) plugin (third party) | Finds intros and credits and writes them to Jellyfin's Media Segments | Skip Intro and Skip Credits buttons (Skip Credits goes straight to Up Next). Sashimi reads `/MediaSegments`, and falls back to Intro Skipper's own route on servers older than 10.10 | No skip buttons. Up Next still appears when the episode ends |
-| [Trailarr](https://github.com/nandyalu/trailarr) (separate app) | Downloads trailers next to your movies and shows | A trailer button, and the trailer playing behind the detail page (Settings, Play Trailers on Detail Pages) | No trailer button |
+| [Intro Skipper](https://github.com/intro-skipper/intro-skipper) plugin, by the Intro Skipper team (not Bitstorm Labs) | Finds intros and credits and writes them to Jellyfin's Media Segments | Skip Intro and Skip Credits buttons (Skip Credits goes straight to Up Next). Sashimi reads `/MediaSegments`, and falls back to Intro Skipper's own route on servers older than 10.10 | No skip buttons. Up Next still appears when the episode ends |
+| [Trailarr](https://github.com/nandyalu/trailarr), a separate app by nandyalu (not Bitstorm Labs) | Downloads trailers next to your movies and shows | A trailer button, and the trailer playing behind the detail page (Settings, Play Trailers on Detail Pages) | No trailer button |
 
 The Theme Songs plugin installs from a Jellyfin plugin repository. Add
 `https://raw.githubusercontent.com/bitstorm-labs/jellyfin-theme-songs/main/manifest.json`
@@ -119,7 +121,7 @@ Two more things on the server help:
 
 ### Dependencies
 
-- [Nuke](https://github.com/kean/Nuke) - Image loading and caching
+- [Nuke](https://github.com/kean/Nuke) - Image loading and caching (iPhone, iPad and Mac)
 
 ## Development
 
@@ -200,5 +202,29 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- [Jellyfin](https://jellyfin.org/) - The free software media system
-- [Nuke](https://github.com/kean/Nuke) - Image loading framework
+Sashimi is built on, and works with, other people's projects. Each one is a
+separate project under its own license. Sashimi is not affiliated with or
+endorsed by any of them.
+
+**The server**
+
+- [Jellyfin](https://jellyfin.org/) (the Jellyfin project, GPL-2.0). The free
+  software media system Sashimi is a client for.
+
+**Server add-ons Sashimi works with** (not made by Bitstorm Labs)
+
+- [Intro Skipper](https://github.com/intro-skipper/intro-skipper) (by the Intro
+  Skipper team, GPL-3.0). Detects intros and credits. Sashimi reads the
+  segments it writes to Jellyfin and shows the Skip buttons.
+- [Trailarr](https://github.com/nandyalu/trailarr) (by nandyalu, GPL-3.0).
+  Downloads trailers next to your media. Sashimi plays them behind the detail page.
+
+**Libraries and tools**
+
+- [Nuke](https://github.com/kean/Nuke) (kean, MIT). Image loading and
+  caching on iPhone, iPad and Mac.
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (yonaskolb, MIT). Generates
+  the Xcode project from `project.yml`.
+
+The TMDb and Rotten Tomatoes logos next to ratings belong to their owners. The
+ratings themselves come from your Jellyfin server.
