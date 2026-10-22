@@ -401,11 +401,13 @@ struct MainTabView: View {
             // changes on a real Apple TV and the selection landed wherever the
             // scroll animation stopped rather than where the viewer aimed.
             // If the nav ever does outgrow the rail, shrink it; do not scroll it.
-            VStack(alignment: .leading, spacing: 26) {
-                ForEach(navRows, id: \.id) { row in
-                    navButton(row.id, row.title, row.icon)
-                }
+            // RailNavStack does the shrinking: its gaps close up when the
+            // libraries outnumber the screen. The priority lets it take its
+            // full gaps before the spacers around it get anything.
+            RailNavStack(data: navRows) { row in
+                navButton(row.id, row.title, row.icon)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 16)
 
@@ -648,11 +650,14 @@ private extension MainTabView {
     }
 
     /// Nav rows follow the Home row order set in Settings, so the rail and the
-    /// screen it opens onto agree with each other. Home leads and Search and
-    /// Settings trail: they are destinations rather than rows, and have no place
-    /// in that ordering. RailOrder decides the middle.
+    /// screen it opens onto agree with each other. Home and Search lead and
+    /// Settings trails: they are destinations rather than rows, and have no
+    /// place in that ordering. RailOrder decides the middle.
     private var navRows: [NavRow] {
-        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
+        var rows: [NavRow] = [
+            NavRow(id: .home, title: "Home", icon: "house"),
+            NavRow(id: .search, title: "Search", icon: "magnifyingglass")
+        ]
 
         for destination in RailOrder.destinations(
             rowConfigs: homeSettings.rowConfigs,
@@ -667,7 +672,6 @@ private extension MainTabView {
             }
         }
 
-        rows.append(NavRow(id: .search, title: "Search", icon: "magnifyingglass"))
         rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
         return rows
     }
