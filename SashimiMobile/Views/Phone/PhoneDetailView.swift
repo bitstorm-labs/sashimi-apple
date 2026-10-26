@@ -173,6 +173,10 @@ struct PhoneDetailView: View {
         // Posted once the stopped report has been delivered: the player
         // closes before that (#591), and on a slow server the one-second
         // guess above reads the position from before this viewing.
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiPlayedStateDidChange)) { note in
+            guard let change = PlayedStateChange.from(note) else { return }
+            Task { await applyPlayedStateChange(change) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidStop)) { _ in
             Task { await refreshPlaybackState() }
         }
@@ -929,16 +933,60 @@ struct PhoneDetailView: View {
         }
     }
 
+    /// On a series page, a menu: the series and the season on screen (#749).
+    /// Elsewhere, the plain toggle.
+    @ViewBuilder
     private var watchedButton: some View {
-        Button {
-            Task { await toggleWatched() }
-        } label: {
-            Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
+        if isSeries, NetworkMonitor.shared.isConnected {
+            Menu {
+                ForEach(watchedScopeEntries, id: \.title) { entry in
+                    switch entry {
+                    case .series:
+                        Button {
+                            Task { await toggleWatched() }
+                        } label: {
+                            Label(entry.title, systemImage: entry.systemImage)
+                        }
+                    case .season(let season, let action):
+                        Section(season.name) {
+                            Button {
+                                seasonWatchRequest = SeasonWatchRequest(season: season, action: action)
+                            } label: {
+                                Label(entry.title, systemImage: entry.systemImage)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                watchedIcon
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
+            .accessibilityLabel("Watched")
+        } else {
+            Button {
+                Task { await toggleWatched() }
+            } label: {
+                watchedIcon
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
         }
-        .buttonStyle(.bordered)
-        .tint(.white)
+    }
+
+    private var watchedIcon: some View {
+        Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
+            .font(.system(size: 20))
+            .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
+    }
+
+    private var watchedScopeEntries: [WatchedScopeEntry] {
+        WatchedScopeEntry.entries(
+            isSeriesWatched: isWatched,
+            season: selectedSeason,
+            loadedEpisodes: isLoadingEpisodes ? nil : episodes,
+            isConnected: NetworkMonitor.shared.isConnected
+        )
     }
 
     // MARK: - Overview Section
@@ -1356,6 +1404,25 @@ struct PhoneDetailView: View {
         if isSeries || isSeason {
             await findNextEpisodeToPlay()
         }
+    }
+
+    /// A watched mark made anywhere (the episode page over this one, a context
+    /// menu, a season or series mark) shows on this page's episodes (#750).
+    private func applyPlayedStateChange(_ change: PlayedStateChange) async {
+        if change.itemId == item.id {
+            isWatched = change.played
+            if change.played { hasProgress = false }
+        }
+        let seasonId = selectedSeason?.id
+        guard NetworkMonitor.shared.isOnline,
+              let fresh = await change.refreshedEpisodes(
+                showing: episodes,
+                containerIds: [item.id, item.seriesId, item.seasonId],
+                seriesId: contentSeriesId,
+                seasonId: seasonId
+              ),
+              selectedSeason?.id == seasonId else { return }
+        episodes = fresh
     }
 
     private func toggleWatched() async {

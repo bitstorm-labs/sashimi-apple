@@ -208,6 +208,18 @@ extension MediaDetailView {
             }
 
             Menu {
+                // The season on screen, so a whole season can be marked without
+                // knowing about the season tab's long-press (#749).
+                if isSeries, let season = selectedSeason,
+                   SeasonWatchAction.canApply(to: season, isConnected: NetworkMonitor.shared.isConnected) {
+                    let action = seasonWatchAction(for: season)
+                    Button {
+                        seasonWatchRequest = SeasonWatchRequest(season: season, action: action)
+                    } label: {
+                        Label("\(action.title) \u{00B7} \(season.name)", systemImage: action.systemImage)
+                    }
+                }
+
                 Button {
                     Task { await toggleFavorite() }
                 } label: {
