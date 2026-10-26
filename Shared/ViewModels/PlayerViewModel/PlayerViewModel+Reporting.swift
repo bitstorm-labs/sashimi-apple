@@ -23,6 +23,11 @@ extension PlayerViewModel {
             playSessionID: playSessionId,
             playMethod: currentPlayMethod
         )
+        // Watching a series again brings it back to Continue Watching (#742).
+        // A channel is someone else's schedule, not the user picking the show.
+        if channelContext == nil, !isOfflinePlayback {
+            await ContinueWatchingHideStore.shared.playbackStarted(of: item, client: client)
+        }
     }
 
     func reportProgress() async {

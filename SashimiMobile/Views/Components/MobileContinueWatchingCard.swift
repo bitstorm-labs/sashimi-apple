@@ -258,6 +258,8 @@ struct MobileContinueWatchingRow<Destination: View>: View {
     let items: [BaseItemDto]
     let libraryNames: [String: String]?
     let cardWidth: CGFloat
+    /// "Remove from Continue Watching" in the card's context menu (#742).
+    let onRemove: ((BaseItemDto) -> Void)?
     let destination: (BaseItemDto) -> Destination
 
     init(
@@ -265,12 +267,14 @@ struct MobileContinueWatchingRow<Destination: View>: View {
         items: [BaseItemDto],
         libraryNames: [String: String]? = nil,
         cardWidth: CGFloat = 280,
+        onRemove: ((BaseItemDto) -> Void)? = nil,
         @ViewBuilder destination: @escaping (BaseItemDto) -> Destination
     ) {
         self.title = title
         self.items = items
         self.libraryNames = libraryNames
         self.cardWidth = cardWidth
+        self.onRemove = onRemove
         self.destination = destination
     }
 
@@ -298,6 +302,14 @@ struct MobileContinueWatchingRow<Destination: View>: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             ItemContextMenu(item: item)
+                            if let onRemove {
+                                Divider()
+                                Button(role: .destructive) {
+                                    withAnimation { onRemove(item) }
+                                } label: {
+                                    Label("Remove from Continue Watching", systemImage: "minus.circle")
+                                }
+                            }
                         }
                     }
                 }

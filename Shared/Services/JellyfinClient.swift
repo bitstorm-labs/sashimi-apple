@@ -2251,6 +2251,56 @@ actor JellyfinClient {
         _ = try await request(path: "/Users/\(userId)/FavoriteItems/\(itemId)", method: "DELETE")
     }
 
+    /// Set (or clear, with 0) the user's resume position, leaving watched
+    /// state alone. Jellyfin 10.9+ takes `/UserItems/{id}/UserData`; older
+    /// servers answer it 404 and take the per-user route instead.
+    func setPlaybackPosition(itemId: String, ticks: Int64) async throws {
+        guard let userId else { throw JellyfinError.notConfigured }
+        let body = try JSONEncoder().encode(["PlaybackPositionTicks": ticks])
+        do {
+            _ = try await request(
+                path: "/UserItems/\(itemId)/UserData",
+                method: "POST",
+                queryItems: [URLQueryItem(name: "userId", value: userId)],
+                body: body
+            )
+        } catch JellyfinError.httpError(statusCode: let status) where status == 404 || status == 405 {
+            _ = try await request(path: "/Users/\(userId)/Items/\(itemId)/UserData", method: "POST", body: body)
+        }
+    }
+
+    /// Ask the Continue Watching plugin to hide an episode's series from Next
+    /// Up. False when the server has no plugin, or one without the endpoint
+    /// (404): the caller then keeps the hide on this device.
+    func hideFromContinueWatching(episodeId: String) async throws -> Bool {
+        guard let userId else { throw JellyfinError.notConfigured }
+        do {
+            _ = try await request(
+                path: "/ContinueWatching/Hidden/\(episodeId)",
+                method: "POST",
+                queryItems: [URLQueryItem(name: "userId", value: userId)]
+            )
+            return true
+        } catch JellyfinError.httpError(statusCode: 404) {
+            return false
+        }
+    }
+
+    /// Undo `hideFromContinueWatching`. Idempotent; a server without the
+    /// endpoint has nothing to undo.
+    func unhideFromContinueWatching(episodeId: String) async throws {
+        guard let userId else { throw JellyfinError.notConfigured }
+        do {
+            _ = try await request(
+                path: "/ContinueWatching/Hidden/\(episodeId)",
+                method: "DELETE",
+                queryItems: [URLQueryItem(name: "userId", value: userId)]
+            )
+        } catch JellyfinError.httpError(statusCode: 404) {
+            return
+        }
+    }
+
     func deleteItem(itemId: String) async throws {
         _ = try await request(path: "/Items/\(itemId)", method: "DELETE")
     }

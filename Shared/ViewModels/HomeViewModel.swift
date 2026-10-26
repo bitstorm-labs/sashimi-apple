@@ -17,10 +17,16 @@ final class HomeViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: Error?
 
-    private let client: JellyfinClient
+    /// The outcome of the last "Remove from Continue Watching", for the
+    /// view's confirmation toast (and its Undo).
+    @Published var removalNotice: ContinueWatchingRemovalNotice?
 
-    init(client: JellyfinClient = .shared) {
+    private let client: JellyfinClient
+    private let hideStore: ContinueWatchingHideStore
+
+    init(client: JellyfinClient = .shared, hideStore: ContinueWatchingHideStore = .shared) {
         self.client = client
+        self.hideStore = hideStore
     }
 
     /// When Home last loaded successfully, so a return to Home (or to the
@@ -73,6 +79,21 @@ final class HomeViewModel: ObservableObject {
     /// The server's ranked row when it has the Continue Watching plugin, so every
     /// client shows the same order; otherwise the row is merged here.
     func loadContinueWatching() async throws -> [BaseItemDto] {
+        let row = try await loadUnfilteredContinueWatching()
+        // Series the user removed from the row (#742). The plugin already
+        // leaves out the ones it holds; applying the local list to its row
+        // too is harmless and covers hides made while it was missing.
+        guard let scope = await hideScope() else { return row }
+        let (visible, live) = ContinueWatchingRemoval.filter(row, hidden: hideStore.entries(scope: scope))
+        hideStore.replace(live, scope: scope)
+        return visible
+    }
+
+    private func hideScope() async -> String? {
+        ContinueWatchingHideStore.scope(serverURL: await client.currentServerURL, userId: await client.currentUserId)
+    }
+
+    private func loadUnfilteredContinueWatching() async throws -> [BaseItemDto] {
         if let row = try? await client.getContinueWatching() {
             return row.filter(\.isPlayable)
         }
@@ -407,5 +428,81 @@ private extension BaseItemDto {
         case .season, .series, .boxSet, .folder, .collectionFolder: return false
         default: return true
         }
+    }
+}
+
+// MARK: - Remove from Continue Watching (#742)
+
+extension HomeViewModel {
+    /// Take an item out of Continue Watching: the card goes at once, then the
+    /// server is told and the row reloads. See `ContinueWatchingRemoval`.
+    @discardableResult
+    func removeFromContinueWatching(_ item: BaseItemDto) async -> ContinueWatchingRemovalReceipt? {
+        continueWatchingItems.removeAll { $0.id == item.id }
+        let plan = ContinueWatchingRemoval.plan(for: item)
+        var receipt = ContinueWatchingRemovalReceipt(item: item, plan: plan, hiddenEntry: nil)
+
+        if plan.clearsResume {
+            do {
+                try await client.setPlaybackPosition(itemId: item.id, ticks: 0)
+            } catch {
+                logger.error("Clearing the resume position failed: \(error.localizedDescription, privacy: .public)")
+                // A movie has nothing else to do: report it and put it back.
+                guard plan.hide != nil else {
+                    removalNotice = .failed(item)
+                    await reloadContinueWatching()
+                    return nil
+                }
+                // Nothing was cleared, so Undo has no position to restore.
+                receipt = ContinueWatchingRemovalReceipt(
+                    item: item,
+                    plan: ContinueWatchingRemoval.Plan(resumeTicks: nil, hide: plan.hide),
+                    hiddenEntry: nil
+                )
+            }
+        }
+
+        if let hide = plan.hide, let scope = await hideScope() {
+            // Any failure other than "no such endpoint" still hides it here:
+            // what the user asked for holds on this device either way.
+            let onServer = (try? await client.hideFromContinueWatching(episodeId: hide.episodeId)) ?? false
+            let entry = HiddenContinueWatchingEntry(
+                seriesId: hide.seriesId,
+                episodeId: hide.episodeId,
+                hiddenAt: now(),
+                isOnServer: onServer
+            )
+            hideStore.add(entry, scope: scope)
+            receipt.hiddenEntry = entry
+        }
+
+        removalNotice = .removed(receipt)
+        await reloadContinueWatching()
+        return receipt
+    }
+
+    /// Put a removed item back: its resume position and its series.
+    func undoRemoval(_ receipt: ContinueWatchingRemovalReceipt) async {
+        if removalNotice?.receipt == receipt { removalNotice = nil }
+        if let entry = receipt.hiddenEntry, let scope = await hideScope() {
+            hideStore.remove(episodeId: entry.episodeId, scope: scope)
+            if entry.isOnServer {
+                try? await client.unhideFromContinueWatching(episodeId: entry.episodeId)
+            }
+        }
+        if let ticks = receipt.plan.resumeTicks {
+            try? await client.setPlaybackPosition(itemId: receipt.item.id, ticks: ticks)
+        }
+        await reloadContinueWatching()
+    }
+
+    /// Just the row, not the whole of Home.
+    private func reloadContinueWatching() async {
+        guard let row = try? await loadContinueWatching() else { return }
+        continueWatchingItems = row
+        #if os(tvOS)
+        saveContinueWatchingForTopShelf()
+        #endif
+        await loadContinueWatchingLibraryNames()
     }
 }

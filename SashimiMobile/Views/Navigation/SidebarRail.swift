@@ -181,6 +181,7 @@ struct SidebarRail<Footer: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isExpanded ? "Close menu" : "Open menu")
+        .help(isExpanded ? "Close menu" : "Open menu")
     }
 
     private func row(_ item: SidebarSelection) -> some View {
@@ -217,6 +218,8 @@ struct SidebarRail<Footer: View>: View {
         .opacity(isAvailable ? 1 : 0.35)
         // Collapsed rows are icon-only; name them for VoiceOver either way.
         .accessibilityLabel(item.displayName)
+        // Hover tooltip on the Mac / iPad pointer: the collapsed rail has no labels (#743).
+        .help(item.helpLabel)
         .accessibilityValue(item == .downloads ? downloadActivity.accessibilityValue ?? "" : "")
         .accessibilityHint(isAvailable ? "" : "Unavailable offline")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
