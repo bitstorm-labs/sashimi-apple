@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Whether a show is still being made, as a pill on the info row of the show's
+/// Whether a show is still being made, as a tag on the info row of the show's
 /// detail screen and those of its seasons and episodes. Jellyfin only knows
 /// Continuing / Ended (a canceled show reads Ended) plus Unreleased for one
 /// that hasn't aired.
@@ -44,7 +44,8 @@ enum SeriesStatus: Equatable {
     }
 }
 
-/// The status pill: the word in the status colour on a faint tint of it.
+/// The status tag: the word in the status colour on a faint tint of it, a
+/// rounded rectangle like the rating and quality tags beside it (#760).
 /// Sized by the caller so the tvOS row can render larger than the iOS one.
 struct SeriesStatusBadge: View {
     let status: SeriesStatus
@@ -56,7 +57,7 @@ struct SeriesStatusBadge: View {
             .foregroundStyle(status.color)
             .padding(.horizontal, fontSize * 0.75)
             .padding(.vertical, fontSize * 0.3)
-            .background(Capsule().fill(status.color.opacity(0.14)))
+            .background(RoundedRectangle(cornerRadius: 4).fill(status.color.opacity(0.14)))
             .accessibilityLabel("Status: \(status.label)")
     }
 }

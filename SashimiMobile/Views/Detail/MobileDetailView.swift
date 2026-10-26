@@ -45,13 +45,16 @@ struct MobileDetailView: View {
     @State private var isRefreshing = false
     @State private var adminError: String?
     @State private var seasonWatchRequest: SeasonWatchRequest?
+    /// The season page (#760): Go to Season, or a season tab tapped again.
+    @State private var seasonPage: BaseItemDto?
+    /// Go to Series in More pushes the series fetched with the page.
+    @State private var seriesPage: BaseItemDto?
     @State private var channelTarget: ChannelTarget?
     @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
 
     private var isSeries: Bool { item.type == .series }
-    private var isSeason: Bool { item.type == .season }
     private var isEpisode: Bool { item.type == .episode }
     private var isMovie: Bool { item.type == .movie }
     /// The series whose seasons/episodes this page lists (self for a series,
@@ -119,8 +122,6 @@ struct MobileDetailView: View {
                 VStack(alignment: .leading, spacing: MobileSpacing.xl) {
                     if isSeries {
                         seriesHeaderSection
-                    } else if isSeason {
-                        seasonHeaderSection
                     } else if isEpisode {
                         episodeHeaderSection
                     } else {
@@ -136,7 +137,7 @@ struct MobileDetailView: View {
                 // Seasons & Episodes — series AND episode detail both get the
                 // season-tab selector (phone parity); episodes title the list
                 // "More Episodes".
-                if isSeries || isSeason || isEpisode {
+                if isSeries || isEpisode {
                     seasonsSection
                 }
 
@@ -257,6 +258,12 @@ struct MobileDetailView: View {
         .sheet(item: $channelTarget) { target in
             MobileAddToChannelSheet(target: target)
         }
+        .navigationDestination(item: $seasonPage) { season in
+            MobileSeasonView(season: season, libraryName: libraryName, serverID: serverID, layout: .pad)
+        }
+        .navigationDestination(item: $seriesPage) { series in
+            AdaptiveDetailView(item: series, libraryName: libraryName, serverID: serverID)
+        }
         .task {
             if NetworkMonitor.shared.isOnline,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
@@ -324,9 +331,20 @@ struct MobileDetailView: View {
 
     // MARK: - Admin Menu (tvOS parity)
 
-    /// File Info / Refresh Metadata / Delete — online only.
-    private var adminMenu: some View {
+    /// More (online only): Go to Series / Season and Add to Channel first
+    /// (#760), then File Info / Refresh Metadata / Delete.
+    private var moreMenu: some View {
         Menu {
+            ForEach(menuEntries, id: \.title) { entry in
+                Button {
+                    open(entry)
+                } label: {
+                    Label(entry.title, systemImage: entry.systemImage)
+                }
+            }
+            if !menuEntries.isEmpty {
+                Divider()
+            }
             Button {
                 showingFileInfo = true
             } label: {
@@ -350,26 +368,38 @@ struct MobileDetailView: View {
         }
         .buttonStyle(.bordered)
         .tint(.white)
+        .accessibilityLabel("More")
     }
 
-    /// Add to Channel — the active server's administrators only, online, for
-    /// titles a channel can air (an episode or season adds its series).
-    @ViewBuilder
-    private var addToChannelButton: some View {
-        if NetworkMonitor.shared.isOnline,
-           session.canManageChannels(serverID: serverID),
-           let target = ChannelTarget(item: item) {
-            Button {
-                channelTarget = target
-            } label: {
-                Image(systemName: "rectangle.stack.badge.plus")
-                    .font(.system(size: 20))
-                    .foregroundStyle(MobileColors.textSecondary)
+    private var menuEntries: [DetailMenuEntry] {
+        DetailMenuEntry.entries(for: item, canManageChannels: session.canManageChannels(serverID: serverID))
+    }
+
+    private func open(_ entry: DetailMenuEntry) {
+        switch entry {
+        case .goToSeries(let seriesId):
+            // The page fetches its series as it loads; fetch it now if
+            // More was opened before that finished.
+            Task {
+                if navigateToSeriesItem == nil {
+                    navigateToSeriesItem = try? await JellyfinClient.shared.getItem(itemId: seriesId)
+                }
+                seriesPage = navigateToSeriesItem
             }
-            .buttonStyle(.bordered)
-            .tint(.white)
-            .accessibilityLabel("Add to Channel")
+        case .goToSeason(let seasonId, _):
+            if let season = selectedSeason, season.id == seasonId {
+                seasonPage = season
+            } else {
+                Task { seasonPage = try? await JellyfinClient.shared.getItem(itemId: seasonId) }
+            }
+        case .addToChannel(let target):
+            channelTarget = target
         }
+    }
+
+    private func openSeasonPage(_ season: BaseItemDto) {
+        guard SeasonPageText.canOpen(season, isConnected: NetworkMonitor.shared.isConnected) else { return }
+        seasonPage = season
     }
 
     private func refreshMetadata() async {
@@ -459,41 +489,6 @@ struct MobileDetailView: View {
             .foregroundStyle(MobileColors.textSecondary)
 
             // Action buttons
-            seriesActionButtons
-                // A touch more air: the buttons are their own row under the metadata.
-                .padding(.top, MobileSpacing.xs)
-        }
-    }
-
-    /// A season can be opened directly by Siri. Keep it in the same detail
-    /// surface as a series so the user sees the season's episodes and the
-    /// normal play controls instead of an empty movie-style page.
-    private var seasonHeaderSection: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text(item.name)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(MobileColors.textPrimary)
-
-            WrappingHStack(spacing: MobileSpacing.sm) {
-                if let seriesName = item.seriesName {
-                    Text(seriesName)
-                }
-                if let year = item.productionYear {
-                    // Kept together so a wrap never strands the bullet.
-                    HStack(spacing: MobileSpacing.sm) {
-                        if item.seriesName != nil {
-                            Text("•")
-                        }
-                        Text(String(year))
-                    }
-                }
-                if let status = SeriesStatus(item: item, seriesStatus: seriesStatus) {
-                    SeriesStatusBadge(status: status)
-                }
-            }
-            .font(MobileTypography.caption)
-            .foregroundStyle(MobileColors.textSecondary)
-
             seriesActionButtons
                 // A touch more air: the buttons are their own row under the metadata.
                 .padding(.top, MobileSpacing.xs)
@@ -894,10 +889,8 @@ struct MobileDetailView: View {
                 )
             }
 
-            addToChannelButton
-
             if NetworkMonitor.shared.isOnline {
-                adminMenu
+                moreMenu
             }
 
             Spacer()
@@ -932,27 +925,7 @@ struct MobileDetailView: View {
 
             if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: true)
-            }
-
-            if NetworkMonitor.shared.isOnline, isEpisode, item.seriesId != nil {
-                NavigationLink {
-                    if let seriesItem = navigateToSeriesItem {
-                        AdaptiveDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
-                    } else {
-                        ProgressView()
-                    }
-                } label: {
-                    Label("Series", systemImage: "tv")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-            }
-
-            addToChannelButton
-
-            if NetworkMonitor.shared.isOnline {
-                adminMenu
+                moreMenu
             }
 
             Spacer()
@@ -983,8 +956,6 @@ struct MobileDetailView: View {
                 .tint(.white)
             }
 
-            watchedButton
-
             if (item.localTrailerCount ?? 0) > 0 {
                 Button {
                     Task { await playLocalTrailer() }
@@ -997,10 +968,11 @@ struct MobileDetailView: View {
                 .tint(.white)
             }
 
+            watchedButton
+
             if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
-                addToChannelButton
-                adminMenu
+                moreMenu
             }
 
             Spacer()
@@ -1019,60 +991,18 @@ struct MobileDetailView: View {
         }
     }
 
-    /// On a series page, a menu: the series and the season on screen (#749).
-    /// Elsewhere, the plain toggle.
-    @ViewBuilder
+    /// Watched: a plain toggle for this item only (#760).
     private var watchedButton: some View {
-        if isSeries, NetworkMonitor.shared.isConnected {
-            Menu {
-                ForEach(watchedScopeEntries, id: \.title) { entry in
-                    switch entry {
-                    case .series:
-                        Button {
-                            Task { await toggleWatched() }
-                        } label: {
-                            Label(entry.title, systemImage: entry.systemImage)
-                        }
-                    case .season(let season, let action):
-                        Section(season.name) {
-                            Button {
-                                seasonWatchRequest = SeasonWatchRequest(season: season, action: action)
-                            } label: {
-                                Label(entry.title, systemImage: entry.systemImage)
-                            }
-                        }
-                    }
-                }
-            } label: {
-                watchedIcon
-            }
-            .buttonStyle(.bordered)
-            .tint(.white)
-            .accessibilityLabel("Watched")
-        } else {
-            Button {
-                Task { await toggleWatched() }
-            } label: {
-                watchedIcon
-            }
-            .buttonStyle(.bordered)
-            .tint(.white)
+        Button {
+            Task { await toggleWatched() }
+        } label: {
+            Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                .font(.system(size: 20))
+                .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
         }
-    }
-
-    private var watchedIcon: some View {
-        Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
-            .font(.system(size: 20))
-            .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
-    }
-
-    private var watchedScopeEntries: [WatchedScopeEntry] {
-        WatchedScopeEntry.entries(
-            isSeriesWatched: isWatched,
-            season: selectedSeason,
-            loadedEpisodes: isLoadingEpisodes ? nil : episodes,
-            isConnected: NetworkMonitor.shared.isConnected
-        )
+        .buttonStyle(.bordered)
+        .tint(.white)
+        .accessibilityLabel(isWatched ? "Watched" : "Mark Watched")
     }
 
     // MARK: - Seasons Section
@@ -1086,6 +1016,11 @@ struct MobileDetailView: View {
                     HStack(spacing: MobileSpacing.sm) {
                         ForEach(seasons) { season in
                             Button {
+                                // Tapping the season already shown opens its page (#760).
+                                if selectedSeason?.id == season.id {
+                                    openSeasonPage(season)
+                                    return
+                                }
                                 selectedSeason = season
                                 Task {
                                     await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
@@ -1099,11 +1034,13 @@ struct MobileDetailView: View {
                                     .foregroundStyle(selectedSeason?.id == season.id ? .black : .white)
                                     .clipShape(Capsule())
                             }
-                            .seasonWatchMenu(
+                            .seasonTabMenu(
                                 for: season,
                                 action: seasonWatchAction(for: season),
                                 request: $seasonWatchRequest
-                            )
+                            ) {
+                                openSeasonPage(season)
+                            }
                         }
                     }
                     .padding(.horizontal, MobileSpacing.md)
@@ -1195,15 +1132,13 @@ struct MobileDetailView: View {
     private func loadContent() async {
         if isSeries {
             await loadSeriesContent()
-        } else if isSeason {
-            await loadSeasonContent()
         } else if isEpisode {
             await loadEpisodeContent()
         }
 
         guard NetworkMonitor.shared.isOnline else { return }
 
-        if !isSeries && !isSeason {
+        if !isSeries {
             await loadMediaInfo()
         }
 
@@ -1248,21 +1183,6 @@ struct MobileDetailView: View {
         } catch {
             await loadOfflineSeriesContent()
         }
-    }
-
-    private func loadSeasonContent() async {
-        guard let seriesID = item.seriesId ?? item.parentId else { return }
-
-        let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
-        seriesCommunityRating = series?.communityRating
-        seriesCriticRating = series?.criticRating
-        seriesStatus = series?.status
-        seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
-
-        let selected = seasons.first { $0.id == item.id } ?? item
-        selectedSeason = selected
-        await loadEpisodesForSeason(seriesId: seriesID, season: selected)
-        await findNextEpisodeToPlay(preferredSeasonID: selected.id)
     }
 
     private func loadOfflineSeriesContent() async {
@@ -1408,8 +1328,8 @@ struct MobileDetailView: View {
         if let season = selectedSeason {
             await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
         }
-        if isSeries || isSeason {
-            await findNextEpisodeToPlay(preferredSeasonID: isSeason ? item.id : nil)
+        if isSeries {
+            await findNextEpisodeToPlay()
         }
     }
 
@@ -1418,7 +1338,7 @@ struct MobileDetailView: View {
         isWatched = freshItem.userData?.played ?? false
         hasProgress = freshItem.progressPercent > 0
         // For series, also refresh next-up episode
-        if isSeries || isSeason {
+        if isSeries {
             await findNextEpisodeToPlay()
         }
     }

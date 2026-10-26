@@ -276,7 +276,7 @@ struct KeepNextEpisodesMenu: View {
 // MARK: - Series page menu
 
 /// The download menu on a series or season page: whole-series and
-/// selected-season bulk actions.
+/// selected-season bulk actions (the season page shows only the season's).
 struct BulkDownloadMenu: View {
     /// Episodes of the season currently shown on the page.
     let seasonEpisodes: [BaseItemDto]
@@ -286,8 +286,10 @@ struct BulkDownloadMenu: View {
     /// Nil hides "Download Unwatched" and "Download Series".
     var seriesId: String?
     var serverID: String?
-    /// Icon-only label (iPhone) instead of an icon and "Download" (iPad).
+    /// Icon-only label (iPhone) instead of an icon and `title` (iPad).
     var compact = false
+    /// The label's text: "Download", or "Download Season" on a season page.
+    var title = "Download"
 
     @StateObject private var flow = BulkDownloadFlow()
     @State private var showingNextN = false
@@ -352,7 +354,7 @@ struct BulkDownloadMenu: View {
             Image(systemName: "arrow.down.circle")
                 .font(.system(size: 20))
         } else {
-            Label("Download", systemImage: "arrow.down.circle")
+            Label(title, systemImage: "arrow.down.circle")
                 .font(.system(size: 14, weight: .semibold))
         }
     }

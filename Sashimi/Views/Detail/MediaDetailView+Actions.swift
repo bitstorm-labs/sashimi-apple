@@ -48,7 +48,7 @@ extension MediaDetailView {
     }
 
     /// Optimistic favorite toggle (reverts on failure), matching toggleWatched.
-    private func toggleFavorite() async {
+    func toggleFavorite() async {
         let newState = !isFavorite
         isFavorite = newState
         do {
@@ -66,7 +66,7 @@ extension MediaDetailView {
         }
     }
 
-    private func refreshMetadata() async {
+    func refreshMetadata() async {
         isRefreshing = true
         do {
             // Refresh metadata on server
@@ -110,10 +110,70 @@ extension MediaDetailView {
     }
 
     // MARK: - Action Buttons
+
+    /// Play, Start Over, Shuffle, Trailer, Watched, More (#760). Series and
+    /// Season navigation and Add to Channel are in More.
     var actionButtonsRow: some View {
         HStack(spacing: 30) {
-            // Series: show play button for next episode
-            if isSeries, let nextEp = nextEpisodeToPlay {
+            ForEach(mainRowActions, id: \.self) { action in
+                actionButton(action)
+            }
+            Spacer()
+        }
+    }
+
+    private var mainRowActions: [DetailRowAction] {
+        DetailRowAction.mainRow(
+            for: item.type,
+            hasProgress: isSeries ? (nextEpisodeToPlay?.userData?.playbackPositionTicks ?? 0) > 0 : hasProgress,
+            hasTrailer: (item.localTrailerCount ?? 0) > 0,
+            supportsDownloads: false
+        )
+    }
+
+    @ViewBuilder
+    private func actionButton(_ action: DetailRowAction) -> some View {
+        switch action {
+        case .play:
+            playButton
+        case .startOver:
+            ActionButton(title: "Start Over", icon: "arrow.counterclockwise", isPrimary: false) {
+                // A series starts its next episode over.
+                selectedEpisode = isSeries ? nextEpisodeToPlay : nil
+                startFromBeginning = true
+                DetailAmbience.stopForPlayback()
+                showingPlayer = true
+            }
+        case .shuffle:
+            ActionButton(title: "Shuffle", icon: "shuffle", isPrimary: false) {
+                Task { await shuffleEpisode() }
+            }
+        case .trailer:
+            // Only when a local trailer exists (Trailarr), played inline. No
+            // remote (YouTube) hand-off, matching Roku.
+            ActionButton(title: "Trailer", icon: "film", isPrimary: false) {
+                Task { await playLocalTrailer() }
+            }
+        case .watched:
+            ActionButton(
+                title: "Watched",
+                icon: isWatched ? "checkmark.circle.fill" : "checkmark.circle",
+                isActive: isWatched
+            ) {
+                Task { await toggleWatched() }
+            }
+        case .download:
+            EmptyView()
+        case .more:
+            moreMenu
+        }
+    }
+
+    /// A series plays its next episode; anything else plays itself.
+    @ViewBuilder
+    private var playButton: some View {
+        if isSeries {
+            if let nextEp = nextEpisodeToPlay {
                 let epHasProgress = (nextEp.userData?.playbackPositionTicks ?? 0) > 0
                 let seasonNum = nextEp.parentIndexNumber ?? 1
                 let epNum = nextEp.indexNumber ?? 1
@@ -128,157 +188,12 @@ extension MediaDetailView {
                     showingPlayer = true
                 }
             }
-
-            // Series: shuffle a random episode
-            if isSeries {
-                ActionButton(
-                    title: "Shuffle",
-                    icon: "shuffle",
-                    isPrimary: false
-                ) {
-                    Task { await shuffleEpisode() }
-                }
+        } else {
+            ActionButton(title: hasProgress ? "Resume" : "Play", icon: "play.fill", isPrimary: true) {
+                startFromBeginning = false
+                DetailAmbience.stopForPlayback()
+                showingPlayer = true
             }
-
-            // Non-series: show regular play buttons
-            if !isSeries {
-                ActionButton(
-                    title: hasProgress ? "Resume" : "Play",
-                    icon: "play.fill",
-                    isPrimary: true
-                ) {
-                    startFromBeginning = false
-                    DetailAmbience.stopForPlayback()
-                    showingPlayer = true
-                }
-
-                if hasProgress {
-                    ActionButton(
-                        title: "Start Over",
-                        icon: "arrow.counterclockwise",
-                        isPrimary: false
-                    ) {
-                        startFromBeginning = true
-                        DetailAmbience.stopForPlayback()
-                        showingPlayer = true
-                    }
-                }
-            }
-
-            // Trailer button — only when a local trailer exists (Trailarr),
-            // played inline. No remote (YouTube) hand-off, matching Roku.
-            if !isEpisode, (item.localTrailerCount ?? 0) > 0 {
-                ActionButton(
-                    title: "Trailer",
-                    icon: "film",
-                    isPrimary: false
-                ) {
-                    Task { await playLocalTrailer() }
-                }
-            }
-
-            ActionButton(
-                title: "Watched",
-                icon: isWatched ? "checkmark.circle.fill" : "checkmark.circle",
-                isActive: isWatched
-            ) {
-                Task { await toggleWatched() }
-            }
-
-            // Episode: show Series button
-            if isEpisode, let seriesId = item.seriesId {
-                ActionButton(
-                    title: "Series",
-                    icon: "tv",
-                    isPrimary: false
-                ) {
-                    navigateToSeries(seriesId: seriesId)
-                }
-            }
-
-            // Admins: put this title (an episode's series) on a SashimiTV channel.
-            if session.canManageChannels(serverID: serverID), let target = ChannelTarget(item: item) {
-                ActionButton(
-                    title: "Add to Channel",
-                    icon: "rectangle.stack.badge.plus",
-                    isPrimary: false
-                ) {
-                    channelTarget = target
-                }
-            }
-
-            Menu {
-                // The season on screen, so a whole season can be marked without
-                // knowing about the season tab's long-press (#749).
-                if isSeries, let season = selectedSeason,
-                   SeasonWatchAction.canApply(to: season, isConnected: NetworkMonitor.shared.isConnected) {
-                    let action = seasonWatchAction(for: season)
-                    Button {
-                        seasonWatchRequest = SeasonWatchRequest(season: season, action: action)
-                    } label: {
-                        Label("\(action.title) \u{00B7} \(season.name)", systemImage: action.systemImage)
-                    }
-                }
-
-                Button {
-                    Task { await toggleFavorite() }
-                } label: {
-                    Label(
-                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                        systemImage: isFavorite ? "heart.fill" : "heart"
-                    )
-                }
-
-                if item.overview?.isEmpty == false {
-                    Button {
-                        showingFullOverview = true
-                    } label: {
-                        Label("Full Overview", systemImage: "text.alignleft")
-                    }
-                }
-
-                Button {
-                    showingFileInfo = true
-                } label: {
-                    Label("File Info", systemImage: "info.circle")
-                }
-
-                Button {
-                    Task { await refreshMetadata() }
-                } label: {
-                    Label(isRefreshing ? "Refreshing..." : "Refresh Metadata", systemImage: "arrow.clockwise")
-                }
-                .disabled(isRefreshing)
-
-                Button(role: .destructive) {
-                    showingDeleteConfirm = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "ellipsis.circle")
-                    Text("More")
-                }
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .foregroundStyle(.white)
-                .background(SashimiTheme.cardBackground)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(isMoreButtonFocused ? SashimiTheme.focus : .clear, lineWidth: 3)
-                )
-                .shadow(color: isMoreButtonFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
-                .scaleEffect(isMoreButtonFocused ? 1.05 : 1.0)
-                .animation(.spring(response: 0.3), value: isMoreButtonFocused)
-            }
-            .focused($isMoreButtonFocused)
-            .menuStyle(.borderlessButton)
-
-            Spacer()
         }
     }
 
@@ -300,17 +215,6 @@ extension MediaDetailView {
             isWatched = !newState
             hasProgress = previousProgress
             ToastManager.shared.show("Failed to update watched status")
-        }
-    }
-
-    private func navigateToSeries(seriesId: String) {
-        Task {
-            do {
-                let series = try await JellyfinClient.shared.getItem(itemId: seriesId)
-                showingSeriesDetail = series
-            } catch {
-                ToastManager.shared.show("Failed to load series")
-            }
         }
     }
 }

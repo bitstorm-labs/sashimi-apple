@@ -31,16 +31,23 @@ extension View {
 }
 
 extension View {
-    /// Long-press (tvOS) / context-menu (iOS) entry point on a season tab.
+    /// Long-press (tvOS) / context-menu (iOS) entry point on a season tab:
+    /// Open Season (the season page, #760) and the season-wide watched mark.
     /// Offline, synthetic seasons built from downloads have no server id, so
     /// they get no menu.
     @MainActor
-    func seasonWatchMenu(
+    func seasonTabMenu(
         for season: BaseItemDto,
         action: SeasonWatchAction,
-        request: Binding<SeasonWatchRequest?>
+        request: Binding<SeasonWatchRequest?>,
+        openSeason: @escaping () -> Void
     ) -> some View {
         contextMenu {
+            if SeasonPageText.canOpen(season, isConnected: NetworkMonitor.shared.isConnected) {
+                Button(action: openSeason) {
+                    Label("Open Season", systemImage: "rectangle.stack")
+                }
+            }
             if SeasonWatchAction.canApply(to: season, isConnected: NetworkMonitor.shared.isConnected) {
                 Button {
                     request.wrappedValue = SeasonWatchRequest(season: season, action: action)
