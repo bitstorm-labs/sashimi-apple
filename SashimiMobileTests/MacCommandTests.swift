@@ -308,6 +308,30 @@ final class ItemContextActionTests: XCTestCase {
         )
     }
 
+    /// An episode of a series gets the episode download menu (#744), even when
+    /// it is downloaded: the bulk entries still apply.
+    func testAnEpisodeOfASeriesOffersTheEpisodeDownloadMenu() throws {
+        XCTAssertEqual(
+            ItemContextAction.available(
+                for: try item("Episode", seriesId: "s"), isOnline: true, canManageChannels: false, hasDownload: false
+            ),
+            [.play, .episodeDownloads]
+        )
+        XCTAssertEqual(
+            ItemContextAction.available(
+                for: try item("Episode", seriesId: "s"), isOnline: true, canManageChannels: false, hasDownload: true
+            ),
+            [.play, .episodeDownloads]
+        )
+        XCTAssertEqual(
+            ItemContextAction.available(
+                for: try item("Episode", seriesId: "s"), isOnline: false, canManageChannels: false, hasDownload: true
+            ),
+            [.play],
+            "offline: no bulk entries, they fetch the series"
+        )
+    }
+
     func testOfflineOnlyADownloadPlays() throws {
         XCTAssertEqual(
             ItemContextAction.available(for: try item("Movie"), isOnline: false, canManageChannels: true, hasDownload: true),

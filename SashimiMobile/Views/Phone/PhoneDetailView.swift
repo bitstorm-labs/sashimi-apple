@@ -862,7 +862,7 @@ struct PhoneDetailView: View {
             watchedButton
 
             if NetworkMonitor.shared.isOnline {
-                DownloadButton(item: item, serverID: serverID, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: true)
 
                 overflowMenu {
                     if hasProgress {
@@ -1101,6 +1101,11 @@ struct PhoneDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    // Long-press: the episode download menu (#744) and the
+                    // usual item actions. The menu acts on the active server.
+                    if serverID == nil { ItemContextMenu(item: episode) }
+                }
             }
         }
     }

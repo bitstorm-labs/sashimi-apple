@@ -7,6 +7,10 @@ import SwiftUI
 enum ItemContextAction: Equatable {
     case play
     case download
+    /// An episode of a series: the episode download menu (#744) — this
+    /// episode (when not downloaded yet), this and the next N, the unwatched
+    /// scopes and Keep Next. Replaces the plain Download.
+    case episodeDownloads
     case addToChannel
 
     static func available(
@@ -23,7 +27,9 @@ enum ItemContextAction: Equatable {
         default:
             break
         }
-        if isOnline, !hasDownload, [.movie, .episode, .video].contains(item.type) {
+        if isOnline, item.type == .episode, item.seriesId != nil {
+            actions.append(.episodeDownloads)
+        } else if isOnline, !hasDownload, [.movie, .episode, .video].contains(item.type) {
             actions.append(.download)
         }
         if isOnline, canManageChannels, ChannelTarget(item: item) != nil {
@@ -41,6 +47,20 @@ final class ItemActionRouter: ObservableObject {
 
     @Published var playItem: BaseItemDto?
     @Published var channelTarget: ChannelTarget?
+    /// A context menu's bulk episode download, run by the app root's
+    /// `BulkDownloadFlow` (a context menu can't present its own dialogs).
+    @Published var episodeDownload: EpisodeDownloadRequest?
+}
+
+struct EpisodeDownloadRequest: Identifiable {
+    enum Action: Equatable {
+        case scope(EpisodeDownloadScope)
+        case keepNext(Int)
+    }
+
+    let id = UUID()
+    let episode: BaseItemDto
+    let action: Action
 }
 
 // MARK: - Shared Context Menu
@@ -109,6 +129,10 @@ struct ItemContextMenu: View {
             }
         }
 
+        if actions.contains(.episodeDownloads) {
+            episodeDownloadMenu(hasDownload: DownloadManager.shared.downloadStatus(for: item.id) != nil)
+        }
+
         if actions.contains(.addToChannel), let target = ChannelTarget(item: item) {
             Button {
                 ItemActionRouter.shared.channelTarget = target
@@ -116,5 +140,62 @@ struct ItemContextMenu: View {
                 Label("Add to Channel…", systemImage: "rectangle.stack.badge.plus")
             }
         }
+    }
+
+    /// Same entries as the episode page's download menu.
+    private func episodeDownloadMenu(hasDownload: Bool) -> some View {
+        Menu {
+            Section(EpisodeDownloadPlanner.menuTitle(item)) {
+                if !hasDownload {
+                    Menu {
+                        ForEach(DownloadQuality.allCases.filter { $0 != .original }) { quality in
+                            Button(quality.displayName) {
+                                DownloadManager.shared.enqueueDownload(item: item, quality: quality)
+                            }
+                        }
+                    } label: {
+                        Label("This Episode", systemImage: "arrow.down.circle")
+                    }
+                }
+                Menu {
+                    ForEach(EpisodeDownloadPlanner.nextCounts, id: \.self) { count in
+                        Button(EpisodeDownloadPlanner.nextCountTitle(count)) { request(.scope(.thisAndNext(count))) }
+                    }
+                } label: {
+                    Label("This and the Next\u{2026}", systemImage: "arrow.down.to.line")
+                }
+            }
+            Section {
+                Button {
+                    request(.scope(.unwatchedInSeason))
+                } label: {
+                    Label(EpisodeDownloadPlanner.seasonTitle(item), systemImage: "arrow.down.circle")
+                }
+                Button {
+                    request(.scope(.unwatchedInSeries))
+                } label: {
+                    Label("Unwatched in Series", systemImage: "arrow.down.circle")
+                }
+                if let seriesId = item.seriesId {
+                    let current = KeepNextEpisodesStore.shared.count(
+                        serverID: SessionManager.shared.activeServerId, seriesId: seriesId
+                    )
+                    Menu {
+                        KeepNextEpisodesPicker(selection: current) { request(.keepNext($0)) }
+                    } label: {
+                        Label(
+                            current > 0 ? "Keep Next Episodes Downloaded: \(current)" : "Keep Next Episodes Downloaded",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                }
+            }
+        } label: {
+            Label("Download", systemImage: "arrow.down.circle")
+        }
+    }
+
+    private func request(_ action: EpisodeDownloadRequest.Action) {
+        ItemActionRouter.shared.episodeDownload = EpisodeDownloadRequest(episode: item, action: action)
     }
 }

@@ -6,7 +6,13 @@ struct DownloadButton: View {
     var serverID: String?
     let quality: Binding<DownloadQuality>?
     var showQualityPicker: Bool = true
+    /// An episode's button opens the episode download menu (#744) instead of
+    /// acting straight away: the single-episode action, then "This and the
+    /// Next…", the unwatched scopes and Keep Next. Offline it stays the plain
+    /// single-episode button, since the bulk entries fetch the series.
+    var offersBulkOptions: Bool = false
 
+    @StateObject private var bulkFlow = BulkDownloadFlow()
     @State private var downloadState: DownloadButtonState = .notDownloaded
     /// The record's saved fraction, used until the manager publishes a live one.
     @State private var savedProgress: Double = 0
@@ -39,12 +45,12 @@ struct DownloadButton: View {
         "\(serverID ?? "legacy"):\(item.id)"
     }
 
+    private var showsBulkMenu: Bool {
+        offersBulkOptions && item.type == .episode && item.seriesId != nil && NetworkMonitor.shared.isOnline
+    }
+
     var body: some View {
-        Button {
-            handleTap()
-        } label: {
-            label
-        }
+        control
         .buttonStyle(.bordered)
         .tint(.white)
         .onAppear { refreshState() }
@@ -66,12 +72,73 @@ struct DownloadButton: View {
                 Text("Original isn't available — this file's format can't play offline on this device.")
             }
         }
+        .bulkDownloadDialogs(bulkFlow)
+        .onAppear { bulkFlow.serverID = serverID }
         .confirmationDialog("Remove Download?", isPresented: $showingDeleteConfirmation) {
             Button("Remove Download", role: .destructive) {
                 Task { await downloadManager.deleteDownload(itemId: item.id, serverID: serverID) }
             }
         } message: {
             Text("This will remove the downloaded file from your device.")
+        }
+    }
+
+    @ViewBuilder
+    private var control: some View {
+        if showsBulkMenu {
+            Menu {
+                Section(EpisodeDownloadPlanner.menuTitle(item)) {
+                    singleEpisodeAction
+                    EpisodeBulkDownloadItems(episode: item, flow: bulkFlow)
+                }
+            } label: {
+                label
+            }
+            .disabled(bulkFlow.isLoading)
+        } else {
+            Button {
+                handleTap()
+            } label: {
+                label
+            }
+        }
+    }
+
+    /// The menu's first entry: what the plain button's tap does, by state.
+    @ViewBuilder
+    private var singleEpisodeAction: some View {
+        switch downloadState {
+        case .notDownloaded:
+            Button {
+                // Let the menu finish closing before the quality dialog.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    handleTap()
+                }
+            } label: {
+                Label("This Episode", systemImage: "arrow.down.circle")
+            }
+        case .queued, .preparing, .downloading:
+            Button(role: .destructive) {
+                handleTap()
+            } label: {
+                Label("Cancel Download", systemImage: "xmark.circle")
+            }
+        case .completed:
+            Button(role: .destructive) {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    handleTap()
+                }
+            } label: {
+                Label("Remove Download", systemImage: "trash")
+            }
+        case .failed:
+            Button {
+                handleTap()
+            } label: {
+                Label("Retry Download", systemImage: "arrow.clockwise")
+            }
         }
     }
 
