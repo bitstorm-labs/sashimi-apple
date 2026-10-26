@@ -150,9 +150,7 @@ struct OfflineShowView: View {
                     }
                 }
                 .clipped()
-
-            LinearGradient(colors: [.clear, MobileColors.background], startPoint: .top, endPoint: .bottom)
-                .frame(height: 80)
+                .backdropBottomFade()
         }
     }
 
@@ -333,7 +331,7 @@ struct OfflineShowView: View {
 // MARK: - Pieces
 
 /// MobileDetailView's backdrop: the art at the top right, faded into the
-/// page on its left and lower edges.
+/// page on its left and lower edges (`BackdropFade`).
 private struct OfflineShowPadBackdrop: View {
     let image: Image?
 
@@ -348,20 +346,7 @@ private struct OfflineShowPadBackdrop: View {
                         image
                             .resizable().scaledToFit()
                             .frame(width: geometry.size.width * 0.55)
-                            .mask(
-                                LinearGradient(
-                                    colors: [.clear, .white, .white, .clear],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                                .mask(
-                                    LinearGradient(
-                                        colors: [.white, .white, .white, .clear],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                            )
+                            .backdropFade()
                             .padding(.trailing, 20)
                     }
                 }
@@ -374,17 +359,6 @@ private struct OfflineShowPadBackdrop: View {
                 )
                 .frame(height: 140)
                 .frame(maxHeight: .infinity, alignment: .top)
-
-                LinearGradient(
-                    colors: [
-                        MobileColors.background.opacity(0.0),
-                        MobileColors.background.opacity(0.1),
-                        MobileColors.background.opacity(0.5),
-                        MobileColors.background
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
             }
         }
         .ignoresSafeArea()

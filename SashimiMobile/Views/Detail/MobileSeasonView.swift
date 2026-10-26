@@ -3,7 +3,8 @@ import SwiftUI
 /// One season of a show (#760) on iPhone, iPad and Mac: poster, the show's
 /// name, "Season N · X episodes · Y of X watched", Play for the next
 /// unwatched episode, the season-wide watched mark, Download Season, Series,
-/// and the season's episodes in the series page's card style.
+/// and the season's episodes in the series page's card style, under the
+/// series' backdrop and hero trailer (#764).
 struct MobileSeasonView: View {
     var libraryName: String?
     var serverID: String?
@@ -30,16 +31,40 @@ struct MobileSeasonView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MobileSpacing.xl) {
-                header
-                episodesSection
+            VStack(alignment: .leading, spacing: 0) {
+                // iPhone: the series' backdrop and trailer across the top, as
+                // on the series page.
+                if layout == .phone {
+                    PhoneHeroBanner(serverID: serverID, trailerItem: model.season) { width in
+                        heroURL(maxWidth: ImageSizing.backdropPixelWidth(points: width >= 1 ? width : 440))
+                            .map { SashimiImagePipeline.request(url: $0, serverID: serverID) }
+                    }
+                    .clipped()
+                }
+                VStack(alignment: .leading, spacing: MobileSpacing.xl) {
+                    header
+                    episodesSection
+                }
+                .padding(MobileSpacing.md)
             }
-            .padding(MobileSpacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(MobileColors.background)
+        .clipped()
+        // iPad and Mac: the series' backdrop and trailer top-right, fading
+        // into the page, as on the series page (#764).
+        .background {
+            if layout == .pad {
+                PadDetailHeroBackground(serverID: serverID, trailerItem: model.season) { maxWidth in
+                    heroURL(maxWidth: maxWidth)
+                }
+            } else {
+                MobileColors.background
+            }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .themeSong(for: model.season)
         .fullScreenPlayer(item: $playingItem, serverID: serverID)
         .fullScreenPlayer(item: $startOverItem, serverID: serverID, startFromBeginning: true)
         .sheet(item: $showingEpisode) { episode in
@@ -69,6 +94,21 @@ struct MobileSeasonView: View {
             guard let change = PlayedStateChange.from(note) else { return }
             Task { await model.apply(change) }
         }
+    }
+
+    /// The series' backdrop (a YouTube channel's banner): seasons have none.
+    private func heroURL(maxWidth: Int) -> URL? {
+        let hero = DetailHero.mobileImage(for: model.season, isYouTubeSeries: isYouTube)
+        let serverURL = serverID.flatMap { id in SessionManager.shared.servers.first { $0.id == id }?.url }
+            ?? (serverID == nil ? SessionManager.shared.serverURL : nil)
+        guard let serverURL else { return nil }
+        return JellyfinClient.shared.syncImageURL(
+            itemId: hero.itemId,
+            imageType: hero.type,
+            maxWidth: hero.type == "Banner" ? 1920 : maxWidth,
+            tag: model.season.imageTag(for: hero.type, itemId: hero.itemId),
+            serverURL: serverURL
+        )
     }
 
     // MARK: - Header

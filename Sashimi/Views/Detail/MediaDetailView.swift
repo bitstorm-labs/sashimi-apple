@@ -99,35 +99,17 @@ struct MediaDetailView: View {
         return false
     }
 
-    // For backdrop: episodes use their own thumbnail, others use backdrop
-    private var backdropId: String {
-        return item.id
-    }
-
-    // Episodes use Primary (thumbnail), others use Backdrop
-    // YouTube channels from Pinchflat have Banner images instead of Backdrop
-    private var backdropImageType: String {
-        if isEpisode || isVideo {
-            return "Primary"
-        }
-        if isYouTubeSeriesStyle {
-            return "Banner"
-        }
-        return "Backdrop"
-    }
-
-    /// Fraction of the layout width the backdrop fills in the top-right corner.
-    /// Single source of truth: the frame and the image request both derive from
-    /// it, so resizing the layout can't silently leave the request undersized.
-    ///
-    /// About half the screen, flush to the top and right edges like the home
-    /// hero. Its left third fades out, so the part under the info column is a
-    /// blend into the background rather than picture behind the title.
-    private var backdropWidthFraction: CGFloat {
-        isYouTubeSeriesStyle ? 0.6 : 0.55
-    }
-
     var body: some View {
+        // A season has its own page (#760), wherever it's opened from: a
+        // deep link, search, a row.
+        if item.type == .season {
+            SeasonDetailView(season: item, serverID: serverID, forceYouTubeStyle: forceYouTubeStyle)
+        } else {
+            itemBody
+        }
+    }
+
+    private var itemBody: some View {
         ScrollView {
             VStack(spacing: 0) {
                 Spacer().frame(height: isEpisode ? 0 : 20)
@@ -135,74 +117,14 @@ struct MediaDetailView: View {
             }
         }
         .background {
-            GeometryReader { geometry in
-                ZStack {
-                    // Dark background base
-                    SashimiTheme.background
-                        .ignoresSafeArea()
-
-                    // Background image: flush top-right, fading into the page on
-                    // its left and bottom, the same way the home hero does.
-                    VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            Spacer()
-                            AsyncItemImage(
-                                itemId: backdropId,
-                                imageType: backdropImageType,
-                                // Request at native pixel density: tvOS lays out
-                                // in 1920pt but Apple TV 4K renders @2x, so a
-                                // point-width frame needs twice that many pixels
-                                // or the backdrop is upscaled and reads soft.
-                                maxWidth: Int(geometry.size.width * backdropWidthFraction * 2),
-                                contentMode: .fit,
-                                fallbackImageTypes: isYouTubeSeriesStyle ? ["Backdrop", "Thumb", "Primary"] : ["Thumb", "Backdrop", "Primary"],
-                                serverID: serverID,
-                                tagSource: item
-                            )
-                            .id(refreshID)
-                            .heroTrailer(for: item, serverID: serverID)
-                            .frame(width: geometry.size.width * backdropWidthFraction, alignment: .topTrailing)
-                            // Only the left and bottom edges fade; the top and
-                            // right run off the screen like the home hero's.
-                            .mask(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: .clear, location: 0.0),
-                                        .init(color: .white, location: 0.35)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                                .mask(
-                                    LinearGradient(
-                                        stops: [
-                                            .init(color: .white, location: 0.6),
-                                            .init(color: .clear, location: 1.0)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                            )
-                        }
-                        Spacer()
-                    }
-                    .ignoresSafeArea()
-
-                    // Subtle gradient for text readability (minimal to keep backdrop vibrant)
-                    LinearGradient(
-                        colors: [
-                            SashimiTheme.background.opacity(0.0),
-                            SashimiTheme.background.opacity(0.05),
-                            SashimiTheme.background.opacity(0.3),
-                            SashimiTheme.background
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .ignoresSafeArea()
-                }
-            }
+            DetailHeroBackground(
+                image: DetailHero.tvImage(for: item, isYouTubeSeries: isYouTubeSeriesStyle),
+                isYouTubeSeries: isYouTubeSeriesStyle,
+                tagSource: item,
+                trailerItem: item,
+                serverID: serverID,
+                refreshID: refreshID
+            )
         }
         .themeSong(for: item)
         .fullScreenCover(isPresented: $showingPlayer) {
