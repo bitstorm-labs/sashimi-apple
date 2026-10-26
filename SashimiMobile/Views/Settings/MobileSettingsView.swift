@@ -28,7 +28,7 @@ struct MobileSettingsView: View {
                     NavigationLink {
                         MobileServerDashboardView()
                     } label: {
-                        Label("Server Dashboard", systemImage: "server.rack")
+                        Label("Dashboard", systemImage: "server.rack")
                     }
                 }
             }

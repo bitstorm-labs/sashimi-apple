@@ -99,7 +99,7 @@ struct ServerDashboardView: View {
     private var header: some View {
         HStack(alignment: .center) {
             HStack(alignment: .firstTextBaseline, spacing: 24) {
-                Text("Server")
+                Text("Dashboard")
                     .font(Typography.displayMedium)
                     .foregroundStyle(SashimiTheme.textPrimary)
                 Text(model.serverLine)
