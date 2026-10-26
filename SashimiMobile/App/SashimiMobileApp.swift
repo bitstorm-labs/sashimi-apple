@@ -99,6 +99,8 @@ struct ContentView: View {
     @ObservedObject private var networkMonitor = NetworkMonitor.shared
     /// A poster context menu's Play / Add to Channel.
     @ObservedObject private var itemActions = ItemActionRouter.shared
+    /// Runs a context menu's bulk episode download (#744).
+    @StateObject private var episodeDownloadFlow = BulkDownloadFlow()
 
     // Pick the layout by DEVICE TYPE (stable), not horizontalSizeClass (transient).
     // The size class flips .compact -> .regular when an iPhone Plus/Pro Max rotates
@@ -239,6 +241,17 @@ struct ContentView: View {
             itemActions.playItem = nil
             deepLinkDestination = .play(item, serverID: sessionManager.activeServerId)
         }
+        .onChange(of: itemActions.episodeDownload?.id) { _, _ in
+            guard let request = itemActions.episodeDownload else { return }
+            itemActions.episodeDownload = nil
+            episodeDownloadFlow.serverID = nil
+            switch request.action {
+            case .scope(let scope): episodeDownloadFlow.begin(scope, for: request.episode)
+            case .keepNext(let count):
+                if let seriesId = request.episode.seriesId { episodeDownloadFlow.setKeepNext(count, seriesId: seriesId) }
+            }
+        }
+        .bulkDownloadDialogs(episodeDownloadFlow)
         .sheet(item: $itemActions.channelTarget) { target in
             MobileAddToChannelSheet(target: target)
         }
