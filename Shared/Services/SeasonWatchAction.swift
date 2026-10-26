@@ -73,3 +73,49 @@ enum SeasonWatchAction: Equatable {
         }
     }
 }
+
+/// The series page's watched control (#749): the series itself and, under it,
+/// the season on screen. The season entry used to exist only as a long-press
+/// on the season tab, which nobody found.
+enum WatchedScopeEntry: Equatable {
+    /// Mark the whole series watched (true) or unwatched (false).
+    case series(markWatched: Bool)
+    case season(BaseItemDto, SeasonWatchAction)
+
+    var title: String {
+        switch self {
+        case .series(let markWatched): return markWatched ? "Mark Series Watched" : "Mark Series Unwatched"
+        case .season(_, let action): return action.title
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .series(let markWatched): return markWatched ? "eye" : "eye.slash"
+        case .season(_, let action): return action.systemImage
+        }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.series(left), .series(right)): return left == right
+        case let (.season(leftSeason, leftAction), .season(rightSeason, rightAction)):
+            return leftSeason.id == rightSeason.id && leftAction == rightAction
+        default: return false
+        }
+    }
+
+    /// `loadedEpisodes` are the episodes shown for `season` (nil while loading).
+    static func entries(
+        isSeriesWatched: Bool,
+        season: BaseItemDto?,
+        loadedEpisodes: [BaseItemDto]?,
+        isConnected: Bool
+    ) -> [WatchedScopeEntry] {
+        var entries: [WatchedScopeEntry] = [.series(markWatched: !isSeriesWatched)]
+        if let season, SeasonWatchAction.canApply(to: season, isConnected: isConnected) {
+            entries.append(.season(season, SeasonWatchAction.resolve(season: season, loadedEpisodes: loadedEpisodes)))
+        }
+        return entries
+    }
+}

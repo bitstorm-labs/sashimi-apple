@@ -2231,14 +2231,18 @@ actor JellyfinClient {
         return response.items
     }
 
+    /// Marks an item (episode, movie, or a whole season / series) watched,
+    /// then tells open screens so their checkmarks follow (#750).
     func markPlayed(itemId: String) async throws {
         guard let userId else { throw JellyfinError.notConfigured }
         _ = try await request(path: "/Users/\(userId)/PlayedItems/\(itemId)", method: "POST")
+        await PlayedStateChange(itemId: itemId, played: true).post()
     }
 
     func markUnplayed(itemId: String) async throws {
         guard let userId else { throw JellyfinError.notConfigured }
         _ = try await request(path: "/Users/\(userId)/PlayedItems/\(itemId)", method: "DELETE")
+        await PlayedStateChange(itemId: itemId, played: false).post()
     }
 
     func markFavorite(itemId: String) async throws {

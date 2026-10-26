@@ -291,6 +291,12 @@ struct MediaDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
             Task { await refreshItemState() }
         }
+        // A watched mark made anywhere (an episode's page, a row's long-press
+        // menu, a season mark) shows on this page's episode cards (#750).
+        .onReceive(NotificationCenter.default.publisher(for: .sashimiPlayedStateDidChange)) { note in
+            guard let change = PlayedStateChange.from(note) else { return }
+            Task { await applyPlayedStateChange(change) }
+        }
     }
 
     // MARK: - Main Content
