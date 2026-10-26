@@ -197,6 +197,13 @@ struct HomeView: View {
                     .allowsHitTesting(false) // Allow navigation while loading
             }
         }
+        .onChange(of: viewModel.removalNotice) { _, notice in
+            // tvOS toasts carry no buttons (a focusable toast would pull focus
+            // off the row), so the confirmation is plain, as on Roku.
+            guard let notice else { return }
+            ToastManager.shared.show(notice.message, type: notice.receipt == nil ? .error : .success, duration: 3)
+            viewModel.removalNotice = nil
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playbackDidEnd)) { _ in
             Task { await viewModel.refresh() }
         }
@@ -282,6 +289,9 @@ struct HomeView: View {
                         },
                         onPlay: { item in
                             playingItem = item
+                        },
+                        onRemove: { item in
+                            Task { await viewModel.removeFromContinueWatching(item) }
                         }
                     )
                     .focusSection()
