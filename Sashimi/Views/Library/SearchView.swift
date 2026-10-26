@@ -177,17 +177,27 @@ struct SearchView: View {
                 }
             )
 
-            if searchText.isEmpty && !historyManager.recentSearches.isEmpty {
-                recentSearchesSection
+            // The recents take what is left under the keyboard, and only as
+            // many rows as fit: five rows made this panel 1156pt tall on a
+            // 1080pt screen, which stretched the rail beside it (#751).
+            Group {
+                if searchText.isEmpty && !historyManager.recentSearches.isEmpty {
+                    ViewThatFits(in: .vertical) {
+                        ForEach((1...Self.maxRecentRows).reversed(), id: \.self) { count in
+                            recentSearchesSection(count: count)
+                        }
+                    }
+                }
             }
-
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, 60)
         .padding(.vertical, 60)
     }
 
-    private var recentSearchesSection: some View {
+    static let maxRecentRows = 5
+
+    private func recentSearchesSection(count: Int) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("RECENT")
@@ -203,7 +213,7 @@ struct SearchView: View {
                 .buttonStyle(.plain)
             }
 
-            ForEach(historyManager.recentSearches.prefix(5), id: \.self) { query in
+            ForEach(historyManager.recentSearches.prefix(count), id: \.self) { query in
                 RecentSearchButton(query: query) {
                     searchText = query
                     historyManager.addSearch(query)

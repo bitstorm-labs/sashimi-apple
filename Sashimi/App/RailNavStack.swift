@@ -31,3 +31,19 @@ enum RailNavSpacing {
     static let max: CGFloat = 26
     static let min: CGFloat = 4
 }
+
+extension View {
+    /// Pins a section's view to the screen's height. The root ZStack sizes to
+    /// its tallest child, and the rail beside the content is
+    /// `maxHeight: .infinity`: a section whose content asked for more than
+    /// 1080pt (Search with a full recent-search list asked for 1156pt) made
+    /// the whole ZStack that tall, so the rail stretched, its flexible gaps
+    /// (#740) spread the rows apart, and the stack re-centred — the
+    /// "accordion" on selecting Search (#751).
+    ///
+    /// `height` is the full screen, safe areas included: the sections draw
+    /// under the overscan margins (containerRelativeFrame would stop short).
+    func railSectionFrame(height: CGFloat) -> some View {
+        frame(height: height)
+    }
+}
