@@ -6,7 +6,10 @@ private final class EpisodesStubServer: URLProtocol {
     nonisolated(unsafe) static var asked: [URL] = []
     private static let lock = NSLock()
 
-    override static func canInit(with request: URLRequest) -> Bool { true }
+    // Only the test's own client: the host app's client, when a logged-in
+    // simulator gives it a session, must not land in `asked` (a stray request
+    // there made `asked.first` the wrong one).
+    override static func canInit(with request: URLRequest) -> Bool { request.url?.host == "stub.local" }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {

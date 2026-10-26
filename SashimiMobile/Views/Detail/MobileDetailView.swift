@@ -156,80 +156,9 @@ struct MobileDetailView: View {
         // keep them light.
         .toolbarColorScheme(.dark, for: .navigationBar)
         .background {
-            // Background with backdrop image on the right
-            GeometryReader { geometry in
-                ZStack {
-                    // Dark background base
-                    MobileColors.background
-
-                    // Backdrop image: flush top-right, fading into the page on
-                    // its left and bottom, the same way the home hero does.
-                    HStack(spacing: 0) {
-                        Spacer()
-                        let pictureWidth = geometry.size.width * ImageSizing.padDetailPictureFraction
-                        if let backdropURL = backdropImageURL(
-                            maxWidth: ImageSizing.backdropPixelWidth(points: pictureWidth)
-                        ) {
-                            LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
-                                if let image = state.image {
-                                    image
-                                        .resizable().scaledToFit()
-                                } else {
-                                    Color.clear
-                                }
-                            }
-                            .frame(width: pictureWidth)
-                            .heroTrailer(for: item, serverID: serverID)
-                            // Only the left and bottom edges fade; the top and
-                            // right run off the screen like the home hero's.
-                            .mask(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: .clear, location: 0.0),
-                                        .init(color: .white, location: 0.35)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                                .mask(
-                                    LinearGradient(
-                                        stops: [
-                                            .init(color: .white, location: 0.6),
-                                            .init(color: .clear, location: 1.0)
-                                        ],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                            )
-                        }
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-
-                    // Top scrim under the status bar and back button, which
-                    // the backdrop now reaches.
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.5), Color.clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 140)
-                    .frame(maxHeight: .infinity, alignment: .top)
-
-                    // Subtle gradient for text readability
-                    LinearGradient(
-                        colors: [
-                            MobileColors.background.opacity(0.0),
-                            MobileColors.background.opacity(0.1),
-                            MobileColors.background.opacity(0.5),
-                            MobileColors.background
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
+            PadDetailHeroBackground(serverID: serverID, trailerItem: item) { maxWidth in
+                backdropImageURL(maxWidth: maxWidth)
             }
-            .ignoresSafeArea()
         }
         .themeSong(for: item)
         .fullScreenPlayer(item: $playingItem, serverID: serverID)
@@ -1410,20 +1339,8 @@ struct MobileDetailView: View {
             )
         }
 
-        if isEpisode {
-            return url(item.id, "Primary", heroWidth)
-        }
-
-        if isYouTubeSeriesStyle {
-            return url(item.id, "Banner", heroWidth)
-        }
-
-        if item.backdropImageTags?.isEmpty == false {
-            return url(item.id, "Backdrop", heroWidth)
-        } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            return url(seriesId, "Backdrop", heroWidth)
-        }
-        return url(item.id, "Primary", heroWidth)
+        let hero = DetailHero.mobileImage(for: item, isYouTubeSeries: isYouTubeSeriesStyle)
+        return url(hero.itemId, hero.type, heroWidth)
     }
 
     private func logoImageURL(for itemId: String) -> URL? {

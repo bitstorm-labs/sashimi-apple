@@ -373,48 +373,8 @@ struct PhoneDetailView: View {
                 .padding(.bottom, -24)
             }
         } else {
-            ZStack(alignment: .bottom) {
-                // A definite screen-width × 220 frame (Color.clear) with the image
-                // as an OVERLAY. Critical: a resizable `.aspectRatio(.fill)` image
-                // reports an oversized intrinsic width for a PORTRAIT poster
-                // fallback (missing-backdrop items like Ratatouille), and if it
-                // sizes the container that width propagates to the whole detail
-                // column — shoving the title and Play button off the left edge.
-                // Overlaying it on a fixed-size Color.clear stops the image from
-                // dictating layout width.
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 220)
-                    .overlay {
-                        // Read the drawn width so the request matches it: full
-                        // width is 440pt in portrait but ~950pt in landscape.
-                        GeometryReader { geo in
-                            LazyImage(
-                                request: imageRequest(for: backdropImageURL(widthPoints: geo.size.width))
-                            ) { state in
-                                if let image = state.image {
-                                    // No real backdrop → the URL falls back to the
-                                    // portrait poster; blur + darken it so it reads
-                                    // as an ambient backdrop, not a sliced strip.
-                                    image.resizable().scaledToFill()
-                                        .blur(radius: hasRealBackdrop ? 0 : 32)
-                                        .overlay(hasRealBackdrop ? Color.clear : Color.black.opacity(0.4))
-                                } else {
-                                    Rectangle().fill(MobileColors.cardBackground)
-                                }
-                            }
-                            .frame(width: geo.size.width, height: geo.size.height)
-                        }
-                    }
-                    .heroTrailer(for: item, serverID: serverID)
-                    .clipped()
-
-                LinearGradient(
-                    colors: [.clear, MobileColors.background],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 80)
+            PhoneHeroBanner(serverID: serverID, trailerItem: item, isBlurred: !hasRealBackdrop) { width in
+                imageRequest(for: backdropImageURL(widthPoints: width))
             }
         }
     }
@@ -1293,20 +1253,8 @@ struct PhoneDetailView: View {
         }
 
         let heroWidth = ImageSizing.backdropPixelWidth(points: widthPoints >= 1 ? widthPoints : 440)
-        if isEpisode {
-            return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
-        }
-
-        if isYouTubeSeriesStyle {
-            return serverImageURL(item.id, "Banner", maxWidth: 1920)
-        }
-
-        if item.backdropImageTags?.isEmpty == false {
-            return serverImageURL(item.id, "Backdrop", maxWidth: heroWidth)
-        } else if item.parentBackdropImageTags?.isEmpty == false, let seriesId = item.seriesId {
-            return serverImageURL(seriesId, "Backdrop", maxWidth: heroWidth)
-        }
-        return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
+        let hero = DetailHero.mobileImage(for: item, isYouTubeSeries: isYouTubeSeriesStyle)
+        return serverImageURL(hero.itemId, hero.type, maxWidth: hero.type == "Banner" ? 1920 : heroWidth)
     }
 
     // MARK: - Formatting
