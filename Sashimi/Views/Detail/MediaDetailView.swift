@@ -31,6 +31,8 @@ struct MediaDetailView: View {
     @State var nextEpisodeToPlay: BaseItemDto?
     @State var isLoadingEpisodes = false
     @State var showingSeriesDetail: BaseItemDto?
+    /// The season page (#760): Go to Season, or a season tab pressed again.
+    @State var showingSeasonDetail: BaseItemDto?
     @State var showingEpisodeDetail: BaseItemDto?
     @State var showingPersonDetail: PersonInfo?
     @State var pendingServerMedia: ServerMediaResult?
@@ -212,6 +214,9 @@ struct MediaDetailView: View {
         }
         .fullScreenCover(item: $showingSeriesDetail) { series in
             MediaDetailView(item: series, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID)
+        }
+        .fullScreenCover(item: $showingSeasonDetail) { season in
+            SeasonDetailView(season: season, serverID: serverID, forceYouTubeStyle: forceYouTubeStyle)
         }
         .fullScreenCover(item: $showingEpisodeDetail) { episode in
             MediaDetailView(item: episode, forceYouTubeStyle: forceYouTubeStyle, serverID: serverID)

@@ -20,18 +20,26 @@ extension MediaDetailView {
                                     season: season,
                                     isSelected: selectedSeason?.id == season.id
                                 ) {
+                                    // Select pressed on the season already
+                                    // shown opens its page (#760).
+                                    if selectedSeason?.id == season.id {
+                                        openSeasonPage(season)
+                                        return
+                                    }
                                     selectedSeason = season
                                     if let seriesId = seriesId {
                                         Task { await loadEpisodesForSeason(seriesId: seriesId, season: season) }
                                     }
                                 }
-                                // Long-press a season tab: the same idiom
-                                // MediaRow uses for item-level watched.
-                                .seasonWatchMenu(
+                                // Long-press a season tab: Open Season and the
+                                // season-wide watched mark.
+                                .seasonTabMenu(
                                     for: season,
                                     action: seasonWatchAction(for: season),
                                     request: $seasonWatchRequest
-                                )
+                                ) {
+                                    openSeasonPage(season)
+                                }
                             }
                         }
                         .padding(.horizontal, 60)
