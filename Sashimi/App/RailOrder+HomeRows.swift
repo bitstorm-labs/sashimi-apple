@@ -4,11 +4,21 @@ extension RailOrder {
     /// The tvOS rail's order: Home's rows (the SashimiTV row and the library
     /// rows), then anything they leave out. Rows that are not destinations —
     /// hero, Continue Watching — contribute nothing.
-    static func destinations(rowConfigs: [HomeRowConfig], libraryIds: [String]) -> [Destination] {
-        let rowOrder: [Destination] = rowConfigs.compactMap { config in
-            if config.type == .channels { return .finTV }
-            return config.libraryId.map(Destination.library)
-        }
-        return destinations(rowOrder: rowOrder, libraryIds: libraryIds)
+    /// `hidden` is what the user took out of the side menu (#753).
+    static func destinations(
+        rowConfigs: [HomeRowConfig],
+        libraryIds: [String],
+        hidden: Set<Destination> = []
+    ) -> [Destination] {
+        destinations(rowOrder: rowConfigs.compactMap(\.railDestination), libraryIds: libraryIds, hidden: hidden)
+    }
+}
+
+extension HomeRowConfig {
+    /// The rail entry this row stands for; nil for rows that are not
+    /// destinations (Featured, Continue Watching).
+    var railDestination: RailOrder.Destination? {
+        if type == .channels { return .finTV }
+        return libraryId.map(RailOrder.Destination.library)
     }
 }

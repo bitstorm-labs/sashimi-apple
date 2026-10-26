@@ -55,8 +55,8 @@ struct SettingsView: View {
 
                             SettingsOptionRow(
                                 icon: "house",
-                                title: "Home Screen",
-                                subtitle: "Customize row order"
+                                title: "Home & Side Menu",
+                                subtitle: "Row order, and what the side menu lists"
                             ) {
                                 navigationPath.append(SettingsDestination.homeScreen)
                             }
@@ -407,7 +407,14 @@ class HomeScreenSettings: ObservableObject {
 
 struct HomeScreenSettingsView: View {
     @StateObject private var settings = HomeScreenSettings.shared
+    @ObservedObject private var sideMenu = SideMenuSettings.shared
     @State private var isLoading = true
+    /// Every library the rail can list, for the ones Home has no row for.
+    @State private var railLibraries: [JellyfinLibrary] = []
+
+    private var menuOnlyLibraries: [JellyfinLibrary] {
+        RailOrder.menuOnlyLibraries(railLibraries, homeDestinations: settings.rowConfigs.compactMap(\.railDestination))
+    }
 
     var body: some View {
         SettingsContainer {
@@ -429,12 +436,12 @@ struct HomeScreenSettingsView: View {
                 .padding(.top, 60)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Home Screen Rows")
+                    Text("Home & Side Menu")
                         .font(Typography.headline)
                         .foregroundStyle(SashimiTheme.textPrimary)
                         .padding(.bottom, 8)
 
-                    Text("Use arrows to reorder, tap checkmark to show/hide")
+                    Text("Arrows reorder Home and the side menu together. Always in the side menu: Home, Search, Settings.")
                         .font(Typography.caption)
                         .foregroundStyle(SashimiTheme.textSecondary)
                         .padding(.bottom, 16)
@@ -444,15 +451,34 @@ struct HomeScreenSettingsView: View {
                             config: config,
                             index: index,
                             totalCount: settings.rowConfigs.count,
+                            isInSideMenu: config.railDestination.map(sideMenu.isShown) ?? true,
                             onToggle: { settings.toggleVisibility(for: config) },
+                            onToggleSideMenu: { config.railDestination.map(sideMenu.toggle) },
                             onMoveUp: { moveRow(from: index, direction: -1) },
                             onMoveDown: { moveRow(from: index, direction: 1) }
                         )
+                    }
+
+                    if !menuOnlyLibraries.isEmpty {
+                        Text("Side menu only")
+                            .font(Typography.headline)
+                            .foregroundStyle(SashimiTheme.textPrimary)
+                            .padding(.top, 24)
+                        ForEach(menuOnlyLibraries) { library in
+                            SideMenuOnlyRow(
+                                name: library.name,
+                                isOn: sideMenu.isShown(.library(library.id)),
+                                onToggle: { sideMenu.toggle(.library(library.id)) }
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 60)
                 .padding(.bottom, 60)
             }
+        }
+        .task {
+            railLibraries = (try? await JellyfinClient.shared.getLibraryViews()) ?? []
         }
         .onAppear {
             if settings.rowConfigs.isEmpty {
@@ -476,11 +502,24 @@ struct HomeScreenRowItem: View {
     let config: HomeRowConfig
     let index: Int
     let totalCount: Int
+    /// Rows that are not side-menu destinations (Featured, Continue Watching)
+    /// show a dash instead of a switch.
+    let isInSideMenu: Bool
     let onToggle: () -> Void
+    let onToggleSideMenu: () -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            controls
+            if let note = RailOrder.reachabilityNote(isOnHome: config.isVisible, isInSideMenu: isInSideMenu) {
+                ReachabilityNote(text: note)
+            }
+        }
+    }
+
+    private var controls: some View {
         HStack(spacing: 12) {
             // Move up button
             HomeRowMoveButton(
@@ -498,7 +537,78 @@ struct HomeScreenRowItem: View {
 
             // Toggle visibility button
             HomeRowToggleButton(config: config, onToggle: onToggle)
+
+            // Side menu (#753): only rows that are menu destinations.
+            if config.railDestination != nil {
+                HomeRowSideMenuButton(isOn: isInSideMenu, action: onToggleSideMenu)
+            } else {
+                Text("\u{2014}")
+                    .font(Typography.body)
+                    .foregroundStyle(SashimiTheme.textTertiary)
+                    .frame(width: 190)
+                    .accessibilityLabel("Not in the side menu")
+            }
         }
+    }
+}
+
+/// A library the side menu lists but Home has no row for.
+struct SideMenuOnlyRow: View {
+    let name: String
+    let isOn: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(name)
+                    .font(Typography.body)
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .padding(.leading, 24)
+                Spacer()
+                HomeRowSideMenuButton(isOn: isOn, action: onToggle)
+            }
+            if let note = RailOrder.reachabilityNote(isOnHome: false, isInSideMenu: isOn) {
+                ReachabilityNote(text: note)
+            }
+        }
+    }
+}
+
+struct ReachabilityNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(Typography.captionSmall)
+            .foregroundStyle(SashimiTheme.textTertiary)
+            .padding(.leading, 136)
+    }
+}
+
+/// "Side Menu" on/off for one row.
+struct HomeRowSideMenuButton: View {
+    let isOn: Bool
+    let action: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isOn ? SashimiTheme.accent : SashimiTheme.textTertiary)
+                Text("Side Menu")
+                    .foregroundStyle(isOn ? SashimiTheme.textPrimary : SashimiTheme.textSecondary)
+            }
+            .font(Typography.bodySmall)
+            .frame(width: 190)
+            .padding(.vertical, 18)
+        }
+        .buttonStyle(.card)
+        .focusHighlight(isFocused, cornerRadius: 14)
+        .focused($isFocused)
+        .accessibilityLabel("Side menu")
+        .accessibilityValue(isOn ? "Shown" : "Hidden")
     }
 }
 

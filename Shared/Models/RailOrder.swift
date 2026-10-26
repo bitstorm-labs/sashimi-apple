@@ -19,9 +19,17 @@ enum RailOrder {
     /// wins; anything it does not account for follows in server order.
     ///
     /// Rows hidden on Home are still listed. Hiding a row is a statement about
-    /// the Home screen, not about the destination, and for a library the rail is
-    /// the only way to reach it at all.
-    static func destinations(rowOrder: [Destination], libraryIds: [String]) -> [Destination] {
+    /// the Home screen, not about the destination. What leaves the rail is
+    /// what the user hid from the side menu (`hidden`, #753), a setting of its
+    /// own; Home, Search and Settings are not destinations, so they can never
+    /// be hidden. Anything not in `hidden` — a library added on the server
+    /// later included — shows, and hidden ids the server no longer has do
+    /// nothing.
+    static func destinations(
+        rowOrder: [Destination],
+        libraryIds: [String],
+        hidden: Set<Destination> = []
+    ) -> [Destination] {
         var ordered: [Destination] = []
         var placed: Set<Destination> = []
 
@@ -52,7 +60,20 @@ enum RailOrder {
         // Likewise FinTV, if the saved order predates the row existing.
         place(.finTV)
 
-        return ordered
+        return ordered.filter { !hidden.contains($0) }
+    }
+
+    /// Libraries the rail lists that Home has no row for (Collections,
+    /// Playlists): their side-menu switch needs a row of its own in settings.
+    static func menuOnlyLibraries(_ libraries: [JellyfinLibrary], homeDestinations: [Destination]) -> [JellyfinLibrary] {
+        let onHome = Set(homeDestinations)
+        return libraries.filter { !onHome.contains(.library($0.id)) }
+    }
+
+    /// The settings footnote for a destination hidden from both Home and the
+    /// side menu, which leaves Search as the only way to it.
+    static func reachabilityNote(isOnHome: Bool, isInSideMenu: Bool) -> String? {
+        isOnHome || isInSideMenu ? nil : "Only reachable from Search"
     }
 
     /// The rail's SF Symbol for a library. YouTube libraries report
