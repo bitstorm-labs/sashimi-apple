@@ -79,6 +79,7 @@ struct SidebarRail<Footer: View>: View {
 
     /// The rail lists destinations in the order Home lists them.
     @ObservedObject private var homeRows = HomeRowSettings.shared
+    @ObservedObject private var sideMenu = SideMenuSettings.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -150,7 +151,7 @@ struct SidebarRail<Footer: View>: View {
     }
 
     private var navItems: [SidebarSelection] {
-        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries)
+        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden)
     }
 
     /// The sushi mark, with the "Sashimi" wordmark beside it when expanded.
@@ -223,6 +224,17 @@ struct SidebarRail<Footer: View>: View {
         .accessibilityValue(item == .downloads ? downloadActivity.accessibilityValue ?? "" : "")
         .accessibilityHint(isAvailable ? "" : "Unavailable offline")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        // Right-click (Mac) / long-press (iPad): drop a library or SashimiTV
+        // from the menu (#753). Home, Search, Downloads and Settings stay.
+        .contextMenu {
+            if let destination = item.railDestination {
+                Button {
+                    sideMenu.setShown(false, for: destination)
+                } label: {
+                    Label("Hide from Side Menu", systemImage: "eye.slash")
+                }
+            }
+        }
     }
 
     /// The row's symbol. Downloads swaps it for the activity ring while
@@ -273,11 +285,17 @@ extension SidebarSelection {
     /// The rail's destinations, top to bottom: Home, then SashimiTV and the
     /// libraries in Home's row order, then Search, Downloads (iPad only) and
     /// Settings. The menu bar's ⌘1…⌘9 number them in this order.
-    static func railItems(rowConfigs: [HomeRowConfig], libraries: [JellyfinLibrary]) -> [SidebarSelection] {
+    /// `hidden`: what the user took out of the side menu (#753).
+    static func railItems(
+        rowConfigs: [HomeRowConfig],
+        libraries: [JellyfinLibrary],
+        hidden: Set<RailOrder.Destination> = []
+    ) -> [SidebarSelection] {
         var items: [SidebarSelection] = [.home]
         for destination in RailOrder.destinations(
             rowConfigs: rowConfigs,
-            libraryIds: libraries.map(\.id)
+            libraryIds: libraries.map(\.id),
+            hidden: hidden
         ) {
             switch destination {
             case .finTV:
