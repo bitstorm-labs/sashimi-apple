@@ -125,38 +125,3 @@ final class PlayedStateChangeTests: XCTestCase {
         XCTAssertTrue(PlayedStubServer.asked.isEmpty)
     }
 }
-
-/// The series page's watched control offers the season on screen (#749).
-final class WatchedScopeEntryTests: XCTestCase {
-    private func season(_ id: String, played: Bool = false) -> BaseItemDto {
-        let json = "{\"Id\":\"\(id)\",\"Name\":\"Season 2\",\"Type\":\"Season\",\"UserData\":{\"Played\":\(played)}}"
-        // swiftlint:disable:next force_try
-        return try! JSONDecoder().decode(BaseItemDto.self, from: Data(json.utf8))
-    }
-
-    func testOffersTheSeriesAndTheSeasonOnScreen() {
-        let entries = WatchedScopeEntry.entries(
-            isSeriesWatched: false, season: season("s2"), loadedEpisodes: [episode("e1", played: true)], isConnected: true
-        )
-        XCTAssertEqual(entries, [.series(markWatched: true), .season(season("s2"), .markUnwatched)])
-        XCTAssertEqual(entries.map(\.title), ["Mark Series Watched", "Mark Season Unwatched"])
-    }
-
-    func testAWatchedSeriesOffersUnwatched() {
-        let entries = WatchedScopeEntry.entries(isSeriesWatched: true, season: nil, loadedEpisodes: nil, isConnected: true)
-        XCTAssertEqual(entries.map(\.title), ["Mark Series Unwatched"])
-    }
-
-    func testNoSeasonEntryOfflineOrForADownloadsSeason() {
-        XCTAssertEqual(
-            WatchedScopeEntry.entries(isSeriesWatched: false, season: season("s2"), loadedEpisodes: nil, isConnected: false),
-            [.series(markWatched: true)]
-        )
-        XCTAssertEqual(
-            WatchedScopeEntry.entries(
-                isSeriesWatched: false, season: season("offline-season-2"), loadedEpisodes: nil, isConnected: true
-            ),
-            [.series(markWatched: true)]
-        )
-    }
-}

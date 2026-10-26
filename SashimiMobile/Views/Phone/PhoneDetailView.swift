@@ -50,6 +50,8 @@ struct PhoneDetailView: View {
     @State private var isRefreshing = false
     @State private var adminError: String?
     @State private var seasonWatchRequest: SeasonWatchRequest?
+    /// The season page (#760): Go to Season, or a season tab tapped again.
+    @State private var seasonPage: BaseItemDto?
     @State private var channelTarget: ChannelTarget?
     @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
@@ -58,7 +60,6 @@ struct PhoneDetailView: View {
     // MARK: - Computed Properties
 
     private var isSeries: Bool { item.type == .series }
-    private var isSeason: Bool { item.type == .season }
     private var isEpisode: Bool { item.type == .episode }
     /// The series whose seasons/episodes this page lists (self for a series,
     /// the parent for an episode) — drives the shared episode machinery.
@@ -107,7 +108,7 @@ struct PhoneDetailView: View {
                     actionButtons
                     overviewSection
 
-                    if isSeries || isSeason || isEpisode {
+                    if isSeries || isEpisode {
                         seasonsSection
                     }
 
@@ -132,6 +133,9 @@ struct PhoneDetailView: View {
             if let seriesItem = navigateToSeriesItem {
                 PhoneDetailView(item: seriesItem, libraryName: libraryName, serverID: serverID)
             }
+        }
+        .navigationDestination(item: $seasonPage) { season in
+            MobileSeasonView(season: season, libraryName: libraryName, serverID: serverID, layout: .phone)
         }
         .sheet(item: $showingEpisodeDetail) { episode in
             // Full detail view — one consistent episode UI (matches iPad)
@@ -234,15 +238,6 @@ struct PhoneDetailView: View {
     /// File Info / Refresh Metadata / Delete — online only.
     @ViewBuilder
     private var adminMenuItems: some View {
-        // Administrators of the active server: put this title (an episode's
-        // or season's series) on a SashimiTV channel.
-        if session.canManageChannels(serverID: serverID), let target = ChannelTarget(item: item) {
-            Button {
-                channelTarget = target
-            } label: {
-                Label("Add to Channel…", systemImage: "rectangle.stack.badge.plus")
-            }
-        }
         Button {
             showingFileInfo = true
         } label: {
@@ -261,13 +256,17 @@ struct PhoneDetailView: View {
         }
     }
 
-    /// Single overflow menu per action row: contextual actions (labeled) first,
-    /// then the admin items. Phones don't have the width for a pile of
-    /// unlabeled icon buttons — six in a row compressed the Resume label into
-    /// a vertical letter-stack and left users guessing at cryptic glyphs.
-    private func overflowMenu(@ViewBuilder extras: () -> some View) -> some View {
+    /// Single overflow menu per action row: Go to Series / Season and Add to
+    /// Channel first (#760), then the admin items.
+    private var overflowMenu: some View {
         Menu {
-            extras()
+            ForEach(menuEntries, id: \.title) { entry in
+                Button {
+                    open(entry)
+                } label: {
+                    Label(entry.title, systemImage: entry.systemImage)
+                }
+            }
             Divider()
             adminMenuItems
         } label: {
@@ -276,6 +275,38 @@ struct PhoneDetailView: View {
         }
         .buttonStyle(.bordered)
         .tint(.white)
+        .accessibilityLabel("More")
+    }
+
+    private var menuEntries: [DetailMenuEntry] {
+        DetailMenuEntry.entries(for: item, canManageChannels: session.canManageChannels(serverID: serverID))
+    }
+
+    private func open(_ entry: DetailMenuEntry) {
+        switch entry {
+        case .goToSeries(let seriesId):
+            // The page fetches its series as it loads; fetch it now if
+            // More was opened before that finished.
+            Task {
+                if navigateToSeriesItem == nil {
+                    navigateToSeriesItem = try? await JellyfinClient.shared.getItem(itemId: seriesId)
+                }
+                if navigateToSeriesItem != nil { showSeriesDetail = true }
+            }
+        case .goToSeason(let seasonId, _):
+            if let season = selectedSeason, season.id == seasonId {
+                seasonPage = season
+            } else {
+                Task { seasonPage = try? await JellyfinClient.shared.getItem(itemId: seasonId) }
+            }
+        case .addToChannel(let target):
+            channelTarget = target
+        }
+    }
+
+    private func openSeasonPage(_ season: BaseItemDto) {
+        guard SeasonPageText.canOpen(season, isConnected: NetworkMonitor.shared.isConnected) else { return }
+        seasonPage = season
     }
 
     private func refreshMetadata() async {
@@ -553,11 +584,6 @@ struct PhoneDetailView: View {
         DateFormatting.formatLongDate(item.premiereDate)
     }
 
-    /// Episode air date "Nov 8, 2024" (short form for list rows)
-    private func shortAirDateText(_ episode: BaseItemDto) -> String? {
-        DateFormatting.formatMediumDate(episode.premiereDate)
-    }
-
     /// "Ends at 9:41 PM" from now + what is left to watch (tvOS parity)
     private var endsAtText: String? {
         guard let ticks = item.runTimeTicks, ticks > 0 else { return nil }
@@ -757,236 +783,118 @@ struct PhoneDetailView: View {
 
     // MARK: - Action Buttons
 
-    @ViewBuilder
+    /// Play, Start Over, Shuffle, Trailer, Watched, Download, More (#760).
+    ///
+    /// The row's ideal width can exceed the content width on smaller phones.
+    /// An HStack that can't compress CHOOSES its ideal width, which silently
+    /// widens the whole detail column — every section then overhangs the
+    /// screen and .clipped() trims both edges. Hosting the row in a
+    /// horizontal ScrollView caps it at the proposed width: it scrolls when
+    /// tight and looks identical when it fits.
     private var actionButtons: some View {
-        // The button row's ideal width (e.g. "Resume S3:E3" + four circle
-        // buttons, all non-compressible) can exceed the content width on
-        // smaller phones. An HStack that can't compress CHOOSES its ideal
-        // width, which silently widens the whole detail column — every
-        // section then overhangs the screen and .clipped() trims both edges
-        // (the "expanding, edges cut off" bug). Hosting the row in a
-        // horizontal ScrollView caps it at the proposed width: it scrolls
-        // when tight and looks identical when it fits.
         ScrollView(.horizontal, showsIndicators: false) {
-            Group {
-                if isSeries || isSeason {
-                    seriesActionButtons
-                } else if isEpisode {
-                    episodeActionButtons
-                } else {
-                    movieActionButtons
+            HStack(spacing: MobileSpacing.sm) {
+                ForEach(mainRowActions, id: \.self) { action in
+                    actionButton(action)
                 }
+                Spacer()
             }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
-    private var seriesActionButtons: some View {
-        HStack(spacing: MobileSpacing.sm) {
-            if let nextEp = nextEpisodeToPlay {
-                let epHasProgress = (nextEp.userData?.playbackPositionTicks ?? 0) > 0
-                let epLabel: String = {
-                    if let sNum = nextEp.parentIndexNumber, let eNum = nextEp.indexNumber {
-                        return "\(epHasProgress ? "Resume" : "Play") S\(sNum):E\(eNum)"
-                    }
-                    return epHasProgress ? "Resume" : "Play"
-                }()
+    /// What Play plays: a series' next episode, otherwise the item.
+    private var playItem: BaseItemDto? {
+        isSeries ? nextEpisodeToPlay : item
+    }
 
+    private var playHasProgress: Bool {
+        isSeries ? (nextEpisodeToPlay?.userData?.playbackPositionTicks ?? 0) > 0 : hasProgress
+    }
+
+    private var mainRowActions: [DetailRowAction] {
+        DetailRowAction.mainRow(
+            for: item.type,
+            hasProgress: playHasProgress,
+            hasTrailer: (item.localTrailerCount ?? 0) > 0,
+            supportsDownloads: NetworkMonitor.shared.isOnline
+        ).filter { $0 != .more || NetworkMonitor.shared.isOnline }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ action: DetailRowAction) -> some View {
+        switch action {
+        case .play:
+            if let playItem {
                 Button {
                     DetailAmbience.stopForPlayback()
-                    playingItem = nextEp
+                    playingItem = playItem
                 } label: {
-                    Label(epLabel, systemImage: "play.fill")
+                    Label(playLabel(for: playItem), systemImage: "play.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .fixedSize()
                 }
                 .buttonStyle(.borderedProminent)
                 .layoutPriority(1)
             }
-
-            Button {
-                Task { await shuffleEpisode() }
-            } label: {
-                Image(systemName: "shuffle")
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.bordered)
-            .tint(.white)
-
-            watchedButton
-
-            if (isSeries || !episodes.isEmpty) && NetworkMonitor.shared.isOnline {
-                BulkDownloadMenu(
-                    seasonEpisodes: episodes,
-                    seasonName: selectedSeason?.name,
-                    seriesId: isSeries ? item.id : nil,
-                    serverID: serverID,
-                    compact: true
-                )
-            }
-
-            if NetworkMonitor.shared.isOnline {
-                overflowMenu {
-                    if let nextEp = nextEpisodeToPlay,
-                       (nextEp.userData?.playbackPositionTicks ?? 0) > 0 {
-                        Button {
-                            DetailAmbience.stopForPlayback()
-                            startOverItem = nextEp
-                        } label: {
-                            Label("Start Over", systemImage: "arrow.counterclockwise")
-                        }
-                    }
-                    if (item.localTrailerCount ?? 0) > 0 {
-                        Button {
-                            Task { await playLocalTrailer() }
-                        } label: {
-                            Label("Play Trailer", systemImage: "film")
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-        }
-    }
-
-    private var episodeActionButtons: some View {
-        HStack(spacing: MobileSpacing.sm) {
-            Button {
+        case .startOver:
+            iconButton("arrow.counterclockwise", label: "Start Over") {
                 DetailAmbience.stopForPlayback()
-                playingItem = item
-            } label: {
-                Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .fixedSize()
+                startOverItem = playItem
             }
-            .buttonStyle(.borderedProminent)
-            .layoutPriority(1)
-
-            watchedButton
-
-            if NetworkMonitor.shared.isOnline {
-                DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: true)
-
-                overflowMenu {
-                    if hasProgress {
-                        Button {
-                            DetailAmbience.stopForPlayback()
-                            startOverItem = item
-                        } label: {
-                            Label("Start Over", systemImage: "arrow.counterclockwise")
-                        }
-                    }
-                    if item.seriesId != nil {
-                        Button {
-                            showSeriesDetail = true
-                        } label: {
-                            Label("Go to Series", systemImage: "tv")
-                        }
-                        .disabled(navigateToSeriesItem == nil)
-                    }
-                }
-            }
-
-            Spacer()
-        }
-    }
-
-    private var movieActionButtons: some View {
-        HStack(spacing: MobileSpacing.sm) {
-            Button {
-                DetailAmbience.stopForPlayback()
-                playingItem = item
-            } label: {
-                Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .fixedSize()
-            }
-            .buttonStyle(.borderedProminent)
-            .layoutPriority(1)
-
-            watchedButton
-
-            if NetworkMonitor.shared.isOnline {
-                DownloadButton(item: item, serverID: serverID, quality: nil)
-
-                overflowMenu {
-                    if hasProgress {
-                        Button {
-                            DetailAmbience.stopForPlayback()
-                            startOverItem = item
-                        } label: {
-                            Label("Start Over", systemImage: "arrow.counterclockwise")
-                        }
-                    }
-                    if (item.localTrailerCount ?? 0) > 0 {
-                        Button {
-                            Task { await playLocalTrailer() }
-                        } label: {
-                            Label("Play Trailer", systemImage: "film")
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-        }
-    }
-
-    /// On a series page, a menu: the series and the season on screen (#749).
-    /// Elsewhere, the plain toggle.
-    @ViewBuilder
-    private var watchedButton: some View {
-        if isSeries, NetworkMonitor.shared.isConnected {
-            Menu {
-                ForEach(watchedScopeEntries, id: \.title) { entry in
-                    switch entry {
-                    case .series:
-                        Button {
-                            Task { await toggleWatched() }
-                        } label: {
-                            Label(entry.title, systemImage: entry.systemImage)
-                        }
-                    case .season(let season, let action):
-                        Section(season.name) {
-                            Button {
-                                seasonWatchRequest = SeasonWatchRequest(season: season, action: action)
-                            } label: {
-                                Label(entry.title, systemImage: entry.systemImage)
-                            }
-                        }
-                    }
-                }
-            } label: {
-                watchedIcon
-            }
-            .buttonStyle(.bordered)
-            .tint(.white)
-            .accessibilityLabel("Watched")
-        } else {
+        case .shuffle:
+            iconButton("shuffle", label: "Shuffle") { Task { await shuffleEpisode() } }
+        case .trailer:
+            iconButton("film", label: "Play Trailer") { Task { await playLocalTrailer() } }
+        case .watched:
             Button {
                 Task { await toggleWatched() }
             } label: {
-                watchedIcon
+                Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
             }
             .buttonStyle(.bordered)
             .tint(.white)
+            .accessibilityLabel(isWatched ? "Watched" : "Mark Watched")
+        case .download:
+            downloadButton
+        case .more:
+            overflowMenu
         }
     }
 
-    private var watchedIcon: some View {
-        Image(systemName: isWatched ? "checkmark.circle.fill" : "checkmark.circle")
-            .font(.system(size: 20))
-            .foregroundStyle(isWatched ? MobileColors.accent : MobileColors.textSecondary)
+    @ViewBuilder
+    private var downloadButton: some View {
+        if isSeries {
+            BulkDownloadMenu(
+                seasonEpisodes: episodes,
+                seasonName: selectedSeason?.name,
+                seriesId: item.id,
+                serverID: serverID,
+                compact: true
+            )
+        } else {
+            DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: isEpisode)
+        }
     }
 
-    private var watchedScopeEntries: [WatchedScopeEntry] {
-        WatchedScopeEntry.entries(
-            isSeriesWatched: isWatched,
-            season: selectedSeason,
-            loadedEpisodes: isLoadingEpisodes ? nil : episodes,
-            isConnected: NetworkMonitor.shared.isConnected
-        )
+    private func playLabel(for playItem: BaseItemDto) -> String {
+        let verb = playHasProgress ? "Resume" : "Play"
+        if isSeries, let sNum = playItem.parentIndexNumber, let eNum = playItem.indexNumber {
+            return "\(verb) S\(sNum):E\(eNum)"
+        }
+        return verb
+    }
+
+    private func iconButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16))
+        }
+        .buttonStyle(.bordered)
+        .tint(.white)
+        .accessibilityLabel(label)
     }
 
     // MARK: - Overview Section
@@ -1031,6 +939,11 @@ struct PhoneDetailView: View {
                     HStack(spacing: MobileSpacing.sm) {
                         ForEach(seasons) { season in
                             Button {
+                                // Tapping the season already shown opens its page (#760).
+                                if selectedSeason?.id == season.id {
+                                    openSeasonPage(season)
+                                    return
+                                }
                                 selectedSeason = season
                                 Task {
                                     await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
@@ -1044,11 +957,13 @@ struct PhoneDetailView: View {
                                     .foregroundStyle(selectedSeason?.id == season.id ? .black : .white)
                                     .clipShape(Capsule())
                             }
-                            .seasonWatchMenu(
+                            .seasonTabMenu(
                                 for: season,
                                 action: seasonWatchAction(for: season),
                                 request: $seasonWatchRequest
-                            )
+                            ) {
+                                openSeasonPage(season)
+                            }
                         }
                     }
                 }
@@ -1081,78 +996,13 @@ struct PhoneDetailView: View {
     private var episodeList: some View {
         LazyVStack(spacing: MobileSpacing.sm) {
             ForEach(episodes) { episode in
-                Button {
+                PhoneEpisodeRow(
+                    episode: episode,
+                    isCurrentEpisode: episode.id == currentEpisodeId,
+                    isYouTube: isYouTubeStyle,
+                    serverID: serverID
+                ) {
                     showingEpisodeDetail = episode
-                } label: {
-                    HStack(spacing: MobileSpacing.sm) {
-                        ZStack(alignment: .topTrailing) {
-                            LazyImage(request: imageRequest(for: episodeThumbnailURL(episode))) { state in
-                                if let image = state.image {
-                                    image
-                                        .resizable().scaledToFill()
-                                } else {
-                                    Rectangle().fill(MobileColors.cardBackground)
-                                }
-                            }
-                            .frame(width: 120, height: 68)
-
-                            // Watched checkmark (tvOS parity)
-                            if episode.userData?.played == true {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.white, Color(red: 0.29, green: 0.73, blue: 0.47))
-                                    .padding(3)
-                            }
-
-                            // Progress bar (tvOS parity)
-                            if episode.progressPercent > 0 {
-                                VStack {
-                                    Spacer()
-                                    GeometryReader { geo in
-                                        Rectangle()
-                                            .fill(MobileColors.accent)
-                                            .frame(width: geo.size.width * episode.progressPercent, height: 3)
-                                    }
-                                    .frame(height: 3)
-                                }
-                            }
-                        }
-                        .frame(width: 120, height: 68)
-                        .offlineIndicator(itemId: episode.id, serverID: serverID, size: 14)
-                        .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.small))
-                        .currentEpisodeHighlight(episode.id == currentEpisodeId)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            if !isYouTubeStyle, let epNum = episode.indexNumber {
-                                HStack(spacing: 4) {
-                                    Text("E\(epNum)")
-                                        .foregroundStyle(MobileColors.accent)
-                                    if let aired = shortAirDateText(episode) {
-                                        Text("• \(aired)")
-                                            .foregroundStyle(MobileColors.textTertiary)
-                                    }
-                                }
-                                .font(MobileTypography.captionSmall)
-                            }
-                            Text(episode.name)
-                                .font(MobileTypography.titleSmall)
-                                .foregroundStyle(MobileColors.textPrimary)
-                                .lineLimit(2)
-                            if let runtime = episode.runTimeTicks {
-                                Text(formatRuntime(runtime))
-                                    .font(MobileTypography.captionSmall)
-                                    .foregroundStyle(MobileColors.textTertiary)
-                            }
-                        }
-
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    // Long-press: the episode download menu (#744) and the
-                    // usual item actions. The menu acts on the active server.
-                    if serverID == nil { ItemContextMenu(item: episode) }
                 }
             }
         }
@@ -1185,15 +1035,13 @@ struct PhoneDetailView: View {
     private func loadContent() async {
         if isSeries {
             await loadSeriesContent()
-        } else if isSeason {
-            await loadSeasonContent()
         } else if isEpisode {
             await loadEpisodeContent()
         }
 
         guard NetworkMonitor.shared.isOnline else { return }
 
-        if !isSeries && !isSeason {
+        if !isSeries {
             await loadMediaInfo()
         }
 
@@ -1238,21 +1086,6 @@ struct PhoneDetailView: View {
         } catch {
             await loadOfflineSeriesContent()
         }
-    }
-
-    private func loadSeasonContent() async {
-        guard let seriesID = item.seriesId ?? item.parentId else { return }
-
-        let series = try? await JellyfinClient.shared.getItem(itemId: seriesID)
-        seriesCommunityRating = series?.communityRating
-        seriesCriticRating = series?.criticRating
-        seriesStatus = series?.status
-        seasons = (try? await JellyfinClient.shared.getSeasons(seriesId: seriesID)) ?? []
-
-        let selected = seasons.first { $0.id == item.id } ?? item
-        selectedSeason = selected
-        await loadEpisodesForSeason(seriesId: seriesID, season: selected)
-        await findNextEpisodeToPlay(preferredSeasonID: selected.id)
     }
 
     private func loadOfflineSeriesContent() async {
@@ -1392,8 +1225,8 @@ struct PhoneDetailView: View {
         if let season = selectedSeason {
             await loadEpisodesForSeason(seriesId: contentSeriesId, season: season)
         }
-        if isSeries || isSeason {
-            await findNextEpisodeToPlay(preferredSeasonID: isSeason ? item.id : nil)
+        if isSeries {
+            await findNextEpisodeToPlay()
         }
     }
 
@@ -1401,7 +1234,7 @@ struct PhoneDetailView: View {
         guard let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) else { return }
         isWatched = freshItem.userData?.played ?? false
         hasProgress = freshItem.progressPercent > 0
-        if isSeries || isSeason {
+        if isSeries {
             await findNextEpisodeToPlay()
         }
     }
@@ -1476,13 +1309,6 @@ struct PhoneDetailView: View {
         return serverImageURL(item.id, "Primary", maxWidth: heroWidth)
     }
 
-    private func episodeThumbnailURL(_ episode: BaseItemDto) -> URL? {
-        if !NetworkMonitor.shared.isOnline {
-            return OfflineImageHelper.thumbnailURL(for: episode.id, serverID: serverID)
-        }
-        return serverImageURL(episode.id, "Primary", maxWidth: ImageSizing.pixelWidth(points: 120), owner: episode)
-    }
-
     // MARK: - Formatting
 
     private func formatRuntime(_ ticks: Int64) -> String {
@@ -1490,10 +1316,6 @@ struct PhoneDetailView: View {
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
         return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes) min"
-    }
-
-    private func formatPremiereDate(_ dateStr: String) -> String {
-        DateFormatting.formatLongDate(dateStr) ?? ""
     }
 
     private func formatCodec(_ codec: String) -> String {
@@ -1566,6 +1388,10 @@ struct AdaptiveDetailView: View {
     }
 
     private var detailContent: AdaptiveDetailContent {
+        // A season has its own page (#760) on every device.
+        if item.type == .season {
+            return .season(MobileSeasonView(season: item, libraryName: libraryName, serverID: serverID, layout: layout))
+        }
         switch layout {
         case .phone:
             return .phone(
@@ -1596,6 +1422,7 @@ struct AdaptiveDetailView: View {
 enum AdaptiveDetailContent: View {
     case phone(PhoneDetailView)
     case pad(MobileDetailView)
+    case season(MobileSeasonView)
 
     var layout: AdaptiveDetailLayout {
         switch self {
@@ -1603,6 +1430,8 @@ enum AdaptiveDetailContent: View {
             return .phone
         case .pad:
             return .pad
+        case .season(let view):
+            return view.layout
         }
     }
 
@@ -1612,6 +1441,8 @@ enum AdaptiveDetailContent: View {
         case .phone(let view):
             view
         case .pad(let view):
+            view
+        case .season(let view):
             view
         }
     }

@@ -37,17 +37,35 @@ final class AdaptiveDetailViewTests: XCTestCase {
         XCTAssertEqual(detailView.serverID, "server-one")
     }
 
+    /// A season opens the season page (#760), laid out for the device.
+    func testASeasonOpensTheSeasonPage() throws {
+        for idiom in [UIUserInterfaceIdiom.phone, .pad] {
+            let content = try XCTUnwrap(
+                AdaptiveDetailView(
+                    item: Self.makeItem(type: .season),
+                    serverID: "server-one",
+                    deviceIdiom: idiom
+                ).body as? AdaptiveDetailContent
+            )
+            guard case .season(let seasonView) = content else {
+                return XCTFail("Expected a season to open MobileSeasonView on \(idiom)")
+            }
+            XCTAssertEqual(seasonView.serverID, "server-one")
+            XCTAssertEqual(content.layout, idiom == .pad ? .pad : .phone)
+        }
+    }
+
     func testUnknownIdiomsKeepThePhoneLayoutFallback() {
         XCTAssertEqual(AdaptiveDetailLayout.forDevice(idiom: .unspecified), .phone)
     }
 
-    private static func makeItem() -> BaseItemDto {
+    private static func makeItem(type: ItemType = .movie) -> BaseItemDto {
         BaseItemDto(
             id: "test-item",
             name: "Test Item",
-            type: .movie,
+            type: type,
             seriesName: nil,
-            seriesId: nil,
+            seriesId: type == .season ? "test-series" : nil,
             seasonId: nil,
             parentId: nil,
             indexNumber: nil,
