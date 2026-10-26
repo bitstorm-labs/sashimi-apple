@@ -927,7 +927,7 @@ struct MobileDetailView: View {
             watchedButton
 
             if NetworkMonitor.shared.isOnline {
-                DownloadButton(item: item, serverID: serverID, quality: nil)
+                DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: true)
             }
 
             if NetworkMonitor.shared.isOnline, isEpisode, item.seriesId != nil {
@@ -1088,6 +1088,11 @@ struct MobileDetailView: View {
                                         serverID: serverID
                                     ) {
                                         showingEpisodeDetail = episode
+                                    }
+                                    .contextMenu {
+                                        // Right-click / long-press: the episode download
+                                        // menu (#744). The menu acts on the active server.
+                                        if serverID == nil { ItemContextMenu(item: episode) }
                                     }
                                     .id(episode.id)
                                 }
