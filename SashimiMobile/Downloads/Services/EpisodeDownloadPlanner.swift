@@ -10,6 +10,15 @@ enum EpisodeDownloadScope: Equatable {
     case unwatchedInSeason
     /// Unwatched regular episodes of the whole series.
     case unwatchedInSeries
+
+    /// Named in the quality dialog.
+    var title: String {
+        switch self {
+        case .thisAndNext(let count): return "This and the \(EpisodeDownloadPlanner.nextCountTitle(count).lowercased())"
+        case .unwatchedInSeason: return "Unwatched in Season"
+        case .unwatchedInSeries: return "Unwatched in Series"
+        }
+    }
 }
 
 enum EpisodeDownloadPlanner {
