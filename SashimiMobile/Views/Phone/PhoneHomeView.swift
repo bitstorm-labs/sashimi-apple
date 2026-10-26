@@ -23,6 +23,7 @@ struct PhoneHomeView: View {
             .padding(.vertical, MobileSpacing.sm)
         }
         .background(MobileColors.background)
+        .continueWatchingRemovalToast(viewModel)
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 8) {
@@ -125,6 +126,10 @@ struct PhoneHomeView: View {
         }
     }
 
+    private func removeFromContinueWatching(_ item: BaseItemDto) {
+        Task { await viewModel.removeFromContinueWatching(item) }
+    }
+
     @ViewBuilder
     private func rowView(for row: HomeRowConfig) -> some View {
         switch row.type {
@@ -134,7 +139,8 @@ struct PhoneHomeView: View {
                 MobileContinueWatchingRow(
                     items: viewModel.continueWatchingItems,
                     libraryNames: libNames,
-                    cardWidth: PhoneSizing.continueWatchingWidth
+                    cardWidth: PhoneSizing.continueWatchingWidth,
+                    onRemove: removeFromContinueWatching
                 ) { item in
                     PhoneDetailView(item: item, libraryName: libNames[item.id])
                 }

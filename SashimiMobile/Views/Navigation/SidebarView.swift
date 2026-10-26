@@ -21,6 +21,21 @@ enum SidebarSelection: Hashable {
         }
     }
 
+    /// The hover tooltip on the rail icon (Mac, iPad with a pointer). The
+    /// collapsed rail is icons only, so this is how a pointer user learns what
+    /// each one opens (#743). Never empty: a library the server sent without a
+    /// name still says what it is.
+    var helpLabel: String {
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Library" : name
+    }
+
+    /// The account button's tooltip: whose account it is and what it does.
+    static func accountHelpLabel(userName: String?) -> String {
+        let name = userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Account and servers" : "\(name) — Switch server"
+    }
+
     /// Sections that work without the server: Home (as the offline Home),
     /// Downloads and Settings.
     var isAvailableOffline: Bool {
@@ -290,6 +305,7 @@ struct MainNavigationView: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel("Account and servers")
+        .help(SidebarSelection.accountHelpLabel(userName: sessionManager.currentUser?.name))
     }
 
     /// The Search section's field (#126), the one screen with a header strip.

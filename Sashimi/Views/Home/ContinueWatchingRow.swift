@@ -5,6 +5,12 @@ struct ContinueWatchingRow: View {
     var libraryNames: [String: String] = [:]  // Item ID -> Library name mapping
     let onSelect: (BaseItemDto) -> Void
     var onPlay: ((BaseItemDto) -> Void)?  // Optional: immediate playback on Play button
+    /// "Remove from Continue Watching" in the card's long-press menu (#742).
+    var onRemove: ((BaseItemDto) -> Void)?
+
+    /// Which card has focus, so a removal can hand focus to its neighbour
+    /// rather than letting tvOS re-resolve it (often onto the rail).
+    @FocusState private var focusedId: String?
 
     private func isYouTube(_ item: BaseItemDto) -> Bool {
         guard let libraryName = libraryNames[item.id] else { return false }
@@ -24,8 +30,10 @@ struct ContinueWatchingRow: View {
                         ContinueWatchingCard(
                             item: item,
                             isYouTube: isYouTube(item),
+                            focus: $focusedId,
                             onSelect: { onSelect(item) },
-                            onPlayPause: onPlay != nil ? { onPlay?(item) } : nil
+                            onPlayPause: onPlay != nil ? { onPlay?(item) } : nil,
+                            onRemove: onRemove != nil ? { remove(item) } : nil
                         )
                     }
                 }
@@ -34,15 +42,28 @@ struct ContinueWatchingRow: View {
             }
         }
     }
+
+    private func remove(_ item: BaseItemDto) {
+        let neighbour = ContinueWatchingRemoval.focusAfterRemoving(item.id, from: items.map(\.id))
+        onRemove?(item)
+        // After the context menu has closed, hand focus to the card that
+        // takes the removed one's place.
+        if let neighbour {
+            DispatchQueue.main.async { focusedId = neighbour }
+        }
+    }
 }
 
 struct ContinueWatchingCard: View {
     let item: BaseItemDto
     var isYouTube: Bool = false  // Whether this is YouTube content
+    /// The row's focus, keyed by item id.
+    let focus: FocusState<String?>.Binding
     let onSelect: () -> Void
     var onPlayPause: (() -> Void)?  // Optional: immediate playback on Play/Pause button
+    var onRemove: (() -> Void)?
 
-    @FocusState private var isFocused: Bool
+    private var isFocused: Bool { focus.wrappedValue == item.id }
 
     // Check if parent series has backdrop images (regular shows have it, YouTube doesn't)
     private var seriesHasBackdrop: Bool {
@@ -184,7 +205,15 @@ struct ContinueWatchingCard: View {
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isFocused)
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
-        .focused($isFocused)
+        .focused(focus, equals: item.id)
+        .contextMenu {
+            // Long-press Select, as on the library posters (MediaRow).
+            if let onRemove {
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove from Continue Watching", systemImage: "minus.circle")
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Double-tap to resume playback, or press Play to start immediately")

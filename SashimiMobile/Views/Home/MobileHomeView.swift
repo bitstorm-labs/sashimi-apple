@@ -63,6 +63,7 @@ struct MobileHomeView: View {
                 }
             }
         }
+        .continueWatchingRemovalToast(viewModel)
         .navigationDestination(item: $heroDestination) { item in
             AdaptiveDetailView(item: item, libraryName: viewModel.heroItemLibraryNames[item.id])
         }
@@ -215,6 +216,10 @@ struct MobileHomeView: View {
         }
     }
 
+    private func removeFromContinueWatching(_ item: BaseItemDto) {
+        Task { await viewModel.removeFromContinueWatching(item) }
+    }
+
     @ViewBuilder
     private func rowView(for row: HomeRowConfig) -> some View {
         switch row.type {
@@ -223,7 +228,8 @@ struct MobileHomeView: View {
                 let libNames = viewModel.continueWatchingLibraryNames
                 MobileContinueWatchingRow(
                     items: viewModel.continueWatchingItems,
-                    libraryNames: libNames
+                    libraryNames: libNames,
+                    onRemove: removeFromContinueWatching
                 ) { item in
                     AdaptiveDetailView(item: item, libraryName: libNames[item.id])
                 }
