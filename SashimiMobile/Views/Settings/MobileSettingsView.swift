@@ -87,7 +87,7 @@ struct MobileSettingsView: View {
 
             // Home Screen Section
             Section("Home Screen") {
-                NavigationLink("Customize Row Order") {
+                NavigationLink(MobileLayoutIdiom.usesPadLayout ? "Home & Side Menu" : "Customize Row Order") {
                     HomeRowOrderView()
                 }
             }
@@ -218,6 +218,46 @@ struct MobileSettingsView: View {
 
 struct HomeRowOrderView: View {
     @ObservedObject private var settings = HomeRowSettings.shared
+    @ObservedObject private var sideMenu = SideMenuSettings.shared
+    /// Every library the side menu can list, for the ones Home has no row for.
+    @State private var railLibraries: [JellyfinLibrary] = []
+
+    /// Only iPad and Mac have a side menu; iPhone uses tabs.
+    private var showsSideMenu: Bool { MobileLayoutIdiom.usesPadLayout }
+
+    private var menuOnlyLibraries: [JellyfinLibrary] {
+        RailOrder.menuOnlyLibraries(railLibraries, homeDestinations: settings.rows.compactMap(\.railDestination))
+    }
+
+    @ViewBuilder
+    private func sideMenuSwitch(_ destination: RailOrder.Destination?) -> some View {
+        if let destination {
+            let isOn = sideMenu.isShown(destination)
+            Image(systemName: "sidebar.left")
+                .foregroundColor(isOn ? .accentColor : .gray)
+                .opacity(isOn ? 1 : 0.35)
+                .onTapGesture { sideMenu.toggle(destination) }
+                .accessibilityLabel("Side menu")
+                .accessibilityValue(isOn ? "Shown" : "Hidden")
+                .accessibilityAddTraits(.isButton)
+        } else {
+            Text("\u{2014}")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Not in the side menu")
+        }
+    }
+
+    @ViewBuilder
+    private func note(isOnHome: Bool, destination: RailOrder.Destination?) -> some View {
+        if showsSideMenu, let text = RailOrder.reachabilityNote(
+            isOnHome: isOnHome,
+            isInSideMenu: destination.map(sideMenu.isShown) ?? true
+        ) {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 
     var body: some View {
         List {
@@ -232,9 +272,16 @@ struct HomeRowOrderView: View {
                                 }
                             }
 
-                        Text(row.displayName)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.displayName)
+                            note(isOnHome: row.isEnabled, destination: row.railDestination)
+                        }
 
                         Spacer()
+
+                        if showsSideMenu {
+                            sideMenuSwitch(row.railDestination)
+                        }
 
                         Image(systemName: "line.3.horizontal")
                             .foregroundColor(.secondary)
@@ -244,10 +291,36 @@ struct HomeRowOrderView: View {
                     settings.moveRow(from: source, to: destination)
                 }
             } header: {
-                Text("Drag to reorder, tap to enable/disable")
+                Text(showsSideMenu
+                     ? "Left: on Home. Right: in the side menu. Drag to reorder both."
+                     : "Drag to reorder, tap to enable/disable")
+            } footer: {
+                if showsSideMenu {
+                    Text("Home, Search, Downloads and Settings are always in the side menu.")
+                }
+            }
+
+            if showsSideMenu, !menuOnlyLibraries.isEmpty {
+                Section("Side menu only") {
+                    ForEach(menuOnlyLibraries) { library in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(library.name)
+                                note(isOnHome: false, destination: .library(library.id))
+                            }
+                            Spacer()
+                            sideMenuSwitch(.library(library.id))
+                        }
+                    }
+                }
             }
         }
-        .navigationTitle("Row Order")
+        .navigationTitle(showsSideMenu ? "Home & Side Menu" : "Row Order")
+        .task {
+            if showsSideMenu {
+                railLibraries = (try? await JellyfinClient.shared.getLibraryViews()) ?? []
+            }
+        }
         .onAppear { settings.use(serverID: SessionManager.shared.activeServerId) }
         .environment(\.editMode, .constant(.active))
     }

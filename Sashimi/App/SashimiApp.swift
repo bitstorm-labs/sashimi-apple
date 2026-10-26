@@ -218,6 +218,8 @@ struct MainTabView: View {
     @State private var libraries: [JellyfinLibrary] = []
     // The rail's order comes from here; HomeView owns the same singleton.
     @ObservedObject private var homeSettings = HomeScreenSettings.shared
+    /// What the user took out of the rail (#753); the rail follows it live.
+    @ObservedObject private var sideMenu = SideMenuSettings.shared
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
     // One-shot: the hero grabs focus once on cold launch (the rail otherwise
@@ -671,7 +673,8 @@ private extension MainTabView {
 
         for destination in RailOrder.destinations(
             rowConfigs: homeSettings.rowConfigs,
-            libraryIds: libraries.map(\.id)
+            libraryIds: libraries.map(\.id),
+            hidden: sideMenu.hidden
         ) {
             switch destination {
             case .finTV:

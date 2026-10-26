@@ -36,6 +36,15 @@ enum SidebarSelection: Hashable {
         return name.isEmpty ? "Account and servers" : "\(name) — Switch server"
     }
 
+    /// The menu entry a user can hide (#753); nil for the ones always shown.
+    var railDestination: RailOrder.Destination? {
+        switch self {
+        case .finTV: return .finTV
+        case .library(let id, _, _): return .library(id)
+        case .home, .search, .downloads, .settings: return nil
+        }
+    }
+
     /// Sections that work without the server: Home (as the offline Home),
     /// Downloads and Settings.
     var isAvailableOffline: Bool {
@@ -85,6 +94,7 @@ struct MainNavigationView: View {
     /// The menu bar's ⌘1…⌘9, ⌘F and ⌘, land here.
     @ObservedObject private var commandCenter = AppCommandCenter.shared
     @ObservedObject private var homeRows = HomeRowSettings.shared
+    @ObservedObject private var sideMenu = SideMenuSettings.shared
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -192,7 +202,7 @@ struct MainNavigationView: View {
     }
 
     private var railItems: [SidebarSelection] {
-        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries)
+        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden)
     }
 
     /// A menu-bar section change (⌘1…⌘9, ⌘F, ⌘,). Unlike a rail tap it never
