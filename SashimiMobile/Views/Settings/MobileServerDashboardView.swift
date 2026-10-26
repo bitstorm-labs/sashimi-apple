@@ -18,7 +18,7 @@ struct MobileServerDashboardView: View {
 
     var body: some View {
         content
-            .navigationTitle("Server")
+            .navigationTitle("Dashboard")
             .onAppear { model.attach() }
             .onDisappear { model.detach() }
             .onChange(of: scenePhase) { _, phase in

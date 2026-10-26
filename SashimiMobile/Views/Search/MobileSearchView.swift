@@ -368,15 +368,29 @@ struct MobileSearchView: View {
 
 /// iPhone's navigation-bar title and system search field. The iPad hides the
 /// system bar and puts its search field in MainNavigationView's header.
+///
+/// The field is always shown (#752): with the default placement iOS tucks it
+/// under the large title until the list is pulled down, so the Search tab
+/// opened looking like it had no search field. Opening the tab with no query
+/// also activates the field, ready to type.
 private struct SystemSearchChrome: ViewModifier {
     let isEnabled: Bool
     @Binding var text: String
+    @State private var isFieldActive = false
 
     func body(content: Content) -> some View {
         if isEnabled {
             content
                 .navigationTitle("Search")
-                .searchable(text: $text, prompt: "Movies, shows, and more")
+                .searchable(
+                    text: $text,
+                    isPresented: $isFieldActive,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Movies, shows, and more"
+                )
+                .onAppear {
+                    if text.isEmpty { isFieldActive = true }
+                }
         } else {
             content
         }
