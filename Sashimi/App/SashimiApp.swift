@@ -241,11 +241,21 @@ struct MainTabView: View {
     private var expanded: Bool { focusedNav != nil }
 
     var body: some View {
+        // The screen's full height, read once here: the section beside the
+        // rail is pinned to it (see railSectionFrame).
+        GeometryReader { screen in
+            railRoot(screenHeight: screen.size.height)
+        }
+        .ignoresSafeArea()
+    }
+
+    private func railRoot(screenHeight: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             // Content sits to the right of the slim rail and never moves —
             // the expanded panel overlays it. Kept bright/unblurred so the
             // previewed section reads clearly as you roam the rail.
             content
+                .railSectionFrame(height: screenHeight)
                 .padding(.leading, railWidth)
                 // Content wins initial focus so the app opens with the rail
                 // resting (collapsed), not auto-expanded onto Home.

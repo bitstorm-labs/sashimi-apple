@@ -46,7 +46,7 @@ struct SettingsView: View {
                             if sessionManager.canViewServerDashboard {
                                 SettingsOptionRow(
                                     icon: "gauge.with.dots.needle.67percent",
-                                    title: "Server",
+                                    title: "Dashboard",
                                     subtitle: "Now playing, activity and health"
                                 ) {
                                     navigationPath.append(SettingsDestination.serverDashboard)
