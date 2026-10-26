@@ -133,8 +133,10 @@ struct HeroSection: View {
                     // than the rest of the screen (which fades to pure black).
                     Color.clear
 
-                    // Backdrop image positioned on the right with soft left edge.
-                    // The fade mask is applied to the IMAGE, not the 0.7-width
+                    // Backdrop image positioned on the right with soft left and
+                    // bottom edges (`BackdropFade`, #765): no full-width wash over
+                    // it; the text keeps the left scrim below, confined to the
+                    // text column. The fade mask is applied to the IMAGE, not the 0.7-width
                     // container: a .fit image sizes to its fitted bounds (a 16:9
                     // backdrop fills ~0.5 of the hero width), so a container-
                     // relative ramp over the leftmost 25% never reached the
@@ -143,16 +145,7 @@ struct HeroSection: View {
                     HStack(spacing: 0) {
                         Spacer()
                         heroImage(maxWidth: layout.imagePixelWidth(in: geometry.size))
-                        .mask(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0.0),
-                                    .init(color: .white, location: 0.35)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .backdropFade()
                         .id(currentItem.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .frame(
@@ -181,19 +174,6 @@ struct HeroSection: View {
                         .frame(width: geometry.size.width * 0.35)
                         Spacer()
                     }
-
-                    // Bottom gradient — fade to black (not charcoal) so the title
-                    // area and the hero's lower edge match the page's fade-to-black.
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: .clear, location: 0.4),
-                            .init(color: .black.opacity(0.6), location: 0.7),
-                            .init(color: .black, location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
 
                     // Content overlay
                     VStack(alignment: .leading, spacing: 20 * scale) {

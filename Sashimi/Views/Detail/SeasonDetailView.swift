@@ -2,7 +2,8 @@ import SwiftUI
 
 /// One season of a show (#760): poster, the show's name, "Season N · X
 /// episodes · Y of X watched", Play for the next unwatched episode, the
-/// season-wide watched mark, Series, and the season's episodes.
+/// season-wide watched mark, Series, and the season's episodes, over the
+/// series' backdrop and hero trailer (#764).
 struct SeasonDetailView: View {
     let serverID: String?
     var forceYouTubeStyle = false
@@ -34,7 +35,18 @@ struct SeasonDetailView: View {
             .padding(.vertical, 60)
         }
         .focusScope(focusScope)
-        .background(SashimiTheme.background.ignoresSafeArea())
+        // The series' backdrop and hero trailer, exactly as on the series
+        // page: seasons have neither of their own (#764).
+        .background {
+            DetailHeroBackground(
+                image: DetailHero.tvImage(for: model.season, isYouTubeSeries: forceYouTubeStyle),
+                isYouTubeSeries: forceYouTubeStyle,
+                tagSource: model.season,
+                trailerItem: model.season,
+                serverID: serverID
+            )
+        }
+        .themeSong(for: model.season)
         .fullScreenCover(item: $playingItem) { episode in
             PlayerView(item: episode, serverID: serverID, startFromBeginning: startFromBeginning)
         }
