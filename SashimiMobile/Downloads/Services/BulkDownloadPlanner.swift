@@ -24,6 +24,12 @@ enum BulkDownloadScope: Equatable {
         }
     }
 
+    /// The scope as the quality dialog names it ("Custom..." is only a menu label).
+    var dialogTitle: String {
+        if case .nextUnwatched(let count) = self { return "Next \(count) Unwatched" }
+        return title
+    }
+
     /// Series scopes span every season, so their episodes must be fetched;
     /// season scopes use the episodes the page already shows.
     var isUnwatchedOnly: Bool {
@@ -98,6 +104,12 @@ enum BulkDownloadPlanner {
         }
     }
 
+    /// The quality dialog's line: "Download Series · 15 episodes".
+    static func qualityMessage(title: String, count: Int) -> String {
+        let episodes = "\(count) episode\(count == 1 ? "" : "s")"
+        return title.isEmpty ? episodes : "\(title) \u{00B7} \(episodes)"
+    }
+
     static func needsConfirmation(count: Int) -> Bool {
         count > confirmationThreshold
     }
@@ -120,5 +132,27 @@ enum BulkDownloadPlanner {
         }
         let size = ByteCountFormatter.string(fromByteCount: estimatedBytes, countStyle: .file)
         return "Download \(count) \(noun) (~\(size))?"
+    }
+}
+
+/// Where a bulk scope's episodes come from. Always the server: the page's own
+/// list keeps the watched state it was loaded with, so after marking episodes
+/// watched "Download Unwatched in Season" picked them anyway (#750).
+enum BulkDownloadSource {
+    static func episodes(
+        for scope: BulkDownloadScope,
+        seasonEpisodes: [BaseItemDto],
+        seriesId: String?,
+        client: JellyfinClient = .shared
+    ) async -> [BaseItemDto]? {
+        if scope.spansSeries {
+            guard let seriesId else { return nil }
+            return try? await client.getEpisodes(seriesId: seriesId)
+        }
+        // A season built from downloads (offline) has no server ids to ask with.
+        guard let first = seasonEpisodes.first,
+              let series = first.seriesId ?? seriesId,
+              let season = first.seasonId else { return seasonEpisodes }
+        return try? await client.getEpisodes(seriesId: series, seasonId: season)
     }
 }

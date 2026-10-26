@@ -148,7 +148,7 @@ extension MediaDetailView {
 
     // MARK: - Season watched state
 
-    private func seasonWatchAction(for season: BaseItemDto) -> SeasonWatchAction {
+    func seasonWatchAction(for season: BaseItemDto) -> SeasonWatchAction {
         // `episodes` only describes the selected season, and only once loaded.
         let loaded = season.id == selectedSeason?.id && !isLoadingEpisodes ? episodes : nil
         return SeasonWatchAction.resolve(season: season, loadedEpisodes: loaded)
@@ -205,5 +205,20 @@ extension MediaDetailView {
         }
         guard selectedSeason?.id == season.id else { return }
         isLoadingEpisodes = false
+    }
+
+    func applyPlayedStateChange(_ change: PlayedStateChange) async {
+        if change.itemId == item.id {
+            isWatched = change.played
+            if change.played { hasProgress = false }
+        }
+        let seasonId = selectedSeason?.id
+        guard let fresh = await change.refreshedEpisodes(
+            showing: episodes,
+            containerIds: [item.id, item.seriesId, item.seasonId],
+            seriesId: isSeries ? item.id : item.seriesId,
+            seasonId: seasonId
+        ), selectedSeason?.id == seasonId else { return }
+        episodes = fresh
     }
 }

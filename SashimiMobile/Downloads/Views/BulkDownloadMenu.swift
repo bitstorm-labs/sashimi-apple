@@ -24,6 +24,9 @@ final class BulkDownloadFlow: ObservableObject {
     var serverID: String?
 
     @Published var candidates: [BaseItemDto] = []
+    /// What the user picked ("Download Series"), named in the quality dialog
+    /// so a tap on the neighbouring entry shows before anything downloads.
+    @Published var batchTitle = ""
     @Published var showingQuality = false
     @Published var pendingBatch: PendingBatch?
     @Published var pendingKeepNext: PendingKeepNext?
@@ -54,6 +57,7 @@ final class BulkDownloadFlow: ObservableObject {
     /// `originalSample`, when given, is checked for Original before the
     /// quality dialog (the episode menu has no page-wide check to rely on).
     func begin(
+        title: String,
         unwatchedOnly: Bool,
         originalSample: BaseItemDto? = nil,
         load: @escaping () async -> [BaseItemDto]?,
@@ -74,6 +78,7 @@ final class BulkDownloadFlow: ObservableObject {
                 return
             }
             candidates = pending
+            batchTitle = title
             pendingKeepNext = nil
             if let originalSample { await refreshOriginalAllowed(sample: originalSample) }
             // Let a dismissing menu/alert finish before presenting the dialog.
@@ -84,10 +89,8 @@ final class BulkDownloadFlow: ObservableObject {
 
     /// One of the series page's season/series scopes.
     func begin(_ scope: BulkDownloadScope, seasonEpisodes: [BaseItemDto], seriesId: String?) {
-        begin(unwatchedOnly: scope.isUnwatchedOnly) {
-            guard scope.spansSeries else { return seasonEpisodes }
-            guard let seriesId else { return nil }
-            return try? await JellyfinClient.shared.getEpisodes(seriesId: seriesId)
+        begin(title: scope.dialogTitle, unwatchedOnly: scope.isUnwatchedOnly) {
+            await BulkDownloadSource.episodes(for: scope, seasonEpisodes: seasonEpisodes, seriesId: seriesId)
         } choose: { [weak self] source in
             let selected = BulkDownloadPlanner.select(scope, from: source)
             let pending = BulkDownloadPlanner.pending(selected) { self?.status(of: $0) }
@@ -99,7 +102,7 @@ final class BulkDownloadFlow: ObservableObject {
     func begin(_ scope: EpisodeDownloadScope, for episode: BaseItemDto) {
         let unwatchedOnly: Bool
         if case .thisAndNext = scope { unwatchedOnly = false } else { unwatchedOnly = true }
-        begin(unwatchedOnly: unwatchedOnly, originalSample: episode) {
+        begin(title: scope.title, unwatchedOnly: unwatchedOnly, originalSample: episode) {
             guard let seriesId = episode.seriesId else { return nil }
             return try? await JellyfinClient.shared.getEpisodes(seriesId: seriesId)
         } choose: { [weak self] source in
@@ -223,7 +226,7 @@ struct BulkDownloadDialogs: ViewModifier {
                 if let keepNext = flow.pendingKeepNext {
                     Text("Keep the next \(keepNext.count == 1 ? "episode" : "\(keepNext.count) episodes") downloaded")
                 } else {
-                    Text("\(flow.candidates.count) episode\(flow.candidates.count == 1 ? "" : "s")")
+                    Text(BulkDownloadPlanner.qualityMessage(title: flow.batchTitle, count: flow.candidates.count))
                 }
             }
             .alert(
