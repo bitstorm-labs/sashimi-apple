@@ -114,10 +114,38 @@ final class DownloadWatchPolicyTests: XCTestCase {
 
     // MARK: - Delete after watching
 
-    func testAutoDeleteRequiresSettingCompletedDownloadAndEnd() {
-        XCTAssertTrue(DownloadWatchPolicy.shouldAutoDelete(settingEnabled: true, isCompletedDownload: true, playedToEnd: true))
-        XCTAssertFalse(DownloadWatchPolicy.shouldAutoDelete(settingEnabled: false, isCompletedDownload: true, playedToEnd: true))
-        XCTAssertFalse(DownloadWatchPolicy.shouldAutoDelete(settingEnabled: true, isCompletedDownload: false, playedToEnd: true))
-        XCTAssertFalse(DownloadWatchPolicy.shouldAutoDelete(settingEnabled: true, isCompletedDownload: true, playedToEnd: false))
+    private func autoDeletes(
+        enabled: Bool = true, complete: Bool = true, position: Int64, runTime: Int64?, reachedEnd: Bool = false
+    ) -> Bool {
+        DownloadWatchPolicy.shouldAutoDelete(
+            settingEnabled: enabled,
+            isCompletedDownload: complete,
+            positionTicks: position,
+            runTimeTicks: runTime,
+            reachedEnd: reachedEnd
+        )
+    }
+
+    func testAutoDeleteRequiresTheSettingAndACompletedDownload() {
+        XCTAssertTrue(autoDeletes(position: hour, runTime: hour, reachedEnd: true))
+        XCTAssertFalse(autoDeletes(enabled: false, position: hour, runTime: hour, reachedEnd: true))
+        XCTAssertFalse(autoDeletes(complete: false, position: hour, runTime: hour, reachedEnd: true))
+    }
+
+    /// Stopped in the credits: the server marks it watched, so it goes.
+    func testStoppingPastTheWatchedLineDeletes() {
+        XCTAssertTrue(autoDeletes(position: hour * 92 / 100, runTime: hour))
+        XCTAssertTrue(autoDeletes(position: hour * 90 / 100, runTime: hour))
+    }
+
+    func testStoppingBeforeTheWatchedLineKeepsIt() {
+        XCTAssertFalse(autoDeletes(position: hour * 89 / 100, runTime: hour))
+        XCTAssertFalse(autoDeletes(position: 0, runTime: hour))
+    }
+
+    /// No runtime to measure against: only playing to the end counts.
+    func testUnknownRuntimeNeedsTheEnd() {
+        XCTAssertFalse(autoDeletes(position: hour, runTime: nil))
+        XCTAssertTrue(autoDeletes(position: hour, runTime: nil, reachedEnd: true))
     }
 }
