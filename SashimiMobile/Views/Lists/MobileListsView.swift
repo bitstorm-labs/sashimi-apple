@@ -121,36 +121,50 @@ struct MobileListCard: View {
     }
 }
 
-/// Jellyfin's generated playlist image, else the first title's backdrop.
+/// The first four different titles as a 2x2 collage of posters, or the
+/// first title's poster alone (`SharedLists.coverPosterIds`).
 struct MobileListCover: View {
     let card: ListCard
 
-    private var url: URL? {
-        if let tag = card.list.imageTag {
-            return JellyfinClient.shared.syncImageURL(itemId: card.list.id, imageType: "Primary", maxWidth: 500, tag: tag)
-        }
-        guard let first = card.firstItem else { return nil }
-        let id = first.type == .episode ? (first.seriesId ?? first.id) : first.id
-        return JellyfinClient.shared.syncImageURL(itemId: id, imageType: "Backdrop", maxWidth: 500)
-    }
-
     var body: some View {
-        MobileColors.cardBackground
-            .overlay {
-                if let url {
-                    LazyImage(url: url) { state in
-                        if let image = state.image {
-                            image.resizable().scaledToFill()
+        GeometryReader { geometry in
+            ZStack {
+                MobileColors.cardBackground
+                if card.coverIds.count == 4 {
+                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { row in
+                            HStack(spacing: 0) {
+                                ForEach(0..<2, id: \.self) { column in
+                                    poster(card.coverIds[row * 2 + column], width: cell.width)
+                                        .frame(width: cell.width, height: cell.height)
+                                        .clipped()
+                                }
+                            }
                         }
                     }
-                    .pipeline(SashimiImagePipeline.shared)
+                } else if let first = card.coverIds.first {
+                    poster(first, width: geometry.size.width)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
                 } else {
                     Image(systemName: "list.bullet.rectangle")
                         .font(.system(size: 30))
                         .foregroundStyle(MobileColors.textTertiary)
                 }
             }
-            .clipped()
+        }
+    }
+
+    private func poster(_ itemId: String, width: CGFloat) -> some View {
+        LazyImage(url: JellyfinClient.shared.syncImageURL(
+            itemId: itemId, imageType: "Primary", maxWidth: ImageSizing.pixelWidth(points: width)
+        )) { state in
+            if let image = state.image {
+                image.resizable().scaledToFill()
+            }
+        }
+        .pipeline(SashimiImagePipeline.shared)
     }
 }
 

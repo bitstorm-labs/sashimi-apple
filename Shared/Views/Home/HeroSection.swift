@@ -145,7 +145,10 @@ struct HeroSection: View {
                     HStack(spacing: 0) {
                         Spacer()
                         heroImage(maxWidth: layout.imagePixelWidth(in: geometry.size))
-                        .backdropFade()
+                        // The top feathers too: the picture starts below the
+                        // screen's top (tvOS overscan inset, iPad status bar)
+                        // and its top edge was a hard line (#787).
+                        .backdropFade(fadesTop: true)
                         .id(currentItem.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .frame(

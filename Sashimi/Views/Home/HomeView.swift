@@ -236,7 +236,7 @@ struct HomeView: View {
         guard sharedLists.hasLoaded, !homeSettings.rowConfigs.isEmpty else { return }
         let lists = sharedLists.subscribedLists
         homeSettings.updateWithLists(lists, titles: Dictionary(lists.map {
-            ($0.id, SharedLists.rowTitle(listName: $0.name, ownerName: sharedLists.ownerName(of: $0)))
+            ($0.id, sharedLists.rowTitle(of: $0))
         }, uniquingKeysWith: { first, _ in first }))
     }
 

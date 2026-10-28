@@ -11,6 +11,8 @@ private final class ListsStub: URLProtocol {
     }
 
     nonisolated(unsafe) static var routes: [String: (Int, String)] = [:]
+    /// Answers given in turn, before `routes`; the last one repeats.
+    nonisolated(unsafe) static var sequences: [String: [(Int, String)]] = [:]
     nonisolated(unsafe) static var recorded: [Recorded] = []
     private static let lock = NSLock()
 
@@ -26,7 +28,13 @@ private final class ListsStub: URLProtocol {
         let body = request.httpBody ?? request.httpBodyStream.map(Self.read)
         let (status, text) = Self.lock.withLock {
             Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
-            return Self.routes["\(method) \(url.path)"] ?? (404, "")
+            let key = "\(method) \(url.path)"
+            if var answers = Self.sequences[key], let first = answers.first {
+                if answers.count > 1 { answers.removeFirst() }
+                Self.sequences[key] = answers
+                return first
+            }
+            return Self.routes[key] ?? (404, "")
         }
         if let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -64,6 +72,7 @@ final class SharedListsServiceTests: XCTestCase {
     override func setUp() {
         super.setUp()
         ListsStub.routes = [:]
+        ListsStub.sequences = [:]
         ListsStub.recorded = []
         JellyfinClient.testURLProtocolClasses = [ListsStub.self]
     }
@@ -313,5 +322,150 @@ final class SharedListsServiceTests: XCTestCase {
         XCTAssertEqual(model.choices.map(\.id), ["mine"])
         XCTAssertEqual(model.choices.first?.alreadyOn, true)
         XCTAssertEqual(model.choices.first?.detail, "Already on this list")
+    }
+
+    // MARK: Who made it (#784)
+
+    /// Jellyfin 12.4 wiped every self-share when a user was deleted: the
+    /// plugin still knows the owner, in one batch call.
+    func testThePluginNamesTheCreatorWhenTheSelfShareIsGone() async throws {
+        ListsStub.routes["GET /Items"] = (200, items([playlist("theirs")]))
+        ListsStub.routes["GET /Playlists/theirs"] = (200, #"{"OpenAccess":true,"Shares":[]}"#)
+        ListsStub.routes["GET /Playlists/theirs/Items"] = (200, items([movie("m2")]))
+        ListsStub.routes["GET /Users"] = (200, #"[{"Id":"marge","Name":"Marge"}]"#)
+        ListsStub.routes["GET /SashimiLists/Owners"] = (200, #"{"theirs":{"OwnerUserId":"marge","OwnerName":"Marge S."}}"#)
+        let service = try service()
+        let model = ListsPageViewModel(service: service, store: SharedListsStore(service: service))
+
+        await model.load()
+
+        XCTAssertEqual(model.others.first?.list.ownerId, "marge")
+        XCTAssertEqual(model.others.first?.subtitle(isOwn: false), "Marge S. · 1 title", "the plugin's name")
+        XCTAssertEqual(ListsStub.requests("GET", "/SashimiLists/Owners").map { $0.query["ids"] }, ["theirs"])
+        XCTAssertTrue(ListsStub.requests("POST", "/Playlists/theirs/Users/\(user)").isEmpty, "never claims someone else's list")
+    }
+
+    /// No plugin (404 on its route) and no self-share: the owner self-check
+    /// finds your own list, and the self-share is put back for older clients.
+    func testWithoutThePluginTheSelfCheckFindsYourListAndRepairsTheShare() async throws {
+        ListsStub.routes["GET /Items"] = (200, items([playlist("mine"), playlist("theirs")]))
+        ListsStub.routes["GET /Playlists/mine"] = (200, #"{"OpenAccess":true,"Shares":[]}"#)
+        ListsStub.routes["GET /Playlists/theirs"] = (200, #"{"OpenAccess":true,"Shares":[]}"#)
+        ListsStub.routes["GET /Playlists/mine/Users/\(user)"] = (200, #"{"UserId":"me","CanEdit":true}"#)
+        ListsStub.routes["GET /Playlists/theirs/Users/\(user)"] = (403, "")
+        ListsStub.routes["POST /Playlists/mine/Users/\(user)"] = (204, "")
+        ListsStub.routes["GET /Playlists/mine/Items"] = (200, items([movie("m1")]))
+        ListsStub.routes["GET /Playlists/theirs/Items"] = (200, items([movie("m2")]))
+        ListsStub.routes["GET /Users"] = (200, "[]")
+        let service = try service()
+        let model = ListsPageViewModel(service: service, store: SharedListsStore(service: service))
+
+        await model.load()
+
+        XCTAssertEqual(model.mine.map(\.id), ["mine"])
+        XCTAssertEqual(model.others.map(\.id), ["theirs"])
+        let repair = try XCTUnwrap(ListsStub.requests("POST", "/Playlists/mine/Users/\(user)").first?.body)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: repair) as? [String: Any])?["CanEdit"] as? Bool, true)
+        XCTAssertTrue(ListsStub.requests("POST", "/Playlists/theirs/Users/\(user)").isEmpty)
+    }
+
+    func testThePluginsOwnerIsYouRepairsAMissingSelfShare() async throws {
+        ListsStub.routes["GET /Items"] = (200, items([playlist("mine")]))
+        ListsStub.routes["GET /Playlists/mine"] = (200, #"{"OpenAccess":false,"Shares":[]}"#)
+        ListsStub.routes["GET /SashimiLists/Owners"] = (200, #"{"mine":{"OwnerUserId":"me","OwnerName":"Me"}}"#)
+        ListsStub.routes["POST /Playlists/mine/Users/\(user)"] = (204, "")
+
+        let lists = try await service().lists()
+
+        XCTAssertEqual(lists.first?.isOwned(by: user), true)
+        XCTAssertEqual(ListsStub.requests("POST", "/Playlists/mine/Users/\(user)").count, 1)
+        XCTAssertTrue(ListsStub.requests("GET", "/Playlists/mine/Users/\(user)").isEmpty, "the plugin answered; no self-check")
+    }
+
+    /// Home's subscribed rows use the batch call too; your own reads "Your list".
+    func testHomeRowsTakeTheOwnerFromThePlugin() async throws {
+        ListsStub.routes["GET /DisplayPreferences/sashimi-lists"] = (200, preferences(#"[{"id":"L","seen":[]},{"id":"M","seen":[]}]"#))
+        ListsStub.routes["GET /Users/\(user)/Items"] = (200, items([playlist("L"), playlist("M")]))
+        ListsStub.routes["GET /Playlists/L"] = (200, #"{"OpenAccess":true,"Shares":[]}"#)
+        ListsStub.routes["GET /Playlists/M"] = (200, #"{"OpenAccess":true,"Shares":[{"UserId":"me","CanEdit":true}]}"#)
+        ListsStub.routes["GET /Playlists/L/Items"] = (200, items([movie("m1")]))
+        ListsStub.routes["GET /Playlists/M/Items"] = (200, items([movie("m2")]))
+        ListsStub.routes["GET /SashimiLists/Owners"] = (200, #"{"L":{"OwnerUserId":"marge","OwnerName":"Marge"},"M":{"OwnerUserId":"me","OwnerName":"Me"}}"#)
+
+        let store = SharedListsStore(service: try service())
+        await store.refresh()
+
+        XCTAssertEqual(store.rows["L"]?.title, "From Marge: List L")
+        XCTAssertEqual(store.rows["M"]?.title, "Your list: List M")
+        XCTAssertEqual(store.subscribedLists.map { store.rowTitle(of: $0) }, ["From Marge: List L", "Your list: List M"])
+        XCTAssertEqual(ListsStub.requests("GET", "/SashimiLists/Owners").count, 1)
+    }
+
+    /// A list's page asks the plugin for that one list.
+    func testTheListPageUsesTheSingleOwnerCall() async throws {
+        ListsStub.routes["GET /SashimiLists/Playlists/L/Owner"] = (200, #"{"OwnerUserId":"me","OwnerName":"Me"}"#)
+        ListsStub.routes["GET /Playlists/L"] = (200, #"{"OpenAccess":true,"Shares":[]}"#)
+        ListsStub.routes["POST /Playlists/L/Users/\(user)"] = (204, "")
+        ListsStub.routes["GET /Playlists/L/Items"] = (200, items([movie("m1")]))
+        ListsStub.routes["GET /Users"] = (200, "[]")
+        let service = try service()
+        let stale = SharedList(id: "L", name: "L", ownerId: nil, isPublic: false, imageTag: nil)
+        let model = ListDetailViewModel(list: stale, service: service, store: SharedListsStore(service: service))
+
+        await model.load()
+
+        XCTAssertTrue(model.isOwner)
+        XCTAssertEqual(model.creatorLine, "Your list")
+        XCTAssertTrue(model.list.isPublic, "the server's OpenAccess, not the card's")
+        XCTAssertTrue(ListsStub.requests("GET", "/SashimiLists/Owners").isEmpty)
+    }
+
+    // MARK: Public/Private is the server's (#785)
+
+    private func detailModel(isPublic: Bool) throws -> ListDetailViewModel {
+        let service = try service()
+        let list = SharedList(id: "L", name: "L", ownerId: user, isPublic: isPublic, imageTag: nil)
+        return ListDetailViewModel(list: list, service: service, store: SharedListsStore(service: service), settle: .zero)
+    }
+
+    /// A queued server refresh reverts the switch a second later: it is
+    /// applied once more, and what shows is what the server then says.
+    func testARevertedSwitchIsAppliedAgain() async throws {
+        ListsStub.routes["POST /Playlists/L"] = (204, "")
+        ListsStub.sequences["GET /Playlists/L"] = [(200, #"{"OpenAccess":false}"#), (200, #"{"OpenAccess":true}"#)]
+        let model = try detailModel(isPublic: false)
+
+        let ok = await model.togglePublic()
+
+        XCTAssertTrue(ok)
+        XCTAssertTrue(model.list.isPublic)
+        let posts = ListsStub.requests("POST", "/Playlists/L").compactMap(\.body)
+            .compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        XCTAssertEqual(posts.compactMap { $0["IsPublic"] as? Bool }, [true, true])
+    }
+
+    /// The switch never shows a value the server does not have.
+    func testTheSwitchShowsTheServersValueWhenItWillNotStick() async throws {
+        ListsStub.routes["POST /Playlists/L"] = (204, "")
+        ListsStub.routes["GET /Playlists/L"] = (200, #"{"OpenAccess":false}"#)
+        let model = try detailModel(isPublic: false)
+
+        let ok = await model.togglePublic()
+
+        XCTAssertFalse(ok)
+        XCTAssertFalse(model.list.isPublic)
+        XCTAssertEqual(ListsStub.requests("POST", "/Playlists/L").count, 2, "re-applied once, not forever")
+    }
+
+    func testASwitchThatSticksIsAppliedOnce() async throws {
+        ListsStub.routes["POST /Playlists/L"] = (204, "")
+        ListsStub.routes["GET /Playlists/L"] = (200, #"{"OpenAccess":false}"#)
+        let model = try detailModel(isPublic: true)
+
+        let ok = await model.togglePublic()
+
+        XCTAssertTrue(ok)
+        XCTAssertFalse(model.list.isPublic)
+        XCTAssertEqual(ListsStub.requests("POST", "/Playlists/L").count, 1)
     }
 }
