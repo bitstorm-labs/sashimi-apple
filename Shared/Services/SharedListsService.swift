@@ -157,16 +157,25 @@ struct SharedListsService {
     /// Creates a list owned by the current user. The self-share is what
     /// records the creator; without it the list would show as nobody's, so a
     /// failed share deletes the list again.
+    ///
+    /// Order matters (found by the Android build, verified on Jellyfin 12.4):
+    /// a playlist created WITH items is re-saved by the server 1-3 s later
+    /// from its pre-share state, which drops the self-share. So the list is
+    /// created empty, shared with its creator, and only then given its first
+    /// title.
     func create(name: String, isPublic: Bool, adding item: BaseItemDto?) async throws -> String {
         guard let userId = await client.currentUserId else { throw JellyfinError.notConfigured }
         var entry: BaseItemDto?
         if let item { entry = try await listEntry(for: item) }
-        let listId = try await client.createPlaylist(name: name, itemIds: entry.map { [$0.id] } ?? [], isPublic: isPublic)
+        let listId = try await client.createPlaylist(name: name, itemIds: [], isPublic: isPublic)
         do {
             try await client.sharePlaylist(playlistId: listId, userId: userId, canEdit: true)
         } catch {
             try? await client.deleteItem(itemId: listId)
             throw error
+        }
+        if let entry {
+            try await client.addToPlaylist(playlistId: listId, itemIds: [entry.id])
         }
         return listId
     }

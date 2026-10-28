@@ -111,7 +111,7 @@ extension MediaDetailView {
 
     // MARK: - Action Buttons
 
-    /// Play, Start Over, Shuffle, Trailer, Watched, More (#760). Series and
+    /// Play, Start Over, Shuffle, Trailer, Watched, Add to List, More (#760). Series and
     /// Season navigation and Add to Channel are in More.
     var actionButtonsRow: some View {
         HStack(spacing: 30) {
@@ -127,7 +127,9 @@ extension MediaDetailView {
             for: item.type,
             hasProgress: isSeries ? (nextEpisodeToPlay?.userData?.playbackPositionTicks ?? 0) > 0 : hasProgress,
             hasTrailer: (item.localTrailerCount ?? 0) > 0,
-            supportsDownloads: false
+            supportsDownloads: false,
+            // Lists live on the active server only.
+            supportsLists: serverID == nil || serverID == session.activeServerId
         )
     }
 
@@ -164,6 +166,10 @@ extension MediaDetailView {
             }
         case .download:
             EmptyView()
+        case .addToList:
+            ActionButton(title: "Add to List", icon: "text.badge.plus", isPrimary: false) {
+                showingAddToList = true
+            }
         case .more:
             moreMenu
         }

@@ -4,18 +4,29 @@ struct PhoneLibrariesTab: View {
     @State private var libraries: [JellyfinLibrary] = []
 
     var body: some View {
-        List(libraries) { library in
+        List {
+            // Shared lists live here on iPhone: the tab bar has no room for a
+            // sixth tab without hiding Settings behind More.
             NavigationLink {
-                MobileLibraryBrowseView(
-                    libraryId: library.id,
-                    libraryName: library.name,
-                    collectionType: library.collectionType
-                )
-                .navigationTitle(library.name)
+                MobileListsView()
             } label: {
-                Label(library.name, systemImage: iconFor(library.collectionType))
+                Label("Lists", systemImage: "list.bullet.rectangle")
             }
             .listRowBackground(MobileColors.cardBackground)
+
+            ForEach(libraries) { library in
+                NavigationLink {
+                    MobileLibraryBrowseView(
+                        libraryId: library.id,
+                        libraryName: library.name,
+                        collectionType: library.collectionType
+                    )
+                    .navigationTitle(library.name)
+                } label: {
+                    Label(library.name, systemImage: iconFor(library.collectionType))
+                }
+                .listRowBackground(MobileColors.cardBackground)
+            }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

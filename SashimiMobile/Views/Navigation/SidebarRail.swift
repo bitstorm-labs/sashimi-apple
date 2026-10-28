@@ -283,8 +283,8 @@ struct SidebarRail<Footer: View>: View {
 
 extension SidebarSelection {
     /// The rail's destinations, top to bottom: Home, then SashimiTV and the
-    /// libraries in Home's row order, then Search, Downloads (iPad only) and
-    /// Settings. The menu bar's ⌘1…⌘9 number them in this order.
+    /// libraries in Home's row order, Lists, then Search, Downloads (iPad
+    /// only) and Settings. The menu bar's ⌘1…⌘9 number them in this order.
     /// `hidden`: what the user took out of the side menu (#753).
     static func railItems(
         rowConfigs: [HomeRowConfig],
@@ -307,8 +307,12 @@ extension SidebarSelection {
                     name: library.name,
                     collectionType: library.collectionType
                 ))
+            case .lists:
+                continue
             }
         }
+        // Shared lists follow the libraries; hideable like them (#753).
+        if !hidden.contains(.lists) { items.append(.lists) }
         items += [.search, .downloads, .settings]
         return items
     }

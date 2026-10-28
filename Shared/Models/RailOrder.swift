@@ -13,6 +13,10 @@ enum RailOrder {
     enum Destination: Hashable {
         case finTV
         case library(String)
+        /// Shared lists. Not a Home row, so it never comes out of
+        /// `destinations`; each rail places it after the libraries, and the
+        /// side-menu setting can hide it like any library (#753).
+        case lists
     }
 
     /// `rowOrder` (the Home rows that are destinations, in the user's order)
@@ -47,7 +51,7 @@ enum RailOrder {
                 // A config can outlive the library it names — the row order is
                 // saved locally and the server is free to drop a library.
                 place(destination)
-            case .library:
+            case .library, .lists:
                 continue
             }
         }

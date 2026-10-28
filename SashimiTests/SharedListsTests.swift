@@ -158,3 +158,31 @@ extension BaseItemDto {
         return try! JSONDecoder().decode(BaseItemDto.self, from: data)
     }
 }
+
+/// Home rows follow the subscriptions without disturbing the user's order.
+final class SharedListRowSyncTests: XCTestCase {
+    private func sync(_ current: [String], _ lists: [String]) -> [String] {
+        SharedLists.syncedRowKeys(
+            current: current,
+            listKeys: lists,
+            isListKey: { $0.hasPrefix("list_") },
+            continueWatchingKey: "continueWatching",
+            heroKey: "hero"
+        )
+    }
+
+    func testNewSubscriptionsGoAfterContinueWatchingInOrder() {
+        XCTAssertEqual(sync(["hero", "continueWatching", "lib1"], ["list_a", "list_b"]),
+                       ["hero", "continueWatching", "list_a", "list_b", "lib1"])
+    }
+
+    func testAMovedRowStaysWhereTheUserPutIt() {
+        XCTAssertEqual(sync(["hero", "continueWatching", "lib1", "list_a"], ["list_a", "list_b"]),
+                       ["hero", "continueWatching", "list_b", "lib1", "list_a"])
+    }
+
+    func testAnUnsubscribedListLosesItsRow() {
+        XCTAssertEqual(sync(["continueWatching", "list_a", "lib1", "list_b"], ["list_b"]),
+                       ["continueWatching", "lib1", "list_b"])
+    }
+}

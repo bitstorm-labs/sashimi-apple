@@ -195,6 +195,7 @@ final class SharedListsServiceTests: XCTestCase {
     func testCreateSharesTheListWithItsCreator() async throws {
         ListsStub.routes["POST /Playlists"] = (200, #"{"Id":"new"}"#)
         ListsStub.routes["POST /Playlists/new/Users/\(user)"] = (204, "")
+        ListsStub.routes["POST /Playlists/new/Items"] = (204, "")
 
         let id = try await service().create(name: "Date Night", isPublic: true, adding: .listFixture(id: "m1", type: .movie))
 
@@ -203,7 +204,13 @@ final class SharedListsServiceTests: XCTestCase {
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: create) as? [String: Any])
         XCTAssertEqual(body["MediaType"] as? String, "Video")
         XCTAssertEqual(body["IsPublic"] as? Bool, true)
-        XCTAssertEqual(body["Ids"] as? [String], ["m1"])
+        // Created EMPTY: Jellyfin 12.4 re-saves a playlist created with items
+        // a moment later and drops the self-share.
+        XCTAssertEqual(body["Ids"] as? [String], [])
+        let order = ListsStub.recorded.filter { $0.method == "POST" }.map(\.path)
+        XCTAssertEqual(order, ["/Playlists", "/Playlists/new/Users/\(user)", "/Playlists/new/Items"],
+                       "create empty, then self-share, then add the first title")
+        XCTAssertEqual(ListsStub.requests("POST", "/Playlists/new/Items").first?.query["ids"], "m1")
         let share = try XCTUnwrap(ListsStub.requests("POST", "/Playlists/new/Users/\(user)").first?.body)
         XCTAssertEqual((try JSONSerialization.jsonObject(with: share) as? [String: Any])?["CanEdit"] as? Bool, true)
     }
@@ -270,5 +277,41 @@ final class SharedListsServiceTests: XCTestCase {
         try await service().remove(.listFixture(id: "m1", type: .movie), from: "L", contents: contents)
 
         XCTAssertEqual(ListsStub.requests("DELETE", "/Playlists/L/Items").first?.query["entryIds"], "m1,m1")
+    }
+
+    // MARK: Screens
+
+    private func routeTwoLists() {
+        ListsStub.routes["GET /Items"] = (200, items([playlist("mine"), playlist("theirs")]))
+        ListsStub.routes["GET /Playlists/mine"] = (200, #"{"OpenAccess":false,"Shares":[{"UserId":"me","CanEdit":true}]}"#)
+        ListsStub.routes["GET /Playlists/theirs"] = (200, #"{"OpenAccess":true,"Shares":[{"UserId":"marge","CanEdit":true}]}"#)
+        ListsStub.routes["GET /Playlists/mine/Items"] = (200, items([movie("m1")]))
+        ListsStub.routes["GET /Playlists/theirs/Items"] = (200, items([movie("m2"), movie("m3")]))
+        ListsStub.routes["GET /Users"] = (200, #"[{"Id":"marge","Name":"Marge"},{"Id":"me","Name":"Me"}]"#)
+    }
+
+    func testTheListsPageSplitsYourListsFromOthersAndNamesTheCreator() async throws {
+        routeTwoLists()
+        let service = try service()
+        let model = ListsPageViewModel(service: service, store: SharedListsStore(service: service))
+
+        await model.load()
+
+        XCTAssertEqual(model.mine.map(\.id), ["mine"])
+        XCTAssertEqual(model.others.map(\.id), ["theirs"])
+        XCTAssertEqual(model.mine.first?.subtitle(isOwn: true), "Private · 1 title")
+        XCTAssertEqual(model.others.first?.subtitle(isOwn: false), "Marge · 2 titles")
+    }
+
+    /// The picker offers only your own lists, and says where the title is.
+    func testThePickerOffersYourListsAndMarksWhereTheTitleIs() async throws {
+        routeTwoLists()
+        let model = AddToListViewModel(item: .listFixture(id: "m1", type: .movie), service: try service())
+
+        await model.load()
+
+        XCTAssertEqual(model.choices.map(\.id), ["mine"])
+        XCTAssertEqual(model.choices.first?.alreadyOn, true)
+        XCTAssertEqual(model.choices.first?.detail, "Already on this list")
     }
 }

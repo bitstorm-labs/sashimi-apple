@@ -7,6 +7,8 @@ struct MediaPosterButton: View {
     var isLandscape: Bool = false
     var isCircular: Bool = false  // For YouTube channel-style circular covers
     var badgeCount: Int?  // Shows "X new" badge when >= 1
+    /// A shared list's title the subscriber hasn't seen yet: a "NEW" tag.
+    var isNew: Bool = false
     var serverURL: URL?
     var serverID: String?
     let onSelect: () -> Void
@@ -194,6 +196,22 @@ struct MediaPosterButton: View {
                                         .symbolRenderingMode(.palette)
                                         .foregroundStyle(.black, Color(red: 0.29, green: 0.73, blue: 0.47))
                                         .padding(6)
+                                }
+                                Spacer()
+                            }
+                        }
+
+                        if isNew {
+                            VStack {
+                                HStack {
+                                    Text("NEW")
+                                        .font(.system(size: 17, weight: .heavy))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 4)
+                                        .background(Color(red: 0.24, green: 0.48, blue: 0.99), in: RoundedRectangle(cornerRadius: 5))
+                                        .padding(9)
+                                    Spacer()
                                 }
                                 Spacer()
                             }
