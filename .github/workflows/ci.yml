@@ -279,28 +279,25 @@ jobs:
   swiftlint:
     name: SwiftLint
     if: ${{ !inputs.tests_only }}
-    # Lints with its own bundled SwiftSyntax; no SDK involved, so it does not
-    # need the Xcode 27 image.
-    runs-on: macos-15
+    # Lints on Linux, in SwiftLint's own image (its Swift toolchain included),
+    # so this 15-second job never waits for a scarce macOS runner: on
+    # 2026-10-28 it sat unstarted for 15 min twice and the merge queue dropped
+    # the release PR both times (#794).
+    runs-on: ubuntu-latest
+    # Pinned deliberately. An unpinned SwiftLint can fail CI with no code
+    # change: that happened when 0.65.x flagged 18 pre-existing files under
+    # --strict with its new legacy_swiftui_aspect_ratio rule. Bump the version
+    # on purpose, together with the fixes.
+    container: ghcr.io/realm/swiftlint:0.63.0
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run SwiftLint
-        env:
-          # Pinned deliberately. `brew install swiftlint` installs whatever is
-          # current, so an upstream release can fail CI with no code change --
-          # which is exactly what happened when 0.65.x reached Homebrew and its
-          # new legacy_swiftui_aspect_ratio rule flagged 18 pre-existing files
-          # under --strict. Bump this on purpose, with the fixes, not by accident.
-          SWIFTLINT_VERSION: "0.63.0"
         run: |
-          curl -fsSL -o /tmp/swiftlint.zip \
-            "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip"
-          unzip -qo /tmp/swiftlint.zip -d /tmp/swiftlint
-          /tmp/swiftlint/swiftlint version
-          /tmp/swiftlint/swiftlint lint --strict --reporter github-actions-logging
+          swiftlint version
+          swiftlint lint --strict --reporter github-actions-logging
 
   forward-compat:
     # NOT a required check and never blocks a merge: an early warning that the
