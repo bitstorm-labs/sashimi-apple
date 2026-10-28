@@ -135,8 +135,65 @@ final class SharedListsTests: XCTestCase {
     }
 
     func testRowTitleNamesTheCreator() {
-        XCTAssertEqual(SharedLists.rowTitle(listName: "Christmas Movies", ownerName: "Marge"), "From Marge: Christmas Movies")
-        XCTAssertEqual(SharedLists.rowTitle(listName: "Picks", ownerName: nil), "Picks")
+        XCTAssertEqual(SharedLists.rowTitle(listName: "Christmas Movies", ownerName: "Marge", isOwn: false), "From Marge: Christmas Movies")
+        XCTAssertEqual(SharedLists.rowTitle(listName: "Picks", ownerName: nil, isOwn: false), "Picks")
+    }
+
+    /// Your own subscribed list never reads "From <you>" (#788).
+    func testYourOwnListsRowSaysYourList() {
+        XCTAssertEqual(SharedLists.rowTitle(listName: "Picks", ownerName: "Mondo", isOwn: true), "Your list: Picks")
+        XCTAssertEqual(SharedLists.rowTitle(listName: "Picks", ownerName: nil, isOwn: true), "Your list: Picks")
+    }
+
+    // MARK: V7: the cover (#786), shared with Android and Roku
+
+    private func series(_ id: String) -> ListEntry {
+        ListEntry(itemId: id, type: .series, seriesId: nil, season: nil, episode: nil)
+    }
+
+    /// Input is what the list shows, in display order (after V2). An episode
+    /// is its series' title, so two episodes of one show are one title.
+    func testCoverIsTheFirstFourDifferentTitles() {
+        let shown = [series("show1"), ep("e2", "show1", 1, 2), mv("m1"), ep("e7", "show2", 2, 3), mv("m2"), mv("m3")]
+        XCTAssertEqual(SharedLists.coverPosterIds(shown), ["show1", "m1", "show2", "m2"])
+    }
+
+    func testFewerThanFourDifferentTitlesShowTheFirstAlone() {
+        XCTAssertEqual(SharedLists.coverPosterIds([mv("m1"), ep("e2", "show1", 1, 2), ep("e3", "show1", 1, 3), mv("m2")]), ["m1"])
+        XCTAssertEqual(SharedLists.coverPosterIds([series("show1"), ep("e2", "show1", 1, 2), ep("e3", "show1", 1, 3), ep("e4", "show1", 1, 4)]),
+                       ["show1"], "four entries of one show are ONE title, not four copies of its poster")
+        XCTAssertEqual(SharedLists.coverPosterIds([]), [])
+    }
+
+    func testAnEpisodeWithNoSeriesIsItsOwnTitle() {
+        XCTAssertEqual(SharedLists.coverPosterIds([ep("e1", nil, 2, 1), ep("e2", nil, 2, 2), mv("m1"), mv("m2")]),
+                       ["e1", "e2", "m1", "m2"])
+    }
+
+    // MARK: V8: who made it (#784)
+
+    /// Jellyfin 12.4 wipes self-shares when any user is deleted; the plugin
+    /// reads the real owner and wins.
+    func testThePluginOwnerWinsOverTheSelfShare() {
+        XCTAssertEqual(SharedLists.owner(pluginOwnerId: "marge", shares: []), "marge")
+        XCTAssertEqual(SharedLists.owner(pluginOwnerId: "marge", shares: [PlaylistShare(userId: "x", canEdit: true)]), "marge")
+        XCTAssertEqual(SharedLists.owner(pluginOwnerId: nil, shares: [PlaylistShare(userId: "x", canEdit: true)]), "x")
+        XCTAssertNil(SharedLists.owner(pluginOwnerId: nil, shares: []))
+    }
+
+    func testTheOwnersMissingSelfShareIsPutBack() {
+        XCTAssertTrue(SharedLists.needsSelfShare(ownerId: "me", me: "me", shares: []))
+        XCTAssertTrue(SharedLists.needsSelfShare(ownerId: "me", me: "me", shares: [PlaylistShare(userId: "me", canEdit: false)]))
+        XCTAssertFalse(SharedLists.needsSelfShare(ownerId: "me", me: "me", shares: [PlaylistShare(userId: "me", canEdit: true)]))
+        XCTAssertFalse(SharedLists.needsSelfShare(ownerId: "marge", me: "me", shares: []), "only the owner repairs a list")
+        XCTAssertFalse(SharedLists.needsSelfShare(ownerId: nil, me: "me", shares: []))
+    }
+
+    /// The self-check's CanEdit is ownership; a missing answer (403/404) is not.
+    func testTheSelfCheckNeedsCanEdit() {
+        XCTAssertTrue(SharedLists.isOwnerPerSelfCheck(PlaylistShare(userId: "me", canEdit: true)))
+        XCTAssertFalse(SharedLists.isOwnerPerSelfCheck(PlaylistShare(userId: "me", canEdit: false)))
+        XCTAssertFalse(SharedLists.isOwnerPerSelfCheck(nil))
     }
 }
 

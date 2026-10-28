@@ -28,6 +28,18 @@ struct PlaylistSharing: Decodable, Equatable {
     }
 }
 
+/// A list's owner as the SashimiLists plugin reports it
+/// (`GET /SashimiLists/Owners`, `GET /SashimiLists/Playlists/{id}/Owner`).
+struct ListOwner: Decodable, Equatable {
+    let userId: String
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "OwnerUserId"
+        case name = "OwnerName"
+    }
+}
+
 /// `POST /Playlists` answers with the new playlist's id.
 struct PlaylistCreationResult: Decodable {
     let id: String

@@ -172,28 +172,49 @@ struct ListCardButton: View {
     }
 }
 
-/// Jellyfin's generated playlist image, else the first title's backdrop.
+/// The first four different titles as a 2x2 collage of posters, or the
+/// first title's poster alone (`SharedLists.coverPosterIds`).
 struct ListCover: View {
     let card: ListCard
 
     var body: some View {
-        ZStack {
-            SashimiTheme.cardBackground
-            if card.list.imageTag != nil {
-                AsyncItemImage(itemId: card.list.id, imageType: "Primary", maxWidth: 600)
-            } else if let first = card.firstItem {
-                AsyncItemImage(
-                    itemId: first.type == .episode ? (first.seriesId ?? first.id) : first.id,
-                    imageType: "Backdrop",
-                    maxWidth: 600,
-                    fallbackImageTypes: ["Thumb", "Primary"]
-                )
-            } else {
-                Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: 60))
-                    .foregroundStyle(SashimiTheme.textTertiary)
+        GeometryReader { geometry in
+            ZStack {
+                SashimiTheme.cardBackground
+                if card.coverIds.count == 4 {
+                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { row in
+                            HStack(spacing: 0) {
+                                ForEach(0..<2, id: \.self) { column in
+                                    poster(card.coverIds[row * 2 + column], width: cell.width)
+                                        .frame(width: cell.width, height: cell.height)
+                                        .clipped()
+                                }
+                            }
+                        }
+                    }
+                } else if let first = card.coverIds.first {
+                    poster(first, width: geometry.size.width)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 60))
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
             }
         }
+    }
+
+    private func poster(_ itemId: String, width: CGFloat) -> some View {
+        AsyncItemImage(
+            itemId: itemId,
+            imageType: "Primary",
+            // tvOS draws at 2x.
+            maxWidth: Int(width * 2),
+            contentMode: .fill
+        )
     }
 }
 
