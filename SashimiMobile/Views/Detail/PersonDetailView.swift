@@ -41,6 +41,7 @@ struct PersonDetailView: View {
                 selectedGroup = nil
                 onSelectSource(source)
             }
+            .dismissesOnOutsideTap()
         }
         .task {
             await loadFilmography()

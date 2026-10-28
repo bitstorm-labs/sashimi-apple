@@ -67,6 +67,7 @@ struct PhoneHomeView: View {
         }
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
+                .dismissesOnOutsideTap()
         }
         .refreshable {
             await viewModel.loadContent()
@@ -90,7 +91,7 @@ struct PhoneHomeView: View {
                 Task { await channelsViewModel.load() }
             }
         }
-        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView() }
+        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView().dismissesOnOutsideTap() }
         .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
             Task { await channelsViewModel.load() }
         }

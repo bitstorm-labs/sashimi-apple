@@ -66,8 +66,8 @@ struct MobileGuideView: View {
         .fullScreenCover(item: $tuned) { tuned in
             MobilePlayerView(item: tuned.item, channelContext: tuned.context)
         }
-        .sheet(isPresented: $showReminders) { MobileRemindersList() }
-        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView() }
+        .sheet(isPresented: $showReminders) { MobileRemindersList().dismissesOnOutsideTap() }
+        .sheet(isPresented: $showManageChannels) { MobileManageChannelsView().dismissesOnOutsideTap() }
         // A change made from this device redraws the grid now rather than at
         // the next quarter-hour refresh.
         .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
@@ -75,6 +75,7 @@ struct MobileGuideView: View {
         }
         .sheet(item: $selected) { selection in
             MobileGuideDetailSheet(row: selection.row, entry: selection.entry)
+                .dismissesOnOutsideTap()
         }
     }
 

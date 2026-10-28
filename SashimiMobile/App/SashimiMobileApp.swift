@@ -154,6 +154,7 @@ struct ContentView: View {
                     .onDisappear {
                         Task { await sessionManager.restoreActiveClient() }
                     }
+                    .dismissesOnOutsideTap()
                 }
             } else {
                 NavigationStack {
@@ -254,6 +255,7 @@ struct ContentView: View {
         .bulkDownloadDialogs(episodeDownloadFlow)
         .sheet(item: $itemActions.channelTarget) { target in
             MobileAddToChannelSheet(target: target)
+                .dismissesOnOutsideTap()
         }
         .fullScreenCover(item: $deepLinkDestination) { destination in
             switch destination {
