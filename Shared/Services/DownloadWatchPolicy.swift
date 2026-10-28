@@ -89,15 +89,21 @@ enum DownloadWatchPolicy {
         candidates.reduce(0) { $0 + max(0, $1.sizeBytes) }
     }
 
-    /// Whether a download is removed when its playback ends. Only a finished
-    /// download that was played to its end qualifies, and only when the user
-    /// opted in.
+    /// Whether a download is removed when its player closes: only a finished
+    /// download, only when the user opted in, and only once it counts as
+    /// watched. That is the server's own line (MaxResumePct, `playedFraction`)
+    /// rather than the very end, so stopping in the credits deletes it just as
+    /// the server marks it played. `reachedEnd` covers an item whose runtime
+    /// is unknown.
     static func shouldAutoDelete(
         settingEnabled: Bool,
         isCompletedDownload: Bool,
-        playedToEnd: Bool
+        positionTicks: Int64,
+        runTimeTicks: Int64?,
+        reachedEnd: Bool
     ) -> Bool {
-        settingEnabled && isCompletedDownload && playedToEnd
+        guard settingEnabled, isCompletedDownload else { return false }
+        return reachedEnd || OfflinePlaybackRules.isPlayed(positionTicks: positionTicks, runTimeTicks: runTimeTicks)
     }
 
     private static func fraction(_ ticks: Int64, of runTimeTicks: Int64?) -> Double {

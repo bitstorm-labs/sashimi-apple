@@ -750,17 +750,22 @@ final class DownloadManager: NSObject, ObservableObject {
         toastMessage = "Deleted \(items.count) download\(items.count == 1 ? "" : "s")"
     }
 
-    /// Called once the player is gone after a downloaded item played to its
-    /// end. With "Delete downloads after watching" on, the completion is handed
-    /// to the durable report queue (so the server still learns it was watched
-    /// after the local record is gone) and the download is deleted.
-    func handleOfflinePlaybackFinished(itemId: String, serverID: String?) async {
+    /// Called once the player is gone, for each downloaded item it played:
+    /// `stoppedAtTicks` is nil for one that played to its end, otherwise where
+    /// it stopped (passed in: the saved position is written asynchronously). With "Delete downloads after watching" on and
+    /// the item past the server's watched line, the completion is handed to
+    /// the durable report queue (so the server still learns it was watched
+    /// after the local record is gone, offline included) and the download is
+    /// deleted.
+    func handleOfflinePlaybackFinished(itemId: String, serverID: String?, stoppedAtTicks: Int64? = nil) async {
         let record = downloadStatus(for: itemId, serverID: serverID)
         let enabled = UserDefaults.standard.bool(forKey: DownloadWatchPolicy.deleteAfterWatchingKey)
         guard DownloadWatchPolicy.shouldAutoDelete(
             settingEnabled: enabled,
             isCompletedDownload: record?.isComplete == true,
-            playedToEnd: true
+            positionTicks: stoppedAtTicks ?? 0,
+            runTimeTicks: record?.runTimeTicks,
+            reachedEnd: stoppedAtTicks == nil
         ), let record else { return }
 
         let recordServerID = record.serverID

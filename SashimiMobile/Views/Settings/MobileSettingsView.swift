@@ -180,8 +180,9 @@ struct MobileSettingsView: View {
             } footer: {
                 Text(
                     "With Download over Cellular off, downloads wait for Wi-Fi that isn't a hotspot or in Low Data Mode. "
-                        + "Delete After Watching removes a download once it has played to the end; "
-                        + "its watched state still reaches the server."
+                        + "Delete After Watching removes a download once you've watched it: "
+                        + "played to the end, or stopped past the point the server marks it watched (about 90%). "
+                        + "Its watched state still reaches the server, even if you were offline."
                 )
             }
 
