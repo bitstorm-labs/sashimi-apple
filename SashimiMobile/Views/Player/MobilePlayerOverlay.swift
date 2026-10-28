@@ -40,21 +40,17 @@ struct MobilePlayerOverlay: View {
     /// The finger is on the scrubber: the overlay must not hide meanwhile.
     var onScrubbing: (Bool) -> Void = { _ in }
     let onClose: () -> Void
+    /// The Mac's full screen: a pill in the bottom row and a double-click on
+    /// the picture. Nil on iPhone and iPad, where the player already fills
+    /// the screen.
+    var fullScreen: PlayerFullScreenControl?
     /// Fixed playback state for previews and snapshot tests; nil reads the player.
     var fixedSnapshot: PlaybackSnapshot?
     var fixedClock: Date?
 
     var body: some View {
         ZStack {
-            // Tapping the picture shows or hides the controls.
-            Button {
-                isVisible.toggle()
-                onInteract()
-            } label: {
-                Color.clear.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isVisible ? "Hide Playback Controls" : "Show Playback Controls")
+            pictureTapTarget
 
             if isVisible {
                 VStack(spacing: 0) {
@@ -90,6 +86,34 @@ struct MobilePlayerOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: isVisible)
+    }
+
+    /// Tapping the picture shows or hides the controls. On the Mac a
+    /// double-click toggles full screen, as in QuickTime and the TV app.
+    @ViewBuilder private var pictureTapTarget: some View {
+        if let fullScreen {
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    TapGesture(count: 2)
+                        .onEnded { fullScreen.toggle() }
+                        .exclusively(before: TapGesture().onEnded { toggleControls() })
+                )
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(isVisible ? "Hide Playback Controls" : "Show Playback Controls")
+                .accessibilityAction { toggleControls() }
+        } else {
+            Button(action: toggleControls) {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isVisible ? "Hide Playback Controls" : "Show Playback Controls")
+        }
+    }
+
+    private func toggleControls() {
+        isVisible.toggle()
+        onInteract()
     }
 
     // MARK: - Top band (the tvOS info bar)
@@ -203,6 +227,7 @@ struct MobilePlayerOverlay: View {
                 pictureInPicture: pictureInPicture,
                 isOffline: isOffline,
                 playbackSpeed: $playbackSpeed,
+                fullScreen: fullScreen,
                 onInteract: onInteract
             )
             TimelineView(.periodic(from: .now, by: 0.5)) { _ in

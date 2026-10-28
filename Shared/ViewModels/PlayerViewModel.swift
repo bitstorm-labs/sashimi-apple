@@ -299,11 +299,7 @@ final class PlayerViewModel: ObservableObject {
     /// than stream index (indexes are not stable across media sources).
     /// Once set, subtitles stay on across quality changes and episode
     /// transitions until explicitly turned off (disableSubtitles/stop).
-    struct SubtitlePreference {
-        let language: String?
-        let displayTitle: String?
-        let isExternal: Bool
-    }
+    typealias SubtitlePreference = PlaybackTrackMemory.Subtitle
     var sessionSubtitlePreference: SubtitlePreference?
 
     /// The audio track the viewer picked in the player this session.
@@ -314,11 +310,12 @@ final class PlayerViewModel: ObservableObject {
     /// Without this, a manual pick was silently reverted to the default track
     /// on every quality change and every episode -- while the menu kept the
     /// checkmark on the track that was no longer playing.
-    struct AudioPreference {
-        let language: String?
-        let displayName: String
-    }
+    typealias AudioPreference = PlaybackTrackMemory.Audio
     var sessionAudioPreference: AudioPreference?
+
+    /// Where the session's picks go when the player is torn down (leaving
+    /// the app, closing the player), so reopening the item restores them.
+    var trackMemory = PlaybackTrackMemory.shared
 
     // Server-side play session: sent with playback reports so the server can
     // correlate them, and used to stop the session's transcode when playback
@@ -365,6 +362,19 @@ final class PlayerViewModel: ObservableObject {
     func setCurrentItem(_ item: BaseItemDto?) {
         currentItem = item
         transitionState.currentItem = item
+        restoreRememberedTracks(for: item)
+    }
+
+    /// A player opened on an item the viewer left earlier (switched apps,
+    /// closed the player) starts from the picks made then, before the stream
+    /// is requested: an image subtitle is burned in again and the audio
+    /// stream is asked for, instead of falling back to the Settings language.
+    /// Picks already made in this player win.
+    private func restoreRememberedTracks(for item: BaseItemDto?) {
+        guard let item, sessionSubtitlePreference == nil, sessionAudioPreference == nil,
+              let remembered = trackMemory.recall(itemID: item.id) else { return }
+        sessionSubtitlePreference = remembered.subtitle
+        sessionAudioPreference = remembered.audio
     }
 
     func resetTransitionState(for item: BaseItemDto?) {
