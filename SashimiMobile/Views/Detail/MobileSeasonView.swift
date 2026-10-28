@@ -14,6 +14,8 @@ struct MobileSeasonView: View {
     @State private var playingItem: BaseItemDto?
     @State private var startOverItem: BaseItemDto?
     @State private var showingEpisode: BaseItemDto?
+    /// An episode card on the Mac and iPad pushes the episode's page (#781).
+    @State private var episodePage: BaseItemDto?
     @State private var seasonWatchRequest: SeasonWatchRequest?
     @State private var errorMessage: String?
 
@@ -67,10 +69,13 @@ struct MobileSeasonView: View {
         .themeSong(for: model.season)
         .fullScreenPlayer(item: $playingItem, serverID: serverID)
         .fullScreenPlayer(item: $startOverItem, serverID: serverID, startFromBeginning: true)
-        .sheet(item: $showingEpisode) { episode in
+        .playerSheet(item: $showingEpisode) { episode in
             NavigationStack {
                 AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
             }
+        }
+        .navigationDestination(item: $episodePage) { episode in
+            AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
         }
         .seasonWatchConfirmation($seasonWatchRequest) { request in
             Task {
@@ -97,6 +102,13 @@ struct MobileSeasonView: View {
     }
 
     /// The series' backdrop (a YouTube channel's banner): seasons have none.
+    private func openEpisode(_ episode: BaseItemDto) {
+        switch EpisodeOpenStyle.current {
+        case .push: episodePage = episode
+        case .sheet: showingEpisode = episode
+        }
+    }
+
     private func heroURL(maxWidth: Int) -> URL? {
         let hero = DetailHero.mobileImage(for: model.season, isYouTubeSeries: isYouTube)
         let serverURL = serverID.flatMap { id in SessionManager.shared.servers.first { $0.id == id }?.url }
@@ -261,7 +273,7 @@ struct MobileSeasonView: View {
                             isYouTube: isYouTube,
                             serverID: serverID
                         ) {
-                            showingEpisode = episode
+                            openEpisode(episode)
                         }
                         .contextMenu {
                             // The episode download menu (#744); acts on the active server.
@@ -278,7 +290,7 @@ struct MobileSeasonView: View {
                             isYouTube: isYouTube,
                             serverID: serverID
                         ) {
-                            showingEpisode = episode
+                            openEpisode(episode)
                         }
                     }
                 }

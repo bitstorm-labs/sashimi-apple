@@ -201,6 +201,7 @@ struct MobileSettingsView: View {
         }
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
+                .dismissesOnOutsideTap()
         }
         .fullScreenCover(item: $serverBeingEdited) { server in
             ServerEditView(server: server)

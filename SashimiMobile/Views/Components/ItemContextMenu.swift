@@ -67,6 +67,9 @@ struct EpisodeDownloadRequest: Identifiable {
 
 struct ItemContextMenu: View {
     let item: BaseItemDto
+    /// In a sheet the app root can't present over it (#781): the sheet's
+    /// presenter closes it and plays instead.
+    @Environment(\.playerHandoff) private var playerHandoff
 
     private var actions: [ItemContextAction] {
         ItemContextAction.available(
@@ -81,7 +84,11 @@ struct ItemContextMenu: View {
         let actions = actions
         if actions.contains(.play) {
             Button {
-                ItemActionRouter.shared.playItem = item
+                if let playerHandoff {
+                    playerHandoff.send(PlayerRequest(item: item))
+                } else {
+                    ItemActionRouter.shared.playItem = item
+                }
             } label: {
                 Label("Play", systemImage: "play.fill")
             }
