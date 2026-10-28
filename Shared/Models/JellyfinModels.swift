@@ -127,6 +127,9 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     var parentLogoImageTag: String?
     var seriesPrimaryImageTag: String?
     var seriesThumbImageTag: String?
+    /// The entry's id within a playlist (shared lists): what remove and move
+    /// address. Only playlist item listings carry it.
+    var playlistItemId: String?
 
     /// Resolution chip for cover art: "4K", "HD", or "SD". Nil when the item
     /// has no video stream (series/season) or dimensions are unknown.
@@ -180,6 +183,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case parentLogoImageTag = "ParentLogoImageTag"
         case seriesPrimaryImageTag = "SeriesPrimaryImageTag"
         case seriesThumbImageTag = "SeriesThumbImageTag"
+        case playlistItemId = "PlaylistItemId"
     }
 
     func hash(into hasher: inout Hasher) {
@@ -268,16 +272,6 @@ struct UserItemDataDto: Codable {
         case played = "Played"
         case lastPlayedDate = "LastPlayedDate"
         case unplayedItemCount = "UnplayedItemCount"
-    }
-}
-
-struct ItemsResponse: Codable {
-    let items: [BaseItemDto]
-    let totalRecordCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case items = "Items"
-        case totalRecordCount = "TotalRecordCount"
     }
 }
 
