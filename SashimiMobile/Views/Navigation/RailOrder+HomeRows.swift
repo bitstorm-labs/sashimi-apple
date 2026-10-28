@@ -21,6 +21,7 @@ extension HomeRowConfig {
         case .builtIn(.channels): return .finTV
         case .builtIn: return nil
         case .library(let id, _): return .library(id)
+        case .list: return nil
         }
     }
 }

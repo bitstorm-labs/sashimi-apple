@@ -53,6 +53,7 @@ struct PhoneDetailView: View {
     /// The season page (#760): Go to Season, or a season tab tapped again.
     @State private var seasonPage: BaseItemDto?
     @State private var channelTarget: ChannelTarget?
+    @State private var showingAddToList = false
     @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
@@ -150,6 +151,9 @@ struct PhoneDetailView: View {
             NavigationStack {
                 ServerScopedMediaDetailView(source: source)
             }
+        }
+        .sheet(isPresented: $showingAddToList) {
+            MobileAddToListSheet(item: item)
         }
         .sheet(item: $channelTarget) { target in
             MobileAddToChannelSheet(target: target)
@@ -777,7 +781,9 @@ struct PhoneDetailView: View {
             for: item.type,
             hasProgress: playHasProgress,
             hasTrailer: (item.localTrailerCount ?? 0) > 0,
-            supportsDownloads: NetworkMonitor.shared.isOnline
+            supportsDownloads: NetworkMonitor.shared.isOnline,
+            // Lists live on the active server only.
+            supportsLists: NetworkMonitor.shared.isOnline && (serverID == nil || serverID == SessionManager.shared.activeServerId)
         ).filter { $0 != .more || NetworkMonitor.shared.isOnline }
     }
 
@@ -819,6 +825,8 @@ struct PhoneDetailView: View {
             .accessibilityLabel(isWatched ? "Watched" : "Mark Watched")
         case .download:
             downloadButton
+        case .addToList:
+            iconButton("text.badge.plus", label: "Add to List") { showingAddToList = true }
         case .more:
             overflowMenu
         }

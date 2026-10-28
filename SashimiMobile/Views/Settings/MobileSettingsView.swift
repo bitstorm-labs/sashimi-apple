@@ -300,8 +300,13 @@ struct HomeRowOrderView: View {
                 }
             }
 
-            if showsSideMenu, !menuOnlyLibraries.isEmpty {
+            if showsSideMenu {
                 Section("Side menu only") {
+                    HStack {
+                        Text("Lists")
+                        Spacer()
+                        sideMenuSwitch(.lists)
+                    }
                     ForEach(menuOnlyLibraries) { library in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {

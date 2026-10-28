@@ -29,6 +29,7 @@ struct HomeRowConfig: Codable, Identifiable, Equatable {
         switch type {
         case .builtIn(let rowType): return rowType.rawValue
         case .library(let id, _): return id
+        case .list(let id, _): return Self.listRowKey(id)
         }
     }
 
@@ -36,13 +37,19 @@ struct HomeRowConfig: Codable, Identifiable, Equatable {
         switch type {
         case .builtIn(let rowType): return rowType.displayName
         case .library(_, let name): return "Recently Added \(name)"
+        case .list(_, let title): return title
         }
     }
+
+    static func listRowKey(_ listId: String) -> String { "list_\(listId)" }
 }
 
 enum HomeRowConfigType: Codable, Equatable {
     case builtIn(HomeRowType)
     case library(id: String, name: String)
+    /// A subscribed shared list; `title` is "From <name>: <list>". Added
+    /// after release: older saved configs simply have none.
+    case list(id: String, title: String)
 }
 
 @MainActor
@@ -143,6 +150,29 @@ final class HomeRowSettings: ObservableObject {
             return false
         }
 
+        saveRows()
+    }
+
+    /// Follows the subscribed lists: a new one's row goes after Continue
+    /// Watching, an unsubscribed one's row goes, and the rest stay where the
+    /// user put them. Saves only when something changed.
+    func updateWithLists(_ lists: [SharedList], titles: [String: String]) {
+        let keys = SharedLists.syncedRowKeys(
+            current: rows.map(\.id),
+            listKeys: lists.map { HomeRowConfig.listRowKey($0.id) },
+            isListKey: { $0.hasPrefix("list_") },
+            continueWatchingKey: HomeRowType.continueWatching.rawValue,
+            heroKey: "hero"
+        )
+        let synced: [HomeRowConfig] = keys.compactMap { key in
+            if let list = lists.first(where: { HomeRowConfig.listRowKey($0.id) == key }) {
+                let existing = rows.first { $0.id == key }
+                return HomeRowConfig(type: .list(id: list.id, title: titles[list.id] ?? list.name), isEnabled: existing?.isEnabled ?? true)
+            }
+            return rows.first { $0.id == key }
+        }
+        guard synced != rows else { return }
+        rows = synced
         saveRows()
     }
 

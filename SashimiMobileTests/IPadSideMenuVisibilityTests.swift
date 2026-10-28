@@ -17,8 +17,20 @@ final class IPadSideMenuVisibilityTests: XCTestCase {
         ]
         XCTAssertEqual(
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.library("kids"), .finTV]),
-            [.home, .library(id: "movies", name: "Movies", collectionType: "movies"), .search, .downloads, .settings]
+            [.home, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .search, .downloads, .settings]
         )
+    }
+
+    /// Lists sits after the libraries and can be hidden like them.
+    func testListsFollowsTheLibrariesAndCanBeHidden() {
+        let libraries = [JellyfinLibrary(id: "movies", name: "Movies", collectionType: "movies", imageTags: nil)]
+        let rows = [HomeRowConfig(type: .library(id: "movies", name: "Movies"), isEnabled: true)]
+        XCTAssertEqual(SidebarSelection.lists.railDestination, .lists)
+        XCTAssertEqual(
+            SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.finTV]),
+            [.home, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .search, .downloads, .settings]
+        )
+        XCTAssertFalse(SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.lists]).contains(.lists))
     }
 
     func testOnlyLibrariesAndSashimiTVCanBeHidden() {

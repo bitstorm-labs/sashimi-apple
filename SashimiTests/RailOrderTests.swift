@@ -105,3 +105,18 @@ final class RailOrderTests: XCTestCase {
         )
     }
 }
+
+/// Lists (shared lists) has its own rail entry after the libraries.
+final class TVRailListsTests: XCTestCase {
+    private let libraries = [JellyfinLibrary(id: "movies", name: "Movies", collectionType: "movies", imageTags: nil)]
+
+    func testListsComesAfterTheLibrariesAndBeforeSettings() {
+        let rows = MainTabView.navRows(rowConfigs: [.library(id: "movies", name: "Movies")], libraries: libraries, hidden: [])
+        XCTAssertEqual(rows.map(\.title), ["Home", "Search", "Movies", "SashimiTV", "Lists", "Settings"])
+    }
+
+    func testHidingListsTakesItOutOfTheRail() {
+        let rows = MainTabView.navRows(rowConfigs: [], libraries: libraries, hidden: [.lists])
+        XCTAssertFalse(rows.contains { $0.id == .lists })
+    }
+}

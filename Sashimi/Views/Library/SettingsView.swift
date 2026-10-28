@@ -272,17 +272,28 @@ enum HomeRowType: String, Codable, CaseIterable {
 
 struct HomeRowConfig: Codable, Identifiable, Equatable {
     let id: String
-    let type: HomeRowType?  // nil for library rows
+    let type: HomeRowType?  // nil for library and list rows
     let libraryId: String?  // for library rows
     let libraryName: String?
     var isVisible: Bool
+    /// A subscribed shared list's row. Optional so configs saved before lists
+    /// existed still decode.
+    var listId: String?
+    var listTitle: String?
 
     var displayName: String {
         if let type = type {
             return type.displayName
         }
+        if listId != nil { return listTitle ?? "Shared list" }
         return libraryName ?? "Unknown Library"
     }
+
+    static func list(id: String, title: String, visible: Bool = true) -> HomeRowConfig {
+        HomeRowConfig(id: listRowKey(id), type: nil, libraryId: nil, libraryName: nil, isVisible: visible, listId: id, listTitle: title)
+    }
+
+    static func listRowKey(_ listId: String) -> String { "list_\(listId)" }
 
     static func builtIn(_ type: HomeRowType, visible: Bool = true) -> HomeRowConfig {
         HomeRowConfig(id: type.rawValue, type: type, libraryId: nil, libraryName: nil, isVisible: visible)
@@ -360,6 +371,9 @@ class HomeScreenSettings: ObservableObject {
             }
         }
 
+        // Subscribed lists keep their rows; updateWithLists owns them.
+        newConfigs += rowConfigs.filter { $0.listId != nil }
+
         // Remove library rows that no longer exist
         rowConfigs = newConfigs.filter { config in
             if config.libraryId != nil {
@@ -378,6 +392,30 @@ class HomeScreenSettings: ObservableObject {
                 return indexA < indexB
             }
         }
+    }
+
+    /// Follows the subscribed lists: a new one's row goes after Continue
+    /// Watching, an unsubscribed one's row goes, and the rest stay where the
+    /// user put them. Saves only when something changed.
+    func updateWithLists(_ lists: [SharedList], titles: [String: String]) {
+        let keys = SharedLists.syncedRowKeys(
+            current: rowConfigs.map(\.id),
+            listKeys: lists.map { HomeRowConfig.listRowKey($0.id) },
+            isListKey: { $0.hasPrefix("list_") },
+            continueWatchingKey: HomeRowType.continueWatching.rawValue,
+            heroKey: HomeRowType.hero.rawValue
+        )
+        let synced: [HomeRowConfig] = keys.compactMap { key in
+            if let list = lists.first(where: { HomeRowConfig.listRowKey($0.id) == key }) {
+                let title = titles[list.id] ?? list.name
+                let existing = rowConfigs.first { $0.id == key }
+                return .list(id: list.id, title: title, visible: existing?.isVisible ?? true)
+            }
+            return rowConfigs.first { $0.id == key }
+        }
+        guard synced != rowConfigs else { return }
+        rowConfigs = synced
+        saveSettings()
     }
 
     func moveRow(from source: IndexSet, to destination: Int) {
@@ -459,11 +497,16 @@ struct HomeScreenSettingsView: View {
                         )
                     }
 
+                    Text("Side menu only")
+                        .font(Typography.headline)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                        .padding(.top, 24)
+                    SideMenuOnlyRow(
+                        name: "Lists",
+                        isOn: sideMenu.isShown(.lists),
+                        onToggle: { sideMenu.toggle(.lists) }
+                    )
                     if !menuOnlyLibraries.isEmpty {
-                        Text("Side menu only")
-                            .font(Typography.headline)
-                            .foregroundStyle(SashimiTheme.textPrimary)
-                            .padding(.top, 24)
                         ForEach(menuOnlyLibraries) { library in
                             SideMenuOnlyRow(
                                 name: library.name,

@@ -14,6 +14,20 @@ extension RailOrder {
     }
 }
 
+extension RailOrder {
+    /// Everything between Search and Settings: Home's destinations, then
+    /// Lists (shared lists), which is not a Home row but can be hidden from
+    /// the side menu like a library (#753).
+    static func railDestinations(
+        rowConfigs: [HomeRowConfig],
+        libraryIds: [String],
+        hidden: Set<Destination> = []
+    ) -> [Destination] {
+        destinations(rowConfigs: rowConfigs, libraryIds: libraryIds, hidden: hidden)
+            + (hidden.contains(.lists) ? [] : [.lists])
+    }
+}
+
 extension HomeRowConfig {
     /// The rail entry this row stands for; nil for rows that are not
     /// destinations (Featured, Continue Watching).

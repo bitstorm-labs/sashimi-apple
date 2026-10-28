@@ -14,7 +14,7 @@ final class SidebarRailHelpTests: XCTestCase {
 
         let items = SidebarSelection.railItems(rowConfigs: rows, libraries: libraries)
 
-        XCTAssertEqual(items.count, 8, "Home, SashimiTV, three libraries, Search, Downloads, Settings")
+        XCTAssertEqual(items.count, 9, "Home, SashimiTV, three libraries, Lists, Search, Downloads, Settings")
         for item in items {
             XCTAssertFalse(item.helpLabel.trimmingCharacters(in: .whitespaces).isEmpty, "\(item) has no tooltip")
         }

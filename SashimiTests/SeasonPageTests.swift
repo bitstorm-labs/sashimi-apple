@@ -135,6 +135,19 @@ final class DetailActionsTests: XCTestCase {
             [.play, .startOver, .shuffle, .trailer, .watched, .more]
         )
     }
+
+    /// Add to List sits in the main row right before More, on movies, shows
+    /// and episodes only.
+    func testAddToListComesRightBeforeMore() {
+        for type in [ItemType.movie, .series, .episode] {
+            let row = DetailRowAction.mainRow(for: type, hasProgress: false, hasTrailer: false, supportsDownloads: true, supportsLists: true)
+            XCTAssertEqual(Array(row.suffix(2)), [.addToList, .more], "\(type)")
+        }
+        for type in [ItemType.season, .boxSet, .video] {
+            let row = DetailRowAction.mainRow(for: type, hasProgress: false, hasTrailer: false, supportsDownloads: false, supportsLists: true)
+            XCTAssertFalse(row.contains(.addToList), "\(type)")
+        }
+    }
 }
 
 /// Answers from a "METHOD path" → (status, body) table; 404 otherwise.

@@ -88,6 +88,16 @@ final class SideMenuVisibilityTests: XCTestCase {
         XCTAssertEqual(SideMenuSettings(defaults: defaults).hidden, [.library("kids")])
     }
 
+    /// Lists is a side-menu destination of its own (shared lists), hideable
+    /// like a library, and never a Home row.
+    func testListsCanBeHiddenAndIsRemembered() {
+        let store = SideMenuSettings(defaults: defaults)
+        XCTAssertTrue(store.isShown(.lists))
+        store.toggle(.lists)
+        XCTAssertEqual(SideMenuSettings(defaults: defaults).hidden, [.lists])
+        XCTAssertFalse(RailOrder.destinations(rowOrder: [.lists], libraryIds: ["tv"]).contains(.lists))
+    }
+
     func testOnlyReachableFromSearchWhenHiddenFromBoth() {
         XCTAssertEqual(RailOrder.reachabilityNote(isOnHome: false, isInSideMenu: false), "Only reachable from Search")
         XCTAssertNil(RailOrder.reachabilityNote(isOnHome: true, isInSideMenu: false))

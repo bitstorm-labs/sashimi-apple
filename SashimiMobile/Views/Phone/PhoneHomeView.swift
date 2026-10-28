@@ -4,6 +4,7 @@ struct PhoneHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var rowSettings = HomeRowSettings.shared
+    @ObservedObject private var sharedLists = SharedListsStore.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
     @State private var showManageChannels = false
@@ -108,6 +109,7 @@ struct PhoneHomeView: View {
         .onChange(of: viewModel.libraries) { _, libraries in
             rowSettings.updateLibraries(libraries)
         }
+        .sharedListHomeSync(rowSettings)
     }
 
     @ViewBuilder
@@ -166,6 +168,13 @@ struct PhoneHomeView: View {
                 cardWidth: PhoneSizing.posterWidth
             ) { item in
                 PhoneDetailView(item: item, libraryName: libraryName)
+            }
+
+        case .list(let listId, _):
+            if let row = sharedLists.rows[listId], !row.contents.items.isEmpty {
+                MobileSharedListRow(row: row, cardWidth: PhoneSizing.posterWidth) { item in
+                    PhoneDetailView(item: item, libraryName: item.libraryName)
+                }
             }
         }
     }

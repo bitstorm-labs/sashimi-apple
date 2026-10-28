@@ -8,6 +8,8 @@ enum SidebarSelection: Hashable {
     case search
     case downloads
     case settings
+    /// Shared lists.
+    case lists
     case library(id: String, name: String, collectionType: String?)
 
     var displayName: String {
@@ -17,6 +19,7 @@ enum SidebarSelection: Hashable {
         case .search: return "Search"
         case .downloads: return "Downloads"
         case .settings: return "Settings"
+        case .lists: return "Lists"
         case .library(_, let name, _): return name
         }
     }
@@ -40,6 +43,7 @@ enum SidebarSelection: Hashable {
     var railDestination: RailOrder.Destination? {
         switch self {
         case .finTV: return .finTV
+        case .lists: return .lists
         case .library(let id, _, _): return .library(id)
         case .home, .search, .downloads, .settings: return nil
         }
@@ -50,7 +54,7 @@ enum SidebarSelection: Hashable {
     var isAvailableOffline: Bool {
         switch self {
         case .home, .downloads, .settings: return true
-        case .finTV, .search, .library: return false
+        case .finTV, .search, .library, .lists: return false
         }
     }
 
@@ -61,6 +65,7 @@ enum SidebarSelection: Hashable {
         case .search: return "magnifyingglass"
         case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
+        case .lists: return "list.bullet.rectangle"
         case .library(_, let name, let collectionType):
             // Same symbols as the tvOS rail.
             return RailOrder.libraryIcon(name: name, collectionType: collectionType)
@@ -388,6 +393,8 @@ struct MainNavigationView: View {
                 DownloadsListView()
             case .settings:
                 MobileSettingsView()
+            case .lists:
+                MobileListsView()
             case .library(let id, let name, let collectionType):
                 MobileLibraryBrowseView(
                     libraryId: id,

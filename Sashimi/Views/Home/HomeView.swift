@@ -11,6 +11,9 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @StateObject private var homeSettings = HomeScreenSettings.shared
+    /// Subscribed shared lists. Loaded beside Home, never ahead of it.
+    @ObservedObject private var sharedLists = SharedListsStore.shared
+    @State private var openList: SharedList?
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedItem: BaseItemDto?
     /// Set when a channel is tuned to. Carries the item and the context that
@@ -119,6 +122,9 @@ struct HomeView: View {
             .fullScreenCover(item: $tunedChannel) { tuned in
                 PlayerView(item: tuned.item, channelContext: tuned.context)
             }
+            .fullScreenCover(item: $openList) { list in
+                ListDetailView(list: list)
+            }
             #if DEBUG
             // Test harness: SASHIMI_TUNE_STATION=<channel id> tunes that station
             // straight after launch, so on-device tests of channel flipping do
@@ -149,6 +155,11 @@ struct HomeView: View {
                     Task { await viewModel.refresh() }
                 }
             }
+            .onChange(of: openList) { oldValue, newValue in
+                if oldValue != nil && newValue == nil {
+                    Task { await sharedLists.refresh() }
+                }
+            }
             .onChange(of: playingItem) { oldValue, newValue in
                 if oldValue != nil && newValue == nil {
                     Task { await viewModel.refresh() }
@@ -156,8 +167,11 @@ struct HomeView: View {
             }
         }
         .task {
+            // Lists load on their own; each row appears when its list has.
+            Task { await sharedLists.refresh() }
             await viewModel.loadContent()
             homeSettings.updateWithLibraries(viewModel.libraries)
+            syncListRows()
             if !viewModel.heroItems.isEmpty { onHeroReady?() }
             // After the main content: a server without the Channels plugin
             // answers 404 and yields an empty row, so this must never gate the
@@ -175,6 +189,7 @@ struct HomeView: View {
             // (e.g. something was watched on another device).
             startAutoRefresh()
             Task { await viewModel.refreshIfStale() }
+            Task { await sharedLists.refresh() }
         }
         .onChange(of: scenePhase) { _, phase in
             // Back from the screensaver, sleep or another app: the 30 s timer
@@ -210,6 +225,19 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sashimiChannelsDidChange)) { _ in
             Task { await channelsViewModel.load() }
         }
+        .onChange(of: sharedLists.subscribedLists) { _, _ in syncListRows() }
+        .onChange(of: sharedLists.hasLoaded) { _, _ in syncListRows() }
+    }
+
+    /// Gives each subscribed list a Home row (after Continue Watching) and
+    /// takes unsubscribed ones away. Waits for the first load of both the
+    /// rows and the subscriptions, so nothing is dropped on a slow start.
+    private func syncListRows() {
+        guard sharedLists.hasLoaded, !homeSettings.rowConfigs.isEmpty else { return }
+        let lists = sharedLists.subscribedLists
+        homeSettings.updateWithLists(lists, titles: Dictionary(lists.map {
+            ($0.id, SharedLists.rowTitle(listName: $0.name, ownerName: sharedLists.ownerName(of: $0)))
+        }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// Keep the FinTV row honest while Home is on screen.
@@ -296,6 +324,18 @@ struct HomeView: View {
                     )
                     .focusSection()
                 }
+            }
+        } else if let listId = config.listId {
+            if let row = sharedLists.rows[listId], !row.contents.items.isEmpty {
+                SharedListHomeRow(
+                    row: row,
+                    onSelect: { item in
+                        selectedItemIsYouTube = item.libraryName?.lowercased().contains("youtube") == true
+                        selectedItem = item
+                    },
+                    onOpenList: { openList = row.list }
+                )
+                .focusSection()
             }
         } else if let libraryId = config.libraryId,
                   let library = viewModel.libraries.first(where: { $0.id == libraryId }) {
