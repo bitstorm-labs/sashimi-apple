@@ -169,12 +169,16 @@ struct MobileListDetailView: View {
     @ViewBuilder
     private func editActions(for item: BaseItemDto, removeOnly: Bool) -> some View {
         if !removeOnly {
-            if model.canMove(item, by: -1) {
+            if model.canMove(item, by: -2) {
                 Button("Move to Start") { run { await model.move(item, by: -model.contents.items.count) } }
+            }
+            if model.canMove(item, by: -1) {
                 Button("Move Earlier") { run { await model.move(item, by: -1) } }
             }
             if model.canMove(item, by: 1) {
                 Button("Move Later") { run { await model.move(item, by: 1) } }
+            }
+            if model.canMove(item, by: 2) {
                 Button("Move to End") { run { await model.move(item, by: model.contents.items.count) } }
             }
         }

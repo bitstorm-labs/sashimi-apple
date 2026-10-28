@@ -16,6 +16,7 @@ struct ListDetailView: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
+    @FocusState private var editMenuFocused: Bool
 
     private let columns = Array(repeating: GridItem(.fixed(220), spacing: 48, alignment: .top), count: 6)
 
@@ -153,7 +154,12 @@ struct ListDetailView: View {
                 .padding(.vertical, 10)
                 .foregroundStyle(.white)
                 .background(SashimiTheme.cardBackground, in: Capsule())
+                .overlay(Capsule().stroke(editMenuFocused ? SashimiTheme.focus : .clear, lineWidth: 3))
+                .shadow(color: editMenuFocused ? SashimiTheme.focusGlow : .clear, radius: 12)
+                .scaleEffect(editMenuFocused ? 1.05 : 1.0)
+                .animation(.spring(response: 0.3), value: editMenuFocused)
         }
+        .focused($editMenuFocused)
         .menuStyle(.borderlessButton)
     }
 
@@ -192,12 +198,16 @@ struct ListDetailView: View {
             Button("Remove from List", role: .destructive) { run { await model.remove(item) } }
         } else {
             let count = model.contents.items.count
-            if model.canMove(item, by: -1) {
+            if model.canMove(item, by: -2) {
                 Button("Move to Start") { run { await model.move(item, by: -count) } }
+            }
+            if model.canMove(item, by: -1) {
                 Button("Move Earlier") { run { await model.move(item, by: -1) } }
             }
             if model.canMove(item, by: 1) {
                 Button("Move Later") { run { await model.move(item, by: 1) } }
+            }
+            if model.canMove(item, by: 2) {
                 Button("Move to End") { run { await model.move(item, by: count) } }
             }
         }

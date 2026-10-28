@@ -23,15 +23,16 @@ struct MobileListsView: View {
                                 cardLink(card, isOwn: true)
                             }
                             Button { creating = true } label: {
-                                Label("New List", systemImage: "plus")
-                                    .font(MobileTypography.title)
-                                    .foregroundStyle(MobileColors.textSecondary)
-                                    .frame(maxWidth: .infinity)
+                                // A definite 16:9 frame with the label laid over it,
+                                // the same size as a list's cover.
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(MobileColors.textTertiary, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
                                     .aspectRatio(16 / 9, contentMode: .fit)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder(MobileColors.textTertiary, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                                    )
+                                    .overlay {
+                                        Label("New List", systemImage: "plus")
+                                            .font(MobileTypography.title)
+                                            .foregroundStyle(MobileColors.textSecondary)
+                                    }
                             }
                             .buttonStyle(.plain)
                         }
