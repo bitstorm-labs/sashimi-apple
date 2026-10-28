@@ -152,8 +152,10 @@ struct MainNavigationView: View {
         }
         .sheet(isPresented: $showAddServer) {
             MobileAddServerSheet()
+                .dismissesOnOutsideTap()
         }
-        .sheet(isPresented: $showingDownloads) {
+        // Downloads play: the player opens over the window, not the sheet.
+        .playerSheet(isPresented: $showingDownloads) {
             NavigationStack {
                 DownloadsListView()
                     .toolbar {

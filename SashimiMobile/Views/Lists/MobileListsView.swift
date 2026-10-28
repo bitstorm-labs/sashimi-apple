@@ -65,6 +65,7 @@ struct MobileListsView: View {
                     creating = false
                 }
             }
+            .dismissesOnOutsideTap()
         }
     }
 

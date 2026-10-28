@@ -138,13 +138,13 @@ struct PhoneDetailView: View {
         .navigationDestination(item: $seasonPage) { season in
             MobileSeasonView(season: season, libraryName: libraryName, serverID: serverID, layout: .phone)
         }
-        .sheet(item: $showingEpisodeDetail) { episode in
+        .playerSheet(item: $showingEpisodeDetail) { episode in
             // Full detail view — one consistent episode UI (matches iPad)
             NavigationStack {
                 PhoneDetailView(item: episode, libraryName: libraryName, serverID: serverID)
             }
         }
-        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
+        .playerSheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
             personDetailView(for: person)
         }
         .fullScreenCover(item: $selectedServerMedia) { source in
@@ -154,9 +154,11 @@ struct PhoneDetailView: View {
         }
         .sheet(isPresented: $showingAddToList) {
             MobileAddToListSheet(item: item)
+                .dismissesOnOutsideTap()
         }
         .sheet(item: $channelTarget) { target in
             MobileAddToChannelSheet(target: target)
+                .dismissesOnOutsideTap()
         }
         .task {
             if NetworkMonitor.shared.isOnline,
@@ -1309,6 +1311,23 @@ enum AdaptiveDetailLayout: Equatable {
 
     static func forDevice(idiom: UIUserInterfaceIdiom) -> Self {
         MobileLayoutIdiom.usesPadLayout(idiom) ? .pad : .phone
+    }
+}
+
+/// How tapping an episode card opens that episode (#781). On the Mac and
+/// iPad it pushes the episode's own page (back returns to the show); a small
+/// sheet there read as a dialog, and Play in it played inside the dialog.
+/// iPhone keeps its near-full-height episode sheet.
+enum EpisodeOpenStyle: Equatable {
+    case push
+    case sheet
+
+    static func forDevice(idiom: UIUserInterfaceIdiom) -> Self {
+        AdaptiveDetailLayout.forDevice(idiom: idiom) == .pad ? .push : .sheet
+    }
+
+    @MainActor static var current: Self {
+        forDevice(idiom: UIDevice.current.userInterfaceIdiom)
     }
 }
 

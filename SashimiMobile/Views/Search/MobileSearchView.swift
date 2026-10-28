@@ -140,6 +140,7 @@ struct MobileSearchView: View {
             ServerMediaSourcePickerView(group: group) { source in
                 selectedSource = source
             }
+            .dismissesOnOutsideTap()
         }
         .onChange(of: currentQuery) { _, newValue in
             guard !isApplyingInitialQuery else { return }
