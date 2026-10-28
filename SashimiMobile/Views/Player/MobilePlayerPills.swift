@@ -12,6 +12,8 @@ struct MobilePlayerPillRow: View {
     /// Downloaded playback: there is no server stream to change quality on.
     let isOffline: Bool
     @Binding var playbackSpeed: Float
+    /// The Mac's full-screen toggle; nil hides the pill.
+    var fullScreen: PlayerFullScreenControl?
     /// Any touch on the row, so the overlay's auto-hide timer restarts.
     var onInteract: () -> Void = {}
 
@@ -44,7 +46,28 @@ struct MobilePlayerPillRow: View {
                 pictureInPicturePill
             }
             AirPlayPill()
+            if let fullScreen {
+                fullScreenPill(fullScreen)
+            }
         }
+    }
+
+    // MARK: Full screen (Mac)
+
+    private func fullScreenPill(_ control: PlayerFullScreenControl) -> some View {
+        Button {
+            onInteract()
+            control.toggle()
+        } label: {
+            PlayerPillLabel(
+                title: control.title,
+                systemImage: control.systemImage,
+                showsTitle: false
+            )
+        }
+        .buttonStyle(.plain)
+        .help(control.title)
+        .accessibilityLabel(control.title)
     }
 
     // MARK: Subtitles
@@ -247,4 +270,17 @@ private struct AirPlayRoutePicker: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+/// The player's full-screen toggle on the Mac: what the pill shows and what
+/// it does. The window state is read when the player draws, and the action
+/// goes to the window (see `MacWindow.toggleFullScreen`).
+struct PlayerFullScreenControl {
+    let isFullScreen: Bool
+    let toggle: () -> Void
+
+    var title: String { isFullScreen ? "Exit Full Screen" : "Enter Full Screen" }
+    var systemImage: String {
+        isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+    }
 }

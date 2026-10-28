@@ -35,6 +35,8 @@ struct MobilePlayerView: View {
     /// Downloaded items that played to their end. Acted on (Delete downloads
     /// after watching) only once the player is gone, never mid-playback.
     @State private var finishedDownloadItemIDs: [String] = []
+    /// The Mac window's full-screen state, for the player's full-screen pill.
+    @State private var isFullScreen = false
 
     init(
         item: BaseItemDto,
@@ -192,6 +194,9 @@ struct MobilePlayerView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = viewModel.keepsScreenAwake }
         // Menu bar / keyboard commands, and the Mac's mouse-move reveal.
         .modifier(PlayerCommandBinding(viewModel: viewModel, perform: handleCommand, onPointerMove: revealControls))
+        // Entering or leaving full screen resizes the window, whichever way
+        // it was asked for; the pill's icon follows.
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in refreshFullScreenState() }
         .onChange(of: viewModel.keepsScreenAwake) { _, awake in
             UIApplication.shared.isIdleTimerDisabled = awake
         }
@@ -212,21 +217,7 @@ struct MobilePlayerView: View {
                 NotificationCenter.default.post(name: .playbackDidStop, object: nil)
             }
         }
-        .onChange(of: scenePhase) { _, newPhase in
-            // The Up Next countdown only runs while the app is in front.
-            if newPhase == .active {
-                viewModel.resumeUpNextCountdown()
-            } else {
-                viewModel.pauseUpNextCountdown()
-            }
-            // Picture in Picture is the one way to keep watching outside the
-            // app; leaving the app otherwise stops playback as before.
-            guard newPhase == .background, !pictureInPicture.isActive else { return }
-            viewModel.player?.pause()
-            saveOfflinePositionIfNeeded()
-            viewModel.beginStop(reason: .sceneBackground)
-            dismiss()
-        }
+        .onChange(of: scenePhase) { _, newPhase in sceneDidChange(to: newPhase) }
         // The .task above runs once. It does not re-run when changeQuality
         // rebuilds the player or when auto-play-next swaps in the next episode,
         // so the menus kept describing the PREVIOUS asset -- and since stream
@@ -359,7 +350,10 @@ struct MobilePlayerView: View {
                 isScrubbing = scrubbing
                 scheduleAutoHide()
             },
-            onClose: { closePlayer() }
+            onClose: { closePlayer() },
+            fullScreen: MacPlatform.isMac
+                ? PlayerFullScreenControl(isFullScreen: isFullScreen, toggle: toggleWindowFullScreen)
+                : nil
         )
     }
 
@@ -457,7 +451,19 @@ extension MobilePlayerView {
     private func toggleWindowFullScreen() {
 #if targetEnvironment(macCatalyst)
         MacWindow.toggleFullScreen()
+        // The window reports the new state only once AppKit's transition
+        // has finished, after the resize that refreshes it.
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            refreshFullScreenState()
+        }
 #endif
+    }
+
+    /// Re-reads the window's full-screen state, which can also change from
+    /// the green window button, ⌃⌘F or a swipe out of the Space.
+    private func refreshFullScreenState() {
+        if isFullScreen != isWindowFullScreen { isFullScreen = isWindowFullScreen }
     }
 
     private func revealControls() {
@@ -496,6 +502,45 @@ private struct PlayerCommandBinding: ViewModifier {
                 guard MacPlatform.isMac, case .active = phase else { return }
                 onPointerMove()
             }
+    }
+}
+
+// MARK: - Leaving the app
+
+extension MobilePlayerView {
+    private func sceneDidChange(to newPhase: ScenePhase) {
+        // The Up Next countdown only runs while the app is in front.
+        if newPhase == .active {
+            viewModel.resumeUpNextCountdown()
+        } else {
+            viewModel.pauseUpNextCountdown()
+        }
+        // Picture in Picture is the one way to keep watching outside the
+        // app on iPhone and iPad; leaving the app otherwise stops playback.
+        // The Mac keeps the player (see PlayerBackgroundPolicy).
+        guard PlayerBackgroundPolicy.stopsPlayback(
+            phase: newPhase,
+            isPictureInPictureActive: pictureInPicture.isActive,
+            isMac: MacPlatform.isMac
+        ) else { return }
+        viewModel.player?.pause()
+        saveOfflinePositionIfNeeded()
+        viewModel.beginStop(reason: .sceneBackground)
+        dismiss()
+    }
+}
+
+/// What leaving the app does to the player.
+///
+/// On the Mac, switching to another app moves the scene to `.background`
+/// (seen on macOS 27: activating Finder is enough, the window need not be
+/// hidden). Treating that like an iPhone going home stopped and closed the
+/// player every time the viewer clicked another window, so their subtitle
+/// and audio picks were gone when they came back. A Mac player, like
+/// QuickTime's, carries on behind other windows.
+enum PlayerBackgroundPolicy {
+    static func stopsPlayback(phase: ScenePhase, isPictureInPictureActive: Bool, isMac: Bool) -> Bool {
+        phase == .background && !isPictureInPictureActive && !isMac
     }
 }
 
