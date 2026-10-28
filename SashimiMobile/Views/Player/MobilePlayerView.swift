@@ -37,6 +37,10 @@ struct MobilePlayerView: View {
     @State private var finishedDownloadItemIDs: [String] = []
     /// The Mac window's full-screen state, for the player's full-screen pill.
     @State private var isFullScreen = false
+    /// The downloaded item whose position was saved last, i.e. the one on
+    /// screen when the player closed. Past the watched line it counts as
+    /// finished for Delete downloads after watching, credits or not.
+    @State private var stoppedDownload: StoppedDownload?
 
     init(
         item: BaseItemDto,
@@ -200,23 +204,7 @@ struct MobilePlayerView: View {
         .onChange(of: viewModel.keepsScreenAwake) { _, awake in
             UIApplication.shared.isIdleTimerDisabled = awake
         }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-            viewModel.player?.pause()
-            saveOfflinePositionIfNeeded()
-            let stopTask = viewModel.beginStop(reason: .viewDisappeared)
-            let finishedDownloads = finishedDownloadItemIDs
-            Task {
-                await stopTask.value
-                for itemId in finishedDownloads {
-                    await DownloadManager.shared.handleOfflinePlaybackFinished(
-                        itemId: itemId,
-                        serverID: serverID
-                    )
-                }
-                NotificationCenter.default.post(name: .playbackDidStop, object: nil)
-            }
-        }
+        .onDisappear { playerDidDisappear() }
         .onChange(of: scenePhase) { _, newPhase in sceneDidChange(to: newPhase) }
         // The .task above runs once. It does not re-run when changeQuality
         // rebuilds the player or when auto-play-next swaps in the next episode,
@@ -389,15 +377,59 @@ struct MobilePlayerView: View {
     /// Persists the offline resume point. Safe to call more than once: the
     /// last call before the player is torn down wins, and it no-ops once the
     /// player is gone.
-    private func saveOfflinePositionIfNeeded() {
+    @discardableResult
+    private func saveOfflinePositionIfNeeded() -> StoppedDownload? {
         // A natural end already saved the item as finished; the stopped
         // player's clock must not overwrite that.
         // livePositionTicks, not the player's clock: until the resume seek
         // lands the clock reads zero, and closing in that window used to save
         // zero over the stored position (#593).
         guard localFileURL != nil, !viewModel.playbackEnded, viewModel.player != nil,
-              let ticks = viewModel.livePositionTicks() else { return }
+              let ticks = viewModel.livePositionTicks() else { return nil }
         DownloadManager.shared.savePlaybackPosition(itemId: displayedItem.id, serverID: serverID, positionTicks: ticks)
+        let stopped = StoppedDownload(itemID: displayedItem.id, positionTicks: ticks)
+        stoppedDownload = stopped
+        return stopped
+    }
+}
+
+// MARK: - Leaving the player
+
+/// A downloaded item and where its playback stopped.
+struct StoppedDownload: Equatable {
+    let itemID: String
+    let positionTicks: Int64
+}
+
+extension MobilePlayerView {
+    /// Stops playback, then acts on the downloads it played (Delete downloads
+    /// after watching) once the stopped report is on its way.
+    private func playerDidDisappear() {
+        UIApplication.shared.isIdleTimerDisabled = false
+        viewModel.player?.pause()
+        // The close button saved before the player went; read its record
+        // too, since @State written there may not read back yet.
+        let savedNow = saveOfflinePositionIfNeeded()
+        let stopTask = viewModel.beginStop(reason: .viewDisappeared)
+        let finishedDownloads = finishedDownloadItemIDs
+        let stopped = (savedNow ?? stoppedDownload).flatMap { finishedDownloads.contains($0.itemID) ? nil : $0 }
+        Task {
+            await stopTask.value
+            for itemId in finishedDownloads {
+                await DownloadManager.shared.handleOfflinePlaybackFinished(
+                    itemId: itemId,
+                    serverID: serverID
+                )
+            }
+            if let stopped {
+                await DownloadManager.shared.handleOfflinePlaybackFinished(
+                    itemId: stopped.itemID,
+                    serverID: serverID,
+                    stoppedAtTicks: stopped.positionTicks
+                )
+            }
+            NotificationCenter.default.post(name: .playbackDidStop, object: nil)
+        }
     }
 }
 
