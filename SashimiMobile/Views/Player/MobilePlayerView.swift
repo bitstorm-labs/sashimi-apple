@@ -582,15 +582,28 @@ struct FullScreenPlayerModifier: ViewModifier {
     @Binding var item: BaseItemDto?
     var serverID: String?
     var startFromBeginning: Bool = false
+    /// Set inside a sheet (#781): a cover presented from there stays inside
+    /// the sheet (on the Mac, a small window), so the request goes to the
+    /// view that showed the sheet.
+    @Environment(\.playerHandoff) private var handoff
+
+    private var route: PlayerPresentationRoute {
+        .route(insideSheet: handoff != nil)
+    }
 
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(item: $item) { mediaItem in
+            .fullScreenCover(item: route == .presentHere ? $item : .constant(nil)) { mediaItem in
                 MobilePlayerView(
                     item: mediaItem,
                     serverID: serverID,
                     startFromBeginning: startFromBeginning
                 )
+            }
+            .onChange(of: item?.id) { _, _ in
+                guard route == .handOffToPresenter, let mediaItem = item, let handoff else { return }
+                item = nil
+                handoff.send(PlayerRequest(item: mediaItem, serverID: serverID, startFromBeginning: startFromBeginning))
             }
     }
 }

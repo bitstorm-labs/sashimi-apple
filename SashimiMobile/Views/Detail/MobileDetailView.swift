@@ -34,6 +34,8 @@ struct MobileDetailView: View {
     @State private var seriesStatus: String?
     @State private var seriesCriticRating: Int?
     @State private var showingEpisodeDetail: BaseItemDto?
+    /// An episode card on the Mac and iPad pushes the episode's page (#781).
+    @State private var episodePage: BaseItemDto?
     @State private var showingPersonDetail: PersonInfo?
     @State private var pendingServerMedia: ServerMediaResult?
     @State private var selectedServerMedia: ServerMediaResult?
@@ -164,12 +166,15 @@ struct MobileDetailView: View {
         .themeSong(for: item)
         .fullScreenPlayer(item: $playingItem, serverID: serverID)
         .fullScreenPlayer(item: $startOverItem, serverID: serverID, startFromBeginning: true)
-        .sheet(item: $showingEpisodeDetail) { episode in
+        .playerSheet(item: $showingEpisodeDetail) { episode in
             NavigationStack {
                 AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
             }
         }
-        .sheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
+        .navigationDestination(item: $episodePage) { episode in
+            AdaptiveDetailView(item: episode, libraryName: libraryName, serverID: serverID)
+        }
+        .playerSheet(item: $showingPersonDetail, onDismiss: presentPendingServerMedia) { person in
             NavigationStack {
                 PersonDetailView(
                     person: person,
@@ -187,9 +192,11 @@ struct MobileDetailView: View {
         }
         .sheet(item: $channelTarget) { target in
             MobileAddToChannelSheet(target: target)
+                .dismissesOnOutsideTap()
         }
         .sheet(isPresented: $showingAddToList) {
             MobileAddToListSheet(item: item)
+                .dismissesOnOutsideTap()
         }
         .navigationDestination(item: $seasonPage) { season in
             MobileSeasonView(season: season, libraryName: libraryName, serverID: serverID, layout: .pad)
@@ -248,6 +255,13 @@ struct MobileDetailView: View {
             Button("OK") { adminError = nil }
         } message: {
             Text(adminError ?? "")
+        }
+    }
+
+    private func openEpisode(_ episode: BaseItemDto) {
+        switch EpisodeOpenStyle.current {
+        case .push: episodePage = episode
+        case .sheet: showingEpisodeDetail = episode
         }
     }
 
@@ -774,8 +788,10 @@ struct MobileDetailView: View {
                 } label: {
                     Label(epLabel, systemImage: "play.fill")
                         .font(.system(size: 14, weight: .semibold))
+                        .fixedSize()
                 }
                 .buttonStyle(.borderedProminent)
+                .layoutPriority(1)
 
                 if epHasProgress {
                     Button {
@@ -839,8 +855,10 @@ struct MobileDetailView: View {
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
+                    .fixedSize()
             }
             .buttonStyle(.borderedProminent)
+            .layoutPriority(1)
 
             if hasProgress {
                 Button {
@@ -875,8 +893,10 @@ struct MobileDetailView: View {
             } label: {
                 Label(hasProgress ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold))
+                    .fixedSize()
             }
             .buttonStyle(.borderedProminent)
+            .layoutPriority(1)
 
             if hasProgress {
                 Button {
@@ -1026,7 +1046,7 @@ struct MobileDetailView: View {
                                         isYouTube: isYouTubeStyle,
                                         serverID: serverID
                                     ) {
-                                        showingEpisodeDetail = episode
+                                        openEpisode(episode)
                                     }
                                     .contextMenu {
                                         // Right-click / long-press: the episode download

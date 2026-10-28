@@ -49,6 +49,7 @@ struct MobileServerDashboardView: View {
             }
             .sheet(item: $details) { session in
                 NavigationStack { MobileStreamDetailsView(session: session) }
+                    .dismissesOnOutsideTap()
             }
             .alert(
                 "Something went wrong",
