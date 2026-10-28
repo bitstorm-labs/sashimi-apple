@@ -2579,6 +2579,28 @@ actor JellyfinClient {
         return try JSONDecoder().decode(LooseItemsResponse.self, from: data).items
     }
 
+    /// This user's own entry on a list. The owner gets 200 with CanEdit even
+    /// when the list's Shares are empty; anyone else gets 403 or 404.
+    func getPlaylistUser(playlistId: String, userId: String) async throws -> PlaylistShare {
+        try JSONDecoder().decode(PlaylistShare.self, from: await request(path: "/Playlists/\(playlistId)/Users/\(userId)"))
+    }
+
+    /// The SashimiLists plugin's owners for these lists, keyed by list id.
+    /// Only lists this user can see are in it. A 404 means no plugin.
+    func getListOwners(playlistIds: [String]) async throws -> [String: ListOwner] {
+        guard !playlistIds.isEmpty else { return [:] }
+        let data = try await request(path: "/SashimiLists/Owners", queryItems: [
+            URLQueryItem(name: "ids", value: playlistIds.joined(separator: ","))
+        ])
+        return try JSONDecoder().decode([String: ListOwner].self, from: data)
+    }
+
+    /// One list's owner from the SashimiLists plugin. A 404 means no plugin,
+    /// or a list this user cannot see.
+    func getListOwner(playlistId: String) async throws -> ListOwner {
+        try JSONDecoder().decode(ListOwner.self, from: await request(path: "/SashimiLists/Playlists/\(playlistId)/Owner"))
+    }
+
     func createPlaylist(name: String, itemIds: [String], isPublic: Bool) async throws -> String {
         guard let userId else { throw JellyfinError.notConfigured }
         let body = try listBody([

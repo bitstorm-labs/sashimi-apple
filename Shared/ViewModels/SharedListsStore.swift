@@ -9,9 +9,11 @@ struct SubscribedListRow: Identifiable, Equatable {
     let ownerName: String?
     let contents: ListContents
     let seen: [String]
+    /// The viewer made this list: the row reads "Your list: …".
+    var isOwn = false
 
     var id: String { list.id }
-    var title: String { SharedLists.rowTitle(listName: list.name, ownerName: ownerName) }
+    var title: String { SharedLists.rowTitle(listName: list.name, ownerName: ownerName, isOwn: isOwn) }
     var newCount: Int { SharedLists.newCount(displayIds: contents.displayIds, seen: seen) }
 
     func isNew(_ itemId: String) -> Bool { !seen.contains(itemId) }
@@ -50,8 +52,19 @@ final class SharedListsStore: ObservableObject {
         subscriptions.contains { $0.id == listId }
     }
 
+    /// The plugin's name for the owner, else the user list's.
     func ownerName(of list: SharedList) -> String? {
-        list.ownerId.flatMap { userNames[$0] }
+        list.ownerName ?? list.ownerId.flatMap { userNames[$0] }
+    }
+
+    /// A subscribed list's Home row title: "Your list: …" for your own.
+    func rowTitle(of list: SharedList) -> String {
+        SharedLists.rowTitle(listName: list.name, ownerName: ownerName(of: list), isOwn: list.isOwned(by: loadedUserId))
+    }
+
+    private func row(_ list: SharedList, contents: ListContents, seen: [String]) -> SubscribedListRow {
+        SubscribedListRow(list: list, ownerName: ownerName(of: list), contents: contents, seen: seen,
+                          isOwn: list.isOwned(by: loadedUserId))
     }
 
     /// Reloads the subscriptions and every subscribed list. Lists the server
@@ -81,7 +94,7 @@ final class SharedListsStore: ObservableObject {
                 do {
                     let contents = try await service.contents(of: list.id)
                     let seen = subs.first { $0.id == list.id }?.seen ?? []
-                    loaded[list.id] = SubscribedListRow(list: list, ownerName: ownerName(of: list), contents: contents, seen: seen)
+                    loaded[list.id] = row(list, contents: contents, seen: seen)
                 } catch where SharedListsService.isGone(error) {
                     gone.append(list.id)
                 } catch {
@@ -106,7 +119,7 @@ final class SharedListsStore: ObservableObject {
     func subscribe(to list: SharedList, current: ListContents) async -> Bool {
         guard await save({ SharedLists.subscribe($0, id: list.id, current: current.displayIds) }) else { return false }
         if !subscribedLists.contains(where: { $0.id == list.id }) { subscribedLists.append(list) }
-        rows[list.id] = SubscribedListRow(list: list, ownerName: ownerName(of: list), contents: current, seen: current.displayIds)
+        rows[list.id] = row(list, contents: current, seen: current.displayIds)
         return true
     }
 
@@ -124,7 +137,7 @@ final class SharedListsStore: ObservableObject {
               sub.seen != current.displayIds else { return }
         _ = await save { SharedLists.markSeen($0, id: listId, current: current.displayIds) }
         if let row = rows[listId] {
-            rows[listId] = SubscribedListRow(list: row.list, ownerName: row.ownerName, contents: current, seen: current.displayIds)
+            rows[listId] = self.row(row.list, contents: current, seen: current.displayIds)
         }
     }
 

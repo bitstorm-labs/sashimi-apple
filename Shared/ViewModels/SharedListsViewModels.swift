@@ -6,8 +6,9 @@ struct ListCard: Identifiable, Hashable {
     let ownerName: String?
     /// What this user sees on it (parental limits applied).
     let count: Int
-    /// The first title, for a cover when Jellyfin has made none.
-    let firstItem: BaseItemDto?
+    /// The cover's posters (`SharedLists.coverPosterIds`): four for a 2x2
+    /// collage, one shown full-bleed, or none.
+    let coverIds: [String]
 
     var id: String { list.id }
 
@@ -60,7 +61,7 @@ final class ListsPageViewModel: ObservableObject {
                     group.addTask { [service, store] in
                         let contents = (try? await service.contents(of: list.id)) ?? .empty
                         let owner = await store.ownerName(of: list)
-                        return (index, ListCard(list: list, ownerName: owner, count: contents.items.count, firstItem: contents.items.first))
+                        return (index, ListCard(list: list, ownerName: owner, count: contents.items.count, coverIds: contents.coverIds))
                     }
                 }
                 var cards: [(Int, ListCard)] = []
@@ -86,8 +87,10 @@ final class ListsPageViewModel: ObservableObject {
         do {
             let id = try await service.create(name: trimmed, isPublic: isPublic, adding: nil)
             let userId = await service.client.currentUserId
-            let list = SharedList(id: id, name: trimmed, ownerId: userId, isPublic: isPublic, imageTag: nil)
-            mine.append(ListCard(list: list, ownerName: nil, count: 0, firstItem: nil))
+            // Shown as the server has it, not as asked.
+            let serverPublic = (try? await service.isPublic(id)) ?? isPublic
+            let list = SharedList(id: id, name: trimmed, ownerId: userId, isPublic: serverPublic, imageTag: nil)
+            mine.append(ListCard(list: list, ownerName: nil, count: 0, coverIds: []))
             return list
         } catch {
             return nil
@@ -107,14 +110,19 @@ final class ListDetailViewModel: ObservableObject {
     @Published private(set) var isGone = false
     @Published private(set) var newIds: Set<String> = []
     @Published private(set) var userId: String?
+    /// A Public/Private switch is waiting for the server to confirm it.
+    @Published private(set) var isChangingVisibility = false
 
     private let service: SharedListsService
     let store: SharedListsStore
+    private let settle: Duration
 
-    init(list: SharedList, service: SharedListsService = SharedListsService(), store: SharedListsStore = .shared) {
+    init(list: SharedList, service: SharedListsService = SharedListsService(), store: SharedListsStore = .shared,
+         settle: Duration = .seconds(2)) {
         self.list = list
         self.service = service
         self.store = store
+        self.settle = settle
     }
 
     var isOwner: Bool { list.isOwned(by: userId) }
@@ -134,6 +142,9 @@ final class ListDetailViewModel: ObservableObject {
     func load() async {
         userId = await service.client.currentUserId
         if store.userNames.isEmpty { await store.loadUserNames() }
+        // The owner (plugin, else self-share, else self-check) and the
+        // server's Public/Private, whatever the card that opened it said.
+        if let fresh = try? await service.refreshed(list) { list = fresh }
         do {
             let loaded = try await service.contents(of: list.id)
             contents = loaded
@@ -167,20 +178,26 @@ final class ListDetailViewModel: ObservableObject {
         guard !trimmed.isEmpty, trimmed != list.name else { return false }
         do {
             try await service.rename(list.id, to: trimmed)
-            list = SharedList(id: list.id, name: trimmed, ownerId: list.ownerId, isPublic: list.isPublic, imageTag: list.imageTag)
+            list = list.with(name: trimmed)
             return true
         } catch {
             return false
         }
     }
 
+    /// Switches Public/Private. What shows afterwards is what the server
+    /// says (OpenAccess), never the value asked for: Jellyfin 12.4 can revert
+    /// it a second later, which the service checks for and repairs once.
     func togglePublic() async -> Bool {
-        let isPublic = !list.isPublic
+        let wanted = !list.isPublic
+        isChangingVisibility = true
+        defer { isChangingVisibility = false }
         do {
-            try await service.setPublic(list.id, isPublic)
-            list = SharedList(id: list.id, name: list.name, ownerId: list.ownerId, isPublic: isPublic, imageTag: list.imageTag)
-            return true
+            let now = try await service.setPublicVerified(list.id, wanted, settle: settle)
+            list = list.with(isPublic: now)
+            return now == wanted
         } catch {
+            if let now = try? await service.isPublic(list.id) { list = list.with(isPublic: now) }
             return false
         }
     }

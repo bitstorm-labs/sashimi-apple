@@ -21,7 +21,7 @@ private struct SharedListHomeSync: ViewModifier {
         guard store.hasLoaded, !rowSettings.rows.isEmpty else { return }
         let lists = store.subscribedLists
         rowSettings.updateWithLists(lists, titles: Dictionary(lists.map {
-            ($0.id, SharedLists.rowTitle(listName: $0.name, ownerName: store.ownerName(of: $0)))
+            ($0.id, store.rowTitle(of: $0))
         }, uniquingKeysWith: { first, _ in first }))
     }
 }

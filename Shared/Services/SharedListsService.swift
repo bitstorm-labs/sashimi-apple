@@ -4,10 +4,28 @@ import Foundation
 struct SharedList: Identifiable, Hashable {
     let id: String
     let name: String
-    /// Nil for a list made outside Sashimi (no self-share): "Shared list".
+    /// Nil when nothing says who made it: "Shared list".
     let ownerId: String?
+    /// The owner's name as the SashimiLists plugin reports it. Nil without
+    /// the plugin; the name then comes from the user list.
+    var ownerName: String?
+    /// The server's OpenAccess, never a value set locally.
     let isPublic: Bool
     let imageTag: String?
+
+    init(id: String, name: String, ownerId: String?, ownerName: String? = nil, isPublic: Bool, imageTag: String?) {
+        self.id = id
+        self.name = name
+        self.ownerId = ownerId
+        self.ownerName = ownerName
+        self.isPublic = isPublic
+        self.imageTag = imageTag
+    }
+
+    func with(name: String? = nil, isPublic: Bool? = nil) -> SharedList {  // swiftlint:disable:this discouraged_optional_boolean
+        SharedList(id: id, name: name ?? self.name, ownerId: ownerId, ownerName: ownerName,
+                   isPublic: isPublic ?? self.isPublic, imageTag: imageTag)
+    }
 
     func isOwned(by userId: String?) -> Bool {
         guard let userId, let ownerId else { return false }
@@ -25,6 +43,9 @@ struct ListContents: Equatable {
 
     /// What "seen" and "N new" compare. A series card's id is the series id.
     var displayIds: [String] { items.map(\.id) }
+
+    /// The cover's posters, from the titles in display order.
+    var coverIds: [String] { SharedLists.coverPosterIds(items.map(ListEntry.init(item:))) }
 
     static let empty = ListContents(entries: [], items: [])
 }
@@ -68,11 +89,44 @@ struct SharedListsService {
     /// the listing and its sharing lookup is left out.
     func lists() async throws -> [SharedList] {
         let playlists = try await client.getPlaylists()
+        return try await resolve(playlists)
+    }
+
+    /// The lists with these ids that this user can still see. A missing one
+    /// is gone (deleted, or made private by its owner).
+    func lists(ids: [String]) async throws -> (found: [SharedList], missing: [String]) {
+        guard !ids.isEmpty else { return ([], []) }
+        let playlists = try await client.getItemsForCards(itemIds: ids)
+        // In the order asked for (the order subscribed), not the server's.
+        let ordered = ids.compactMap { id in playlists.first { $0.id == id } }
+        let found = try await resolve(ordered)
+        let foundIds = Set(found.map(\.id))
+        return (found, ids.filter { !foundIds.contains($0) })
+    }
+
+    /// One list as the server has it now: owner (plugin's single call, else
+    /// the fallbacks) and OpenAccess. For the list's own page.
+    func refreshed(_ list: SharedList) async throws -> SharedList {
+        let me = await client.currentUserId
+        let pluginOwner = try? await client.getListOwner(playlistId: list.id)
+        return try await resolve(id: list.id, name: list.name, imageTag: list.imageTag, pluginOwner: pluginOwner, me: me)
+    }
+
+    /// Owners come from one batch call to the SashimiLists plugin. Without
+    /// the plugin (404 on the route, or any failure) each list falls back to
+    /// its self-share, then to the owner self-check.
+    private func resolve(_ playlists: [BaseItemDto]) async throws -> [SharedList] {
+        let me = await client.currentUserId
+        let owners = (try? await client.getListOwners(playlistIds: playlists.map(\.id))) ?? [:]
         return try await withThrowingTaskGroup(of: (Int, SharedList?).self) { group in
             for (index, playlist) in playlists.enumerated() {
                 group.addTask {
                     do {
-                        return (index, try await list(from: playlist))
+                        let list = try await resolve(
+                            id: playlist.id, name: playlist.name, imageTag: playlist.imageTags?["Primary"],
+                            pluginOwner: owners[playlist.id], me: me
+                        )
+                        return (index, list)
                     } catch where Self.isGone(error) {
                         return (index, nil)
                     }
@@ -86,36 +140,28 @@ struct SharedListsService {
         }
     }
 
-    func list(from playlist: BaseItemDto) async throws -> SharedList {
-        let sharing = try await client.getPlaylistSharing(playlistId: playlist.id)
-        return SharedList(
-            id: playlist.id,
-            name: playlist.name,
-            ownerId: SharedLists.owner(shares: sharing.shares),
-            isPublic: sharing.openAccess,
-            imageTag: playlist.imageTags?["Primary"]
-        )
+    private func resolve(id: String, name: String, imageTag: String?, pluginOwner: ListOwner?, me: String?) async throws -> SharedList {
+        let sharing = try await client.getPlaylistSharing(playlistId: id)
+        var ownerId = SharedLists.owner(pluginOwnerId: pluginOwner?.userId, shares: sharing.shares)
+        if ownerId == nil, let me, await isOwnerPerSelfCheck(listId: id, me: me) {
+            ownerId = me
+        }
+        if let me, SharedLists.needsSelfShare(ownerId: ownerId, me: me, shares: sharing.shares) {
+            // Put the wiped self-share back so clients without the plugin
+            // still see who made it. Silent: the list works either way.
+            try? await client.sharePlaylist(playlistId: id, userId: me, canEdit: true)
+        }
+        return SharedList(id: id, name: name, ownerId: ownerId, ownerName: pluginOwner?.name,
+                          isPublic: sharing.openAccess, imageTag: imageTag)
     }
 
-    /// The lists with these ids that this user can still see. A missing one
-    /// is gone (deleted, or made private by its owner).
-    func lists(ids: [String]) async throws -> (found: [SharedList], missing: [String]) {
-        guard !ids.isEmpty else { return ([], []) }
-        let playlists = try await client.getItemsForCards(itemIds: ids)
-        var found: [SharedList] = []
-        var missing: [String] = []
-        for id in ids {
-            guard let playlist = playlists.first(where: { $0.id == id }) else {
-                missing.append(id)
-                continue
-            }
-            do {
-                found.append(try await list(from: playlist))
-            } catch where Self.isGone(error) {
-                missing.append(id)
-            }
-        }
-        return (found, missing)
+    private func isOwnerPerSelfCheck(listId: String, me: String) async -> Bool {
+        SharedLists.isOwnerPerSelfCheck(try? await client.getPlaylistUser(playlistId: listId, userId: me))
+    }
+
+    /// The server's OpenAccess for a list.
+    func isPublic(_ listId: String) async throws -> Bool {
+        try await client.getPlaylistSharing(playlistId: listId).openAccess
     }
 
     /// The titles the list shows this user: S1:E1 entries become their series
@@ -227,6 +273,23 @@ struct SharedListsService {
 
     func setPublic(_ listId: String, _ isPublic: Bool) async throws {
         try await client.updatePlaylist(playlistId: listId, name: nil, isPublic: isPublic)
+    }
+
+    /// Switches a list public or private and returns what the SERVER then
+    /// says. Jellyfin 12.4 can undo the change about a second later (a queued
+    /// refresh from an earlier add re-saves the old state), so the value is
+    /// read again after `settle`; if the server reverted, the change is
+    /// applied once more and read back.
+    func setPublicVerified(_ listId: String, _ isPublic: Bool, settle: Duration = .seconds(2)) async throws -> Bool {
+        try await setPublic(listId, isPublic)
+        try await Task.sleep(for: settle)
+        var current = try await self.isPublic(listId)
+        if current != isPublic {
+            try await setPublic(listId, isPublic)
+            try await Task.sleep(for: settle)
+            current = try await self.isPublic(listId)
+        }
+        return current
     }
 
     func delete(_ listId: String) async throws {
