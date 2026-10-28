@@ -165,6 +165,24 @@ enum SharedLists {
         return 0
     }
 
+    /// Home's row keys after following the subscriptions: rows of lists no
+    /// longer subscribed go, new ones go after Continue Watching (in the
+    /// order subscribed), and every other row stays where the user put it.
+    static func syncedRowKeys(
+        current: [String],
+        listKeys: [String],
+        isListKey: (String) -> Bool,
+        continueWatchingKey: String,
+        heroKey: String
+    ) -> [String] {
+        let wanted = Set(listKeys)
+        var keys = current.filter { !isListKey($0) || wanted.contains($0) }
+        let added = listKeys.filter { !keys.contains($0) }
+        let index = insertionIndex(rowKeys: keys, continueWatchingKey: continueWatchingKey, heroKey: heroKey)
+        keys.insert(contentsOf: added, at: index)
+        return keys
+    }
+
     /// A subscribed list's home row title.
     static func rowTitle(listName: String, ownerName: String?) -> String {
         guard let ownerName, !ownerName.isEmpty else { return listName }

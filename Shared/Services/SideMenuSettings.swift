@@ -39,6 +39,7 @@ extension RailOrder.Destination {
     var storageKey: String {
         switch self {
         case .finTV: return "fintv"
+        case .lists: return "lists"
         case .library(let id): return "library:\(id)"
         }
     }
@@ -46,6 +47,8 @@ extension RailOrder.Destination {
     init?(storageKey: String) {
         if storageKey == "fintv" {
             self = .finTV
+        } else if storageKey == "lists" {
+            self = .lists
         } else if storageKey.hasPrefix("library:") {
             self = .library(String(storageKey.dropFirst("library:".count)))
         } else {

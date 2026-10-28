@@ -9,17 +9,22 @@ enum DetailRowAction: Equatable {
     case trailer
     case watched
     case download
+    /// Add to List (shared lists): right before More, on movies, shows and
+    /// episodes. Never in the More menu (owner decision, 2026-10-27).
+    case addToList
     case more
 
     /// The main row for an item: Play, Start Over (with progress; for a
     /// series, the progress of the episode Play resumes), Shuffle (series),
     /// Trailer (a local trailer, not on episodes), Watched, Download (where
-    /// the platform has downloads), More.
+    /// the platform has downloads), Add to List (movies, shows, episodes),
+    /// More.
     static func mainRow(
         for itemType: ItemType?,
         hasProgress: Bool,
         hasTrailer: Bool,
-        supportsDownloads: Bool
+        supportsDownloads: Bool,
+        supportsLists: Bool = false
     ) -> [DetailRowAction] {
         var row: [DetailRowAction] = [.play]
         if hasProgress { row.append(.startOver) }
@@ -27,6 +32,7 @@ enum DetailRowAction: Equatable {
         if hasTrailer, itemType != .episode { row.append(.trailer) }
         row.append(.watched)
         if supportsDownloads { row.append(.download) }
+        if supportsLists, [.movie, .series, .episode].contains(itemType) { row.append(.addToList) }
         row.append(.more)
         return row
     }

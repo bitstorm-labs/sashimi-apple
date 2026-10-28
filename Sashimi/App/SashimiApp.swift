@@ -200,7 +200,7 @@ struct MainTabView: View {
     /// A destination in the rail. Libraries are dynamic, so this is an enum
     /// rather than a tab index.
     enum NavID: Hashable {
-        case home, finTV, search, settings, avatar
+        case home, finTV, search, settings, avatar, lists
         case library(String)
     }
 
@@ -370,6 +370,8 @@ struct MainTabView: View {
             GuideView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .search:
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+        case .lists:
+            ListsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
             SettingsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .library(let id):
@@ -652,44 +654,9 @@ extension MainTabView {
 
 // MARK: - Rail contents
 
-/// Split out of MainTabView so its body stays within the length the
-/// linter allows. These decide what the rail lists, not how it is drawn.
+/// What the rail lists; the rule itself is in RailNavRows.swift.
 private extension MainTabView {
-    private struct NavRow: Identifiable {
-        let id: NavID
-        let title: String
-        let icon: String
-    }
-
-    /// Nav rows follow the Home row order set in Settings, so the rail and the
-    /// screen it opens onto agree with each other. Home and Search lead and
-    /// Settings trails: they are destinations rather than rows, and have no
-    /// place in that ordering. RailOrder decides the middle.
-    private var navRows: [NavRow] {
-        var rows: [NavRow] = [
-            NavRow(id: .home, title: "Home", icon: "house"),
-            NavRow(id: .search, title: "Search", icon: "magnifyingglass")
-        ]
-
-        for destination in RailOrder.destinations(
-            rowConfigs: homeSettings.rowConfigs,
-            libraryIds: libraries.map(\.id),
-            hidden: sideMenu.hidden
-        ) {
-            switch destination {
-            case .finTV:
-                rows.append(NavRow(id: .finTV, title: "SashimiTV", icon: "antenna.radiowaves.left.and.right"))
-            case .library(let id):
-                guard let lib = libraries.first(where: { $0.id == id }) else { continue }
-                rows.append(NavRow(id: .library(lib.id), title: lib.name, icon: libraryIcon(lib)))
-            }
-        }
-
-        rows.append(NavRow(id: .settings, title: "Settings", icon: "gearshape"))
-        return rows
-    }
-
-    private func libraryIcon(_ lib: JellyfinLibrary) -> String {
-        RailOrder.libraryIcon(name: lib.name, collectionType: lib.collectionType)
+    var navRows: [NavRow] {
+        Self.navRows(rowConfigs: homeSettings.rowConfigs, libraries: libraries, hidden: sideMenu.hidden)
     }
 }

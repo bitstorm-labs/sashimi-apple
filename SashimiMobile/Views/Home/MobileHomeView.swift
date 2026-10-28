@@ -4,6 +4,7 @@ struct MobileHomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var rowSettings = HomeRowSettings.shared
+    @ObservedObject private var sharedLists = SharedListsStore.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
     @State private var heroIndex = 0
@@ -110,6 +111,7 @@ struct MobileHomeView: View {
         .onChange(of: viewModel.libraries) { _, libraries in
             rowSettings.updateLibraries(libraries)
         }
+        .sharedListHomeSync(rowSettings)
     }
 
     // MARK: - Hero
@@ -250,6 +252,13 @@ struct MobileHomeView: View {
                 collectionType: library?.collectionType
             ) { item in
                 AdaptiveDetailView(item: item, libraryName: libraryName)
+            }
+
+        case .list(let listId, _):
+            if let row = sharedLists.rows[listId], !row.contents.items.isEmpty {
+                MobileSharedListRow(row: row, cardWidth: MobileSizing.posterWidth) { item in
+                    AdaptiveDetailView(item: item, libraryName: item.libraryName)
+                }
             }
         }
     }

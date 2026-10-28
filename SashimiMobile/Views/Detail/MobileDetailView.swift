@@ -50,6 +50,7 @@ struct MobileDetailView: View {
     /// Go to Series in More pushes the series fetched with the page.
     @State private var seriesPage: BaseItemDto?
     @State private var channelTarget: ChannelTarget?
+    @State private var showingAddToList = false
     @ObservedObject private var session = SessionManager.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var downloadManager = DownloadManager.shared
@@ -186,6 +187,9 @@ struct MobileDetailView: View {
         }
         .sheet(item: $channelTarget) { target in
             MobileAddToChannelSheet(target: target)
+        }
+        .sheet(isPresented: $showingAddToList) {
+            MobileAddToListSheet(item: item)
         }
         .navigationDestination(item: $seasonPage) { season in
             MobileSeasonView(season: season, libraryName: libraryName, serverID: serverID, layout: .pad)
@@ -819,6 +823,7 @@ struct MobileDetailView: View {
             }
 
             if NetworkMonitor.shared.isOnline {
+                addToListButton
                 moreMenu
             }
 
@@ -854,6 +859,7 @@ struct MobileDetailView: View {
 
             if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil, offersBulkOptions: true)
+                addToListButton
                 moreMenu
             }
 
@@ -901,6 +907,7 @@ struct MobileDetailView: View {
 
             if NetworkMonitor.shared.isOnline {
                 DownloadButton(item: item, serverID: serverID, quality: nil)
+                addToListButton
                 moreMenu
             }
 
@@ -917,6 +924,24 @@ struct MobileDetailView: View {
         DetailAmbience.stopForPlayback()
         if let trailer = try? await JellyfinClient.shared.getLocalTrailers(itemId: item.id).first {
             playingItem = trailer
+        }
+    }
+
+    /// Add to List, right before More (shared lists). Lists live on the
+    /// active server only.
+    @ViewBuilder
+    private var addToListButton: some View {
+        if serverID == nil || serverID == SessionManager.shared.activeServerId {
+            Button {
+                showingAddToList = true
+            } label: {
+                Image(systemName: "text.badge.plus")
+                    .font(.system(size: 20))
+                    .foregroundStyle(MobileColors.textSecondary)
+            }
+            .buttonStyle(.bordered)
+            .tint(.white)
+            .accessibilityLabel("Add to List")
         }
     }
 

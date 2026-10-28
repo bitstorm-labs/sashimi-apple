@@ -47,6 +47,8 @@ struct MediaDetailView: View {
     @FocusState var isMoreButtonFocused: Bool
     /// Add to Channel, for the active server's administrators.
     @State var channelTarget: ChannelTarget?
+    /// Add to List (shared lists), on the active server's titles.
+    @State var showingAddToList = false
     @ObservedObject var session = SessionManager.shared
 
     var isSeries: Bool { item.type == .series }
@@ -159,6 +161,9 @@ struct MediaDetailView: View {
         }
         .fullScreenCover(item: $channelTarget) { target in
             AddToChannelView(target: target)
+        }
+        .fullScreenCover(isPresented: $showingAddToList) {
+            AddToListView(item: item)
         }
         .sheet(isPresented: $showingFullOverview) {
             ScrollView {

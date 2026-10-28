@@ -32,6 +32,10 @@ final class SharedListsStore: ObservableObject {
     /// settings. Set on every refresh.
     @Published private(set) var subscribedLists: [SharedList] = []
     @Published private(set) var userNames: [String: String] = [:]
+    /// False until the subscriptions have been read once for this user. Home
+    /// syncs its rows only after that, so a slow or failed load never takes a
+    /// list's row (and the place the user gave it) away.
+    @Published private(set) var hasLoaded = false
 
     private let service: SharedListsService
     private var loadedUserId: String?
@@ -61,6 +65,7 @@ final class SharedListsStore: ObservableObject {
             rows = [:]
             subscribedLists = []
             userNames = [:]
+            hasLoaded = false
             loadedUserId = userId
         }
         do {
@@ -84,6 +89,7 @@ final class SharedListsStore: ObservableObject {
                 }
             }
             rows = loaded
+            hasLoaded = true
             if !gone.isEmpty {
                 subscribedLists.removeAll { gone.contains($0.id) }
                 _ = await save { SharedLists.prune($0, missing: gone) }

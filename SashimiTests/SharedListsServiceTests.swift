@@ -271,4 +271,40 @@ final class SharedListsServiceTests: XCTestCase {
 
         XCTAssertEqual(ListsStub.requests("DELETE", "/Playlists/L/Items").first?.query["entryIds"], "m1,m1")
     }
+
+    // MARK: Screens
+
+    private func routeTwoLists() {
+        ListsStub.routes["GET /Items"] = (200, items([playlist("mine"), playlist("theirs")]))
+        ListsStub.routes["GET /Playlists/mine"] = (200, #"{"OpenAccess":false,"Shares":[{"UserId":"me","CanEdit":true}]}"#)
+        ListsStub.routes["GET /Playlists/theirs"] = (200, #"{"OpenAccess":true,"Shares":[{"UserId":"marge","CanEdit":true}]}"#)
+        ListsStub.routes["GET /Playlists/mine/Items"] = (200, items([movie("m1")]))
+        ListsStub.routes["GET /Playlists/theirs/Items"] = (200, items([movie("m2"), movie("m3")]))
+        ListsStub.routes["GET /Users"] = (200, #"[{"Id":"marge","Name":"Marge"},{"Id":"me","Name":"Me"}]"#)
+    }
+
+    func testTheListsPageSplitsYourListsFromOthersAndNamesTheCreator() async throws {
+        routeTwoLists()
+        let service = try service()
+        let model = ListsPageViewModel(service: service, store: SharedListsStore(service: service))
+
+        await model.load()
+
+        XCTAssertEqual(model.mine.map(\.id), ["mine"])
+        XCTAssertEqual(model.others.map(\.id), ["theirs"])
+        XCTAssertEqual(model.mine.first?.subtitle(isOwn: true), "Private · 1 title")
+        XCTAssertEqual(model.others.first?.subtitle(isOwn: false), "Marge · 2 titles")
+    }
+
+    /// The picker offers only your own lists, and says where the title is.
+    func testThePickerOffersYourListsAndMarksWhereTheTitleIs() async throws {
+        routeTwoLists()
+        let model = AddToListViewModel(item: .listFixture(id: "m1", type: .movie), service: try service())
+
+        await model.load()
+
+        XCTAssertEqual(model.choices.map(\.id), ["mine"])
+        XCTAssertEqual(model.choices.first?.alreadyOn, true)
+        XCTAssertEqual(model.choices.first?.detail, "Already on this list")
+    }
 }

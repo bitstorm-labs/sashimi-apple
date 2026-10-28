@@ -113,6 +113,7 @@ final class RailShortcutTests: XCTestCase {
                 .library(id: "tv", name: "TV", collectionType: "tvshows"),
                 .finTV,
                 .library(id: "movies", name: "Movies", collectionType: "movies"),
+                .lists,
                 .search, .downloads, .settings
             ]
         )
