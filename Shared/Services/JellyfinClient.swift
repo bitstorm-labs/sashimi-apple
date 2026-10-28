@@ -2530,6 +2530,121 @@ actor JellyfinClient {
         )
     }
 
+    // MARK: - Shared lists (playlists)
+
+    private static let listEntryFields = "PrimaryImageAspectRatio,UserData,SeriesName,SeriesId,SeasonId,ParentIndexNumber,IndexNumber,ProductionYear,OfficialRating,LibraryName"
+
+    private func listBody(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// Your own lists and everyone's public lists.
+    func getPlaylists() async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+        let data = try await request(path: "/Items", queryItems: [
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Playlist"),
+            URLQueryItem(name: "userId", value: userId),
+            URLQueryItem(name: "SortBy", value: "SortName"),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary")
+        ])
+        return try JSONDecoder().decode(LooseItemsResponse.self, from: data).items
+    }
+
+    /// A 404 means the list is gone or no longer visible to this user.
+    func getPlaylistSharing(playlistId: String) async throws -> PlaylistSharing {
+        try JSONDecoder().decode(PlaylistSharing.self, from: await request(path: "/Playlists/\(playlistId)"))
+    }
+
+    /// The list's entries as this user may see them (parental limits apply).
+    func getPlaylistEntries(playlistId: String) async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+        let data = try await request(path: "/Playlists/\(playlistId)/Items", queryItems: [
+            URLQueryItem(name: "userId", value: userId),
+            URLQueryItem(name: "Fields", value: Self.listEntryFields),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+        ])
+        return try JSONDecoder().decode(LooseItemsResponse.self, from: data).items
+    }
+
+    /// Items by id with what a poster card needs (series cards on lists).
+    func getItemsForCards(itemIds: [String]) async throws -> [BaseItemDto] {
+        guard let userId else { throw JellyfinError.notConfigured }
+        guard !itemIds.isEmpty else { return [] }
+        let data = try await request(path: "/Users/\(userId)/Items", queryItems: [
+            URLQueryItem(name: "Ids", value: itemIds.joined(separator: ",")),
+            URLQueryItem(name: "Fields", value: Self.listEntryFields),
+            URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
+        ])
+        return try JSONDecoder().decode(LooseItemsResponse.self, from: data).items
+    }
+
+    func createPlaylist(name: String, itemIds: [String], isPublic: Bool) async throws -> String {
+        guard let userId else { throw JellyfinError.notConfigured }
+        let body = try listBody([
+            "Name": name, "Ids": itemIds, "UserId": userId, "MediaType": "Video", "IsPublic": isPublic
+        ])
+        let data = try await request(path: "/Playlists", method: "POST", body: body)
+        return try JSONDecoder().decode(PlaylistCreationResult.self, from: data).id
+    }
+
+    func sharePlaylist(playlistId: String, userId: String, canEdit: Bool) async throws {
+        _ = try await request(
+            path: "/Playlists/\(playlistId)/Users/\(userId)",
+            method: "POST",
+            body: try listBody(["CanEdit": canEdit])
+        )
+    }
+
+    func addToPlaylist(playlistId: String, itemIds: [String]) async throws {
+        guard let userId else { throw JellyfinError.notConfigured }
+        _ = try await request(path: "/Playlists/\(playlistId)/Items", method: "POST", queryItems: [
+            URLQueryItem(name: "ids", value: itemIds.joined(separator: ",")),
+            URLQueryItem(name: "userId", value: userId)
+        ])
+    }
+
+    func removeFromPlaylist(playlistId: String, entryIds: [String]) async throws {
+        _ = try await request(path: "/Playlists/\(playlistId)/Items", method: "DELETE", queryItems: [
+            URLQueryItem(name: "entryIds", value: entryIds.joined(separator: ","))
+        ])
+    }
+
+    func movePlaylistEntry(playlistId: String, entryId: String, to index: Int) async throws {
+        _ = try await request(path: "/Playlists/\(playlistId)/Items/\(entryId)/Move/\(index)", method: "POST")
+    }
+
+    // Rename, or switch between public and private. Nil leaves it as it is.
+    // swiftlint:disable:next discouraged_optional_boolean
+    func updatePlaylist(playlistId: String, name: String?, isPublic: Bool?) async throws {
+        var object: [String: Any] = [:]
+        if let name { object["Name"] = name }
+        if let isPublic { object["IsPublic"] = isPublic }
+        _ = try await request(path: "/Playlists/\(playlistId)", method: "POST", body: try listBody(object))
+    }
+
+    /// Every user on the server, for creator names. Any user may read it.
+    func getUsers() async throws -> [UserDto] {
+        try JSONDecoder().decode([UserDto].self, from: await request(path: "/Users"))
+    }
+
+    /// This user's DisplayPreferences entry, raw, so a save can keep its keys.
+    func getDisplayPreferences(id: String, client: String) async throws -> Data {
+        guard let userId else { throw JellyfinError.notConfigured }
+        return try await request(path: "/DisplayPreferences/\(id)", queryItems: [
+            URLQueryItem(name: "userId", value: userId),
+            URLQueryItem(name: "client", value: client)
+        ])
+    }
+
+    func saveDisplayPreferences(id: String, client: String, body: Data) async throws {
+        guard let userId else { throw JellyfinError.notConfigured }
+        _ = try await request(path: "/DisplayPreferences/\(id)", method: "POST", queryItems: [
+            URLQueryItem(name: "userId", value: userId),
+            URLQueryItem(name: "client", value: client)
+        ], body: body)
+    }
+
     // MARK: - Channel management (admin)
 
     /// The user in full, including the policy that says whether they
