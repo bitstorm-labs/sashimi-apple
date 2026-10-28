@@ -71,6 +71,28 @@ enum SharedLists {
         shares.first(where: \.canEdit)?.userId
     }
 
+    /// Who made a list. The SashimiLists plugin reads the playlist's real
+    /// owner and wins; without it the self-share is the record. Jellyfin 12.4
+    /// wipes self-shares from public lists whenever any user is deleted, so
+    /// the self-share alone is not enough.
+    static func owner(pluginOwnerId: String?, shares: [PlaylistShare]) -> String? {
+        pluginOwnerId ?? owner(shares: shares)
+    }
+
+    /// The owner's self-share is gone (wiped by the server) and should be put
+    /// back, so clients without the plugin still know who made the list.
+    static func needsSelfShare(ownerId: String?, me: String?, shares: [PlaylistShare]) -> Bool {
+        guard let me, ownerId == me else { return false }
+        return !shares.contains { $0.userId == me && $0.canEdit }
+    }
+
+    /// The owner self-check (`GET /Playlists/{id}/Users/{me}`): the server
+    /// answers the owner 200 with CanEdit, everyone else 403 or 404.
+    /// `CanDelete` proves nothing: administrators have it on every list.
+    static func isOwnerPerSelfCheck(_ share: PlaylistShare?) -> Bool {
+        share?.canEdit == true
+    }
+
     /// A show goes on a list as its S1:E1 (adding the series would add every
     /// episode), so S1:E1 is shown as the series. Repeats show once.
     static func displayEntries(_ entries: [ListEntry]) -> [DisplayEntry] {
@@ -88,6 +110,27 @@ enum SharedLists {
             return DisplayEntry(id: seriesId, isSeries: true)
         }
         return DisplayEntry(id: entry.itemId, isSeries: false)
+    }
+
+    /// The poster a displayed title shows: an episode shows its series' poster,
+    /// so two episodes of one show are the same title on a cover.
+    static func posterId(_ entry: ListEntry) -> String {
+        if entry.type == .episode, let seriesId = entry.seriesId { return seriesId }
+        return entry.itemId
+    }
+
+    /// A list's cover, from what the list shows (in display order, after
+    /// `displayEntries`): the first four DIFFERENT titles as a 2x2 collage,
+    /// else the first title alone, else nothing. The same rule on Apple,
+    /// Android and Roku (vectors in SharedListsTests).
+    static func coverPosterIds(_ shown: [ListEntry]) -> [String] {
+        var ids: [String] = []
+        for entry in shown {
+            let id = posterId(entry)
+            if !ids.contains(id) { ids.append(id) }
+            if ids.count == 4 { return ids }
+        }
+        return Array(ids.prefix(1))
     }
 
     /// Whether `candidate` would show as something the list already shows.
@@ -183,8 +226,9 @@ enum SharedLists {
         return keys
     }
 
-    /// A subscribed list's home row title.
-    static func rowTitle(listName: String, ownerName: String?) -> String {
+    /// A subscribed list's home row title. Your own list never names you.
+    static func rowTitle(listName: String, ownerName: String?, isOwn: Bool) -> String {
+        if isOwn { return "Your list: \(listName)" }
         guard let ownerName, !ownerName.isEmpty else { return listName }
         return "From \(ownerName): \(listName)"
     }
