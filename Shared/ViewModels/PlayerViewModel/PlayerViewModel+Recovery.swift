@@ -8,8 +8,8 @@ extension PlayerViewModel {
     /// are produced from where the viewer actually is. The first attempt
     /// keeps video stream-copy allowed (a fresh remux session clears the
     /// jellyfin#16070 seek-freeze, whose broken state is per-session); the
-    /// second disallows it (genuine re-encode — the last resort, and the
-    /// escalation jellyfin-web uses). Two attempts per item, then the error
+    /// second disallows it and audio copy too (a full re-encode — the last
+    /// resort; a copied EAC3 track can make the stream unplayable, #806). Two attempts per item, then the error
     /// surfaces normally.
     ///
     /// When the link is the problem (the access log shows segments arriving
@@ -39,10 +39,13 @@ extension PlayerViewModel {
         switch decision {
         case .giveUp:
             return
-        case .rebuild(let allowCopy):
+        case .rebuild(let allowVideoCopy, let allowAudioCopy):
             recoveryAttempts += 1
             recoveryQuality = selectedQuality
-            allowVideoStreamCopy = allowCopy
+            allowVideoStreamCopy = allowVideoCopy
+            // Sticky for the rest of this item: a later quality switch or
+            // step-down must not go back to the copied audio that failed.
+            if !allowAudioCopy { audioStreamCopyAllowed = false }
         case .stepDown(let lower):
             qualityStepDowns += 1
             recoveryQuality = lower
@@ -101,6 +104,7 @@ extension PlayerViewModel {
             PlayerDiagnostics.field("recoveryAttempt", recoveryNumber),
             PlayerDiagnostics.field("trigger", reason),
             PlayerDiagnostics.field("allowVideoStreamCopy", allowVideoStreamCopy),
+            PlayerDiagnostics.field("allowAudioStreamCopy", audioStreamCopyAllowed),
             PlayerDiagnostics.field("decision", Self.diagnosticName(decision)),
             PlayerDiagnostics.field("streamBitrate", streamBitrate),
             PlayerDiagnostics.field("observedBitrate", throughput.map { Int($0.observedBitrate) }),
@@ -189,6 +193,13 @@ extension PlayerViewModel {
 
     static let stallRecoveryReason = "stall-watchdog"
 
+    /// A fresh item gets a fresh recovery budget and stream-copy permission.
+    func resetRecoveryState() {
+        recoveryAttempts = 0
+        qualityStepDowns = 0
+        audioStreamCopyAllowed = true
+    }
+
     /// What recovery would do now for a non-stall failure (item/decoder
     /// error). `canAttemptRecovery` uses it so an error is surfaced exactly
     /// when recovery has nothing left to try.
@@ -222,7 +233,7 @@ extension PlayerViewModel {
 
     private static func diagnosticName(_ decision: PlaybackRecoveryPlan.Decision) -> String {
         switch decision {
-        case .rebuild(let allowCopy): return allowCopy ? "rebuild-copy" : "rebuild-encode"
+        case .rebuild(let allowVideoCopy, _): return allowVideoCopy ? "rebuild-copy" : "rebuild-encode"
         case .stepDown(let lower): return "step-down-\(lower.rawValue)"
         case .giveUp: return "give-up"
         }
