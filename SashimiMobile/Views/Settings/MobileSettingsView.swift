@@ -3,6 +3,7 @@ import SwiftUI
 struct MobileSettingsView: View {
     @ObservedObject private var sessionManager = SessionManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
+    @StateObject private var serverPlugins = ServerPluginsViewModel()
 
     /// Same list as the tvOS LanguagePickerView.
     private static let languages: [(code: String, name: String)] = [
@@ -22,13 +23,29 @@ struct MobileSettingsView: View {
 
     var body: some View {
         List {
-            // Administrators only: the server's own view of who is watching.
-            if sessionManager.canViewServerDashboard {
-                Section("Server") {
+            Section("Server") {
+                // Administrators only: the server's own view of who is watching.
+                if sessionManager.canViewServerDashboard {
                     NavigationLink {
                         MobileServerDashboardView()
                     } label: {
                         Label("Dashboard", systemImage: "server.rack")
+                    }
+                }
+                // Which of the plugins Sashimi uses this server has; admins
+                // also see versions and status.
+                NavigationLink {
+                    MobileServerPluginsView(model: serverPlugins)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Server Plugins")
+                            Text(serverPlugins.subtitle(for: sessionManager))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "puzzlepiece.extension")
                     }
                 }
             }
@@ -208,6 +225,11 @@ struct MobileSettingsView: View {
                 .environmentObject(sessionManager)
         }
         .navigationTitle("Settings")
+        // Read once when Settings opens (and again on a server switch) for
+        // the Server Plugins subtitle; that screen only adds Refresh.
+        .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
+            await serverPlugins.loadIfNeeded(for: sessionManager)
+        }
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {
             Button("Delete All", role: .destructive) {
                 Task { await DownloadManager.shared.deleteAllDownloads() }

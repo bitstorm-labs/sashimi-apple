@@ -2503,6 +2503,41 @@ actor JellyfinClient {
         try JSONDecoder().decode(DashboardSystemInfo.self, from: try await request(path: "/System/Info"))
     }
 
+    // MARK: - Server plugins (Settings › Server Plugins)
+
+    /// Every installed plugin with its version and status. Admin only: a
+    /// non-admin gets 403, and the caller falls back to probing routes.
+    /// Single attempt (no retry backoff): the screen has its own Retry, and a
+    /// dead server should say so in seconds, not after the retry ladder.
+    func getInstalledPlugins() async throws -> [InstalledPluginInfo] {
+        let data = try await request(path: "/Plugins", retryCount: maxRetries)
+        return try JSONDecoder().decode([InstalledPluginInfo].self, from: data)
+    }
+
+    /// Whether a plugin's own route exists on this server, for users who
+    /// can't read `/Plugins`. 2xx, or a 403 that proves the route is there,
+    /// means detected; 404 means nothing owns it; anything else (a network
+    /// failure, a 5xx) says nothing about the plugin, so it is `.failed`
+    /// rather than "not detected".
+    func probePluginRoute(path: String, query: [URLQueryItem]) async -> PluginProbeResult {
+        do {
+            _ = try await request(path: path, queryItems: query.isEmpty ? nil : query, retryCount: maxRetries)
+            return .detected
+        } catch JellyfinError.httpError(statusCode: 404) {
+            return .notDetected
+        } catch JellyfinError.httpError(statusCode: 403) {
+            return .detected
+        } catch {
+            return .failed
+        }
+    }
+
+    /// Server name and Jellyfin version for the Server Plugins header. The
+    /// public endpoint, so it reads the same for admins and everyone else.
+    func getPublicServerInfo() async throws -> DashboardSystemInfo {
+        try JSONDecoder().decode(DashboardSystemInfo.self, from: try await request(path: "/System/Info/Public", retryCount: maxRetries))
+    }
+
     /// Nil on a server without the storage endpoint (it is newer than 10.10).
     func getStorageInfo() async throws -> SystemStorageInfo? {
         do {
