@@ -9,8 +9,11 @@ name: Release
 #              mac-vX.Y.Z-betaN -- only for the platforms selected.
 #   3. deploy  by CALLING deploy.yml / deploy-ios.yml / deploy-mac.yml with
 #              that commit and tag (workflow_call). Deploys do not depend on
-#              the tag push triggering anything: tags pushed with GITHUB_TOKEN
-#              deliberately trigger no workflows, so nothing ships twice.
+#              the tag push triggering anything. The tags are pushed with
+#              RELEASE_TOKEN (only org admins may create tags), which does
+#              start the tag-triggered deploys, so each tag carries a
+#              "Released-by: Release workflow" line and those runs stand down
+#              when they see it: nothing ships twice.
 #
 # dry_run: everything except the PR, merge, tags and uploads. The bump is
 # committed to a throwaway release-dry-run/<run id> branch (deleted at the
@@ -271,23 +274,35 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAGS: ${{ needs.prepare.outputs.tvos_tag }} ${{ needs.prepare.outputs.ios_tag }} ${{ needs.prepare.outputs.mac_tag }}
     steps:
+      - name: Require RELEASE_TOKEN
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error title=RELEASE_TOKEN missing::Tags are pushed with RELEASE_TOKEN (only org admins may create tags). See docs/RELEASING.md."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
+          # The "release tags: maintainers only" ruleset lets only org admins
+          # create tags, and GITHUB_TOKEN can't be exempted from a ruleset.
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Tag the merge commit
-        # Pushed with GITHUB_TOKEN on purpose: such pushes start no workflows,
-        # so the tag-triggered deploys don't fire a second time -- this
-        # workflow calls them below.
+        # Pushed with RELEASE_TOKEN, so the tag-triggered deploys DO start.
+        # The "Released-by: Release workflow" line tells them this workflow
+        # deploys the tag itself (below), and they stand down.
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           scripts/check-version.sh "$VERSION"
           for t in $TAGS; do
-            git tag -a "$t" -m "Sashimi $t" "$SHA"
+            git tag -a "$t" -m "Sashimi $t" -m "Released-by: Release workflow" "$SHA"
           done
           # shellcheck disable=SC2086 # word-splitting the tag list is intended
           git push origin $TAGS
