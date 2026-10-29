@@ -74,7 +74,10 @@ final class PlayerControlsAutoHideTests: XCTestCase {
         let menu = UIViewController()
         host.present(menu, animated: false)
         XCTAssertTrue(probe.isShowingPresentation, "a menu presented over the player's container")
-        menu.dismiss(animated: false)
+        // UIKit finishes even an unanimated dismissal on a later run-loop turn.
+        let dismissed = expectation(description: "menu dismissed")
+        menu.dismiss(animated: false) { dismissed.fulfill() }
+        wait(for: [dismissed], timeout: 5)
         XCTAssertFalse(probe.isShowingPresentation)
         window.isHidden = true
     }
