@@ -123,12 +123,14 @@ struct MobileAuthView: View {
                     }
                 }
                 .disabled(username.isEmpty || isConnecting)
+                .spansRowSeparator()
 
                 if isConnecting {
                     Button("Cancel", role: .cancel) {
                         cancelSignIn()
                     }
                     .frame(maxWidth: .infinity)
+                    .spansRowSeparator()
                 }
 
                 Button {
@@ -139,6 +141,7 @@ struct MobileAuthView: View {
                     Text("Use Different Server")
                         .frame(maxWidth: .infinity)
                 }
+                .spansRowSeparator()
             }
         }
     }
@@ -216,5 +219,14 @@ struct MobileAuthView: View {
         signInTask = nil
         isConnecting = false
         errorMessage = nil
+    }
+}
+
+private extension View {
+    /// A centred button's row separator otherwise starts where its title
+    /// starts, partway across (#809); this starts it at the row's leading
+    /// edge, like the separator between Username and Password.
+    func spansRowSeparator() -> some View {
+        alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
     }
 }
