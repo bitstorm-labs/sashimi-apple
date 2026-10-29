@@ -596,8 +596,22 @@ final class SessionManager: ObservableObject {
     /// Signs into a server and ADDS it to the saved list (making it active).
     func login(serverURL: URL, username: String, password: String) async throws {
         await JellyfinClient.shared.configure(serverURL: serverURL)
-
         let result = try await JellyfinClient.shared.authenticate(username: username, password: password)
+        try await saveSignIn(result, serverURL: serverURL)
+    }
+
+    /// Signs in with an approved Quick Connect request. After the token
+    /// exchange this is the password path exactly: same Keychain token, saved
+    /// server and active user, so nothing afterwards can tell them apart.
+    func loginWithQuickConnect(serverURL: URL, secret: String) async throws {
+        await JellyfinClient.shared.configure(serverURL: serverURL)
+        let result = try await JellyfinClient.shared.authenticateWithQuickConnect(secret: secret)
+        try await saveSignIn(result, serverURL: serverURL)
+    }
+
+    /// Persists a fresh sign-in and activates it — shared by every way of
+    /// signing in.
+    private func saveSignIn(_ result: AuthenticationResult, serverURL: URL) async throws {
         try await abandonIfCancelled()
 
         if ensureDefaultServer() {
