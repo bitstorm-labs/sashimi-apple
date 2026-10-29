@@ -1,0 +1,33 @@
+# Changes to these paths need a review from a code owner before they merge
+# into main (the "main: reviews and checks" ruleset requires it; the code owner's
+# own pull requests need no extra approval).
+#
+# They cover everything that runs with the signing and App Store Connect
+# secrets or decides what ships: workflows, fastlane, the Ruby and Swift
+# dependency pins, the XcodeGen project (build settings and build scripts),
+# entitlements, and the release scripts. Everything else merges on green CI.
+#
+# Only org admins (and Dependabot) can push branches to this repository, so
+# contributors open pull requests from a fork.
+
+/.github/                @mondominator
+/fastlane/               @mondominator
+/Gemfile                 @mondominator
+/Gemfile.lock            @mondominator
+/project.yml             @mondominator
+/Package.swift           @mondominator
+/Package.resolved        @mondominator
+*.xcodeproj/             @mondominator
+*.xcconfig               @mondominator
+*.entitlements           @mondominator
+/scripts/                @mondominator
+Makefile                 @mondominator
+
+# Agent and editor config runs on the maintainer's machine (hooks, commands,
+# instructions), so it gets the same review as CI.
+/CLAUDE.md               @mondominator
+/AGENTS.md               @mondominator
+/.claude/                @mondominator
+/.codex/                 @mondominator
+/.githooks/              @mondominator
+/.vscode/                @mondominator
