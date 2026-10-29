@@ -27,6 +27,12 @@ struct MobilePlayerView: View {
     @State private var showCustomOverlay = true
     @State private var hideTask: Task<Void, Never>?
     @State private var isScrubbing = false
+    /// A Mac menu is open (a pill's picker or the menu bar): the controls
+    /// stay until it closes (#807). Set by `PlayerPointerHiding`.
+    @State private var menuOpen = false
+    /// iPhone and iPad: whether a pill's menu (or anything else) is presented
+    /// over the player, asked when the idle timer fires (#807).
+    @State private var presentationProbe = PlayerPresentationProbe()
     @State private var playbackSpeed: Float = 1.0
     @State private var handoffAcknowledged = false
     /// Bumped by "Try Again". The load is the view's `.task`, keyed on this,
@@ -82,6 +88,7 @@ struct MobilePlayerView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+                .background(PlayerPresentationProbeAnchor(probe: presentationProbe))
 
             // A break between slots on a channel covers everything, loading included.
             if let card = viewModel.upNext {
@@ -203,8 +210,15 @@ struct MobilePlayerView: View {
         .modifier(PlayerPointerHiding(
             player: viewModel.player,
             controlsVisible: isPlayerChromeVisible,
+            menuOpen: $menuOpen,
             reveal: revealControls
         ))
+        .onChange(of: menuOpen) { _, open in
+            switch PlayerControlsAutoHide.transition(menuOpen: open) {
+            case .stopTimer: hideTask?.cancel()
+            case .revealAndRestartTimer: revealControls()
+            }
+        }
         // Entering or leaving full screen resizes the window, whichever way
         // it was asked for; the pill's icon follows.
         .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in refreshFullScreenState() }
@@ -370,17 +384,6 @@ struct MobilePlayerView: View {
         dismiss()
     }
 
-    private func scheduleAutoHide() {
-        hideTask?.cancel()
-        guard showCustomOverlay, !isScrubbing else { return }
-        hideTask = Task {
-            try? await Task.sleep(for: .seconds(5))
-            if !Task.isCancelled {
-                showCustomOverlay = false
-            }
-        }
-    }
-
     /// Persists the offline resume point. Safe to call more than once: the
     /// last call before the player is torn down wins, and it no-ops once the
     /// player is gone.
@@ -513,6 +516,43 @@ extension MobilePlayerView {
     private func revealControls() {
         if !showCustomOverlay { showCustomOverlay = true }
         scheduleAutoHide()
+    }
+}
+
+// MARK: - Controls auto-hide (#807)
+
+extension MobilePlayerView {
+    private var autoHide: PlayerControlsAutoHide {
+        PlayerControlsAutoHide(
+            controlsVisible: showCustomOverlay,
+            isScrubbing: isScrubbing,
+            menuOpen: menuOpen || presentationProbe.isShowingPresentation
+        )
+    }
+
+    private func scheduleAutoHide() {
+        hideTask?.cancel()
+        guard autoHide.runsIdleTimer else { return }
+        hideTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                switch autoHide.timeout {
+                case .hide:
+                    showCustomOverlay = false
+                    return
+                case .stop:
+                    return
+                case .waitForMenuToClose:
+                    // The Mac says when its menus close (menuOpen); iPhone
+                    // and iPad menus do not, so look again until it is gone,
+                    // then count down afresh.
+                    while !Task.isCancelled, autoHide.timeout == .waitForMenuToClose {
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
+                }
+            }
+        }
     }
 }
 

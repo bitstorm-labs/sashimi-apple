@@ -28,13 +28,13 @@ enum StationOptions {
             })
         }
 
-        let audio = model.audioTracks.first { $0.id == model.selectedAudioTrackId }?.displayName ?? "Default"
+        let audio = model.audioTracks.first { $0.id == model.selectedAudioTrackId }?.menuLabel ?? "Default"
         if model.audioTracks.count > 1 {
             sheet.addAction(UIAlertAction(title: "Audio: \(audio)", style: .default) { _ in
                 let pick = UIAlertController(title: "Audio", message: nil, preferredStyle: .actionSheet)
                 for track in model.audioTracks {
                     let mark = track.id == model.selectedAudioTrackId ? "✓ " : ""
-                    pick.addAction(UIAlertAction(title: mark + track.displayName, style: .default) { _ in
+                    pick.addAction(UIAlertAction(title: mark + track.menuLabel, style: .default) { _ in
                         model.selectAudioTrack(track)
                     })
                 }
