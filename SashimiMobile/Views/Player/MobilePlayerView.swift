@@ -196,8 +196,15 @@ struct MobilePlayerView: View {
         // Live channels keep the screen on through Up Next breaks (see
         // keepsScreenAwake); the system default returns when the player goes.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = viewModel.keepsScreenAwake }
-        // Menu bar / keyboard commands, and the Mac's mouse-move reveal.
-        .modifier(PlayerCommandBinding(viewModel: viewModel, perform: handleCommand, onPointerMove: revealControls))
+        // Menu bar / keyboard commands.
+        .modifier(PlayerCommandBinding(viewModel: viewModel, perform: handleCommand))
+        // The Mac's mouse-move reveal, and the pointer hiding with the
+        // controls during playback (#799).
+        .modifier(PlayerPointerHiding(
+            player: viewModel.player,
+            controlsVisible: isPlayerChromeVisible,
+            reveal: revealControls
+        ))
         // Entering or leaving full screen resizes the window, whichever way
         // it was asked for; the pill's icon follows.
         .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in refreshFullScreenState() }
@@ -498,19 +505,23 @@ extension MobilePlayerView {
         if isFullScreen != isWindowFullScreen { isFullScreen = isWindowFullScreen }
     }
 
+    /// Whether any of the player's own UI is up, so the Mac pointer stays.
+    private var isPlayerChromeVisible: Bool {
+        showCustomOverlay || viewModel.player == nil || viewModel.episodeUpNext != nil || viewModel.upNext != nil
+    }
+
     private func revealControls() {
         if !showCustomOverlay { showCustomOverlay = true }
         scheduleAutoHide()
     }
 }
 
-/// Registers the player with the menu bar while it is on screen, remembers
-/// the last subtitle track for Toggle Subtitles, and on the Mac reveals the
-/// controls when the mouse moves (they hide again after the usual idle delay).
+/// Registers the player with the menu bar while it is on screen and
+/// remembers the last subtitle track for Toggle Subtitles. The Mac's
+/// mouse-move reveal lives in `PlayerPointerHiding`.
 private struct PlayerCommandBinding: ViewModifier {
     @ObservedObject var viewModel: PlayerViewModel
     let perform: (AppCommand) -> Void
-    let onPointerMove: () -> Void
     @State private var targetID = UUID()
     @State private var lastSubtitleTrackID: String?
 
@@ -529,10 +540,6 @@ private struct PlayerCommandBinding: ViewModifier {
             }
             .onChange(of: viewModel.selectedSubtitleTrackId) { _, id in
                 if let id, id != "off" { lastSubtitleTrackID = id }
-            }
-            .onContinuousHover { phase in
-                guard MacPlatform.isMac, case .active = phase else { return }
-                onPointerMove()
             }
     }
 }
