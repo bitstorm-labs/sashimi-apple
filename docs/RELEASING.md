@@ -82,8 +82,12 @@ merge. The bump PR is therefore opened with a personal token:
 - Save it as the repository secret **`RELEASE_TOKEN`**
   (`gh secret set RELEASE_TOKEN -R bitstorm-labs/sashimi-apple`)
 
-Dry runs don't need it. Without it a real release stops at step 1 with a clear
-error. (A GitHub App installation token would work the same and doesn't expire.)
+Dry runs need it too: they push and later delete a throwaway
+`release-dry-run/<run id>` branch, and the `branches: maintainers only` ruleset
+lets only org admins create or delete branches (GitHub won't let `GITHUB_TOKEN`
+be exempted from a ruleset). Without it a release or dry run that needs a bump
+stops at step 1 with a clear error. (A GitHub App installation token would work
+the same and doesn't expire, and could be exempted from the rulesets.)
 
 ### Every deploy checks its version
 
