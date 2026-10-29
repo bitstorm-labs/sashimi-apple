@@ -17,8 +17,10 @@ name: Release
 # end), and each selected deploy builds and signs that commit without
 # uploading.
 #
-# Needs secret RELEASE_TOKEN (not for dry runs): a fine-grained PAT on this
-# repo with Contents + Pull requests read/write. GITHUB_TOKEN can't do step 1:
+# Needs secret RELEASE_TOKEN: a fine-grained PAT on this repo with Contents +
+# Pull requests read/write. Dry runs need it too, to push and delete their
+# throwaway branch: the "branches: maintainers only" ruleset lets only org
+# admins create branches, and GITHUB_TOKEN can't be exempted from a ruleset. GITHUB_TOKEN can't do step 1:
 # a PR it opens never triggers CI (events from GITHUB_TOKEN start no
 # workflows), so the required checks would never report and the merge would
 # never happen. See docs/RELEASING.md.
@@ -106,9 +108,11 @@ jobs:
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
-          # The bump branch is pushed with these credentials: RELEASE_TOKEN for
-          # a real release, GITHUB_TOKEN for a dry run's throwaway branch.
-          token: ${{ (!inputs.dry_run && secrets.RELEASE_TOKEN) || github.token }}
+          # The bump branch (release/vX.Y.Z, or a dry run's throwaway
+          # release-dry-run/<run id>) is pushed with RELEASE_TOKEN: only org
+          # admins may create branches here, and GITHUB_TOKEN can't be exempted
+          # from that ruleset.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       # Auto release starts this on a merge, but the run can queue behind a
       # release that was already in progress and has since shipped that merge
@@ -185,7 +189,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Require RELEASE_TOKEN
-        if: steps.changed.outputs.skip != 'true' && inputs.dry_run == false && steps.plan.outputs.current != steps.plan.outputs.version
+        if: steps.changed.outputs.skip != 'true' && steps.plan.outputs.current != steps.plan.outputs.version
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
@@ -336,6 +340,8 @@ jobs:
     steps:
       - name: Delete ${{ needs.prepare.outputs.dry_run_branch }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Same credentials that pushed it: the branch ruleset lets only org
+          # admins delete branches.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           BRANCH: ${{ needs.prepare.outputs.dry_run_branch }}
         run: gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH"
