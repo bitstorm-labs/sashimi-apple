@@ -60,7 +60,8 @@ extension PlayerViewModel {
             // recovery attempt — the stream-copy HLS seek-freeze
             // (jellyfin#16070, #4188) is handled by the error/stall recovery
             // fallback (attemptPlaybackRecovery), the official-client pattern.
-            PlayerDiagnostics.field("allowVideoStreamCopy", allowVideoStreamCopy)
+            PlayerDiagnostics.field("allowVideoStreamCopy", allowVideoStreamCopy),
+            PlayerDiagnostics.field("allowAudioStreamCopy", audioStreamCopyAllowed)
         ])
 
         // Phase 1 of the VLC work: the profile can be VLC-shaped for
@@ -87,6 +88,7 @@ extension PlayerViewModel {
                 forceDirectPlay: playbackSettings.forceDirectPlay && !tracks.burnsInSubtitle,
                 forceTranscode: forceTranscode,
                 allowVideoStreamCopy: allowVideoStreamCopy,
+                allowAudioStreamCopy: audioStreamCopyAllowed,
                 tracks: tracks
             )
         }

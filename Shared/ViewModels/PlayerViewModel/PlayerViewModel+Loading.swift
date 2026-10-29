@@ -23,8 +23,7 @@ extension PlayerViewModel {
         playbackReporter.reset()
         // Fresh item, fresh recovery budget; a watchdog armed for the old
         // player must not fire into the new one.
-        recoveryAttempts = 0
-        qualityStepDowns = 0
+        resetRecoveryState()
         autoSteppedDown = false
         lastAdaptiveChangeAt = nil
         lastAdaptiveUpgradeAt = nil
