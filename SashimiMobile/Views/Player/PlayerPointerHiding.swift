@@ -66,7 +66,7 @@ struct PlayerPointerHiding: ViewModifier {
                     isPlaying = false
                     return
                 }
-                for await status in player.publisher(for: \.timeControlStatus).values {
+                for await status in player.timeControlStatusUpdates() {
                     isPlaying = status != .paused
                 }
             }
@@ -102,5 +102,23 @@ struct PlayerPointerHiding: ViewModifier {
 
     private enum Hover {
         case unknown, inside, outside
+    }
+}
+
+extension AVPlayer {
+    /// The player's `timeControlStatus`: the current value first, then every
+    /// change, for as long as the caller iterates.
+    ///
+    /// Block-based KVO, as `PlayerViewModel` observes it. The Combine KVO
+    /// publisher's `.values` delivered the initial `.paused` and never a
+    /// later change, so the Mac player never knew it was playing and the
+    /// pointer never hid.
+    func timeControlStatusUpdates() -> AsyncStream<TimeControlStatus> {
+        AsyncStream { continuation in
+            let observation = observe(\.timeControlStatus, options: [.initial, .new]) { player, _ in
+                continuation.yield(player.timeControlStatus)
+            }
+            continuation.onTermination = { _ in observation.invalidate() }
+        }
     }
 }
