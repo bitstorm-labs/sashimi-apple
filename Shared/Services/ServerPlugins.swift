@@ -194,6 +194,16 @@ enum ServerPluginCatalog {
         guid.lowercased().filter { $0.isHexDigit }
     }
 
+    /// Jellyfin writes plugin versions as four-part .NET versions ("0.11.0.0");
+    /// the plugins are released as three-part ones, so a trailing ".0"
+    /// revision is dropped. A real revision ("1.2.3.4") is kept.
+    static func displayVersion(_ version: String?) -> String? {
+        guard let version, !version.isEmpty else { return nil }
+        let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[3] == "0" else { return version }
+        return parts.prefix(3).joined(separator: ".")
+    }
+
     private static func normalizedName(_ name: String) -> String {
         name.lowercased().filter { $0.isLetter || $0.isNumber }
     }
@@ -253,7 +263,7 @@ enum ServerPluginCatalog {
             }
             let badge = PluginRowBadge.status(found.status)
             return ServerPluginRow(
-                plugin: plugin, version: found.version, badge: badge,
+                plugin: plugin, version: displayVersion(found.version), badge: badge,
                 detail: detail(for: plugin, badge: badge), providerLine: nil
             )
         }
@@ -267,7 +277,7 @@ enum ServerPluginCatalog {
             match(provider, in: installed).map { (provider: provider, info: $0) }
         }
         let line = found.isEmpty ? nil : found
-            .map { [$0.provider.name, $0.info.version].compactMap { $0 }.joined(separator: " ") }
+            .map { [$0.provider.name, displayVersion($0.info.version)].compactMap { $0 }.joined(separator: " ") }
             .joined(separator: " · ")
         let activeCount = found.filter { $0.info.status == .active }.count
         let badge: PluginRowBadge

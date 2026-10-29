@@ -72,6 +72,26 @@ final class ServerPluginsCatalogTests: XCTestCase {
         XCTAssertNil(try row(rows, .lists).version)
     }
 
+    /// Shape copied from the live server's `GET /Plugins` (2026-10-28):
+    /// four-part versions, dashless GUIDs, other plugins mixed in.
+    func testTheLiveServersPluginsShowAsTheMockupDoes() throws {
+        let json = """
+        [{"Name":"AniDB","Version":"13.0.0.0","Status":"Active","Id":"a2b2a7edaa284521a64a63d86901f246"},
+         {"Name":"Channels","Version":"0.11.0.0","Status":"Active","Id":"7a3f1c925d644b089f216c8e5b0a4d73"},
+         {"Name":"Continue Watching","Version":"0.2.0.0","Status":"Active","Id":"a286cbd2ce2246adad0fd49491cce52a"},
+         {"Name":"Intro Skipper","Version":"12.0.6.0","Status":"Active","Id":"c83d86bba1e04c35a113e2101cf4ee6b"},
+         {"Name":"Sashimi Lists","Version":"0.1.0.0","Status":"Active","Id":"d95b448462cb487392c566a65b86b420"},
+         {"Name":"Segment Editor","Version":"12.0.20.0","Status":"Active","Id":"ace21d44a4e54a85ae75acd2e24a9574"},
+         {"Name":"TheIntroDB","Version":"1.3.0.0","Status":"Active","Id":"c9e41b9563e445e29db6b83df21ae5e7"},
+         {"Name":"Theme Songs","Version":"1.0.4.0","Status":"Active","Id":"d8d1d1a14d9e4d559a2e0a0a1f5b7c31"}]
+        """
+        let rows = ServerPluginCatalog.adminRows(installed: try JSONDecoder().decode([InstalledPluginInfo].self, from: Data(json.utf8)))
+        XCTAssertEqual(rows.map(\.version), ["0.1.0", "0.11.0", "0.2.0", "1.0.4", nil])
+        XCTAssertEqual(rows.map(\.badge), [.status(.active), .status(.active), .status(.active), .status(.active), .providers(3)])
+        XCTAssertEqual(rows.last?.providerLine, "Intro Skipper 12.0.6 · TheIntroDB 1.3.0 · Segment Editor 12.0.20")
+        XCTAssertEqual(ServerPluginCatalog.displayVersion("1.2.3.4"), "1.2.3.4", "a real revision is kept")
+    }
+
     // MARK: GUID matching
 
     func testDashedUppercaseAndDashlessGUIDsAllMatch() throws {
