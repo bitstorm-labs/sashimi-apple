@@ -30,8 +30,12 @@ struct PlayerPointerHiding: ViewModifier {
     let player: AVPlayer?
     /// Any of the player's own UI on screen (controls, Up Next, loading).
     let controlsVisible: Bool
-    /// The mouse moved over the player, a menu closed, or the app came back:
-    /// the controls should come up (and the idle timer restart).
+    /// A menu is open: one of the player's pickers or a menu bar menu. Set
+    /// here on the Mac; the player also holds its controls meanwhile (#807)
+    /// and reveals them when the menu closes.
+    @Binding var menuOpen: Bool
+    /// The mouse moved over the player or the app came back: the controls
+    /// should come up (and the idle timer restart).
     let reveal: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
@@ -39,7 +43,6 @@ struct PlayerPointerHiding: ViewModifier {
     /// Unknown until SwiftUI reports a hover, i.e. the mouse has not moved
     /// since the player opened; AppKit's pointer position answers until then.
     @State private var hover = Hover.unknown
-    @State private var menuOpen = false
 
     func body(content: Content) -> some View {
 #if targetEnvironment(macCatalyst)
@@ -59,7 +62,6 @@ struct PlayerPointerHiding: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: Self.menuEnded)) { _ in
                 menuOpen = false
-                reveal()
             }
             .task(id: player.map(ObjectIdentifier.init)) {
                 guard let player else {

@@ -106,7 +106,7 @@ struct MobilePlayerPillRow: View {
     private func audioPill(_ showsTitle: Bool) -> some View {
         Menu {
             ForEach(viewModel.audioTracks) { track in
-                checkButton(track.displayName, isOn: viewModel.selectedAudioTrackId == track.id) {
+                checkButton(track.menuLabel, isOn: viewModel.selectedAudioTrackId == track.id) {
                     viewModel.selectAudioTrack(track)
                 }
             }

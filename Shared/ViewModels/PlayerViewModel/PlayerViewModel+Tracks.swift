@@ -45,7 +45,11 @@ extension PlayerViewModel {
             ))
         }
 
-        audioTracks = tracks
+        let details = AudioTrackLabels.details(
+            for: options,
+            sourceStreams: currentMediaSource?.audioStreams ?? []
+        )
+        audioTracks = AudioTrackLabels.labelled(tracks, details: details)
 
         if let currentSelection = playerItem.currentMediaSelection.selectedMediaOption(in: audioGroup),
            let currentIndex = options.firstIndex(of: currentSelection) {
@@ -88,15 +92,16 @@ extension PlayerViewModel {
     }
 
     private func loadServerSideAudioTracks() {
-        audioTracks = (currentMediaSource?.audioStreams ?? []).compactMap { stream in
-            guard let index = stream.index else { return nil }
-            return AudioTrackOption(
-                id: "\(index)",
+        let streams = (currentMediaSource?.audioStreams ?? []).filter { $0.index != nil }
+        let tracks = streams.map { stream in
+            AudioTrackOption(
+                id: "\(stream.index ?? 0)",
                 displayName: PlaybackSelection.audioDisplayName(for: stream),
                 languageCode: stream.language,
-                index: index
+                index: stream.index ?? 0
             )
         }
+        audioTracks = AudioTrackLabels.labelled(tracks, details: streams.map(AudioTrackLabels.details(for:)))
         selectedAudioTrackId = activeAudioStreamIndex.map { "\($0)" }
     }
 

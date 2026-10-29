@@ -113,7 +113,7 @@ extension TVPlayerView {
     private func audioMenu() -> UIMenu {
         let actions = viewModel.audioTracks.map { track in
             UIAction(
-                title: track.displayName,
+                title: track.menuLabel,
                 state: track.id == viewModel.selectedAudioTrackId ? .on : .off
             ) { _ in
                 viewModel.selectAudioTrack(track)

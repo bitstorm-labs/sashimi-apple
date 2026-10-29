@@ -11,9 +11,28 @@ extension Notification.Name {
 
 struct AudioTrackOption: Identifiable, Hashable {
     let id: String
+    /// The track's own name. Track selection matches on it, so it never
+    /// changes to tell tracks apart; `menuLabel` does that (#808).
     let displayName: String
     let languageCode: String?
     let index: Int
+    /// What the Audio pickers show: `displayName`, plus Title, codec or
+    /// channels when another track has the same name (see `AudioTrackLabels`).
+    private(set) var menuLabel: String
+
+    init(id: String, displayName: String, languageCode: String?, index: Int, menuLabel: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.languageCode = languageCode
+        self.index = index
+        self.menuLabel = menuLabel ?? displayName
+    }
+
+    func withMenuLabel(_ label: String) -> AudioTrackOption {
+        var copy = self
+        copy.menuLabel = label
+        return copy
+    }
 }
 
 struct SubtitleTrackOption: Identifiable, Hashable {
