@@ -320,7 +320,9 @@ final class ServerPluginsProbeTests: XCTestCase {
 
         await model.refresh(key: "s", isAdministrator: true, fallbackServerName: "Home")
 
+        XCTAssertTrue(PluginRouteStub.requested.contains("/Plugins"), "an admin asks /Plugins")
         XCTAssertEqual(model.state, .failed)
+        XCTAssertEqual(model.subtitle(fallbackServerName: "Home"), "Couldn't check Home")
     }
 
     func testSettingsLoadsOncePerServerAndRefreshAsksAgain() async throws {
