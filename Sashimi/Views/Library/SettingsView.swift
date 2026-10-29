@@ -22,6 +22,7 @@ struct SettingsView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
+    @StateObject private var serverPlugins = ServerPluginsViewModel()
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -51,6 +52,16 @@ struct SettingsView: View {
                                 ) {
                                     navigationPath.append(SettingsDestination.serverDashboard)
                                 }
+                            }
+
+                            // Which of the plugins Sashimi uses this server
+                            // has; admins also see versions and status.
+                            SettingsOptionRow(
+                                icon: "puzzlepiece.extension",
+                                title: "Server Plugins",
+                                subtitle: serverPlugins.subtitle(for: sessionManager)
+                            ) {
+                                navigationPath.append(SettingsDestination.serverPlugins)
                             }
 
                             SettingsOptionRow(
@@ -122,8 +133,15 @@ struct SettingsView: View {
                     AppIconSettingsView()
                 case .serverDashboard:
                     ServerDashboardView()
+                case .serverPlugins:
+                    ServerPluginsView(model: serverPlugins)
                 }
             }
+        }
+        // Read once when Settings opens (and again on a server switch) for
+        // the row's subtitle; the screen itself only adds Refresh.
+        .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
+            await serverPlugins.loadIfNeeded(for: sessionManager)
         }
         .confirmationDialog(
             "Sign Out",
@@ -154,6 +172,7 @@ enum SettingsDestination: Hashable {
     case certificates
     case appIcon
     case serverDashboard
+    case serverPlugins
 }
 
 struct SettingsOptionRow: View {
