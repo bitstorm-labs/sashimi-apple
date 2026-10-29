@@ -1034,6 +1034,82 @@ actor JellyfinClient {
         return result
     }
 
+    // MARK: - Quick Connect
+
+    // Every Quick Connect call is a sign-in step (short budget, never retried)
+    // and an auth request, so a 401 from a server with Quick Connect turned
+    // off reads as `invalidCredentials` instead of expiring a live session.
+
+    /// Whether the server accepts Quick Connect sign-ins. Any failure reads as
+    /// "no": the button is an extra and never blocks password sign-in.
+    func isQuickConnectEnabled() async -> Bool {
+        guard let data = try? await request(
+            path: "/QuickConnect/Enabled",
+            isAuthRequest: true,
+            isSignInStep: true
+        ) else { return false }
+        return (try? JSONDecoder().decode(Bool.self, from: data)) ?? false
+    }
+
+    /// Starts a request; the result carries the code to show and the secret
+    /// to poll with.
+    func initiateQuickConnect() async throws -> QuickConnectResult {
+        let data = try await request(
+            path: "/QuickConnect/Initiate",
+            method: "POST",
+            isAuthRequest: true,
+            isSignInStep: true
+        )
+        return try JSONDecoder().decode(QuickConnectResult.self, from: data)
+    }
+
+    /// The request's current state. The server answers 404 once it has
+    /// expired the request (10 minutes after it started).
+    func quickConnectState(secret: String) async throws -> QuickConnectResult {
+        let data = try await request(
+            path: "/QuickConnect/Connect",
+            queryItems: [URLQueryItem(name: "secret", value: secret)],
+            isAuthRequest: true,
+            isSignInStep: true
+        )
+        return try JSONDecoder().decode(QuickConnectResult.self, from: data)
+    }
+
+    /// Trades an approved request's secret for a session: the same
+    /// `AuthenticationResult` a password sign-in returns.
+    func authenticateWithQuickConnect(secret: String) async throws -> AuthenticationResult {
+        let bodyData = try JSONEncoder().encode(["Secret": secret])
+
+        let data = try await request(
+            path: "/Users/AuthenticateWithQuickConnect",
+            method: "POST",
+            body: bodyData,
+            isAuthRequest: true,
+            isSignInStep: true
+        )
+
+        let result = try JSONDecoder().decode(AuthenticationResult.self, from: data)
+        self.accessToken = result.accessToken
+        self.userId = result.user.id
+
+        return result
+    }
+
+    /// Approves the request another device (a TV) is showing `code` for,
+    /// signing that device in as this client's user. Sent with this client's
+    /// own token. As an auth request, a 401 (Quick Connect switched off)
+    /// surfaces as `invalidCredentials` rather than ending this session; an
+    /// unknown or expired code is a 404.
+    func authorizeQuickConnect(code: String) async throws -> Bool {
+        let data = try await request(
+            path: "/QuickConnect/Authorize",
+            method: "POST",
+            queryItems: [URLQueryItem(name: "code", value: code)],
+            isAuthRequest: true
+        )
+        return (try? JSONDecoder().decode(Bool.self, from: data)) ?? false
+    }
+
     func getResumeItems(limit: Int = 20) async throws -> [BaseItemDto] {
         guard let userId else { throw JellyfinError.notConfigured }
 

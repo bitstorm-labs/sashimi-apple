@@ -17,6 +17,9 @@ enum SignInNetworking {
         config.timeoutIntervalForResource = budget
         config.waitsForConnectivity = false
         config.urlCache = nil
+        // Same test hook as the browsing session, so sign-in steps can be
+        // answered by a stub server in unit tests.
+        config.protocolClasses = JellyfinClient.testURLProtocolClasses + (config.protocolClasses ?? [])
         return config
     }
 

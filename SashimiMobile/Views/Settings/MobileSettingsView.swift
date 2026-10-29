@@ -4,6 +4,7 @@ struct MobileSettingsView: View {
     @ObservedObject private var sessionManager = SessionManager.shared
     @StateObject private var playbackSettings = PlaybackSettings.shared
     @StateObject private var serverPlugins = ServerPluginsViewModel()
+    @StateObject private var quickConnectApproval = QuickConnectApprovalViewModel()
 
     /// Same list as the tvOS LanguagePickerView.
     private static let languages: [(code: String, name: String)] = [
@@ -46,6 +47,19 @@ struct MobileSettingsView: View {
                         }
                     } icon: {
                         Image(systemName: "puzzlepiece.extension")
+                    }
+                }
+                // Approve the Quick Connect code a TV shows (#801); only when
+                // the server has Quick Connect turned on.
+                if quickConnectApproval.isAvailable {
+                    NavigationLink {
+                        MobileQuickConnectApprovalView(
+                            model: quickConnectApproval,
+                            userName: sessionManager.currentUser?.name ?? "you",
+                            serverName: sessionManager.activeServer?.displayName ?? "this server"
+                        )
+                    } label: {
+                        Label("Sign In a TV", systemImage: "tv")
                     }
                 }
             }
@@ -229,6 +243,9 @@ struct MobileSettingsView: View {
         // the Server Plugins subtitle; that screen only adds Refresh.
         .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
             await serverPlugins.loadIfNeeded(for: sessionManager)
+        }
+        .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
+            await quickConnectApproval.refreshAvailability()
         }
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {
             Button("Delete All", role: .destructive) {
