@@ -8,6 +8,11 @@ import Foundation
 /// - The jellyfin#16070 stream-copy seek-freeze: the link is fine, the
 ///   server's session is wedged. A fresh session at the SAME quality clears
 ///   it (first attempt keeps video copy; second disallows it).
+/// - A stream the server cannot package for AVPlayer at all. The second
+///   rebuild is the last resort, so it re-encodes the audio as well (#806):
+///   an EAC3 track that starts after the first segment makes ffmpeg write a
+///   truncated fMP4 init ("Cannot write moov atom before EAC3 packets
+///   parsed"), and AVPlayer fails that at once with any video handling.
 /// - A connection that cannot carry the stream: a fresh session at the same
 ///   bitrate stalls again, and again. Only a lower bitrate helps.
 ///
@@ -16,8 +21,9 @@ import Foundation
 /// tier per recovery, as far as the 720 kbps floor.
 enum PlaybackRecoveryPlan {
     enum Decision: Equatable {
-        /// Rebuild at the current quality (the seek-freeze fix).
-        case rebuild(allowVideoStreamCopy: Bool)
+        /// Rebuild at the current quality (the seek-freeze fix, then the
+        /// full re-encode).
+        case rebuild(allowVideoStreamCopy: Bool, allowAudioStreamCopy: Bool)
         /// Rebuild at a lower tier.
         case stepDown(to: QualityOption)
         /// Nothing left to try: surface the error.
@@ -70,7 +76,7 @@ enum PlaybackRecoveryPlan {
         }
         // First failure of any kind: the seek-freeze fix, as before.
         if rebuildAttempts == 0 {
-            return .rebuild(allowVideoStreamCopy: true)
+            return .rebuild(allowVideoStreamCopy: true, allowAudioStreamCopy: true)
         }
         // A fresh session stalled again with no proof the link is fine:
         // the same bitrate is not going to work, so try a lower one.
@@ -78,7 +84,7 @@ enum PlaybackRecoveryPlan {
             return .stepDown(to: lower)
         }
         if rebuildAttempts < maxRebuildAttempts {
-            return .rebuild(allowVideoStreamCopy: false)
+            return .rebuild(allowVideoStreamCopy: false, allowAudioStreamCopy: false)
         }
         return .giveUp
     }

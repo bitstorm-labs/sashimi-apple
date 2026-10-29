@@ -247,14 +247,19 @@ final class PlayerViewModel: ObservableObject {
 
     /// How many same-quality recovery rebuilds this item has burned. Two max —
     /// first forces a transcode (fresh session at the current position, video
-    /// copy still allowed), the second additionally disallows video stream
-    /// copy (a genuine re-encode, the last resort). Mirrors jellyfin-web's
+    /// copy still allowed), the second additionally disallows video and audio
+    /// stream copy (a genuine re-encode, the last resort). Mirrors jellyfin-web's
     /// onPlaybackError escalation. Reset per item in loadMedia.
     var recoveryAttempts = 0
     /// Bandwidth step-downs taken this item (see PlaybackRecoveryPlan). They
     /// don't spend the rebuild budget: each one lowers the bitrate, so they
     /// end at the 720 kbps floor. Reset per item in loadMedia.
     var qualityStepDowns = 0
+    /// Whether the server may copy the audio stream. Cleared by the
+    /// last-resort recovery (#806) and kept off for the rest of the item, so
+    /// a quality switch does not bring back a copy that could not play.
+    /// Reset per item in loadMedia.
+    var audioStreamCopyAllowed = true
     /// The lower tier in force came from a stall step-down while the viewer
     /// was on Auto, so adaptive Auto may take it back up (see
     /// PlaybackSelection.sustainedUpgrade). Reset per item in loadMedia.

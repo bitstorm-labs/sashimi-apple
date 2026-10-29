@@ -1661,6 +1661,7 @@ actor JellyfinClient {
         forceDirectPlay effectiveForceDirectPlay: Bool = false,
         forceTranscode: Bool = false,
         allowVideoStreamCopy: Bool = true,
+        allowAudioStreamCopy: Bool = true,
         tracks: StreamTrackRequest
     ) -> [String: Any] {
         // Jellyfin's PlaybackInfo API has no "force direct play" flag.
@@ -1702,7 +1703,10 @@ actor JellyfinClient {
             // allowVideoStreamCopy=false on a second failure — recovery only,
             // never as the default path.
             "AllowVideoStreamCopy": allowVideoStreamCopy,
-            "AllowAudioStreamCopy": true,
+            // Copy keeps EAC3/Atmos untouched. Recovery's last resort turns
+            // it off (#806): ffmpeg cannot write an fMP4 init for an EAC3
+            // track that starts after the first segment.
+            "AllowAudioStreamCopy": allowAudioStreamCopy,
             "AutoOpenLiveStream": true
         ]
         // Track selection (#590). MediaSourceId is what makes the server apply
@@ -1729,6 +1733,7 @@ actor JellyfinClient {
         forceDirectPlay: Bool = false,
         forceTranscode: Bool = false,
         allowVideoStreamCopy: Bool = true,
+        allowAudioStreamCopy: Bool = true,
         tracks: StreamTrackRequest? = nil
     ) async throws -> PlaybackInfoResponse {
         // Defensive guard: PlaybackInfo for a container type (Series, Season,
@@ -1783,6 +1788,7 @@ actor JellyfinClient {
             forceDirectPlay: effectiveForceDirectPlay,
             forceTranscode: forceTranscode,
             allowVideoStreamCopy: allowVideoStreamCopy,
+            allowAudioStreamCopy: allowAudioStreamCopy,
             // The item's own version is the source the server lists first, so
             // its id is the item id until a response says otherwise (the
             // player re-requests when it does).

@@ -90,7 +90,7 @@ final class LowBandwidthPlaybackTests: XCTestCase {
         let throughput = Plan.Throughput(observedBitrate: 300_000_000, indicatedBitrate: 20_000_000)
         XCTAssertEqual(
             Plan.decide(isStall: true, rebuildAttempts: 0, currentBitrate: 20_000_000, throughput: throughput),
-            .rebuild(allowVideoStreamCopy: true)
+            .rebuild(allowVideoStreamCopy: true, allowAudioStreamCopy: true)
         )
     }
 
@@ -104,11 +104,11 @@ final class LowBandwidthPlaybackTests: XCTestCase {
     func testErrorsKeepTheLegacyEscalation() {
         XCTAssertEqual(
             Plan.decide(isStall: false, rebuildAttempts: 0, currentBitrate: 8_000_000, throughput: nil),
-            .rebuild(allowVideoStreamCopy: true)
+            .rebuild(allowVideoStreamCopy: true, allowAudioStreamCopy: true)
         )
         XCTAssertEqual(
             Plan.decide(isStall: false, rebuildAttempts: 1, currentBitrate: 8_000_000, throughput: nil),
-            .rebuild(allowVideoStreamCopy: false)
+            .rebuild(allowVideoStreamCopy: false, allowAudioStreamCopy: false)
         )
         XCTAssertEqual(
             Plan.decide(isStall: false, rebuildAttempts: 2, currentBitrate: 8_000_000, throughput: nil),
