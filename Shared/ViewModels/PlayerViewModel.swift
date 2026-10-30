@@ -340,6 +340,10 @@ final class PlayerViewModel: ObservableObject {
     /// Where the session's picks go when the player is torn down (leaving
     /// the app, closing the player), so reopening the item restores them.
     var trackMemory = PlaybackTrackMemory.shared
+    /// Remembered picks are restored once, for the item the player opened on.
+    /// After that the session's own picks carry across episodes, so a pick
+    /// undone in this player is not brought back by the next episode (#818).
+    var hasRestoredRememberedTracks = false
 
     // Server-side play session: sent with playback reports so the server can
     // correlate them, and used to stop the session's transcode when playback
@@ -390,13 +394,16 @@ final class PlayerViewModel: ObservableObject {
     }
 
     /// A player opened on an item the viewer left earlier (switched apps,
-    /// closed the player) starts from the picks made then, before the stream
-    /// is requested: an image subtitle is burned in again and the audio
-    /// stream is asked for, instead of falling back to the Settings language.
+    /// closed the player), or on another episode of that series, starts from
+    /// the picks made then, before the stream is requested: an image
+    /// subtitle is burned in again and the audio stream is asked for,
+    /// instead of falling back to the Settings language.
     /// Picks already made in this player win.
     private func restoreRememberedTracks(for item: BaseItemDto?) {
-        guard let item, sessionSubtitlePreference == nil, sessionAudioPreference == nil,
-              let remembered = trackMemory.recall(itemID: item.id) else { return }
+        guard let item, !hasRestoredRememberedTracks else { return }
+        hasRestoredRememberedTracks = true
+        guard sessionSubtitlePreference == nil, sessionAudioPreference == nil,
+              let remembered = trackMemory.recall(itemID: item.id, seriesID: item.seriesId) else { return }
         sessionSubtitlePreference = remembered.subtitle
         sessionAudioPreference = remembered.audio
     }
