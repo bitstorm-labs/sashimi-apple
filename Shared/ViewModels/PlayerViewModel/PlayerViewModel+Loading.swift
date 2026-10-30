@@ -151,6 +151,11 @@ extension PlayerViewModel {
                 // directly here left downloads with no end-of-item notification
                 // and no way to surface a decode failure.
                 makePlayerAndObservers(for: playerItem)
+                // The same subtitle choice a stream gets (#821): the session's
+                // pick, else Settings. Set before the rest of the load sets it
+                // again, since both read the downloaded tracks only offline.
+                isOfflinePlayback = true
+                applyOfflineSubtitleChoice()
             } else {
                 // Online playback - fetch fresh data from server.
                 // Resolve container types (Series/Season) to the episode that
