@@ -124,13 +124,20 @@ extension PlayerViewModel {
         clearPlaybackNotice()
         cleanupSegmentTracking()
         subtitleManager.clear()
-        // The session is over. Its picks are kept for this item, so leaving
-        // the app and coming back to it does not reset them (#774); other
-        // items get the persisted Settings preference.
+        // The session is over. Its picks are kept for this item and its
+        // series, so leaving the app and coming back to it (#774), or starting
+        // another episode from the season page (#818), does not reset them;
+        // anything else gets the persisted Settings preference.
         if let item = currentItem {
-            trackMemory.remember(itemID: item.id, subtitle: sessionSubtitlePreference, audio: sessionAudioPreference)
+            trackMemory.remember(
+                itemID: item.id,
+                seriesID: item.seriesId,
+                subtitle: sessionSubtitlePreference,
+                audio: sessionAudioPreference
+            )
         }
         sessionSubtitlePreference = nil
+        hasRestoredRememberedTracks = false
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
