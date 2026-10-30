@@ -38,7 +38,9 @@ enum DownloadURLBuilder {
     /// screen with audio. Instead ask the transcode pipeline for a stream-copy
     /// REMUX into mp4: identical video/audio bits (no re-encode, no quality
     /// loss — VideoCodec lists the source codecs so copy applies), but in a
-    /// container AVPlayer demuxes, with HEVC tagged hvc1. Embedded subtitle
+    /// container AVPlayer demuxes. The server leaves HEVC tagged `hev1` here
+    /// (only its HLS path forces hvc1), which AVPlayer will not render; the
+    /// finished file is relabelled by `MP4HEVCSampleEntry` (#817). Embedded subtitle
     /// tracks are dropped by the remux; subtitles are downloaded separately as
     /// VTT (subtitleURL), so nothing user-visible is lost.
     static func originalDownloadURL(itemId: String, serverURL: URL? = nil) -> URL? {

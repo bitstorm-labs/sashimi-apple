@@ -137,8 +137,14 @@ extension PlayerViewModel {
                     PlayerDiagnostics.field("kind", PlayerDiagnostics.StreamKind.localFile.rawValue),
                     PlayerDiagnostics.field("ext", localFileURL.pathExtension)
                 ])
+                // Downloads made before #817 still carry the server's `hev1`
+                // label: audio over a black screen until it is fixed here.
+                let retag = await Task.detached { try? MP4HEVCSampleEntry.makePlayable(fileAt: localFileURL) }.value
                 let asset = AVURLAsset(url: localFileURL)
-                diag(.assetCreated, [PlayerDiagnostics.field("kind", PlayerDiagnostics.StreamKind.localFile.rawValue)])
+                diag(.assetCreated, [
+                    PlayerDiagnostics.field("kind", PlayerDiagnostics.StreamKind.localFile.rawValue),
+                    PlayerDiagnostics.field("hevcRetagged", retag == .retagged)
+                ])
                 let playerItem = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"])
                 // Same observer wiring as the online path. loadMedia has already
                 // torn down the previous endObserver, so building the player
