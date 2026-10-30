@@ -193,6 +193,14 @@ extension PlayerViewModel {
         }
     }
 
+    /// A download's subtitles: the session's pick, else the Settings
+    /// preference, against the downloaded tracks (#821).
+    func applyOfflineSubtitleChoice() {
+        if !applySessionSubtitlePreference() {
+            applyPreferredSubtitles()
+        }
+    }
+
     /// The language of the audio that is playing, best answer available
     /// without waiting: the stream a transcode was built with, else the
     /// source's default audio stream (what AVPlayer starts on for direct
@@ -225,10 +233,12 @@ extension PlayerViewModel {
     func applySessionSubtitlePreference() -> Bool {
         guard let preference = sessionSubtitlePreference,
               let stream = PlaybackSelection.matchingSubtitleStream(
-                in: currentMediaSource?.subtitleStreams ?? [],
+                in: availableSubtitleStreams,
                 language: preference.language,
                 displayTitle: preference.displayTitle,
-                isExternal: preference.isExternal
+                // Every downloaded track is a sidecar file, whatever the pick
+                // was when it streamed.
+                isExternal: isOfflinePlayback || preference.isExternal
               ) else { return false }
 
         selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
@@ -255,15 +265,30 @@ extension PlayerViewModel {
     /// subtitles are off or nothing matches the preference; nil uses
     /// `playingAudioLanguageHint`.
     func applyPreferredSubtitles(audioLanguage: String? = nil) {
-        guard let mediaSource = currentMediaSource,
-              let stream = PlaybackSelection.preferredSubtitleStream(
-                from: mediaSource.subtitleStreams,
+        guard let stream = PlaybackSelection.preferredSubtitleStream(
+                from: availableSubtitleStreams,
                 preferredLanguage: playbackSettings.preferredSubtitleLanguage,
                 subtitlesEnabled: playbackSettings.subtitlesEnabled,
                 audioLanguage: audioLanguage ?? playingAudioLanguageHint
               ) else { return }
 
         selectSubtitleTrack(Self.subtitleTrackOption(for: stream), isUserSelection: false)
+    }
+
+    /// The subtitle streams a choice can land on: the server's for a stream,
+    /// the downloaded VTT files for a local file (#821). Offline playback has
+    /// no media source, so the choice used to find nothing and every
+    /// download started with subtitles off.
+    var availableSubtitleStreams: [MediaStream] {
+        guard isOfflinePlayback else { return currentMediaSource?.subtitleStreams ?? [] }
+        return offlineSubtitles.map { subtitle in
+            MediaStream(
+                type: "Subtitle", codec: "webvtt", language: subtitle.language, displayTitle: subtitle.displayTitle,
+                title: nil, height: nil, width: nil, channels: nil, index: subtitle.index, isDefault: nil,
+                isExternal: true, isForced: nil, videoRangeType: nil, bitRate: nil,
+                deliveryUrl: nil, deliveryMethod: nil
+            )
+        }
     }
 
     /// Builds a menu option for a Jellyfin subtitle stream using the same
