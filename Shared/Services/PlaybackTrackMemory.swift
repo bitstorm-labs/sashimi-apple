@@ -31,7 +31,7 @@ struct PlaybackTrackMemory {
     /// Long enough to cover leaving the app for an evening; short enough that
     /// a later change to the Settings preference still decides tomorrow.
     static let lifetime: TimeInterval = 12 * 60 * 60
-    /// Items remembered at once; the oldest goes first.
+    /// Items and series remembered at once; the oldest goes first.
     static let capacity = 20
     static let defaultsKey = "playback.trackMemory"
 
@@ -45,24 +45,36 @@ struct PlaybackTrackMemory {
         self.now = now
     }
 
-    /// Records the picks in force when an item's player goes away. With no
-    /// pick at all the item is forgotten, so a choice the viewer has since
-    /// undone (subtitles turned off) cannot come back.
-    func remember(itemID: String, subtitle: Subtitle?, audio: Audio?) {
+    /// Records the picks in force when an item's player goes away, for the
+    /// item and, for an episode, its series (#818): the next episode started
+    /// from the season page is a different item, and per-item memory alone
+    /// brought it back with subtitles off. A session that ended with no pick
+    /// is recorded too, so turning subtitles off sticks the same way.
+    func remember(itemID: String, seriesID: String? = nil, subtitle: Subtitle?, audio: Audio?) {
         var entries = load()
-        if subtitle == nil && audio == nil {
-            entries[itemID] = nil
-        } else {
-            entries[itemID] = Entry(subtitle: subtitle, audio: audio, savedAt: now())
+        let entry = Entry(subtitle: subtitle, audio: audio, savedAt: now())
+        entries[itemID] = entry
+        if let seriesID {
+            entries[Self.seriesKey(seriesID)] = entry
         }
         save(entries)
     }
 
-    /// The picks remembered for an item, if they are recent enough.
-    func recall(itemID: String) -> Entry? {
-        guard let entry = load()[itemID], now().timeIntervalSince(entry.savedAt) < Self.lifetime else { return nil }
-        return entry
+    /// The most recent picks for the item or its series, if recent enough.
+    /// Nil when the most recent record holds no pick at all: the viewer
+    /// turned them off, and the Settings preference decides.
+    func recall(itemID: String, seriesID: String? = nil) -> Entry? {
+        let entries = load()
+        let candidates = [entries[itemID], seriesID.flatMap { entries[Self.seriesKey($0)] }]
+            .compactMap { $0 }
+            .filter { now().timeIntervalSince($0.savedAt) < Self.lifetime }
+        guard let latest = candidates.max(by: { $0.savedAt < $1.savedAt }),
+              latest.subtitle != nil || latest.audio != nil else { return nil }
+        return latest
     }
+
+    /// Series share the dictionary with items; Jellyfin ids never contain ":".
+    private static func seriesKey(_ seriesID: String) -> String { "series:\(seriesID)" }
 
     private func load() -> [String: Entry] {
         guard let data = defaults.data(forKey: Self.defaultsKey),
