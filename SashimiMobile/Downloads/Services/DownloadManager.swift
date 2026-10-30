@@ -1552,6 +1552,9 @@ extension DownloadManager: URLSessionDownloadDelegate {
         do {
             try DownloadFileManager.moveFile(from: location, to: destination)
             moveError = nil
+            // The server's stream-copy remux labels HEVC `hev1`, which
+            // AVFoundation plays as audio over a black screen (#817).
+            _ = try? MP4HEVCSampleEntry.makePlayable(fileAt: destination)
         } catch {
             moveError = error
         }
