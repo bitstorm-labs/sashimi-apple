@@ -1398,6 +1398,16 @@ final class DownloadManager: NSObject, ObservableObject {
         return mediaSource
     }
 
+    /// The subtitle tracks to fetch as VTT: those with an index and a name,
+    /// minus `skipping` (already on disk).
+    nonisolated static func subtitleStreamsToFetch(_ streams: [MediaStream], skipping: Set<Int>) -> [MediaStream] {
+        streams.filter { stream in
+            guard let index = stream.index, !skipping.contains(index),
+                  stream.language ?? stream.displayTitle != nil else { return false }
+            return true
+        }
+    }
+
     /// Downloads the item's subtitle tracks, except `skipping` (stream indexes
     /// already on disk). Returns what it wrote, or nil if the track list could
     /// not be fetched or any track failed -- so a caller can try again later.
@@ -1416,8 +1426,8 @@ final class DownloadManager: NSObject, ObservableObject {
         var written: [OfflineSubtitle] = []
         var complete = true
         let fetcher = await DownloadAssetFetcher.live()
-        for stream in mediaSource.subtitleStreams {
-            guard let index = stream.index, !skipping.contains(index),
+        for stream in Self.subtitleStreamsToFetch(mediaSource.subtitleStreams, skipping: skipping) {
+            guard let index = stream.index,
                   let language = stream.language ?? stream.displayTitle else {
                 continue
             }
