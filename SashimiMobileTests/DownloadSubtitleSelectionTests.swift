@@ -27,7 +27,7 @@ final class DownloadSubtitleSelectionTests: XCTestCase {
         XCTAssertEqual(fetched.compactMap(\.index), [3, 8])
     }
 
-    func testTheMontoCristoTrackListFetchesOnlyTheSRT() {
+    func testTheMonteCristoTrackListFetchesOnlyTheSRT() {
         // The Count of Monte Cristo (2024): one SRT, three PGS tracks.
         let streams = [
             stream(codec: "subrip", index: 3),
