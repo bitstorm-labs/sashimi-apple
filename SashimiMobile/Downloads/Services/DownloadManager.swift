@@ -1398,6 +1398,19 @@ final class DownloadManager: NSObject, ObservableObject {
         return mediaSource
     }
 
+    /// The subtitle tracks to fetch as VTT: text tracks with an index and a
+    /// name, minus `skipping` (already on disk). Image-based tracks (PGS,
+    /// VobSub, DVB) have no VTT form -- the server answers 500 -- so asking
+    /// for them only re-failed on every launch's backfill (#824).
+    nonisolated static func subtitleStreamsToFetch(_ streams: [MediaStream], skipping: Set<Int>) -> [MediaStream] {
+        streams.filter { stream in
+            guard !PlaybackSelection.isImageSubtitle(stream),
+                  let index = stream.index, !skipping.contains(index),
+                  stream.language ?? stream.displayTitle != nil else { return false }
+            return true
+        }
+    }
+
     /// Downloads the item's subtitle tracks, except `skipping` (stream indexes
     /// already on disk). Returns what it wrote, or nil if the track list could
     /// not be fetched or any track failed -- so a caller can try again later.
@@ -1416,8 +1429,8 @@ final class DownloadManager: NSObject, ObservableObject {
         var written: [OfflineSubtitle] = []
         var complete = true
         let fetcher = await DownloadAssetFetcher.live()
-        for stream in mediaSource.subtitleStreams {
-            guard let index = stream.index, !skipping.contains(index),
+        for stream in Self.subtitleStreamsToFetch(mediaSource.subtitleStreams, skipping: skipping) {
+            guard let index = stream.index,
                   let language = stream.language ?? stream.displayTitle else {
                 continue
             }
@@ -1457,10 +1470,9 @@ final class DownloadManager: NSObject, ObservableObject {
                     fileURL: destination
                 ))
             } catch DownloadAssetFetcher.FetchError.badStatus(let status) {
-                // An image-based track (PGS) has no VTT form: the server
-                // answers 500, and saving that body gave a track with no cues.
-                // Retrying will not change that, so it does not mark the set
-                // incomplete.
+                // The server could not produce VTT for this track (image-based
+                // tracks are filtered out above). Retrying will not change
+                // that, so it does not mark the set incomplete.
                 logger.info(
                     "Subtitle \(index, privacy: .public) for item \(itemId, privacy: .public) unavailable as VTT (HTTP \(status, privacy: .public))"
                 )
