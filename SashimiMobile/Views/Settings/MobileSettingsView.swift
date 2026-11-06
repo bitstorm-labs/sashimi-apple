@@ -266,8 +266,24 @@ struct HomeRowOrderView: View {
     /// Only iPad and Mac have a side menu; iPhone uses tabs.
     private var showsSideMenu: Bool { MobileLayoutIdiom.usesPadLayout }
 
-    private var menuOnlyLibraries: [JellyfinLibrary] {
-        RailOrder.menuOnlyLibraries(railLibraries, homeDestinations: settings.rows.compactMap(\.railDestination))
+    /// Whether the libraries for the menu-only entries have been asked for:
+    /// dragging before then would save an order without them.
+    @State private var libraryLoadFinished = false
+
+    /// iPad/Mac's one list (#841): Home's rows with Lists and the menu-only
+    /// libraries among them, in side-menu order. iPhone lists Home rows only.
+    private var entries: [SideMenuOrder.Entry] {
+        showsSideMenu
+            ? settings.sideMenuEntries(libraryIds: railLibraries.map(\.id))
+            : settings.rows.map { .row($0.id) }
+    }
+
+    private func name(of destination: RailOrder.Destination) -> String {
+        switch destination {
+        case .lists: return "Lists"
+        case .finTV: return HomeRowType.channels.displayName
+        case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
+        }
     }
 
     @ViewBuilder
@@ -300,64 +316,85 @@ struct HomeRowOrderView: View {
         }
     }
 
+    @ViewBuilder
+    private func rowItem(_ row: HomeRowConfig) -> some View {
+        HStack {
+            Image(systemName: row.isEnabled ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(row.isEnabled ? .green : .gray)
+                .onTapGesture {
+                    if let index = settings.rows.firstIndex(where: { $0.id == row.id }) {
+                        settings.toggleRow(at: index)
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.displayName)
+                note(isOnHome: row.isEnabled, destination: row.railDestination)
+            }
+
+            Spacer()
+
+            if showsSideMenu {
+                sideMenuSwitch(row.railDestination)
+            }
+
+            Image(systemName: "line.3.horizontal")
+                .foregroundColor(.secondary)
+        }
+    }
+
+    /// Lists, Collections, Playlists: no Home switch, but they drag like rows.
+    private func menuOnlyItem(_ destination: RailOrder.Destination) -> some View {
+        HStack {
+            Image(systemName: "minus.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name(of: destination))
+                Text("Side menu only")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                note(isOnHome: false, destination: destination)
+            }
+
+            Spacer()
+
+            sideMenuSwitch(destination)
+
+            Image(systemName: "line.3.horizontal")
+                .foregroundColor(.secondary)
+        }
+    }
+
     var body: some View {
         List {
             Section {
-                ForEach(settings.rows) { row in
-                    HStack {
-                        Image(systemName: row.isEnabled ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(row.isEnabled ? .green : .gray)
-                            .onTapGesture {
-                                if let index = settings.rows.firstIndex(where: { $0.id == row.id }) {
-                                    settings.toggleRow(at: index)
-                                }
-                            }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.displayName)
-                            note(isOnHome: row.isEnabled, destination: row.railDestination)
+                ForEach(entries, id: \.self) { entry in
+                    switch entry {
+                    case .row(let id):
+                        if let row = settings.rows.first(where: { $0.id == id }) {
+                            rowItem(row)
                         }
-
-                        Spacer()
-
-                        if showsSideMenu {
-                            sideMenuSwitch(row.railDestination)
-                        }
-
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundColor(.secondary)
+                    case .menuOnly(let destination):
+                        menuOnlyItem(destination)
                     }
                 }
                 .onMove { source, destination in
-                    settings.moveRow(from: source, to: destination)
+                    if showsSideMenu {
+                        settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: source, to: destination))
+                    } else {
+                        settings.moveRow(from: source, to: destination)
+                    }
                 }
+                .moveDisabled(showsSideMenu && !libraryLoadFinished)
             } header: {
                 Text(showsSideMenu
                      ? "Left: on Home. Right: in the side menu. Drag to reorder both."
                      : "Drag to reorder, tap to enable/disable")
             } footer: {
                 if showsSideMenu {
-                    Text("Home, Search, Downloads and Settings are always in the side menu.")
-                }
-            }
-
-            if showsSideMenu {
-                Section("Side menu only") {
-                    HStack {
-                        Text("Lists")
-                        Spacer()
-                        sideMenuSwitch(.lists)
-                    }
-                    ForEach(menuOnlyLibraries) { library in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(library.name)
-                                note(isOnHome: false, destination: .library(library.id))
-                            }
-                            Spacer()
-                            sideMenuSwitch(.library(library.id))
-                        }
-                    }
+                    Text("Home, Search, Downloads and Settings stay where they are in the side menu.")
                 }
             }
         }
@@ -366,6 +403,7 @@ struct HomeRowOrderView: View {
             if showsSideMenu {
                 railLibraries = (try? await JellyfinClient.shared.getLibraryViews()) ?? []
             }
+            libraryLoadFinished = true
         }
         .onAppear { settings.use(serverID: SessionManager.shared.activeServerId) }
         .environment(\.editMode, .constant(.active))

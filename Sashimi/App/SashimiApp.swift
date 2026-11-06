@@ -657,6 +657,11 @@ extension MainTabView {
 /// What the rail lists; the rule itself is in RailNavRows.swift.
 private extension MainTabView {
     var navRows: [NavRow] {
-        Self.navRows(rowConfigs: homeSettings.rowConfigs, libraries: libraries, hidden: sideMenu.hidden)
+        Self.navRows(
+            rowConfigs: homeSettings.rowConfigs,
+            libraries: libraries,
+            hidden: sideMenu.hidden,
+            savedOrder: homeSettings.sideMenuOrder
+        )
     }
 }

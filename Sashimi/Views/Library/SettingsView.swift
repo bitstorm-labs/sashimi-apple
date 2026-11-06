@@ -329,17 +329,25 @@ class HomeScreenSettings: ObservableObject {
 
     @Published var rowConfigs: [HomeRowConfig] = []
     @Published var needsRefresh = false
+    /// Where Lists and the menu-only libraries sit among the rows in the side
+    /// menu (#841): `SideMenuOrder` keys, nil until the user moves anything.
+    /// Kept apart from `rowConfigs` so Home never sees those entries.
+    @Published private(set) var sideMenuOrder: [String]?
 
     private let userDefaultsKey = "homeScreenRowOrder"
+    static let sideMenuOrderKey = "sideMenuOrder"
+    private let defaults: UserDefaults
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         loadSettings()
     }
 
     func loadSettings() {
+        sideMenuOrder = defaults.stringArray(forKey: Self.sideMenuOrderKey)
         // Falling back to defaults is correct, but doing it silently made a
         // schema change indistinguishable from "user never customised".
-        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        guard let data = defaults.data(forKey: userDefaultsKey),
               let configs = decodeSavedConfigs(data) else { return }
         rowConfigs = configs
     }
@@ -356,7 +364,7 @@ class HomeScreenSettings: ObservableObject {
     func saveSettings() {
         do {
             let data = try JSONEncoder().encode(rowConfigs)
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+            defaults.set(data, forKey: userDefaultsKey)
         } catch {
             // The user's row layout is silently dropped if this throws.
             logger.error("Failed to encode home row config: \(error.localizedDescription, privacy: .public)")
@@ -402,7 +410,7 @@ class HomeScreenSettings: ObservableObject {
         }
 
         // Preserve order from saved settings
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        if let data = defaults.data(forKey: userDefaultsKey),
            let savedConfigs = decodeSavedConfigs(data) {
             let savedOrder = savedConfigs.map { $0.id }
             rowConfigs.sort { a, b in
@@ -437,11 +445,6 @@ class HomeScreenSettings: ObservableObject {
         saveSettings()
     }
 
-    func moveRow(from source: IndexSet, to destination: Int) {
-        rowConfigs.move(fromOffsets: source, toOffset: destination)
-        saveSettings()
-    }
-
     func toggleVisibility(for config: HomeRowConfig) {
         if let index = rowConfigs.firstIndex(where: { $0.id == config.id }) {
             rowConfigs[index].isVisible.toggle()
@@ -460,6 +463,25 @@ class HomeScreenSettings: ObservableObject {
     func orderedLibraryIds() -> [String] {
         rowConfigs.compactMap { $0.libraryId }
     }
+
+    /// Settings' one list (#841): the rows, with Lists and the libraries Home
+    /// has no row for among them.
+    func sideMenuEntries(libraryIds: [String]) -> [SideMenuOrder.Entry] {
+        SideMenuOrder.entries(rows: rowConfigs.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder)
+    }
+
+    /// Saves a new order from Settings: the rows in their new order, as
+    /// always, and where the menu-only entries sit among them. Home reloads
+    /// only when its own rows moved.
+    func applySideMenuOrder(_ entries: [SideMenuOrder.Entry]) {
+        let keys = SideMenuOrder.savedKeys(entries)
+        sideMenuOrder = keys
+        defaults.set(keys, forKey: Self.sideMenuOrderKey)
+        let reordered = SideMenuOrder.reordered(rowConfigs, id: \.id, by: entries)
+        guard reordered != rowConfigs else { return }
+        rowConfigs = reordered
+        saveSettings()
+    }
 }
 
 struct HomeScreenSettingsView: View {
@@ -469,8 +491,10 @@ struct HomeScreenSettingsView: View {
     /// Every library the rail can list, for the ones Home has no row for.
     @State private var railLibraries: [JellyfinLibrary] = []
 
-    private var menuOnlyLibraries: [JellyfinLibrary] {
-        RailOrder.menuOnlyLibraries(railLibraries, homeDestinations: settings.rowConfigs.compactMap(\.railDestination))
+    /// One list (#841): Home's rows with Lists and the menu-only libraries
+    /// among them, in side-menu order.
+    private var entries: [SideMenuOrder.Entry] {
+        settings.sideMenuEntries(libraryIds: railLibraries.map(\.id))
     }
 
     var body: some View {
@@ -498,41 +522,14 @@ struct HomeScreenSettingsView: View {
                         .foregroundStyle(SashimiTheme.textPrimary)
                         .padding(.bottom, 8)
 
-                    Text("Arrows reorder Home and the side menu together. Always in the side menu: Home, Search, Settings.")
+                    Text("Arrows move an item on Home and in the side menu. Home, Search and Settings stay where they are.")
                         .font(Typography.caption)
                         .foregroundStyle(SashimiTheme.textSecondary)
                         .padding(.bottom, 16)
 
-                    ForEach(Array(settings.rowConfigs.enumerated()), id: \.element.id) { index, config in
-                        HomeScreenRowItem(
-                            config: config,
-                            index: index,
-                            totalCount: settings.rowConfigs.count,
-                            isInSideMenu: config.railDestination.map(sideMenu.isShown) ?? true,
-                            onToggle: { settings.toggleVisibility(for: config) },
-                            onToggleSideMenu: { config.railDestination.map(sideMenu.toggle) },
-                            onMoveUp: { moveRow(from: index, direction: -1) },
-                            onMoveDown: { moveRow(from: index, direction: 1) }
-                        )
-                    }
-
-                    Text("Side menu only")
-                        .font(Typography.headline)
-                        .foregroundStyle(SashimiTheme.textPrimary)
-                        .padding(.top, 24)
-                    SideMenuOnlyRow(
-                        name: "Lists",
-                        isOn: sideMenu.isShown(.lists),
-                        onToggle: { sideMenu.toggle(.lists) }
-                    )
-                    if !menuOnlyLibraries.isEmpty {
-                        ForEach(menuOnlyLibraries) { library in
-                            SideMenuOnlyRow(
-                                name: library.name,
-                                isOn: sideMenu.isShown(.library(library.id)),
-                                onToggle: { sideMenu.toggle(.library(library.id)) }
-                            )
-                        }
+                    let entries = entries
+                    ForEach(Array(entries.enumerated()), id: \.element) { index, entry in
+                        entryRow(entry, index: index, entries: entries)
                     }
                 }
                 .padding(.horizontal, 60)
@@ -540,9 +537,9 @@ struct HomeScreenSettingsView: View {
             }
         }
         .task {
+            // Wait for the libraries before listing: moving anything before
+            // the menu-only ones are known would save an order without them.
             railLibraries = (try? await JellyfinClient.shared.getLibraryViews()) ?? []
-        }
-        .onAppear {
             if settings.rowConfigs.isEmpty {
                 for type in HomeRowType.allCases {
                     settings.rowConfigs.append(.builtIn(type))
@@ -552,11 +549,49 @@ struct HomeScreenSettingsView: View {
         }
     }
 
-    private func moveRow(from index: Int, direction: Int) {
-        let newIndex = index + direction
-        guard newIndex >= 0 && newIndex < settings.rowConfigs.count else { return }
-        settings.rowConfigs.swapAt(index, newIndex)
-        settings.saveSettings()
+    @ViewBuilder
+    private func entryRow(_ entry: SideMenuOrder.Entry, index: Int, entries: [SideMenuOrder.Entry]) -> some View {
+        switch entry {
+        case .row(let id):
+            if let config = settings.rowConfigs.first(where: { $0.id == id }) {
+                HomeScreenRowItem(
+                    config: config,
+                    index: index,
+                    totalCount: entries.count,
+                    isInSideMenu: config.railDestination.map(sideMenu.isShown) ?? true,
+                    onToggle: { settings.toggleVisibility(for: config) },
+                    onToggleSideMenu: { config.railDestination.map(sideMenu.toggle) },
+                    onMoveUp: { move(entries, from: index, by: -1) },
+                    onMoveDown: { move(entries, from: index, by: 1) }
+                )
+            }
+        case .menuOnly(let destination):
+            SideMenuOnlyRow(
+                name: name(of: destination),
+                index: index,
+                totalCount: entries.count,
+                isOn: sideMenu.isShown(destination),
+                onToggle: { sideMenu.toggle(destination) },
+                onMoveUp: { move(entries, from: index, by: -1) },
+                onMoveDown: { move(entries, from: index, by: 1) }
+            )
+        }
+    }
+
+    private func name(of destination: RailOrder.Destination) -> String {
+        switch destination {
+        case .lists: return "Lists"
+        case .finTV: return HomeRowType.channels.displayName
+        case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
+        }
+    }
+
+    private func move(_ entries: [SideMenuOrder.Entry], from index: Int, by offset: Int) {
+        let target = index + offset
+        guard entries.indices.contains(target) else { return }
+        // Array.move semantics: moving down lands after the next entry.
+        let moved = SideMenuOrder.moving(entries, from: [index], to: offset > 0 ? target + 1 : target)
+        settings.applySideMenuOrder(moved)
     }
 }
 
@@ -614,20 +649,39 @@ struct HomeScreenRowItem: View {
     }
 }
 
-/// A library the side menu lists but Home has no row for.
+/// A side-menu entry Home has no row for (Lists, Collections, Playlists):
+/// it moves like a row, but says "Side menu only" where the Home switch would be.
 struct SideMenuOnlyRow: View {
     let name: String
+    let index: Int
+    let totalCount: Int
     let isOn: Bool
     let onToggle: () -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                Text(name)
-                    .font(Typography.body)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                    .padding(.leading, 24)
-                Spacer()
+                HomeRowMoveButton(direction: .up, isEnabled: index > 0, action: onMoveUp)
+                HomeRowMoveButton(direction: .down, isEnabled: index < totalCount - 1, action: onMoveDown)
+
+                HStack(spacing: 16) {
+                    Image(systemName: "minus.circle")
+                        .font(Typography.title)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                    Text(name)
+                        .font(Typography.body)
+                        .foregroundStyle(SashimiTheme.textPrimary)
+                    Spacer()
+                    Text("Side menu only")
+                        .font(Typography.captionSmall)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .accessibilityElement(children: .combine)
+
                 HomeRowSideMenuButton(isOn: isOn, action: onToggle)
             }
             if let note = RailOrder.reachabilityNote(isOnHome: false, isInSideMenu: isOn) {

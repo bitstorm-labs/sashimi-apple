@@ -57,6 +57,11 @@ final class HomeRowSettings: ObservableObject {
     static let shared = HomeRowSettings()
 
     @Published var rows: [HomeRowConfig] = []
+    /// Where Lists and the menu-only libraries sit among the rows in the
+    /// iPad/Mac side menu (#841): `SideMenuOrder` keys, nil until the user
+    /// moves anything. Per server, like `rows`; kept apart from them so Home
+    /// (and iPhone's Row Order) never sees those entries.
+    @Published private(set) var sideMenuOrder: [String]?
 
     /// Pre-multi-server installs saved one unscoped list; it seeds a server
     /// that has no list of its own yet.
@@ -67,6 +72,12 @@ final class HomeRowSettings: ObservableObject {
 
     private var userDefaultsKey: String {
         serverID.map { "\(legacyKey).\($0)" } ?? legacyKey
+    }
+
+    static let sideMenuOrderKey = "sideMenuOrder"
+
+    private var sideMenuOrderDefaultsKey: String {
+        serverID.map { "\(Self.sideMenuOrderKey).\($0)" } ?? Self.sideMenuOrderKey
     }
 
     private init() {
@@ -83,6 +94,7 @@ final class HomeRowSettings: ObservableObject {
 
     func loadRows() {
         let defaults = UserDefaults.standard
+        sideMenuOrder = defaults.stringArray(forKey: sideMenuOrderDefaultsKey)
         if let data = defaults.data(forKey: userDefaultsKey) ?? defaults.data(forKey: legacyKey),
            let savedRows = decodeSavedRows(data) {
             rows = savedRows
@@ -183,6 +195,24 @@ final class HomeRowSettings: ObservableObject {
 
     func toggleRow(at index: Int) {
         rows[index].isEnabled.toggle()
+        saveRows()
+    }
+
+    /// Home & Side Menu's one list on iPad/Mac (#841): the rows, with Lists
+    /// and the libraries Home has no row for among them.
+    func sideMenuEntries(libraryIds: [String]) -> [SideMenuOrder.Entry] {
+        SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder)
+    }
+
+    /// Saves a drag in that list: the rows in their new order, as always, and
+    /// where the menu-only entries sit among them.
+    func applySideMenuOrder(_ entries: [SideMenuOrder.Entry]) {
+        let keys = SideMenuOrder.savedKeys(entries)
+        sideMenuOrder = keys
+        UserDefaults.standard.set(keys, forKey: sideMenuOrderDefaultsKey)
+        let reordered = SideMenuOrder.reordered(rows, id: \.id, by: entries)
+        guard reordered != rows else { return }
+        rows = reordered
         saveRows()
     }
 }
