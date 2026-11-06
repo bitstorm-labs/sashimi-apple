@@ -35,9 +35,14 @@ struct SeerrSearchItem: Identifiable, Equatable {
 final class SeerrSearchModel: ObservableObject {
     @Published private(set) var items: [SeerrSearchItem] = []
     private let session: SeerrSession
+    /// The Requests page's own search (#845) lists everything Seerr finds,
+    /// what's on the server included (it opens the library title); Search's
+    /// row leaves those to the library row.
+    private let includesAvailable: Bool
 
-    init(session: SeerrSession = .shared) {
+    init(session: SeerrSession = .shared, includesAvailable: Bool = false) {
         self.session = session
+        self.includesAvailable = includesAvailable
     }
 
     var isVisible: Bool { session.isActive && !items.isEmpty }
@@ -56,7 +61,10 @@ final class SeerrSearchModel: ObservableObject {
             let page = try await client.search(query: trimmed)
             guard !Task.isCancelled else { return }
             let userId = session.state.user?.id
-            items = SeerrSearchMerge.requestable(page.results, library: library).map {
+            let results = includesAvailable
+                ? SeerrSearchMerge.unique(page.results)
+                : SeerrSearchMerge.requestable(page.results, library: library)
+            items = results.map {
                 SeerrSearchItem(result: $0, badge: SeerrBadge(mediaInfo: $0.mediaInfo, userId: userId))
             }
         } catch is CancellationError {

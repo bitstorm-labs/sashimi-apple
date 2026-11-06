@@ -6,19 +6,22 @@ extension RailOrder {
     /// (Lists, Collections, Playlists) in the one order Settings edits
     /// (#841). Rows that are not destinations — hero, Continue Watching,
     /// shared-list rows — contribute nothing. `hidden` is what the user took
-    /// out of the side menu (#753); `savedOrder` is
+    /// out of the side menu (#753); `available` is `RailOrder.conditionalDestinations` (Requests,
+    /// Dashboard, #845); `savedOrder` is
     /// `HomeScreenSettings.sideMenuOrder` (nil before anything was moved).
     static func destinations(
         rowConfigs: [HomeRowConfig],
         libraryIds: [String],
         hidden: Set<Destination> = [],
-        savedOrder: [String]? = nil
+        savedOrder: [String]? = nil,
+        available: [Destination] = []
     ) -> [Destination] {
         SideMenuOrder.destinations(
             rows: rowConfigs.map(\.sideMenuRow),
             libraryIds: libraryIds,
             saved: savedOrder,
-            hidden: hidden
+            hidden: hidden,
+            available: available
         )
     }
 }

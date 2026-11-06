@@ -215,13 +215,6 @@ struct MainTabView: View {
     /// Bumped each time that cover has finished closing.
     var deepLinkDismissals = 0
 
-    /// A destination in the rail. Libraries are dynamic, so this is an enum
-    /// rather than a tab index.
-    enum NavID: Hashable {
-        case home, finTV, search, settings, avatar, lists
-        case library(String)
-    }
-
     // Which nav item currently holds focus; nil means focus is in content
     // (so the rail rests collapsed). Drives the pullout expansion.
     @FocusState private var focusedNav: NavID?
@@ -238,6 +231,8 @@ struct MainTabView: View {
     @ObservedObject private var homeSettings = HomeScreenSettings.shared
     /// What the user took out of the rail (#753); the rail follows it live.
     @ObservedObject private var sideMenu = SideMenuSettings.shared
+    /// Requests is in the rail while a Seerr account is connected (#845).
+    @ObservedObject private var seerr = SeerrSession.shared
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
     // One-shot: the hero grabs focus once on cold launch (the rail otherwise
@@ -317,6 +312,13 @@ struct MainTabView: View {
             }
         }
         .task { await loadLibraries() }
+        // Signed out of Seerr, or no longer an administrator, while on that
+        // page: it has left the rail, so go Home.
+        .onChange(of: navRows.map(\.id)) { _, ids in
+            if [.requests, .dashboard].contains(selection), !ids.contains(selection) {
+                selection = .home
+            }
+        }
         // Focus-driven: moving focus onto a nav item switches the content
         // behind the blur immediately — no click needed (Plex behavior).
         .onChange(of: focusedNav) { old, newValue in
@@ -390,6 +392,10 @@ struct MainTabView: View {
             SearchView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .lists:
             ListsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+        case .requests:
+            RequestsPageView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
+        case .dashboard:
+            ServerDashboardView()
         case .settings:
             SettingsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .library(let id):
@@ -446,7 +452,7 @@ struct MainTabView: View {
             avatarButton
 
             // App version under the avatar (centered when collapsed)
-            Text(appVersion)
+            Text(Self.appVersion)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(0.4))
                 .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
@@ -521,29 +527,11 @@ struct MainTabView: View {
             .padding(.vertical, 11)
             .padding(.horizontal, expanded ? 16 : 0)
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .background(focusHighlight(focusedNav == id))
+            .background(Self.railFocusHighlight(focusedNav == id))
         }
         .buttonStyle(SidebarButtonStyle())
         .focused($focusedNav, equals: id)
         .prefersDefaultFocus(id == selection, in: railScope)
-    }
-
-    /// Soft accent highlight in place of the tvOS default white focus platter:
-    /// the same tinted fill + accent ring the settings rows use.
-    private func focusHighlight(_ isFocused: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(SashimiTheme.focus.opacity(isFocused ? 0.18 : 0))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(SashimiTheme.focus.opacity(isFocused ? 1 : 0), lineWidth: 3)
-            )
-    }
-
-    /// Jellyfin purple, sampled from the logo — the selected-item highlight.
-    private static let jellyfinPurple = Color(red: 189 / 255, green: 62 / 255, blue: 237 / 255)
-
-    private var appVersion: String {
-        "v" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "")
     }
 
     private func navTint(_ id: NavID) -> Color {
@@ -598,7 +586,7 @@ struct MainTabView: View {
             .padding(.vertical, 10)
             .padding(.horizontal, expanded ? 12 : 0)
             .frame(maxWidth: .infinity, alignment: expanded ? .leading : .center)
-            .background(focusHighlight(focusedNav == .avatar))
+            .background(Self.railFocusHighlight(focusedNav == .avatar))
         }
         .buttonStyle(SidebarButtonStyle())
         .focused($focusedNav, equals: .avatar)
@@ -679,7 +667,11 @@ private extension MainTabView {
             rowConfigs: homeSettings.rowConfigs,
             libraries: libraries,
             hidden: sideMenu.hidden,
-            savedOrder: homeSettings.sideMenuOrder
+            savedOrder: homeSettings.sideMenuOrder,
+            available: RailOrder.conditionalDestinations(
+                seerr: seerr.state,
+                canViewDashboard: sessionManager.canViewServerDashboard
+            )
         )
     }
 }

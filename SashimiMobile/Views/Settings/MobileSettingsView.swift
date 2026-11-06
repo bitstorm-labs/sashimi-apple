@@ -26,14 +26,6 @@ struct MobileSettingsView: View {
     var body: some View {
         List {
             Section("Server") {
-                // Administrators only: the server's own view of who is watching.
-                if sessionManager.canViewServerDashboard {
-                    NavigationLink {
-                        MobileServerDashboardView()
-                    } label: {
-                        Label("Dashboard", systemImage: "server.rack")
-                    }
-                }
                 // Which of the plugins Sashimi uses this server has; admins
                 // also see versions and status.
                 NavigationLink {
@@ -280,6 +272,8 @@ struct MobileSettingsView: View {
 struct HomeRowOrderView: View {
     @ObservedObject private var settings = HomeRowSettings.shared
     @ObservedObject private var sideMenu = SideMenuSettings.shared
+    @ObservedObject private var seerr = SeerrSession.shared
+    @ObservedObject private var sessionManager = SessionManager.shared
     /// Every library the side menu can list, for the ones Home has no row for.
     @State private var railLibraries: [JellyfinLibrary] = []
 
@@ -294,13 +288,18 @@ struct HomeRowOrderView: View {
     /// libraries among them, in side-menu order. iPhone lists Home rows only.
     private var entries: [SideMenuOrder.Entry] {
         showsSideMenu
-            ? settings.sideMenuEntries(libraryIds: railLibraries.map(\.id))
+            ? settings.sideMenuEntries(
+                libraryIds: railLibraries.map(\.id),
+                available: RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+            )
             : settings.rows.map { .row($0.id) }
     }
 
     private func name(of destination: RailOrder.Destination) -> String {
         switch destination {
         case .lists: return "Lists"
+        case .requests: return "Requests"
+        case .dashboard: return "Dashboard"
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }
@@ -327,6 +326,7 @@ struct HomeRowOrderView: View {
     @ViewBuilder
     private func note(isOnHome: Bool, destination: RailOrder.Destination?) -> some View {
         if showsSideMenu, let text = RailOrder.reachabilityNote(
+            for: destination,
             isOnHome: isOnHome,
             isInSideMenu: destination.map(sideMenu.isShown) ?? true
         ) {

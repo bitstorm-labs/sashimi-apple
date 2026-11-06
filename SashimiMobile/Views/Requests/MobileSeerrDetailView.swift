@@ -47,6 +47,11 @@ struct MobileSeerrDetailView: View {
                 VStack(alignment: .leading, spacing: MobileSpacing.md) {
                     titleBlock
                     actions
+                    if let quota = model.quotaNote {
+                        Text(quota)
+                            .font(MobileTypography.caption)
+                            .foregroundStyle(MobileColors.textTertiary)
+                    }
                     if let message = model.errorMessage {
                         Label(message, systemImage: "exclamationmark.triangle.fill")
                             .font(MobileTypography.caption)

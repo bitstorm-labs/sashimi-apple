@@ -171,26 +171,6 @@ final class SeerrViewModelTests: XCTestCase {
         XCTAssertEqual(model.homeRows.count, 2)
     }
 
-    func testOnlyAPendingRequestCanBeCancelled() async throws {
-        let session = await signedInSession()
-        SeerrStubServer.on("GET", "/api/v1/request", body: requestsJSON)
-        SeerrStubServer.on("GET", "/api/v1/movie/1", body: "{\"id\":1,\"title\":\"First\"}")
-        SeerrStubServer.on("GET", "/api/v1/movie/2", body: "{\"id\":2,\"title\":\"Second\"}")
-        SeerrStubServer.on("DELETE", "/api/v1/request/4", status: 204, body: "")
-        let model = SeerrRequestsModel(session: session)
-        await model.load()
-
-        XCTAssertTrue(model.rows[0].canCancel)
-        XCTAssertFalse(model.rows[1].canCancel)
-
-        await model.cancel(model.rows[1])
-        XCTAssertTrue(SeerrStubServer.requests("DELETE", "/api/v1/request/5").isEmpty)
-
-        await model.cancel(model.rows[0])
-        XCTAssertEqual(SeerrStubServer.requests("DELETE", "/api/v1/request/4").count, 1)
-        XCTAssertEqual(model.rows.map(\.id), [5])
-    }
-
     // MARK: Request missing seasons (library show's More menu)
 
     private func libraryShow(tmdb: String?) throws -> BaseItemDto {

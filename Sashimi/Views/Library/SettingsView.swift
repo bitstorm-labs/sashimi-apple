@@ -43,18 +43,6 @@ struct SettingsView: View {
                             }
                             .defaultFocus(in: focusNamespace)
 
-                            // Administrators only: who is streaming what,
-                            // and whether anything on the server is failing.
-                            if sessionManager.canViewServerDashboard {
-                                SettingsOptionRow(
-                                    icon: "gauge.with.dots.needle.67percent",
-                                    title: "Dashboard",
-                                    subtitle: "Now playing, activity and health"
-                                ) {
-                                    navigationPath.append(SettingsDestination.serverDashboard)
-                                }
-                            }
-
                             // Which of the plugins Sashimi uses this server
                             // has; admins also see versions and status.
                             SettingsOptionRow(
@@ -65,7 +53,8 @@ struct SettingsView: View {
                                 navigationPath.append(SettingsDestination.serverPlugins)
                             }
 
-                            // Seerr: request titles that aren't on the server.
+                            // Seerr: connect an account; the requests themselves
+                            // are the side menu's Requests page (#845).
                             SettingsOptionRow(
                                 icon: "tray.and.arrow.down",
                                 title: "Requests",
@@ -142,16 +131,10 @@ struct SettingsView: View {
                     CertificateSettingsView()
                 case .appIcon:
                     AppIconSettingsView()
-                case .serverDashboard:
-                    ServerDashboardView()
                 case .serverPlugins:
                     ServerPluginsView(model: serverPlugins)
                 case .requests:
-                    RequestsSettingsView {
-                        navigationPath.append(SettingsDestination.yourRequests)
-                    }
-                case .yourRequests:
-                    SeerrRequestsView()
+                    RequestsSettingsView()
                 }
             }
         }
@@ -188,10 +171,8 @@ enum SettingsDestination: Hashable {
     case playback
     case certificates
     case appIcon
-    case serverDashboard
     case serverPlugins
     case requests
-    case yourRequests
 }
 
 struct SettingsOptionRow: View {
@@ -485,8 +466,9 @@ class HomeScreenSettings: ObservableObject {
 
     /// Settings' one list (#841): the rows, with Lists and the libraries Home
     /// has no row for among them.
-    func sideMenuEntries(libraryIds: [String]) -> [SideMenuOrder.Entry] {
-        SideMenuOrder.entries(rows: rowConfigs.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder)
+    /// `available`: Requests and Dashboard while the account allows them (#845).
+    func sideMenuEntries(libraryIds: [String], available: [RailOrder.Destination] = []) -> [SideMenuOrder.Entry] {
+        SideMenuOrder.entries(rows: rowConfigs.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder, available: available)
     }
 
     /// Saves a new order from Settings: the rows in their new order, as
@@ -506,6 +488,8 @@ class HomeScreenSettings: ObservableObject {
 struct HomeScreenSettingsView: View {
     @StateObject private var settings = HomeScreenSettings.shared
     @ObservedObject private var sideMenu = SideMenuSettings.shared
+    @ObservedObject private var seerr = SeerrSession.shared
+    @EnvironmentObject private var sessionManager: SessionManager
     @State private var isLoading = true
     /// Every library the rail can list, for the ones Home has no row for.
     @State private var railLibraries: [JellyfinLibrary] = []
@@ -513,7 +497,10 @@ struct HomeScreenSettingsView: View {
     /// One list (#841): Home's rows with Lists and the menu-only libraries
     /// among them, in side-menu order.
     private var entries: [SideMenuOrder.Entry] {
-        settings.sideMenuEntries(libraryIds: railLibraries.map(\.id))
+        settings.sideMenuEntries(
+            libraryIds: railLibraries.map(\.id),
+            available: RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        )
     }
 
     var body: some View {
@@ -587,6 +574,7 @@ struct HomeScreenSettingsView: View {
         case .menuOnly(let destination):
             SideMenuOnlyRow(
                 name: name(of: destination),
+                destination: destination,
                 index: index,
                 totalCount: entries.count,
                 isOn: sideMenu.isShown(destination),
@@ -600,6 +588,8 @@ struct HomeScreenSettingsView: View {
     private func name(of destination: RailOrder.Destination) -> String {
         switch destination {
         case .lists: return "Lists"
+        case .requests: return "Requests"
+        case .dashboard: return "Dashboard"
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }
@@ -672,6 +662,7 @@ struct HomeScreenRowItem: View {
 /// it moves like a row, but says "Side menu only" where the Home switch would be.
 struct SideMenuOnlyRow: View {
     let name: String
+    let destination: RailOrder.Destination
     let index: Int
     let totalCount: Int
     let isOn: Bool
@@ -703,7 +694,7 @@ struct SideMenuOnlyRow: View {
 
                 HomeRowSideMenuButton(isOn: isOn, action: onToggle)
             }
-            if let note = RailOrder.reachabilityNote(isOnHome: false, isInSideMenu: isOn) {
+            if let note = RailOrder.reachabilityNote(for: destination, isOnHome: false, isInSideMenu: isOn) {
                 ReachabilityNote(text: note)
             }
         }

@@ -12,7 +12,43 @@ struct SeerrRequestRow: Identifiable, Equatable {
     let state: SeerrRequestState
     let subtitle: String
 
-    var canCancel: Bool { state == .pending }
+    /// Nil when the request names no title (Seerr can return one whose media
+    /// row is gone).
+    @MainActor
+    init?(_ request: SeerrRequest, titles: SeerrTitleCache, now: Date = Date()) {
+        guard let target = SeerrTitleCache.target(for: request) else { return nil }
+        let known = titles.entry(for: target)
+        self.init(
+            id: request.id,
+            request: request,
+            kind: target.kind,
+            tmdbId: target.tmdbId,
+            title: known?.title ?? "Unknown title",
+            posterPath: known?.posterPath,
+            state: SeerrRequestState(request),
+            subtitle: SeerrRequestState.subtitle(for: request, now: now)
+        )
+    }
+
+    init(
+        id: Int,
+        request: SeerrRequest,
+        kind: SeerrMediaKind,
+        tmdbId: Int,
+        title: String,
+        posterPath: String?,
+        state: SeerrRequestState,
+        subtitle: String
+    ) {
+        self.id = id
+        self.request = request
+        self.kind = kind
+        self.tmdbId = tmdbId
+        self.title = title
+        self.posterPath = posterPath
+        self.state = state
+        self.subtitle = subtitle
+    }
 
     var target: SeerrTarget { SeerrTarget(kind: kind, tmdbId: tmdbId, title: title, posterPath: posterPath) }
 
@@ -29,7 +65,8 @@ struct SeerrRequestRow: Identifiable, Equatable {
     }
 }
 
-/// Your requests (mockup E) and the Home row built from them.
+/// The person's own requests for Home's "Your Requests" row (mockup E). The
+/// Requests page's full list is `SeerrRequestListModel` (#845).
 @MainActor
 final class SeerrRequestsModel: ObservableObject {
     @Published private(set) var rows: [SeerrRequestRow] = []
@@ -38,7 +75,7 @@ final class SeerrRequestsModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let session: SeerrSession
-    private var titles: [String: (title: String, poster: String?)] = [:]
+    private let titles = SeerrTitleCache()
 
     init(session: SeerrSession = .shared) {
         self.session = session
@@ -61,67 +98,16 @@ final class SeerrRequestsModel: ObservableObject {
         }
         do {
             let requests = try await client.requests(requestedBy: user.id)
-            await fillTitles(for: requests, client: client)
+            await titles.fill(for: requests, client: client)
             guard !Task.isCancelled else { return }
             let now = Date()
-            rows = requests.compactMap { request in
-                guard let tmdbId = request.media?.tmdbId,
-                      let kind = request.type ?? request.media?.mediaType else { return nil }
-                let known = titles["\(kind.rawValue)-\(tmdbId)"]
-                return SeerrRequestRow(
-                    id: request.id,
-                    request: request,
-                    kind: kind,
-                    tmdbId: tmdbId,
-                    title: known?.title ?? "Unknown title",
-                    posterPath: known?.poster,
-                    state: SeerrRequestState(request),
-                    subtitle: SeerrRequestState.subtitle(for: request, now: now)
-                )
-            }
+            rows = requests.compactMap { SeerrRequestRow($0, titles: titles, now: now) }
             errorMessage = nil
         } catch is CancellationError {
             return
         } catch {
             errorMessage = error.localizedDescription
             await session.handle(error)
-        }
-    }
-
-    /// Pending requests only; Seerr refuses the rest.
-    func cancel(_ row: SeerrRequestRow) async {
-        guard row.canCancel, let client = session.client else { return }
-        do {
-            try await client.cancelRequest(id: row.id)
-            rows.removeAll { $0.id == row.id }
-            session.requestsChanged()
-        } catch {
-            errorMessage = error.localizedDescription
-            await session.handle(error)
-        }
-    }
-
-    private func fillTitles(for requests: [SeerrRequest], client: SeerrClient) async {
-        let missing = Set(requests.compactMap { request -> SeerrTarget? in
-            guard let tmdbId = request.media?.tmdbId, let kind = request.type ?? request.media?.mediaType else { return nil }
-            return SeerrTarget(kind: kind, tmdbId: tmdbId, title: "")
-        }).filter { titles[$0.id] == nil }
-
-        let found = await withTaskGroup(of: SeerrTarget?.self) { group in
-            for target in missing {
-                group.addTask {
-                    guard let details = try? await client.details(kind: target.kind, tmdbId: target.tmdbId) else { return nil }
-                    return SeerrTarget(kind: target.kind, tmdbId: target.tmdbId, title: details.title, posterPath: details.posterPath)
-                }
-            }
-            var found: [SeerrTarget] = []
-            for await entry in group {
-                if let entry { found.append(entry) }
-            }
-            return found
-        }
-        for target in found {
-            titles[target.id] = (target.title, target.posterPath)
         }
     }
 }

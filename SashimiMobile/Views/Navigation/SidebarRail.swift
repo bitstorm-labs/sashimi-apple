@@ -291,19 +291,22 @@ extension SidebarSelection {
     /// libraries and Lists in the order Settings › Home & Side Menu sets
     /// (#841), then Search, Downloads (iPad only) and Settings, which never
     /// move. The menu bar's ⌘1…⌘9 number them in this order.
-    /// `hidden`: what the user took out of the side menu (#753).
+    /// `hidden`: what the user took out of the side menu (#753); `available`:
+    /// Requests and Dashboard while the account allows them (#845).
     static func railItems(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
         hidden: Set<RailOrder.Destination> = [],
-        savedOrder: [String]? = nil
+        savedOrder: [String]? = nil,
+        available: [RailOrder.Destination] = []
     ) -> [SidebarSelection] {
         var items: [SidebarSelection] = [.home]
         for destination in RailOrder.destinations(
             rowConfigs: rowConfigs,
             libraryIds: libraries.map(\.id),
             hidden: hidden,
-            savedOrder: savedOrder
+            savedOrder: savedOrder,
+            available: available
         ) {
             switch destination {
             case .finTV:
@@ -317,6 +320,10 @@ extension SidebarSelection {
                 ))
             case .lists:
                 items.append(.lists)
+            case .requests:
+                items.append(.requests)
+            case .dashboard:
+                items.append(.dashboard)
             }
         }
         items += [.search, .downloads, .settings]
