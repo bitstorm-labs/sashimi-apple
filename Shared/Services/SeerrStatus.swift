@@ -116,7 +116,8 @@ enum SeerrRequestState: Equatable, Sendable {
         case .ready:
             return dated("Arrived", arrival(request), now: now, calendar: calendar)
         case .declined:
-            return "Declined"
+            // Seerr keeps no reason; the tag already says Declined.
+            return dated("Requested", SeerrDates.parse(request.createdAt), now: now, calendar: calendar)
         case .failed:
             return "Approved, but it couldn't be sent for download"
         }

@@ -38,12 +38,27 @@ struct SashimiApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(sessionManager)
-                .toastOverlay()
-                // A saved Seerr session is checked once at launch; without
-                // one, nothing about requests shows anywhere.
-                .task { await SeerrSession.shared.restore() }
+            Group {
+                #if DEBUG
+                if let screen = SeerrDemo.screen {
+                    SeerrDemoRoot(screen: screen)
+                } else {
+                    ContentView()
+                }
+                #else
+                ContentView()
+                #endif
+            }
+            .environmentObject(sessionManager)
+            .toastOverlay()
+            // A saved Seerr session is checked once at launch; without one,
+            // nothing about requests shows anywhere.
+            .task {
+                #if DEBUG
+                guard SeerrDemo.screen == nil else { return }
+                #endif
+                await SeerrSession.shared.restore()
+            }
         }
         // The TV button and other backgrounding transitions leave `.active`
         // without the detail screen's `onDisappear` ever firing (it's a

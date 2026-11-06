@@ -110,6 +110,15 @@ final class SeerrSessionTests: XCTestCase {
         XCTAssertFalse(session.partialRequestsEnabled)
     }
 
+    func testRestoreWithoutAnAccountNeverContactsTheServer() async {
+        let session = session()
+
+        await session.restore()
+
+        XCTAssertEqual(session.state, .notConfigured)
+        XCTAssertTrue(SeerrStubServer.requests.isEmpty, "installs that never set up requests stay off the network")
+    }
+
     func testRestoreWithAnExpiredCookieAsksToSignInAgain() async {
         credentials.setCookie(SeerrFixtures.sessionCookie, forKey: cookieKey)
         SeerrStubServer.on("GET", "/api/v1/auth/me", status: 401, body: "{}")

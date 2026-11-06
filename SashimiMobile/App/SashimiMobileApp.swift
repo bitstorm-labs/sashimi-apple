@@ -43,10 +43,20 @@ struct SashimiMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(sessionManager)
-                .mobileStationReminders()
-                .macWindowConfiguration()
+            Group {
+                #if DEBUG
+                if let screen = SeerrDemo.screen {
+                    MobileSeerrDemoRoot(screen: screen)
+                } else {
+                    ContentView()
+                }
+                #else
+                ContentView()
+                #endif
+            }
+            .environmentObject(sessionManager)
+            .mobileStationReminders()
+            .macWindowConfiguration()
         }
         .modelContainer(modelContainer)
         // The Mac menu bar (and the iPad's keyboard shortcut overlay).
@@ -171,7 +181,12 @@ struct ContentView: View {
         .task {
             // A saved Seerr session is checked once at launch; without one,
             // nothing about requests shows anywhere.
-            Task { await SeerrSession.shared.restore() }
+            Task {
+                #if DEBUG
+                guard SeerrDemo.screen == nil else { return }
+                #endif
+                await SeerrSession.shared.restore()
+            }
             await sessionManager.restoreSession()
             if #available(iOS 18.0, *) {
                 SashimiMediaSpotlightIndexer.shared.refresh()

@@ -127,8 +127,9 @@ final class SeerrSession: ObservableObject {
     /// At launch: a stored cookie is checked with the server. A server that
     /// can't be reached keeps the last known account (it's not a sign-out).
     func restore() async {
-        await refreshPublicSettings()
+        // No account: stay off the network entirely.
         guard let cookie = credentials.cookie(forKey: Self.cookieKey(for: serverURL)) else { return }
+        await refreshPublicSettings()
         let client = SeerrClient(baseURL: serverURL, cookie: cookie)
         do {
             let user = try await client.currentUser()

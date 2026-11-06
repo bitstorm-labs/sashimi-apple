@@ -117,7 +117,7 @@ final class SeerrStatusTests: XCTestCase {
         XCTAssertEqual(SeerrRequestState.subtitle(for: pending, now: now, calendar: calendar), "Requested today")
         XCTAssertEqual(SeerrRequestState.subtitle(for: approved, now: now, calendar: calendar), "Approved Tue · 62% downloaded")
         XCTAssertEqual(SeerrRequestState.subtitle(for: ready, now: now, calendar: calendar), "Arrived yesterday")
-        XCTAssertEqual(SeerrRequestState.subtitle(for: declined, now: now, calendar: calendar), "Declined")
+        XCTAssertEqual(SeerrRequestState.subtitle(for: declined, now: now, calendar: calendar), "Requested Oct 1")
     }
 
     func testHomeRowShowsWaitingRequestsAndLastWeeksArrivalsOnly() throws {
