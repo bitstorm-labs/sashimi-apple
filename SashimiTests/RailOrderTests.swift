@@ -20,7 +20,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["tv", "movies"]),
-            [.finTV, .library("movies"), .library("tv")],
+            [.finTV, .library("movies"), .library("tv"), .lists],
             "Row order decides the rail, not the order the server returned libraries in"
         )
     }
@@ -30,7 +30,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["movies", "tv"]),
-            [.library("movies"), .library("tv"), .finTV]
+            [.library("movies"), .library("tv"), .finTV, .lists]
         )
     }
 
@@ -40,7 +40,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: []),
-            [.finTV],
+            [.finTV, .lists],
             "FinTV is still reachable even when no config placed it"
         )
     }
@@ -52,7 +52,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["movies", "new"]),
-            [.finTV, .library("movies"), .library("new")],
+            [.finTV, .library("movies"), .library("new"), .lists],
             "A library added since the order was saved goes behind what the config placed"
         )
     }
@@ -62,14 +62,14 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["movies"]),
-            [.library("movies"), .finTV]
+            [.library("movies"), .finTV, .lists]
         )
     }
 
     func testEmptyConfigFallsBackToServerOrder() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [], libraryIds: ["a", "b"]),
-            [.library("a"), .library("b"), .finTV],
+            [.library("a"), .library("b"), .finTV, .lists],
             "A first run with nothing saved still lists everything"
         )
     }
@@ -84,7 +84,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["movies"]),
-            [.finTV, .library("movies")],
+            [.finTV, .library("movies"), .lists],
             "Hiding a Home row hides it from Home, not from the only way to reach it"
         )
     }
@@ -101,7 +101,7 @@ final class RailOrderTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: configs, libraryIds: ["movies"]),
-            [.finTV, .library("movies")]
+            [.finTV, .library("movies"), .lists]
         )
     }
 }

@@ -16,21 +16,21 @@ final class IPadRailOrderTests: XCTestCase {
                 rowConfigs: [continueWatching, library("movies"), channels, library("tv")],
                 libraryIds: ["tv", "movies"]
             ),
-            [.library("movies"), .finTV, .library("tv")]
+            [.library("movies"), .finTV, .library("tv"), .lists]
         )
     }
 
     func testUnlistedLibrariesAndChannelsFollowInServerOrder() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("tv")], libraryIds: ["movies", "tv", "music"]),
-            [.library("tv"), .library("movies"), .library("music"), .finTV]
+            [.library("tv"), .library("movies"), .library("music"), .finTV, .lists]
         )
     }
 
     func testRowsForRemovedLibrariesAreDropped() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("gone"), channels], libraryIds: ["movies"]),
-            [.finTV, .library("movies")]
+            [.finTV, .library("movies"), .lists]
         )
     }
 
@@ -39,7 +39,7 @@ final class IPadRailOrderTests: XCTestCase {
         let hiddenMovies = HomeRowConfig(type: .library(id: "movies", name: "Movies"), isEnabled: false)
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [channels, hiddenMovies], libraryIds: ["tv", "movies"]),
-            [.finTV, .library("movies"), .library("tv")]
+            [.finTV, .library("movies"), .library("tv"), .lists]
         )
     }
 

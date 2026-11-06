@@ -29,7 +29,7 @@ final class SideMenuVisibilityTests: XCTestCase {
             RailOrder.destinations(
                 rowConfigs: configs, libraryIds: ["movies", "anime", "kids"], hidden: [.library("kids")]
             ),
-            [.library("movies"), .library("anime"), .finTV],
+            [.library("movies"), .library("anime"), .finTV, .lists],
             "hidden from Home only: still listed; hidden from the menu: dropped"
         )
     }
@@ -41,21 +41,21 @@ final class SideMenuVisibilityTests: XCTestCase {
                 libraryIds: ["movies", "playlists"],
                 hidden: [.finTV, .library("playlists")]
             ),
-            [.library("movies")]
+            [.library("movies"), .lists]
         )
     }
 
     func testALibraryAddedOnTheServerLaterIsListed() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("movies")], libraryIds: ["movies", "new"], hidden: [.library("movies")]),
-            [.library("new"), .finTV]
+            [.library("new"), .finTV, .lists]
         )
     }
 
     func testAHiddenIdTheServerNoLongerHasChangesNothing() {
         XCTAssertEqual(
             RailOrder.destinations(rowOrder: [], libraryIds: ["tv"], hidden: [.library("gone")]),
-            [.library("tv"), .finTV]
+            [.library("tv"), .finTV, .lists]
         )
     }
 
@@ -70,9 +70,10 @@ final class SideMenuVisibilityTests: XCTestCase {
         let libraries = ["movies", "collections", "playlists"].map {
             JellyfinLibrary(id: $0, name: $0, collectionType: nil, imageTags: nil)
         }
+        let rows = [HomeRowConfig.builtIn(.channels), library("movies")].map(\.sideMenuRow)
         XCTAssertEqual(
-            RailOrder.menuOnlyLibraries(libraries, homeDestinations: [.library("movies"), .finTV]).map(\.id),
-            ["collections", "playlists"]
+            SideMenuOrder.menuOnly(rows: rows, libraryIds: libraries.map(\.id)),
+            [.library("collections"), .library("playlists"), .lists]
         )
     }
 
@@ -95,7 +96,7 @@ final class SideMenuVisibilityTests: XCTestCase {
         XCTAssertTrue(store.isShown(.lists))
         store.toggle(.lists)
         XCTAssertEqual(SideMenuSettings(defaults: defaults).hidden, [.lists])
-        XCTAssertFalse(RailOrder.destinations(rowOrder: [.lists], libraryIds: ["tv"]).contains(.lists))
+        XCTAssertFalse(RailOrder.destinations(rowOrder: [.lists], libraryIds: ["tv"], hidden: [.lists]).contains(.lists))
     }
 
     func testOnlyReachableFromSearchWhenHiddenFromBoth() {

@@ -13,14 +13,15 @@ enum RailOrder {
     enum Destination: Hashable {
         case finTV
         case library(String)
-        /// Shared lists. Not a Home row, so it never comes out of
-        /// `destinations`; each rail places it after the libraries, and the
-        /// side-menu setting can hide it like any library (#753).
+        /// Shared lists. Not a Home row: it sits wherever the combined order
+        /// in `SideMenuOrder` puts it (after the libraries until moved, #841),
+        /// and the side-menu setting can hide it like any library (#753).
         case lists
     }
 
-    /// `rowOrder` (the Home rows that are destinations, in the user's order)
-    /// wins; anything it does not account for follows in server order.
+    /// `rowOrder` (the menu's entries in the user's order, see
+    /// `SideMenuOrder`) wins; libraries it does not account for follow in
+    /// server order, then SashimiTV, then Lists.
     ///
     /// Rows hidden on Home are still listed. Hiding a row is a statement about
     /// the Home screen, not about the destination. What leaves the rail is
@@ -45,13 +46,13 @@ enum RailOrder {
 
         for destination in rowOrder {
             switch destination {
-            case .finTV:
-                place(.finTV)
+            case .finTV, .lists:
+                place(destination)
             case .library(let libraryId) where libraryIds.contains(libraryId):
                 // A config can outlive the library it names — the row order is
                 // saved locally and the server is free to drop a library.
                 place(destination)
-            case .library, .lists:
+            case .library:
                 continue
             }
         }
@@ -61,17 +62,12 @@ enum RailOrder {
         for libraryId in libraryIds {
             place(.library(libraryId))
         }
-        // Likewise FinTV, if the saved order predates the row existing.
+        // Likewise FinTV, if the saved order predates the row existing, and
+        // Lists, which has always come last.
         place(.finTV)
+        place(.lists)
 
         return ordered.filter { !hidden.contains($0) }
-    }
-
-    /// Libraries the rail lists that Home has no row for (Collections,
-    /// Playlists): their side-menu switch needs a row of its own in settings.
-    static func menuOnlyLibraries(_ libraries: [JellyfinLibrary], homeDestinations: [Destination]) -> [JellyfinLibrary] {
-        let onHome = Set(homeDestinations)
-        return libraries.filter { !onHome.contains(.library($0.id)) }
     }
 
     /// The settings footnote for a destination hidden from both Home and the

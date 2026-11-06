@@ -10,25 +10,28 @@ extension MainTabView {
         let icon: String
     }
 
-    /// Nav rows follow the Home row order set in Settings, so the rail and the
-    /// screen it opens onto agree with each other. Home and Search lead and
-    /// Settings trails: they are destinations rather than rows, and have no
-    /// place in that ordering. RailOrder decides the middle, with Lists
-    /// (shared lists) after the libraries unless hidden (#753).
+    /// Nav rows follow the order set in Settings › Home & Side Menu, so the
+    /// rail and the screen it opens onto agree with each other. Home and
+    /// Search lead and Settings trails: they are destinations rather than
+    /// rows, and have no place in that ordering. RailOrder decides the
+    /// middle: Home's rows with Lists and the menu-only libraries among them
+    /// (#841), less what the user hid (#753).
     static func navRows(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
-        hidden: Set<RailOrder.Destination>
+        hidden: Set<RailOrder.Destination>,
+        savedOrder: [String]? = nil
     ) -> [NavRow] {
         var rows: [NavRow] = [
             NavRow(id: .home, title: "Home", icon: "house"),
             NavRow(id: .search, title: "Search", icon: "magnifyingglass")
         ]
 
-        for destination in RailOrder.railDestinations(
+        for destination in RailOrder.destinations(
             rowConfigs: rowConfigs,
             libraryIds: libraries.map(\.id),
-            hidden: hidden
+            hidden: hidden,
+            savedOrder: savedOrder
         ) {
             switch destination {
             case .finTV:
