@@ -15,6 +15,12 @@ extension MediaDetailView {
             if let audioCodec = info.audioCodec, let channels = info.audioChannels {
                 audioInfoBadge(codec: audioCodec, channels: channels)
             }
+            // The audio language that will play, plus the others (#828).
+            if let chip = info.audioLanguageChip(
+                preferredLanguage: PlaybackSettings.shared.preferredAudioLanguage
+            ) {
+                mediaInfoBadge(chip.text())
+            }
         }
     }
 
