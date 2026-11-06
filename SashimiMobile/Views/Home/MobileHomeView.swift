@@ -18,7 +18,11 @@ struct MobileHomeView: View {
 
     /// The same rotation the Apple TV hero shows (`HeroRotation.slides`).
     private var heroSlides: [HeroSlide] {
-        HeroRotation.slides(libraryItems: viewModel.heroItems, channels: channelsViewModel.cards)
+        HeroRotation.slides(
+            libraryItems: viewModel.heroItems,
+            channels: channelsViewModel.cards,
+            hidden: rowSettings.heroHidden(itemLibraryIds: viewModel.heroItemLibraryIds)
+        )
     }
 
     var body: some View {

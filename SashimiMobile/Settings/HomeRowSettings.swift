@@ -186,3 +186,22 @@ final class HomeRowSettings: ObservableObject {
         saveRows()
     }
 }
+
+extension HomeRowSettings {
+    /// The rows turned off on Home, so their titles leave the hero too (#836).
+    func heroHidden(itemLibraryIds: [String: String]) -> HeroRotation.Hidden {
+        HeroRotation.Hidden(
+            rows: rows.map { row in
+                switch row.type {
+                case .library(let id, _):
+                    return .init(libraryId: id, isChannels: false, isVisible: row.isEnabled)
+                case .builtIn(let type):
+                    return .init(libraryId: nil, isChannels: type == .channels, isVisible: row.isEnabled)
+                case .list:
+                    return .init(libraryId: nil, isChannels: false, isVisible: row.isEnabled)
+                }
+            },
+            itemLibraryIds: itemLibraryIds
+        )
+    }
+}
