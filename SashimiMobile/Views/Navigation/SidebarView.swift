@@ -209,7 +209,7 @@ struct MainNavigationView: View {
     }
 
     private var railItems: [SidebarSelection] {
-        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden)
+        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden, savedOrder: homeRows.sideMenuOrder)
     }
 
     /// A menu-bar section change (⌘1…⌘9, ⌘F, ⌘,). Unlike a rail tap it never

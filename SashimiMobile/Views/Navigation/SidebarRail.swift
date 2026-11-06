@@ -151,7 +151,12 @@ struct SidebarRail<Footer: View>: View {
     }
 
     private var navItems: [SidebarSelection] {
-        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden)
+        SidebarSelection.railItems(
+            rowConfigs: homeRows.rows,
+            libraries: libraries,
+            hidden: sideMenu.hidden,
+            savedOrder: homeRows.sideMenuOrder
+        )
     }
 
     /// The sushi mark, with the "Sashimi" wordmark beside it when expanded.
@@ -282,20 +287,23 @@ struct SidebarRail<Footer: View>: View {
 }
 
 extension SidebarSelection {
-    /// The rail's destinations, top to bottom: Home, then SashimiTV and the
-    /// libraries in Home's row order, Lists, then Search, Downloads (iPad
-    /// only) and Settings. The menu bar's ⌘1…⌘9 number them in this order.
+    /// The rail's destinations, top to bottom: Home, then SashimiTV, the
+    /// libraries and Lists in the order Settings › Home & Side Menu sets
+    /// (#841), then Search, Downloads (iPad only) and Settings, which never
+    /// move. The menu bar's ⌘1…⌘9 number them in this order.
     /// `hidden`: what the user took out of the side menu (#753).
     static func railItems(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
-        hidden: Set<RailOrder.Destination> = []
+        hidden: Set<RailOrder.Destination> = [],
+        savedOrder: [String]? = nil
     ) -> [SidebarSelection] {
         var items: [SidebarSelection] = [.home]
         for destination in RailOrder.destinations(
             rowConfigs: rowConfigs,
             libraryIds: libraries.map(\.id),
-            hidden: hidden
+            hidden: hidden,
+            savedOrder: savedOrder
         ) {
             switch destination {
             case .finTV:
@@ -308,11 +316,9 @@ extension SidebarSelection {
                     collectionType: library.collectionType
                 ))
             case .lists:
-                continue
+                items.append(.lists)
             }
         }
-        // Shared lists follow the libraries; hideable like them (#753).
-        if !hidden.contains(.lists) { items.append(.lists) }
         items += [.search, .downloads, .settings]
         return items
     }
