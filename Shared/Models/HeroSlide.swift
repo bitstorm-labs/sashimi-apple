@@ -48,8 +48,16 @@ enum HeroRotation {
     ///
     /// An off-air channel is left out rather than shown as a dead slide — there
     /// is nothing to put in the frame and nothing to watch.
-    static func slides(libraryItems: [BaseItemDto], channels: [ChannelCard]) -> [HeroSlide] {
-        let channelSlides: [HeroSlide] = channels.compactMap { card in
+    static func slides(
+        libraryItems: [BaseItemDto],
+        channels: [ChannelCard],
+        hidden: Hidden = Hidden(libraryIds: [], itemLibraryIds: [:], channels: false)
+    ) -> [HeroSlide] {
+        let visibleItems = libraryItems.filter { item in
+            guard let libraryId = hidden.itemLibraryIds[item.id] else { return true }
+            return !hidden.libraryIds.contains(libraryId)
+        }
+        let channelSlides: [HeroSlide] = hidden.channels ? [] : channels.compactMap { card in
             guard !card.isOffAir, let item = card.item else { return nil }
             return HeroSlide(
                 item: item,
@@ -61,7 +69,41 @@ enum HeroRotation {
                 )
             )
         }
-        return interleave(base: libraryItems.map(HeroSlide.library), inserts: channelSlides)
+        return interleave(base: visibleItems.map(HeroSlide.library), inserts: channelSlides)
+    }
+
+    /// What the user hid from Home (#836). A row hidden in Settings takes its
+    /// titles out of the hero too: hiding a library is a statement that its
+    /// titles shouldn't headline the screen.
+    struct Hidden: Equatable {
+        /// Libraries whose Home row is off.
+        let libraryIds: Set<String>
+        /// Which library each hero item came from. An item it doesn't list
+        /// stays, since there's nothing to say it was hidden.
+        let itemLibraryIds: [String: String]
+        /// The SashimiTV row is off, so no channel slides.
+        let channels: Bool
+
+        init(libraryIds: Set<String>, itemLibraryIds: [String: String], channels: Bool) {
+            self.libraryIds = libraryIds
+            self.itemLibraryIds = itemLibraryIds
+            self.channels = channels
+        }
+
+        /// One Home row, reduced to what the hero cares about.
+        struct Row {
+            let libraryId: String?
+            let isChannels: Bool
+            let isVisible: Bool
+        }
+
+        /// From each target's Home row settings.
+        init(rows: [Row], itemLibraryIds: [String: String]) {
+            let off = rows.filter { !$0.isVisible }
+            self.libraryIds = Set(off.compactMap(\.libraryId))
+            self.itemLibraryIds = itemLibraryIds
+            self.channels = off.contains { $0.isChannels }
+        }
     }
 
     /// Spread `inserts` evenly through `base` rather than grouping them.
