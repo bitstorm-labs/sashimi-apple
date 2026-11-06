@@ -16,7 +16,6 @@ struct MobileSeerrDemoRoot: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(MobileColors.background)
         }
-        .seerrRequestsSheet()
         .task {
             await SeerrDemo.start(signedIn: screen != "A")
             if screen == "B" { await search.search(query: "dune", library: []) }
@@ -47,7 +46,7 @@ struct MobileSeerrDemoRoot: View {
             MobileSeerrDetailView(target: SeerrTarget(kind: .tv, tmdbId: 90228, title: "Dune: Prophecy"),
                                   opensSeasonPicker: true)
         case "E":
-            MobileSeerrRequestsView()
+            MobileRequestsPage()
         default:
             ScrollView {
                 MobileSeerrHomeRow(cardWidth: PhoneSizing.posterWidth)

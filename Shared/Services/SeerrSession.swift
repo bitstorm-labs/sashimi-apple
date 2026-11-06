@@ -76,6 +76,7 @@ final class SeerrSession: ObservableObject {
         static let server = "seerr.serverURL"
         static let userId = "seerr.user.id"
         static let userName = "seerr.user.name"
+        static let permissions = "seerr.user.permissions"
         static let title = "seerr.applicationTitle"
         static let plexClientId = "seerr.plexClientIdentifier"
     }
@@ -90,6 +91,9 @@ final class SeerrSession: ObservableObject {
     }
 
     var isActive: Bool { state.user != nil }
+
+    /// What the signed-in account may do; none while signed out.
+    var permissions: SeerrPermissions { state.user?.permissionSet ?? [] }
 
     /// "example.com" → https://example.com; trailing slashes dropped. Only
     /// http and https.
@@ -139,7 +143,11 @@ final class SeerrSession: ObservableObject {
         } catch {
             guard let id = defaults.object(forKey: Keys.userId) as? Int else { return }
             self.client = client
-            state = .signedIn(SeerrUser(id: id, displayName: defaults.string(forKey: Keys.userName)))
+            state = .signedIn(SeerrUser(
+                id: id,
+                displayName: defaults.string(forKey: Keys.userName),
+                permissions: defaults.object(forKey: Keys.permissions) as? Int
+            ))
         }
     }
 
@@ -283,6 +291,7 @@ final class SeerrSession: ObservableObject {
         credentials.setCookie(cookie, forKey: Self.cookieKey(for: serverURL))
         defaults.set(user.id, forKey: Keys.userId)
         defaults.set(user.name, forKey: Keys.userName)
+        defaults.set(user.permissions, forKey: Keys.permissions)
         self.client = client
         errorMessage = nil
         state = .signedIn(user)
@@ -299,6 +308,7 @@ final class SeerrSession: ObservableObject {
         credentials.setCookie(nil, forKey: Self.cookieKey(for: serverURL))
         defaults.removeObject(forKey: Keys.userId)
         defaults.removeObject(forKey: Keys.userName)
+        defaults.removeObject(forKey: Keys.permissions)
         client = nil
     }
 }

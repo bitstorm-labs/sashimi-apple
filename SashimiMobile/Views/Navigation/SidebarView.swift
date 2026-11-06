@@ -10,6 +10,10 @@ enum SidebarSelection: Hashable {
     case settings
     /// Shared lists.
     case lists
+    /// Seerr requests (#845), while a Seerr account is connected.
+    case requests
+    /// The admin Server dashboard (#845).
+    case dashboard
     case library(id: String, name: String, collectionType: String?)
 
     var displayName: String {
@@ -20,6 +24,8 @@ enum SidebarSelection: Hashable {
         case .downloads: return "Downloads"
         case .settings: return "Settings"
         case .lists: return "Lists"
+        case .requests: return "Requests"
+        case .dashboard: return "Dashboard"
         case .library(_, let name, _): return name
         }
     }
@@ -44,6 +50,8 @@ enum SidebarSelection: Hashable {
         switch self {
         case .finTV: return .finTV
         case .lists: return .lists
+        case .requests: return .requests
+        case .dashboard: return .dashboard
         case .library(let id, _, _): return .library(id)
         case .home, .search, .downloads, .settings: return nil
         }
@@ -54,7 +62,7 @@ enum SidebarSelection: Hashable {
     var isAvailableOffline: Bool {
         switch self {
         case .home, .downloads, .settings: return true
-        case .finTV, .search, .library, .lists: return false
+        case .finTV, .search, .library, .lists, .requests, .dashboard: return false
         }
     }
 
@@ -66,6 +74,8 @@ enum SidebarSelection: Hashable {
         case .downloads: return "arrow.down.circle"
         case .settings: return "gearshape"
         case .lists: return "list.bullet.rectangle"
+        case .requests: return RailOrder.requestsIcon
+        case .dashboard: return RailOrder.dashboardIcon
         case .library(_, let name, let collectionType):
             // Same symbols as the tvOS rail.
             return RailOrder.libraryIcon(name: name, collectionType: collectionType)
@@ -100,6 +110,8 @@ struct MainNavigationView: View {
     @ObservedObject private var commandCenter = AppCommandCenter.shared
     @ObservedObject private var homeRows = HomeRowSettings.shared
     @ObservedObject private var sideMenu = SideMenuSettings.shared
+    /// Requests is in the rail while a Seerr account is connected (#845).
+    @ObservedObject private var seerr = SeerrSession.shared
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -189,6 +201,11 @@ struct MainNavigationView: View {
         }
         .onChange(of: railItems, initial: true) { _, items in
             commandCenter.updateRailItems(items)
+            // Signed out of Seerr, or no longer an administrator, while
+            // on that page: it has left the rail, so go Home.
+            if [.requests, .dashboard].contains(selection), !items.contains(selection) {
+                selection = .home
+            }
         }
         .onDisappear {
             commandCenter.updateRailItems([])
@@ -209,7 +226,9 @@ struct MainNavigationView: View {
     }
 
     private var railItems: [SidebarSelection] {
-        SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden, savedOrder: homeRows.sideMenuOrder)
+        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        return SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden,
+                                          savedOrder: homeRows.sideMenuOrder, available: available)
     }
 
     /// A menu-bar section change (⌘1…⌘9, ⌘F, ⌘,). Unlike a rail tap it never
@@ -381,6 +400,10 @@ struct MainNavigationView: View {
                 MobileSettingsView()
             case .lists:
                 MobileListsView()
+            case .requests:
+                MobileRequestsPage()
+            case .dashboard:
+                MobileServerDashboardView()
             case .library(let id, let name, let collectionType):
                 MobileLibraryBrowseView(
                     libraryId: id,
@@ -429,7 +452,8 @@ struct MainNavigationView: View {
 }
 
 /// The account menu's items on iPhone (logo) and iPad (rail avatar): switch
-/// server, Your Requests (with a Seerr account), add a server.
+/// server, add a server. Requests has its own place now (the iPad rail, the
+/// iPhone's Libraries tab, #845).
 struct AccountMenuItems: View {
     let onAddServer: () -> Void
     @ObservedObject private var sessionManager = SessionManager.shared
@@ -446,7 +470,6 @@ struct AccountMenuItems: View {
                 }
             }
         }
-        SeerrRequestsMenuItem()
         Divider()
         Button(action: onAddServer) {
             Label("Add Server…", systemImage: "plus")

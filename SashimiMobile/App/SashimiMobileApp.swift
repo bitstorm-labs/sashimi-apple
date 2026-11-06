@@ -140,8 +140,6 @@ struct ContentView: View {
                     }
                 }
                 .id(sessionManager.activeSessionIdentity)
-                // The profile menu's "Your Requests" (iPhone and iPad).
-                .seerrRequestsSheet()
                 .task {
                     // Re-runs on a server switch (the id above), which starts
                     // the verdict over for the new server.

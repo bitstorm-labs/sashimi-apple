@@ -32,11 +32,6 @@ struct MobileRequestsSettingsView: View {
             if let user = session.state.user {
                 Section {
                     LabeledContent("Signed in as", value: user.name)
-                    NavigationLink {
-                        MobileSeerrRequestsView()
-                    } label: {
-                        Label("Your Requests", systemImage: "tray.full")
-                    }
                     Button("Sign Out", role: .destructive) {
                         Task { await session.signOut() }
                     }

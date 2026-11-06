@@ -40,6 +40,9 @@ struct SeerrUser: Codable, Equatable, Sendable {
     var username: String?
     var plexUsername: String?
     var email: String?
+    /// Seerr's permission bits (`SeerrPermissions`). Nil when the account
+    /// was restored offline before it was ever saved.
+    var permissions: Int?
 
     /// What "Signed in as …" shows.
     var name: String {
@@ -91,8 +94,38 @@ struct SeerrMediaInfo: Decodable, Equatable, Sendable {
     var mediaStatus: SeerrMediaStatus? { status.flatMap(SeerrMediaStatus.init(rawValue:)) }
 }
 
+/// A request's requester (or approver). Seerr fills `displayName` in itself
+/// from the username, Plex or Jellyfin name, or email.
 struct SeerrRequestUser: Decodable, Equatable, Sendable {
     let id: Int
+    var displayName: String?
+    var username: String?
+    var plexUsername: String?
+    /// A full URL (Plex, Gravatar) or a server path ("/avatarproxy/…").
+    var avatar: String?
+
+    init(id: Int, displayName: String? = nil, username: String? = nil, plexUsername: String? = nil, avatar: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.username = username
+        self.plexUsername = plexUsername
+        self.avatar = avatar
+    }
+
+    var name: String {
+        for candidate in [displayName, username, plexUsername] {
+            if let candidate, !candidate.trimmingCharacters(in: .whitespaces).isEmpty { return candidate }
+        }
+        return "User \(id)"
+    }
+
+    /// The avatar, resolved against the Seerr server for a server path.
+    func avatarURL(server: URL) -> URL? {
+        guard let avatar, !avatar.isEmpty else { return nil }
+        if avatar.hasPrefix("http://") || avatar.hasPrefix("https://") { return URL(string: avatar) }
+        guard avatar.hasPrefix("/") else { return nil }
+        return URL(string: server.absoluteString + avatar)
+    }
 }
 
 /// `MediaRequest`.
@@ -105,12 +138,22 @@ struct SeerrRequest: Decodable, Equatable, Identifiable, Sendable {
     var seasons: [SeerrSeasonRequest]?
     var media: SeerrMediaInfo?
     var requestedBy: SeerrRequestUser?
+    var modifiedBy: SeerrRequestUser?
 
     var requestStatus: SeerrRequestStatus? { SeerrRequestStatus(rawValue: status) }
 }
 
 struct SeerrRequestPage: Decodable, Sendable {
     let results: [SeerrRequest]
+    var pageInfo: SeerrPageInfo?
+}
+
+/// `pageInfo` on `GET /request`: `results` is the total across pages.
+struct SeerrPageInfo: Decodable, Equatable, Sendable {
+    var pages: Int?
+    var pageSize: Int?
+    var results: Int?
+    var page: Int?
 }
 
 /// One search hit. Only movies and shows decode; people and anything else
@@ -149,12 +192,15 @@ struct SeerrSearchResult: Decodable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, mediaType, title, name, releaseDate, firstAirDate, posterPath, backdropPath, overview, mediaInfo
+        case id, tmdbId, mediaType, title, name, releaseDate, firstAirDate, posterPath, backdropPath, overview, mediaInfo
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        tmdbId = try container.decode(Int.self, forKey: .id)
+        // The watchlist names the TMDB id `tmdbId`; for a local (non-Plex)
+        // account its `id` is the watchlist entry's own. Everything else
+        // only has `id`.
+        tmdbId = try container.decodeIfPresent(Int.self, forKey: .tmdbId) ?? container.decode(Int.self, forKey: .id)
         kind = try container.decode(SeerrMediaKind.self, forKey: .mediaType)
         title = try container.decodeIfPresent(String.self, forKey: .title)
             ?? container.decodeIfPresent(String.self, forKey: .name)

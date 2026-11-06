@@ -24,6 +24,9 @@ final class SeerrDetailModel: ObservableObject {
     /// Set once the title is on the server: the page becomes the library page.
     @Published private(set) var libraryItem: BaseItemDto?
     @Published private(set) var isSubmitting = false
+    /// "2 of 5 movie requests left · resets over 7 days" near the Request
+    /// button, only when the account has a limit (#845).
+    @Published private(set) var quotaNote: String?
     @Published var errorMessage: String?
 
     private let session: SeerrSession
@@ -52,6 +55,7 @@ final class SeerrDetailModel: ObservableObject {
             let details = try await client.details(kind: target.kind, tmdbId: target.tmdbId)
             self.details = details
             action = Self.action(for: details, plan: seasonPlan(for: details), userId: session.state.user?.id)
+            await loadQuota(client: client)
             if details.mediaInfo?.mediaStatus == .available || details.mediaInfo?.mediaStatus == .partiallyAvailable {
                 libraryItem = await libraryLookup(target.tmdbId, target.kind, details.title)
             }
@@ -61,6 +65,15 @@ final class SeerrDetailModel: ObservableObject {
             if details == nil { action = .failed(error.localizedDescription) }
             await session.handle(error)
         }
+    }
+
+    /// Best effort: no line if the quota can't be read.
+    private func loadQuota(client: SeerrClient) async {
+        guard action == .request || action == .chooseSeasons, let userId = session.state.user?.id else {
+            quotaNote = nil
+            return
+        }
+        quotaNote = (try? await client.quota(userId: userId))?.summary(for: target.kind)
     }
 
     func seasonPlan() -> SeerrSeasonPlan? {

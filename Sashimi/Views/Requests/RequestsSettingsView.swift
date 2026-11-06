@@ -9,11 +9,6 @@ struct RequestsSettingsView: View {
     @State private var showingLocalForm = false
     @State private var email = ""
     @State private var password = ""
-    private let onOpenRequests: () -> Void
-
-    init(onOpenRequests: @escaping () -> Void = {}) {
-        self.onOpenRequests = onOpenRequests
-    }
 
     var body: some View {
         ZStack {
@@ -54,9 +49,6 @@ struct RequestsSettingsView: View {
 
             if let user = session.state.user {
                 SettingsInfoRow(label: "Signed in as", value: user.name)
-                SettingsOptionRow(icon: "tray.full", title: "Your Requests", subtitle: "What you've asked for, and where it's at") {
-                    onOpenRequests()
-                }
                 SettingsOptionRow(icon: "rectangle.portrait.and.arrow.right", title: "Sign Out", subtitle: "Stop requesting from this Apple TV") {
                     Task { await session.signOut() }
                 }

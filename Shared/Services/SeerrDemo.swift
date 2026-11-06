@@ -60,8 +60,21 @@ final class SeerrDemoServer: URLProtocol {
         "GET /api/v1/movie/253": "{\"id\":253,\"title\":\"Wicked: For Good\",\"releaseDate\":\"2025-11-21\",\"mediaInfo\":{\"status\":5}}"
     ]
 
+    /// The Requests page's extra routes (#845): Discover rows reuse the
+    /// search results; approve, decline and delete change nothing.
+    private static func requestsPageAnswer(_ route: String) -> (Int, String)? {
+        if route == "GET /api/v1/request/count" {
+            return (200, "{\"total\":4,\"pending\":1,\"processing\":1,\"available\":1}")
+        }
+        if route.hasPrefix("GET /api/v1/discover/") { return answer("GET /api/v1/search") }
+        if route.hasPrefix("POST /api/v1/request/") { return (200, "{\"id\":1,\"status\":2}") }
+        if route.hasPrefix("DELETE /api/v1/request/") { return (204, "") }
+        return nil
+    }
+
     private static func answer(_ route: String) -> (Int, String) {
-        let user = "{\"id\":7,\"displayName\":\"mom\",\"email\":\"mom@example.com\"}"
+        // An administrator, so the Requests page shows approve and decline.
+        let user = "{\"id\":7,\"displayName\":\"mom\",\"email\":\"mom@example.com\",\"permissions\":2}"
         if let movie = movies[route] { return (200, movie) }
         switch route {
         case "GET /api/v1/settings/public":
@@ -117,7 +130,7 @@ final class SeerrDemoServer: URLProtocol {
             ]}
             """)
         default:
-            if route.hasPrefix("DELETE /api/v1/request/") { return (204, "") }
+            if let managed = requestsPageAnswer(route) { return managed }
             if route == "POST /api/v1/request" { return (201, "{\"id\":99,\"status\":1}") }
             return (404, "{\"message\":\"Not in the demo\"}")
         }

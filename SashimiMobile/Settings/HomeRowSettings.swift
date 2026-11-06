@@ -200,8 +200,9 @@ final class HomeRowSettings: ObservableObject {
 
     /// Home & Side Menu's one list on iPad/Mac (#841): the rows, with Lists
     /// and the libraries Home has no row for among them.
-    func sideMenuEntries(libraryIds: [String]) -> [SideMenuOrder.Entry] {
-        SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder)
+    /// `available`: Requests and Dashboard while the account allows them (#845).
+    func sideMenuEntries(libraryIds: [String], available: [RailOrder.Destination] = []) -> [SideMenuOrder.Entry] {
+        SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder, available: available)
     }
 
     /// Saves a drag in that list: the rows in their new order, as always, and

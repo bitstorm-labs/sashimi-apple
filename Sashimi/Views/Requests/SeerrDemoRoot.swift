@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// Debug builds only: the screen `SASHIMI_SEERR_DEMO` names, against the
-/// canned Seerr in `SeerrDemo` (A, A2, B, C, D, E, H).
+/// canned Seerr in `SeerrDemo` (A, A2, B, C, D, E: the Requests page, H).
 struct SeerrDemoRoot: View {
     let screen: String
     @State private var ready = false
@@ -47,7 +47,7 @@ struct SeerrDemoRoot: View {
                 SeerrSeasonPickerView(title: "Love Is Blind", plan: plan) { _ in } onCancel: {}
             }
         case "E":
-            SeerrRequestsView()
+            RequestsPageView()
         default:
             VStack {
                 Spacer()

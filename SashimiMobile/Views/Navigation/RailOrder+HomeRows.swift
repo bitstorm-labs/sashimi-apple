@@ -7,18 +7,21 @@ extension RailOrder {
     /// (#841) — the same rule as the tvOS rail. Continue Watching and
     /// shared-list rows are not destinations and contribute nothing.
     /// `hidden` is what the user took out of the side menu (#753);
-    /// `savedOrder` is `HomeRowSettings.sideMenuOrder`.
+    /// `available` is `RailOrder.conditionalDestinations` (Requests,
+    /// Dashboard, #845); `savedOrder` is `HomeRowSettings.sideMenuOrder`.
     static func destinations(
         rowConfigs: [HomeRowConfig],
         libraryIds: [String],
         hidden: Set<Destination> = [],
-        savedOrder: [String]? = nil
+        savedOrder: [String]? = nil,
+        available: [Destination] = []
     ) -> [Destination] {
         SideMenuOrder.destinations(
             rows: rowConfigs.map(\.sideMenuRow),
             libraryIds: libraryIds,
             saved: savedOrder,
-            hidden: hidden
+            hidden: hidden,
+            available: available
         )
     }
 }
