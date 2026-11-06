@@ -2302,7 +2302,7 @@ actor JellyfinClient {
             queryItems: [
                 URLQueryItem(name: "SearchTerm", value: query),
                 URLQueryItem(name: "Limit", value: "\(limit)"),
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,LibraryName,MediaStreams"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,ProductionYear,PremiereDate,ParentBackdropImageTags,BackdropImageTags,UserData,ParentId,Path,LibraryName,MediaStreams,ProviderIds"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb"),
                 URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
                 URLQueryItem(name: "Recursive", value: "true")
@@ -2409,7 +2409,7 @@ actor JellyfinClient {
         let data = try await request(
             path: "/Users/\(userId)/Items/\(itemId)",
             queryItems: [
-                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags,RemoteTrailers,LocalTrailerCount,SeriesName,SeriesId,SeasonId,ParentId,IndexNumber,ParentIndexNumber,RunTimeTicks,ProductionYear,PremiereDate,LibraryName,MediaStreams"),
+                URLQueryItem(name: "Fields", value: "Overview,PrimaryImageAspectRatio,CommunityRating,OfficialRating,Genres,Taglines,People,UserData,Chapters,ParentBackdropImageTags,RemoteTrailers,LocalTrailerCount,SeriesName,SeriesId,SeasonId,ParentId,IndexNumber,ParentIndexNumber,RunTimeTicks,ProductionYear,PremiereDate,LibraryName,MediaStreams,ProviderIds"),
                 URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb")
             ]
         )
