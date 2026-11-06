@@ -41,6 +41,9 @@ struct SashimiApp: App {
             ContentView()
                 .environmentObject(sessionManager)
                 .toastOverlay()
+                // A saved Seerr session is checked once at launch; without
+                // one, nothing about requests shows anywhere.
+                .task { await SeerrSession.shared.restore() }
         }
         // The TV button and other backgrounding transitions leave `.active`
         // without the detail screen's `onDisappear` ever firing (it's a

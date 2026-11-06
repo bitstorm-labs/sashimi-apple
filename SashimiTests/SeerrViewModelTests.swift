@@ -191,6 +191,49 @@ final class SeerrViewModelTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), [5])
     }
 
+    // MARK: Request missing seasons (library show's More menu)
+
+    private func libraryShow(tmdb: String?) throws -> BaseItemDto {
+        let ids = tmdb.map { ",\"ProviderIds\":{\"Tmdb\":\"\($0)\"}" } ?? ""
+        return try JSONDecoder().decode(BaseItemDto.self, from: Data("{\"Id\":\"s1\",\"Name\":\"Love Is Blind\",\"Type\":\"Series\"\(ids)}".utf8))
+    }
+
+    func testALibraryShowMissingSeasonsOffersToRequestThem() async throws {
+        let session = await signedInSession()
+        SeerrStubServer.on("GET", "/api/v1/tv/77", body: """
+        {"id":77,"name":"Love Is Blind","seasons":[{"seasonNumber":1,"episodeCount":10,"airDate":"2020-02-13"},{"seasonNumber":2,"episodeCount":10,"airDate":"2022-02-13"}],
+         "mediaInfo":{"status":4,"seasons":[{"seasonNumber":1,"status":5}]}}
+        """)
+
+        let target = await SeerrDetailModel.missingSeasonsTarget(for: try libraryShow(tmdb: "77"), session: session)
+
+        XCTAssertEqual(target?.tmdbId, 77)
+        XCTAssertEqual(target?.kind, .tv)
+    }
+
+    func testAShowWithEverySeasonOnTheServerOffersNothing() async throws {
+        let session = await signedInSession()
+        SeerrStubServer.on("GET", "/api/v1/tv/77", body: """
+        {"id":77,"name":"Love Is Blind","seasons":[{"seasonNumber":1,"episodeCount":10,"airDate":"2020-02-13"}],
+         "mediaInfo":{"status":5,"seasons":[{"seasonNumber":1,"status":5}]}}
+        """)
+
+        let target = await SeerrDetailModel.missingSeasonsTarget(for: try libraryShow(tmdb: "77"), session: session)
+
+        XCTAssertNil(target)
+    }
+
+    func testMissingSeasonsNeedsAnAccountAndATmdbId() async throws {
+        let signedOut = SeerrSession(defaults: SeerrFixtures.defaults(), credentials: credentials, pollInterval: .zero)
+        let none = await SeerrDetailModel.missingSeasonsTarget(for: try libraryShow(tmdb: "77"), session: signedOut)
+        XCTAssertNil(none)
+
+        let session = await signedInSession()
+        let untagged = await SeerrDetailModel.missingSeasonsTarget(for: try libraryShow(tmdb: nil), session: session)
+        XCTAssertNil(untagged)
+        XCTAssertTrue(SeerrStubServer.requests.isEmpty)
+    }
+
     func testSignedOutHasNoRequests() async {
         let session = SeerrSession(defaults: SeerrFixtures.defaults(), credentials: credentials, pollInterval: .zero)
         let model = SeerrRequestsModel(session: session)

@@ -93,6 +93,13 @@ struct HomeView: View {
                         ) { index, config in
                             rowView(for: config)
                                 .id(index + 1)
+                            // "Your requests" (Seerr), second on Home.
+                            if index == 0 {
+                                SeerrHomeSection { item in
+                                    selectedItemIsYouTube = false
+                                    selectedItem = item
+                                }
+                            }
                         }
 
                         // Bottom spacing
@@ -603,41 +610,6 @@ struct RecentlyAddedLibraryRow: View {
         }
 
         return Array(result.prefix(20))
-    }
-}
-
-// MARK: - Loading Overlay
-struct LoadingOverlay: View {
-    @State private var rotation: Double = 0
-
-    var body: some View {
-        ZStack {
-            SashimiTheme.background.opacity(0.9)
-                .ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                ZStack {
-                    Circle()
-                        .stroke(SashimiTheme.textTertiary.opacity(0.3), lineWidth: 4)
-                        .frame(width: 60, height: 60)
-
-                    Circle()
-                        .trim(from: 0, to: 0.3)
-                        .stroke(SashimiTheme.accent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 60, height: 60)
-                        .rotationEffect(.degrees(rotation))
-                        .onAppear {
-                            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-                                rotation = 360
-                            }
-                        }
-                }
-
-                Text("Loading your library...")
-                    .font(.headline)
-                    .foregroundStyle(SashimiTheme.textSecondary)
-            }
-        }
     }
 }
 

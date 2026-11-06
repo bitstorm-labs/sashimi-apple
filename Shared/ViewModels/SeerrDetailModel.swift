@@ -109,6 +109,16 @@ final class SeerrDetailModel: ObservableObject {
         }
     }
 
+    /// For a library show's More menu: a target when Seerr says some aired
+    /// seasons aren't on the server and nobody has asked for them. Nil (and
+    /// no request to Seerr) without an account or a TMDB id.
+    static func missingSeasonsTarget(for item: BaseItemDto, session: SeerrSession = .shared) async -> SeerrTarget? {
+        guard item.type == .series, let tmdbId = item.tmdbId, let client = session.client, session.isActive else { return nil }
+        guard let details = try? await client.details(kind: .tv, tmdbId: tmdbId) else { return nil }
+        let plan = SeerrSeasonPlan(details: details, partialRequestsEnabled: session.partialRequestsEnabled)
+        return plan.hasMissingSeasons ? SeerrTarget(kind: .tv, tmdbId: tmdbId, title: details.title, posterPath: details.posterPath) : nil
+    }
+
     /// The active server's copy of a title, matched by TMDB id among the
     /// library's search results for its name.
     static func findInLibrary(tmdbId: Int, kind: SeerrMediaKind, title: String) async -> BaseItemDto? {

@@ -15,6 +15,14 @@ extension MediaDetailView {
                 }
             }
 
+            if let target = missingSeasonsTarget {
+                Button {
+                    requestingSeasons = target
+                } label: {
+                    Label("Request Missing Seasons", systemImage: "tray.and.arrow.down")
+                }
+            }
+
             Button {
                 Task { await toggleFavorite() }
             } label: {

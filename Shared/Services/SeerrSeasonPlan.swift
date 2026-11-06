@@ -149,3 +149,8 @@ struct SeerrSeasonPlan: Equatable {
         }
     }
 }
+
+extension SeerrSeasonPlan: Identifiable {
+    /// Stable for one show's sheet: the seasons, not the ticks.
+    var id: String { seasons.map { "\($0.number)" }.joined(separator: ",") }
+}

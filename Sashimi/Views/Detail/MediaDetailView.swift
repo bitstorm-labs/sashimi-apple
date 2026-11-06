@@ -49,6 +49,10 @@ struct MediaDetailView: View {
     @State var channelTarget: ChannelTarget?
     /// Add to List (shared lists), on the active server's titles.
     @State var showingAddToList = false
+    /// Set when Seerr says this show is missing seasons: the More menu then
+    /// offers "Request Missing Seasons".
+    @State var missingSeasonsTarget: SeerrTarget?
+    @State var requestingSeasons: SeerrTarget?
     @ObservedObject var session = SessionManager.shared
 
     var isSeries: Bool { item.type == .series }
@@ -198,6 +202,12 @@ struct MediaDetailView: View {
         }
         .task {
             await loadContent()
+        }
+        .task(id: item.id) {
+            missingSeasonsTarget = await SeerrDetailModel.missingSeasonsTarget(for: item)
+        }
+        .fullScreenCover(item: $requestingSeasons) { target in
+            SeerrDetailView(target: target, opensSeasonPicker: true)
         }
         .onAppear {
             isWatched = item.userData?.played ?? false
