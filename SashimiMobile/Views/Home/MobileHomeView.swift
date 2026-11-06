@@ -212,8 +212,17 @@ struct MobileHomeView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        ForEach(rowSettings.rows.filter { $0.isEnabled }) { row in
-            rowView(for: row)
+        let enabledRows = rowSettings.rows.filter { $0.isEnabled }
+        ForEach(enabledRows) { row in
+            if row.id == enabledRows.first?.id {
+                // "Your requests" (Seerr), second on Home.
+                VStack(alignment: .leading, spacing: 0) {
+                    rowView(for: row)
+                    MobileSeerrHomeRow(cardWidth: MobileSizing.posterWidth)
+                }
+            } else {
+                rowView(for: row)
+            }
         }
 
         // Empty state

@@ -6,6 +6,8 @@ import NukeUI
 // MobileDetailView handles movies, series, and episodes in one view - splitting would fragment related display logic
 
 struct MobileDetailView: View {
+    /// "Request Missing Seasons" (Seerr) in the More menu of a show.
+    @StateObject private var missingSeasons = SeerrMissingSeasonsOffer()
     // @State (tvOS parity): list/search endpoints omit heavy fields like
     // People, so the .task refresh swaps in the full item — with a plain
     // `let`, cast (and other detail-only fields) silently never showed for
@@ -204,6 +206,7 @@ struct MobileDetailView: View {
         .navigationDestination(item: $seriesPage) { series in
             AdaptiveDetailView(item: series, libraryName: libraryName, serverID: serverID)
         }
+        .seerrMissingSeasons(missingSeasons, item: item)
         .task {
             if NetworkMonitor.shared.isOnline,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
@@ -289,7 +292,8 @@ struct MobileDetailView: View {
                     Label(entry.title, systemImage: entry.systemImage)
                 }
             }
-            if !menuEntries.isEmpty {
+            SeerrMissingSeasonsMenuItem(offer: missingSeasons)
+            if !menuEntries.isEmpty || missingSeasons.target != nil {
                 Divider()
             }
             Button {

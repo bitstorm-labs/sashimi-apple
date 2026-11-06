@@ -101,6 +101,9 @@ struct SearchView: View {
     @State private var selectedSource: ServerMediaResult?
     @State private var searchTask: Task<Void, Never>?
     @StateObject private var historyManager = SearchHistoryManager.shared
+    /// Titles that aren't on the server, from Seerr (only with an account).
+    @StateObject private var seerr = SeerrSearchModel()
+    @State private var seerrTarget: SeerrTarget?
 
     init(onBackAtRoot: (() -> Void)? = nil, focusNamespace: Namespace.ID? = nil) {
         self.onBackAtRoot = onBackAtRoot
@@ -136,6 +139,9 @@ struct SearchView: View {
                 ServerScopedMediaDetailView(source: source)
             }
         }
+        .fullScreenCover(item: $seerrTarget) { target in
+            SeerrDetailView(target: target)
+        }
         .sheet(item: $selectedGroup) { group in
             ServerMediaSourcePickerView(group: group) { source in
                 selectedSource = source
@@ -155,6 +161,7 @@ struct SearchView: View {
                 // Back clears the query before leaving the screen.
                 searchText = ""
                 results = []
+                seerr.clear()
             } else {
                 onBackAtRoot?()
             }
@@ -226,7 +233,7 @@ struct SearchView: View {
 
     @ViewBuilder
     private var resultsPanel: some View {
-        if isSearching && results.isEmpty {
+        if isSearching && results.isEmpty && !seerr.isVisible {
             centeredMessage { ProgressView().tint(SashimiTheme.accent).scaleEffect(1.5) }
         } else if searchText.isEmpty {
             centeredMessage {
@@ -236,7 +243,7 @@ struct SearchView: View {
                     message: "Find movies and TV shows"
                 )
             }
-        } else if results.isEmpty {
+        } else if results.isEmpty && !seerr.isVisible {
             centeredMessage {
                 EmptyStateView(
                     icon: "magnifyingglass",
@@ -247,7 +254,9 @@ struct SearchView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 44) {
-                    Text("\(results.count) result\(results.count == 1 ? "" : "s") for \u{201C}\(searchText)\u{201D}")
+                    Text(results.isEmpty
+                         ? "Nothing in your library for \u{201C}\(searchText)\u{201D}"
+                         : "\(results.count) result\(results.count == 1 ? "" : "s") for \u{201C}\(searchText)\u{201D}")
                         .font(.subheadline)
                         .foregroundStyle(SashimiTheme.textTertiary)
                         .padding(.horizontal, 60)
@@ -258,6 +267,12 @@ struct SearchView: View {
                             isYouTube: isYouTubeStyle,
                             onSelect: select
                         )
+                    }
+
+                    if seerr.isVisible {
+                        SeerrSearchRow(title: seerr.sectionTitle, items: seerr.items) { item in
+                            seerrTarget = item.target
+                        }
                     }
                 }
                 .padding(.top, 60)
@@ -280,6 +295,7 @@ struct SearchView: View {
     private func performSearch() async {
         guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
             results = []
+            seerr.clear()
             return
         }
 
@@ -299,6 +315,9 @@ struct SearchView: View {
         if !results.isEmpty {
             historyManager.addSearch(searchText)
         }
+        // After the library row is up: Seerr's row leaves out anything it
+        // already shows.
+        await seerr.search(query: searchText, library: serverResults.map(\.item))
     }
 
     private func select(_ group: ServerMediaResultGroup) {

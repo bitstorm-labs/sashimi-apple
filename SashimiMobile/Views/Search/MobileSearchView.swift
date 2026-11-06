@@ -26,6 +26,22 @@ private enum RecentSearches {
     }
 }
 
+/// "2024 · Movie" secondary line under each result card.
+private func searchResultSubtitle(_ item: BaseItemDto) -> String {
+    var parts: [String] = []
+    if let year = item.displayYear { parts.append(String(year)) }
+    if let type = item.type {
+        switch type {
+        case .movie: parts.append("Movie")
+        case .series: parts.append("Series")
+        case .episode: parts.append("Episode")
+        case .boxSet: parts.append("Collection")
+        default: break
+        }
+    }
+    return parts.joined(separator: " · ")
+}
+
 struct MobileSearchView: View {
     private let initialQuery: String?
     private let onInitialQueryConsumed: (() -> Void)?
@@ -42,6 +58,9 @@ struct MobileSearchView: View {
     // Only commit a query to history after the user pauses typing on a query
     // that returned results (avoids logging every keystroke prefix).
     @State private var historyTask: Task<Void, Never>?
+    /// Titles that aren't on the server, from Seerr (only with an account).
+    @StateObject private var seerr = SeerrSearchModel()
+    @State private var seerrTarget: SeerrTarget?
 
     /// The iPad header bar's search field when it drives this view. `nil`
     /// (iPhone) keeps the query private and uses the system `.searchable`
@@ -104,10 +123,10 @@ struct MobileSearchView: View {
                     } else {
                         recentSearchesSection
                     }
-                } else if isSearching && searchResults.isEmpty {
+                } else if isSearching && searchResults.isEmpty && !seerr.isVisible {
                     ProgressView()
                         .frame(maxWidth: .infinity, minHeight: 300)
-                } else if searchResults.isEmpty {
+                } else if searchResults.isEmpty && !seerr.isVisible {
                     Group {
                         if let searchServerWarning {
                             ContentUnavailableView(
@@ -136,6 +155,7 @@ struct MobileSearchView: View {
                 ServerScopedMediaDetailView(source: source)
             }
         }
+        .seerrDetailCover(item: $seerrTarget)
         .sheet(item: $selectedGroup) { group in
             ServerMediaSourcePickerView(group: group) { source in
                 selectedSource = source
@@ -249,7 +269,8 @@ struct MobileSearchView: View {
 
     private func resultsGrid(metrics: (columns: [GridItem], cardWidth: CGFloat)) -> some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            Text(searchResults.count == 1 ? "1 result" : "\(searchResults.count) results")
+            Text(searchResults.isEmpty ? "Nothing in your library"
+                 : searchResults.count == 1 ? "1 result" : "\(searchResults.count) results")
                 .font(MobileTypography.caption)
                 .foregroundStyle(MobileColors.textTertiary)
                 .padding(.horizontal, MobileSpacing.md)
@@ -279,7 +300,7 @@ struct MobileSearchView: View {
                                     serverURL: result.primary.serverURL,
                                     serverID: result.primary.serverID
                                 )
-                                Text(subtitleText(result.primary.item))
+                                Text(searchResultSubtitle(result.primary.item))
                                     .font(MobileTypography.captionSmall)
                                     .foregroundStyle(MobileColors.textTertiary)
                                     .lineLimit(1)
@@ -294,24 +315,19 @@ struct MobileSearchView: View {
                 }
             }
             .padding(.horizontal, MobileSpacing.md)
-        }
-        .padding(.top, MobileSpacing.xs)
-    }
 
-    /// "2024 · Movie" secondary line under each result card.
-    private func subtitleText(_ item: BaseItemDto) -> String {
-        var parts: [String] = []
-        if let year = item.displayYear { parts.append(String(year)) }
-        if let type = item.type {
-            switch type {
-            case .movie: parts.append("Movie")
-            case .series: parts.append("Series")
-            case .episode: parts.append("Episode")
-            case .boxSet: parts.append("Collection")
-            default: break
+            if seerr.isVisible {
+                MobileSeerrSearchRow(
+                    title: sizeClass == .compact ? "Not in your library" : seerr.sectionTitle,
+                    items: seerr.items,
+                    cardWidth: sizeClass == .compact ? PhoneSizing.posterWidth : MobileSizing.posterWidth
+                ) { item in
+                    seerrTarget = item.target
+                }
+                .padding(.top, MobileSpacing.md)
             }
         }
-        return parts.joined(separator: " · ")
+        .padding(.top, MobileSpacing.xs)
     }
 
     private func performSearch(query: String) async {
@@ -320,6 +336,7 @@ struct MobileSearchView: View {
                 searchResults = []
                 searchServerWarning = nil
                 isSearching = false
+                seerr.clear()
             }
             return
         }
@@ -344,6 +361,9 @@ struct MobileSearchView: View {
         searchServerWarning = search.hasServerFailures
             ? "Some saved servers could not be reached. Results may be incomplete."
             : nil
+        // After the library results are up: Seerr's row leaves out anything
+        // they already show.
+        await seerr.search(query: query, library: search.results.map(\.item))
     }
 
     /// Return in the header field: skip the debounce and record the query.

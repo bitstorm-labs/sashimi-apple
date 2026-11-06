@@ -31,23 +31,7 @@ struct PhoneHomeView: View {
                 // Logo taps open the server quick-switcher (phone equivalent
                 // of the tvOS avatar menu).
                 Menu {
-                    ForEach(sessionManager.servers) { server in
-                        Button {
-                            Task { await sessionManager.switchServer(to: server.id) }
-                        } label: {
-                            if server.id == sessionManager.activeServerId {
-                                Label(server.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(server.displayName)
-                            }
-                        }
-                    }
-                    Divider()
-                    Button {
-                        showAddServer = true
-                    } label: {
-                        Label("Add Server…", systemImage: "plus")
-                    }
+                    AccountMenuItems { showAddServer = true }
                 } label: {
                     HStack(spacing: 8) {
                         Image("SidebarLogo")
@@ -115,8 +99,17 @@ struct PhoneHomeView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        ForEach(rowSettings.rows.filter { $0.isEnabled }) { row in
-            rowView(for: row)
+        let enabledRows = rowSettings.rows.filter { $0.isEnabled }
+        ForEach(enabledRows) { row in
+            if row.id == enabledRows.first?.id {
+                // "Your requests" (Seerr), second on Home.
+                VStack(alignment: .leading, spacing: 0) {
+                    rowView(for: row)
+                    MobileSeerrHomeRow(cardWidth: PhoneSizing.posterWidth)
+                }
+            } else {
+                rowView(for: row)
+            }
         }
 
         if viewModel.continueWatchingItems.isEmpty && viewModel.libraries.isEmpty {
