@@ -7,6 +7,8 @@ import NukeUI
 // PhoneDetailView handles movies, series, and episodes in one stacked layout - splitting would fragment related display logic
 
 struct PhoneDetailView: View {
+    /// "Request Missing Seasons" (Seerr) in the More menu of a show.
+    @StateObject private var missingSeasons = SeerrMissingSeasonsOffer()
     // @State (tvOS parity): list/search endpoints omit heavy fields like
     // People, so the .task refresh swaps in the full item — with a plain
     // `let`, cast (and other detail-only fields) silently never showed for
@@ -160,6 +162,7 @@ struct PhoneDetailView: View {
             MobileAddToChannelSheet(target: target)
                 .dismissesOnOutsideTap()
         }
+        .seerrMissingSeasons(missingSeasons, item: item)
         .task {
             if NetworkMonitor.shared.isOnline,
                let freshItem = try? await JellyfinClient.shared.getItem(itemId: item.id) {
@@ -273,6 +276,7 @@ struct PhoneDetailView: View {
                     Label(entry.title, systemImage: entry.systemImage)
                 }
             }
+            SeerrMissingSeasonsMenuItem(offer: missingSeasons)
             Divider()
             adminMenuItems
         } label: {

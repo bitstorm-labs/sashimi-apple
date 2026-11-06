@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var showingLogoutConfirmation = false
     @State private var navigationPath = NavigationPath()
     @StateObject private var serverPlugins = ServerPluginsViewModel()
+    @ObservedObject private var seerr = SeerrSession.shared
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -62,6 +63,16 @@ struct SettingsView: View {
                                 subtitle: serverPlugins.subtitle(for: sessionManager)
                             ) {
                                 navigationPath.append(SettingsDestination.serverPlugins)
+                            }
+
+                            // Seerr: request titles that aren't on the server.
+                            SettingsOptionRow(
+                                icon: "tray.and.arrow.down",
+                                title: "Requests",
+                                subtitle: seerr.state.user.map { "Signed in as \($0.name)" }
+                                    ?? "Request movies and shows through \(seerr.applicationTitle)"
+                            ) {
+                                navigationPath.append(SettingsDestination.requests)
                             }
 
                             SettingsOptionRow(
@@ -135,6 +146,12 @@ struct SettingsView: View {
                     ServerDashboardView()
                 case .serverPlugins:
                     ServerPluginsView(model: serverPlugins)
+                case .requests:
+                    RequestsSettingsView {
+                        navigationPath.append(SettingsDestination.yourRequests)
+                    }
+                case .yourRequests:
+                    SeerrRequestsView()
                 }
             }
         }
@@ -173,6 +190,8 @@ enum SettingsDestination: Hashable {
     case appIcon
     case serverDashboard
     case serverPlugins
+    case requests
+    case yourRequests
 }
 
 struct SettingsOptionRow: View {

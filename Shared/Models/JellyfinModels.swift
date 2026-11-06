@@ -130,6 +130,10 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
     /// The entry's id within a playlist (shared lists): what remove and move
     /// address. Only playlist item listings carry it.
     var playlistItemId: String?
+    /// External ids ("Tmdb", "Imdb", "Tvdb"), when the query asks for the
+    /// ProviderIds field. Search uses the TMDB id to keep Seerr's results
+    /// from repeating what the library row already shows.
+    var providerIds: [String: String]?
 
     /// Resolution chip for cover art: "4K", "HD", or "SD". Nil when the item
     /// has no video stream (series/season) or dimensions are unknown.
@@ -184,6 +188,7 @@ struct BaseItemDto: Codable, Identifiable, Hashable {
         case seriesPrimaryImageTag = "SeriesPrimaryImageTag"
         case seriesThumbImageTag = "SeriesThumbImageTag"
         case playlistItemId = "PlaylistItemId"
+        case providerIds = "ProviderIds"
     }
 
     func hash(into hasher: inout Hasher) {

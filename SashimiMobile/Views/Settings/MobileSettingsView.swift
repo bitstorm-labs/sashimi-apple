@@ -5,6 +5,7 @@ struct MobileSettingsView: View {
     @StateObject private var playbackSettings = PlaybackSettings.shared
     @StateObject private var serverPlugins = ServerPluginsViewModel()
     @StateObject private var quickConnectApproval = QuickConnectApprovalViewModel()
+    @ObservedObject private var seerr = SeerrSession.shared
 
     /// Same list as the tvOS LanguagePickerView.
     private static let languages: [(code: String, name: String)] = [
@@ -60,6 +61,25 @@ struct MobileSettingsView: View {
                         )
                     } label: {
                         Label("Sign In a TV", systemImage: "tv")
+                    }
+                }
+            }
+
+            // Seerr: request titles that aren't on the server.
+            Section {
+                NavigationLink {
+                    MobileRequestsSettingsView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Requests")
+                            Text(seerr.state.user.map { "Signed in as \($0.name)" }
+                                 ?? "Request movies and shows through \(seerr.applicationTitle)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "tray.and.arrow.down")
                     }
                 }
             }
