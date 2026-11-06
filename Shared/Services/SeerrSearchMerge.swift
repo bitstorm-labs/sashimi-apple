@@ -58,6 +58,12 @@ enum SeerrSearchMerge {
         }
     }
 
+    /// Every movie and show once, in Seerr's order.
+    static func unique(_ results: [SeerrSearchResult]) -> [SeerrSearchResult] {
+        var seen = Set<Key>()
+        return results.filter { seen.insert(Key(kind: $0.kind, tmdbId: $0.tmdbId)).inserted }
+    }
+
     /// The library's copy of a Seerr title, by TMDB id only: a near-miss on
     /// title would open the wrong thing.
     static func libraryMatch(in items: [BaseItemDto], tmdbId: Int, kind: SeerrMediaKind) -> BaseItemDto? {

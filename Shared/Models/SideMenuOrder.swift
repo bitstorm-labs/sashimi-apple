@@ -29,10 +29,13 @@ enum SideMenuOrder {
     }
 
     /// The side menu's entries that are not Home rows, in their default order:
-    /// the libraries Home has no row for (server order), then Lists.
-    static func menuOnly(rows: [Row], libraryIds: [String]) -> [RailOrder.Destination] {
+    /// the libraries Home has no row for (server order), then Lists, then
+    /// whichever of Requests and Dashboard are `available` (#845, see
+    /// `RailOrder.conditionalDestinations`).
+    static func menuOnly(rows: [Row], libraryIds: [String], available: [RailOrder.Destination] = []) -> [RailOrder.Destination] {
         let onHome = Set(rows.compactMap(\.destination))
-        return libraryIds.map(RailOrder.Destination.library).filter { !onHome.contains($0) } + [.lists]
+        let conditional = RailOrder.trailingDestinations.filter { $0 != .lists && available.contains($0) }
+        return libraryIds.map(RailOrder.Destination.library).filter { !onHome.contains($0) } + [.lists] + conditional
     }
 
     /// Home's rows, in their own order, with the menu-only entries among them.
@@ -43,9 +46,13 @@ enum SideMenuOrder {
     /// server later) goes at the end. A saved entry that is no longer
     /// menu-only (the library left the server, or Home gained a row for it)
     /// is ignored.
-    static func entries(rows: [Row], libraryIds: [String], saved: [String]?) -> [Entry] {
+    ///
+    /// Requests and Dashboard are listed only while `available`; saved
+    /// while signed in and absent now, they are skipped like a library
+    /// that left the server.
+    static func entries(rows: [Row], libraryIds: [String], saved: [String]?, available: [RailOrder.Destination] = []) -> [Entry] {
         var result = rows.map { Entry.row($0.id) }
-        var unplaced = menuOnly(rows: rows, libraryIds: libraryIds)
+        var unplaced = menuOnly(rows: rows, libraryIds: libraryIds, available: available)
 
         let savedEntries = (saved ?? []).map(Entry.init(storageKey:))
         for (index, entry) in savedEntries.enumerated() {
@@ -64,19 +71,25 @@ enum SideMenuOrder {
         rows: [Row],
         libraryIds: [String],
         saved: [String]?,
-        hidden: Set<RailOrder.Destination> = []
+        hidden: Set<RailOrder.Destination> = [],
+        available: [RailOrder.Destination] = []
     ) -> [RailOrder.Destination] {
-        // Lists the user never moved is left to RailOrder, which puts it last
-        // as it always has, behind a SashimiTV the rows have not placed yet.
-        let listsPlaced = saved?.contains(Entry.menuOnly(.lists).storageKey) == true
-        let order = entries(rows: rows, libraryIds: libraryIds, saved: saved).compactMap { entry -> RailOrder.Destination? in
-            switch entry {
-            case .row(let id): return rows.first { $0.id == id }?.destination
-            case .menuOnly(.lists): return listsPlaced ? .lists : nil
-            case .menuOnly(let destination): return destination
+        // Lists (and Requests, Dashboard) the user never moved are left to
+        // RailOrder, which puts them last as it always has, behind a
+        // SashimiTV the rows have not placed yet.
+        let savedKeys = Set(saved ?? [])
+        let order = entries(rows: rows, libraryIds: libraryIds, saved: saved, available: available)
+            .compactMap { entry -> RailOrder.Destination? in
+                switch entry {
+                case .row(let id):
+                    return rows.first { $0.id == id }?.destination
+                case .menuOnly(let destination) where RailOrder.trailingDestinations.contains(destination):
+                    return savedKeys.contains(entry.storageKey) ? destination : nil
+                case .menuOnly(let destination):
+                    return destination
+                }
             }
-        }
-        return RailOrder.destinations(rowOrder: order, libraryIds: libraryIds, hidden: hidden)
+        return RailOrder.destinations(rowOrder: order, libraryIds: libraryIds, hidden: hidden, available: available)
     }
 
     /// `entries` with the ones at `source` moved to `destination`, as

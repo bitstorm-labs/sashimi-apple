@@ -108,6 +108,12 @@ struct SeerrDetailView: View {
                 actions
                     .padding(.top, 10)
 
+                if let quota = model.quotaNote {
+                    Text(quota)
+                        .font(Typography.caption)
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
+
                 if let message = model.errorMessage {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(Typography.caption)

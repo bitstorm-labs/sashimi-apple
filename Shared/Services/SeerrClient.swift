@@ -135,9 +135,48 @@ actor SeerrClient {
         return try decode(SeerrRequestPage.self, from: try await send("GET", "request", rawQuery: raw).data).results
     }
 
-    /// Seerr only lets the requester cancel while it's still pending.
+    /// Seerr only lets the requester cancel while it's still pending;
+    /// MANAGE_REQUESTS can delete any request (`DELETE /request/{id}`).
     func cancelRequest(id: Int) async throws {
         _ = try await send("DELETE", "request/\(id)")
+    }
+
+    /// One page of `GET /request`, newest first. Without `requestedBy` the
+    /// server lists everyone's for MANAGE_REQUESTS / REQUEST_VIEW and only
+    /// the caller's for anyone else.
+    func requestPage(filter: SeerrRequestFilter, take: Int, skip: Int, requestedBy userId: Int?) async throws -> SeerrRequestPage {
+        var raw = "take=\(take)&skip=\(skip)&filter=\(filter.rawValue)&sort=added&sortDirection=desc"
+        if let userId { raw += "&requestedBy=\(userId)" }
+        return try decode(SeerrRequestPage.self, from: try await send("GET", "request", rawQuery: raw).data)
+    }
+
+    /// MANAGE_REQUESTS only, and only while the request is pending (409 after).
+    func approveRequest(id: Int) async throws -> SeerrRequest {
+        try decode(SeerrRequest.self, from: try await send("POST", "request/\(id)/approve", body: Data("{}".utf8)).data)
+    }
+
+    func declineRequest(id: Int) async throws -> SeerrRequest {
+        try decode(SeerrRequest.self, from: try await send("POST", "request/\(id)/decline", body: Data("{}".utf8)).data)
+    }
+
+    /// Every request on the server, by state.
+    func requestCount() async throws -> SeerrRequestCount {
+        try decode(SeerrRequestCount.self, from: try await send("GET", "request/count").data)
+    }
+
+    /// The person's own request limits (someone else's needs MANAGE_USERS
+    /// and MANAGE_REQUESTS).
+    func quota(userId: Int) async throws -> SeerrQuota {
+        try decode(SeerrQuota.self, from: try await send("GET", "user/\(userId)/quota").data)
+    }
+
+    // MARK: Discover
+
+    /// One page of a Discover row. Recent Requests is not a discover route
+    /// (see `requestPage`); asking for it is an error.
+    func discover(_ slider: SeerrDiscoverSlider, page: Int = 1) async throws -> SeerrSearchPage {
+        guard let path = slider.path else { throw SeerrError.invalidServerURL }
+        return try decode(SeerrSearchPage.self, from: try await send("GET", path, rawQuery: "page=\(page)").data)
     }
 
     // MARK: Plumbing

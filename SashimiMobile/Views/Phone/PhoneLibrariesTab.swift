@@ -2,6 +2,14 @@ import SwiftUI
 
 struct PhoneLibrariesTab: View {
     @State private var libraries: [JellyfinLibrary] = []
+    @ObservedObject private var seerr = SeerrSession.shared
+    @ObservedObject private var sessionManager = SessionManager.shared
+
+    /// What the iPad's side menu lists after Lists (#845): Requests with a
+    /// Seerr account, Dashboard for administrators.
+    private var extras: [RailOrder.Destination] {
+        RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+    }
 
     var body: some View {
         List {
@@ -13,6 +21,25 @@ struct PhoneLibrariesTab: View {
                 Label("Lists", systemImage: "list.bullet.rectangle")
             }
             .listRowBackground(MobileColors.cardBackground)
+
+            // Requests and the Dashboard too (#845): the iPad has them in the
+            // side menu, and the tab bar has no room for them either.
+            if extras.contains(.requests) {
+                NavigationLink {
+                    MobileRequestsPage()
+                } label: {
+                    Label("Requests", systemImage: RailOrder.requestsIcon)
+                }
+                .listRowBackground(MobileColors.cardBackground)
+            }
+            if extras.contains(.dashboard) {
+                NavigationLink {
+                    MobileServerDashboardView()
+                } label: {
+                    Label("Dashboard", systemImage: RailOrder.dashboardIcon)
+                }
+                .listRowBackground(MobileColors.cardBackground)
+            }
 
             ForEach(libraries) { library in
                 NavigationLink {

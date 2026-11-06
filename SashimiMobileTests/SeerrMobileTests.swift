@@ -60,15 +60,4 @@ final class SeerrMobileTests: XCTestCase {
         XCTAssertEqual(row([1, 4]).displayTitle, "Dune: Prophecy · 2 seasons")
         XCTAssertEqual(row(nil, kind: .movie).displayTitle, "Dune: Prophecy")
     }
-
-    func testOnlyPendingRequestsOfferCancel() {
-        let request = SeerrRequest(id: 1, status: 2)
-        for state: SeerrRequestState in [.coming(progress: nil), .ready, .declined, .failed] {
-            let row = SeerrRequestRow(id: 1, request: request, kind: .movie, tmdbId: 1, title: "A",
-                                      posterPath: nil, state: state, subtitle: "")
-            XCTAssertFalse(row.canCancel, "\(state)")
-        }
-        XCTAssertTrue(SeerrRequestRow(id: 1, request: request, kind: .movie, tmdbId: 1, title: "A",
-                                      posterPath: nil, state: .pending, subtitle: "").canCancel)
-    }
 }
