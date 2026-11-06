@@ -47,7 +47,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // keeping the native AUDIO tab (the only audio control on tvOS).
         playerVC.allowedSubtitleOptionLanguages = [""]
 
-        playerVC.transportBarCustomMenuItems = buildMenus()
+        playerVC.transportBarCustomMenuItems = buildMenus(includeAudio: transportBarIncludesAudio)
 
         // Embed AVPVC as child VC (not modal — avoids dismiss lifecycle issues)
         container.addChild(playerVC)
@@ -93,7 +93,7 @@ struct TVPlayerView: UIViewControllerRepresentable {
         }
 
         // Rebuild menus when selection state changes
-        playerVC.transportBarCustomMenuItems = buildMenus()
+        playerVC.transportBarCustomMenuItems = buildMenus(includeAudio: transportBarIncludesAudio)
 
         context.coordinator.onReadyForDisplay = onReadyForDisplay
 
@@ -145,6 +145,16 @@ struct TVPlayerView: UIViewControllerRepresentable {
                 container.updateFocusIfNeeded()
             }
         }
+    }
+
+    /// Our Audio menu joins the transport bar only when the native Audio tab
+    /// can't switch tracks (a transcode carries one). Re-evaluated on every
+    /// update, so it appears once `audioTracks` loads.
+    private var transportBarIncludesAudio: Bool {
+        TransportAudioMenuPolicy.includesAudioMenu(
+            usesServerSideAudioSelection: viewModel.usesServerSideAudioSelection,
+            audioTrackCount: viewModel.audioTracks.count
+        )
     }
 
     func makeCoordinator() -> Coordinator {
