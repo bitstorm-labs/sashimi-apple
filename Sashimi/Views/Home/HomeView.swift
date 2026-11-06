@@ -268,7 +268,7 @@ struct HomeView: View {
     /// The hero rotation: what each library last added, with the channels that
     /// are on air right now spread through it (see `HeroRotation.slides`).
     private var heroSlides: [HeroSlide] {
-        HeroRotation.slides(libraryItems: viewModel.heroItems, channels: channelsViewModel.cards)
+        HeroRotation.slides(libraryItems: viewModel.heroItems, channels: channelsViewModel.cards, hidden: homeSettings.heroHidden(itemLibraryIds: viewModel.heroItemLibraryIds))
     }
 
     /// Resolve what the channel is airing and open the player on it.

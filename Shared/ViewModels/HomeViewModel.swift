@@ -13,6 +13,8 @@ final class HomeViewModel: ObservableObject {
     @Published var continueWatchingLibraryNames: [String: String] = [:]  // itemId -> libraryName
     @Published var heroItems: [BaseItemDto] = []
     @Published var heroItemLibraryNames: [String: String] = [:]  // itemId -> libraryName
+    /// itemId -> libraryId, so a row hidden in Settings leaves the hero (#836).
+    @Published var heroItemLibraryIds: [String: String] = [:]
     @Published var libraries: [JellyfinLibrary] = []
     @Published var isLoading = false
     @Published var error: Error?
@@ -217,6 +219,7 @@ final class HomeViewModel: ObservableObject {
     private func loadHeroItems() async {
         var allHeroItems: [BaseItemDto] = []
         var libraryNames: [String: String] = [:]
+        var libraryIds: [String: String] = [:]
 
         // Concurrent, but collected in the ORIGINAL library order: the hero
         // rotation should not reorder itself based on which server response
@@ -244,6 +247,7 @@ final class HomeViewModel: ObservableObject {
             let library = libraries[entry.index]
             for item in entry.items {
                 libraryNames[item.id] = library.name
+                libraryIds[item.id] = library.id
             }
             allHeroItems.append(contentsOf: entry.items.prefix(5))
         }
@@ -259,6 +263,7 @@ final class HomeViewModel: ObservableObject {
             heroItems = allHeroItems
         }
         heroItemLibraryNames = libraryNames
+        heroItemLibraryIds = libraryIds
     }
 
     func refresh() async {

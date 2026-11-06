@@ -148,6 +148,53 @@ final class HeroRotationTests: XCTestCase {
         )
     }
 
+    // MARK: - Hidden rows (#836)
+
+    func testItemsFromALibraryHiddenOnHomeLeaveTheRotation() {
+        let library = [item("m1"), item("t1"), item("m2")]
+        let slides = HeroRotation.slides(
+            libraryItems: library,
+            channels: [],
+            hidden: HeroRotation.Hidden(
+                libraryIds: ["tv"],
+                itemLibraryIds: ["m1": "movies", "t1": "tv", "m2": "movies"],
+                channels: false
+            )
+        )
+        XCTAssertEqual(ids(slides), ["item:m1", "item:m2"], "A hidden row's titles must not headline Home")
+    }
+
+    func testHidingSashimiTVDropsTheChannelSlides() {
+        let slides = HeroRotation.slides(
+            libraryItems: [item("l1"), item("l2")],
+            channels: [card("a", onAir: true)],
+            hidden: HeroRotation.Hidden(libraryIds: [], itemLibraryIds: [:], channels: true)
+        )
+        XCTAssertEqual(ids(slides), ["item:l1", "item:l2"])
+    }
+
+    func testAnItemWithNoKnownLibraryStays() {
+        let slides = HeroRotation.slides(
+            libraryItems: [item("x")],
+            channels: [],
+            hidden: HeroRotation.Hidden(libraryIds: ["tv"], itemLibraryIds: [:], channels: false)
+        )
+        XCTAssertEqual(ids(slides), ["item:x"])
+    }
+
+    func testHiddenRowsFromHomeSettings() {
+        let hidden = HeroRotation.Hidden(
+            rows: [
+                .init(libraryId: "movies", isChannels: false, isVisible: true),
+                .init(libraryId: "tv", isChannels: false, isVisible: false),
+                .init(libraryId: nil, isChannels: true, isVisible: false)
+            ],
+            itemLibraryIds: [:]
+        )
+        XCTAssertEqual(hidden.libraryIds, ["tv"])
+        XCTAssertTrue(hidden.channels)
+    }
+
     // MARK: - Countdown
 
     func testTimeRemainingMatchesTheCardWording() {
