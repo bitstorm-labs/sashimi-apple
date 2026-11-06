@@ -45,11 +45,15 @@ enum SeriesStatus: Equatable {
 }
 
 /// The status tag: the word in the status colour on a faint tint of it, a
-/// rounded rectangle like the rating and quality tags beside it (#760).
-/// Sized by the caller so the tvOS row can render larger than the iOS one.
+/// rounded rectangle with the same 1pt white outline as the quality and
+/// language badges beside it (#760, #833). Sized by the caller so the tvOS
+/// row can render larger than the iOS one; the corner follows the size
+/// (4pt on iOS at 12, 6pt on tvOS at 18) like those badges.
 struct SeriesStatusBadge: View {
     let status: SeriesStatus
     var fontSize: CGFloat = 12
+
+    private var cornerRadius: CGFloat { fontSize / 3 }
 
     var body: some View {
         Text(status.label)
@@ -57,7 +61,11 @@ struct SeriesStatusBadge: View {
             .foregroundStyle(status.color)
             .padding(.horizontal, fontSize * 0.75)
             .padding(.vertical, fontSize * 0.3)
-            .background(RoundedRectangle(cornerRadius: 4).fill(status.color.opacity(0.14)))
+            .background(RoundedRectangle(cornerRadius: cornerRadius).fill(status.color.opacity(0.14)))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
             .accessibilityLabel("Status: \(status.label)")
     }
 }
