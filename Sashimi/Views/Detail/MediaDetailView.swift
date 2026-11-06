@@ -203,7 +203,8 @@ struct MediaDetailView: View {
         .task {
             await loadContent()
         }
-        .task(id: item.id) {
+        // Re-checked once the full item (with its TMDB id) has loaded.
+        .task(id: "\(item.id)-\(item.tmdbId ?? 0)") {
             missingSeasonsTarget = await SeerrDetailModel.missingSeasonsTarget(for: item)
         }
         .fullScreenCover(item: $requestingSeasons) { target in

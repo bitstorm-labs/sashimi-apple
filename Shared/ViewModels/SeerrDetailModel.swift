@@ -126,3 +126,15 @@ final class SeerrDetailModel: ObservableObject {
         return SeerrSearchMerge.libraryMatch(in: items, tmdbId: tmdbId, kind: kind)
     }
 }
+
+/// "Request Missing Seasons" on a library show's detail page: checks Seerr
+/// once per show and holds what the menu item presents.
+@MainActor
+final class SeerrMissingSeasonsOffer: ObservableObject {
+    @Published private(set) var target: SeerrTarget?
+    @Published var presented: SeerrTarget?
+
+    func check(_ item: BaseItemDto) async {
+        target = await SeerrDetailModel.missingSeasonsTarget(for: item)
+    }
+}

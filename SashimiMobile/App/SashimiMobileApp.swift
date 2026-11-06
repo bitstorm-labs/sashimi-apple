@@ -130,6 +130,8 @@ struct ContentView: View {
                     }
                 }
                 .id(sessionManager.activeSessionIdentity)
+                // The profile menu's "Your Requests" (iPhone and iPad).
+                .seerrRequestsSheet()
                 .task {
                     // Re-runs on a server switch (the id above), which starts
                     // the verdict over for the new server.
@@ -167,6 +169,9 @@ struct ContentView: View {
             }
         }
         .task {
+            // A saved Seerr session is checked once at launch; without one,
+            // nothing about requests shows anywhere.
+            Task { await SeerrSession.shared.restore() }
             await sessionManager.restoreSession()
             if #available(iOS 18.0, *) {
                 SashimiMediaSpotlightIndexer.shared.refresh()

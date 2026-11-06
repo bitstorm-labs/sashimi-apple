@@ -91,14 +91,19 @@ struct HomeView: View {
                                 .enumerated()),
                             id: \.element.id
                         ) { index, config in
-                            rowView(for: config)
-                                .id(index + 1)
-                            // "Your requests" (Seerr), second on Home.
                             if index == 0 {
-                                SeerrHomeSection { item in
-                                    selectedItemIsYouTube = false
-                                    selectedItem = item
+                                // "Your requests" (Seerr), second on Home.
+                                VStack(alignment: .leading, spacing: 0) {
+                                    rowView(for: config)
+                                    SeerrHomeSection { item in
+                                        selectedItemIsYouTube = false
+                                        selectedItem = item
+                                    }
                                 }
+                                .id(index + 1)
+                            } else {
+                                rowView(for: config)
+                                    .id(index + 1)
                             }
                         }
 

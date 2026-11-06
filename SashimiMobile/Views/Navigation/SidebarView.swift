@@ -279,23 +279,7 @@ struct MainNavigationView: View {
     /// the rail is expanded.
     private func accountMenu(showsName: Bool) -> some View {
         Menu {
-            ForEach(sessionManager.servers) { server in
-                Button {
-                    Task { await sessionManager.switchServer(to: server.id) }
-                } label: {
-                    if server.id == sessionManager.activeServerId {
-                        Label(server.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(server.displayName)
-                    }
-                }
-            }
-            Divider()
-            Button {
-                showAddServer = true
-            } label: {
-                Label("Add Server…", systemImage: "plus")
-            }
+            AccountMenuItems { showAddServer = true }
         } label: {
             HStack(spacing: 12) {
                 userAvatarView
@@ -440,6 +424,32 @@ struct MainNavigationView: View {
             libraries = try await JellyfinClient.shared.getLibraryViews()
         } catch {
             // Silently fail
+        }
+    }
+}
+
+/// The account menu's items on iPhone (logo) and iPad (rail avatar): switch
+/// server, Your Requests (with a Seerr account), add a server.
+struct AccountMenuItems: View {
+    let onAddServer: () -> Void
+    @ObservedObject private var sessionManager = SessionManager.shared
+
+    var body: some View {
+        ForEach(sessionManager.servers) { server in
+            Button {
+                Task { await sessionManager.switchServer(to: server.id) }
+            } label: {
+                if server.id == sessionManager.activeServerId {
+                    Label(server.displayName, systemImage: "checkmark")
+                } else {
+                    Text(server.displayName)
+                }
+            }
+        }
+        SeerrRequestsMenuItem()
+        Divider()
+        Button(action: onAddServer) {
+            Label("Add Server…", systemImage: "plus")
         }
     }
 }

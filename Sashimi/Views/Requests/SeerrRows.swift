@@ -133,13 +133,15 @@ struct SeerrHomeSection: View {
     @State private var target: SeerrTarget?
 
     var body: some View {
-        Group {
+        // Zero height when there's nothing to show, so Home keeps its
+        // spacing; the row brings its own gap above it.
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 0)
             if session.isActive, !requests.homeRows.isEmpty {
                 SeerrRequestsHomeRow(rows: requests.homeRows) { row in
                     Task { await open(row) }
                 }
-            } else {
-                Color.clear.frame(height: 0)
+                .padding(.top, 40)
             }
         }
         .task(id: "\(session.isActive)-\(session.requestsRevision)") {
