@@ -122,3 +122,17 @@ extension TVPlayerView {
         return UIMenu(title: "Audio", image: UIImage(systemName: "speaker.wave.2"), children: actions)
     }
 }
+
+/// Whether the default AVKit transport bar needs Sashimi's own Audio menu.
+///
+/// Direct play leaves the choice to AVKit's native Audio tab, which lists
+/// every track in the file. A transcode or remux carries ONE audio track
+/// (#590), so the native tab can only show that one and a viewer could not
+/// switch, say, a Portuguese dub to English. Then our menu, which lists the
+/// source's streams and renegotiates the stream on a pick, is the only
+/// working control. One track has nothing to switch to.
+enum TransportAudioMenuPolicy {
+    static func includesAudioMenu(usesServerSideAudioSelection: Bool, audioTrackCount: Int) -> Bool {
+        usesServerSideAudioSelection && audioTrackCount > 1
+    }
+}
