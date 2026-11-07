@@ -316,8 +316,10 @@ and only the missing platforms.
 `MARKETING_VERSION`. The tag is on the wrong commit or the bump didn't merge.
 
 **Release stuck on "Bump, PR, wait for merge".** The bump PR's CI failed or the
-merge queue rejected it. Fix it; once it merges, re-run Release with the same
-version — it sees `main` already at that version and skips the bump.
+merge queue rejected it. Fix it; once it merges, re-run Release (a plain re-run
+of the failed jobs is fine). With no `version` input it ships the untagged
+version already on `main` instead of bumping again (`scripts/next-version.sh`,
+#851); before that fix a re-run skipped a version (1.6.83 was never released).
 
 **"bundle version must be higher than N".** Something reset the build number —
 historically caused by a stray `xcodegen generate` running *after*
