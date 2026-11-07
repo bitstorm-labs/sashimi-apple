@@ -177,7 +177,7 @@ final class SeerrViewModelTests: XCTestCase {
         let session = await signedInSession(user: "{\"id\":1,\"displayName\":\"owner\",\"permissions\":2}")
         SeerrStubServer.on("GET", "/api/v1/request", body: """
         {"pageInfo":{"page":1,"pages":1,"results":3},"results":[
-          {"id":9,"status":2,"type":"movie","createdAt":"2026-11-06T10:00:00.000Z","media":{"tmdbId":1,"mediaType":"movie","status":3},"requestedBy":{"id":41}},
+          {"id":9,"status":2,"type":"movie","createdAt":"2026-11-06T10:00:00.000Z","media":{"tmdbId":1,"mediaType":"movie","status":3},"requestedBy":{"id":41,"displayName":"Kurt"}},
           {"id":8,"status":2,"type":"movie","createdAt":"2026-11-05T10:00:00.000Z","media":{"tmdbId":1,"mediaType":"movie","status":3},"requestedBy":{"id":18}},
           {"id":7,"status":1,"type":"movie","createdAt":"2026-11-04T10:00:00.000Z","media":{"tmdbId":2,"mediaType":"movie","status":2},"requestedBy":{"id":6}}
         ]}
@@ -192,6 +192,7 @@ final class SeerrViewModelTests: XCTestCase {
         XCTAssertFalse(query.contains("requestedBy"), "everyone's, not just mine: \(query)")
         XCTAssertEqual(model.rows.map(\.id), [9, 7], "the newest request per title")
         XCTAssertEqual(model.title, "Recent Requests")
+        XCTAssertEqual(model.rows.first.flatMap(model.requester(of:)), "Kurt", "who asked, under the title")
     }
 
     func testARequestOnlyAccountKeepsYourRequests() async {
@@ -203,6 +204,7 @@ final class SeerrViewModelTests: XCTestCase {
 
         XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v1/request").first?.url.query?.contains("requestedBy=7") == true)
         XCTAssertEqual(model.title, "Your Requests")
+        XCTAssertNil(model.rows.first.flatMap(model.requester(of:)), "always the person themselves, so no name")
     }
 
     // MARK: Request missing seasons (library show's More menu)

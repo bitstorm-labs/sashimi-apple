@@ -87,6 +87,12 @@ final class SeerrRequestsModel: ObservableObject {
 
     var title: String { showsEveryone ? "Recent Requests" : "Your Requests" }
 
+    /// Who asked, shown under the title; only on everyone's row, since on
+    /// "Your Requests" it would always be the person themselves.
+    func requester(of row: SeerrRequestRow) -> String? {
+        showsEveryone ? row.requesterName : nil
+    }
+
     /// Only while something waits or arrived in the last week.
     var homeRows: [SeerrRequestRow] {
         rows.filter { SeerrRequestState.showsOnHome($0.request) }

@@ -6,6 +6,8 @@ struct MobileSeerrPosterCard: View {
     let posterPath: String?
     let tag: (label: String, color: Color)?
     let width: CGFloat
+    /// A second line under the title (who asked, on Home's requests row).
+    var subtitle: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -22,9 +24,16 @@ struct MobileSeerrPosterCard: View {
                 .foregroundStyle(MobileColors.textSecondary)
                 .lineLimit(1)
                 .frame(width: width, alignment: .leading)
+            if let subtitle {
+                Text(subtitle)
+                    .font(MobileTypography.captionSmall)
+                    .foregroundStyle(MobileColors.textTertiary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(tag.map { "\(title), \($0.label)" } ?? title)
+        .accessibilityLabel(([title, tag?.label, subtitle.map { "requested by \($0)" }] as [String?]).compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -94,7 +103,8 @@ struct MobileSeerrHomeRow: View {
                                         title: row.displayTitle,
                                         posterPath: row.posterPath,
                                         tag: (row.state.label, row.state.color),
-                                        width: cardWidth
+                                        width: cardWidth,
+                                        subtitle: requests.requester(of: row)
                                     )
                                 }
                                 .buttonStyle(.plain)
