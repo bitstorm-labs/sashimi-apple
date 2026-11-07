@@ -94,7 +94,7 @@ extension SeerrRequestRow {
 @MainActor
 final class SeerrRequestListModel: ObservableObject {
     @Published var filter: SeerrRequestFilter = .all
-    @Published var scope: SeerrRequestScope = .mine
+    @Published var scope: SeerrRequestScope = .everyone
     @Published private(set) var rows: [SeerrRequestRow] = []
     @Published private(set) var isLoading = false
     @Published private(set) var hasLoaded = false

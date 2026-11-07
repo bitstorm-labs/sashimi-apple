@@ -60,9 +60,11 @@ enum SeerrRequestFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Whose requests the list shows.
+/// Everyone comes first: the list opens on all requests for those who may
+/// see them (#855); anyone else only ever gets their own.
 enum SeerrRequestScope: String, CaseIterable, Identifiable, Sendable {
-    case mine
     case everyone
+    case mine
 
     var id: String { rawValue }
     var title: String { self == .mine ? "Mine" : "Everyone" }
