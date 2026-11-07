@@ -80,7 +80,7 @@ struct MobileSeerrHomeRow: View {
             Color.clear.frame(height: 0)
             if session.isActive, !requests.homeRows.isEmpty {
                 VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                    Text("Your Requests")
+                    Text(requests.title)
                         .font(MobileTypography.headline)
                         .foregroundStyle(MobileColors.textPrimary)
                         .padding(.horizontal, MobileSpacing.md)

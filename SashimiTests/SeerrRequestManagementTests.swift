@@ -165,6 +165,19 @@ final class SeerrRequestManagementTests: XCTestCase {
         XCTAssertEqual(model.actions(for: row), [.approve, .decline, .delete])
     }
 
+    func testTheListOpensOnEveryonesRequestsForThoseWhoMaySeeThem() async throws {
+        let session = await session(id: 1, permissions: 2)
+        SeerrStubServer.on("GET", "/api/v1/request", body: page([request(id: 5, status: 2, by: 7)]))
+        let model = SeerrRequestListModel(session: session)
+
+        await model.reload()
+
+        XCTAssertEqual(model.effectiveScope, .everyone, "#855: all requests, not just mine, by default")
+        XCTAssertEqual(SeerrRequestScope.allCases.first, .everyone, "Everyone comes first in the switch")
+        let sent = try XCTUnwrap(SeerrStubServer.requests("GET", "/api/v1/request").first)
+        XCTAssertNil(query(sent)["requestedBy"])
+    }
+
     func testApprovingPostsAndThePendingFilterDropsTheRow() async throws {
         let session = await session(id: 1, permissions: 16 | 32)
         SeerrStubServer.on("GET", "/api/v1/request", body: page([request(id: 5, status: 1, by: 7)]))

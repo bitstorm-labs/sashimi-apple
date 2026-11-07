@@ -2,7 +2,7 @@ import NukeUI
 import SwiftUI
 
 /// The Requests page's request list on iPhone, iPad and Mac (#845): a
-/// filter, Mine / Everyone for those allowed to see everyone's, and each
+/// filter, Everyone / Mine for those allowed to see everyone's, and each
 /// request with who asked and where it's at. Actions are swipes and the row's
 /// menu, only those the account may use; the destructive ones ask first.
 struct MobileSeerrRequestListView: View {

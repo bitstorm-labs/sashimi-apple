@@ -65,8 +65,9 @@ struct SeerrRequestRow: Identifiable, Equatable {
     }
 }
 
-/// The person's own requests for Home's "Your Requests" row (mockup E). The
-/// Requests page's full list is `SeerrRequestListModel` (#845).
+/// Home's requests row (mockup E): everyone's recent requests for those Seerr
+/// lets see them (#855), otherwise the person's own. The Requests page's full
+/// list is `SeerrRequestListModel` (#845).
 @MainActor
 final class SeerrRequestsModel: ObservableObject {
     @Published private(set) var rows: [SeerrRequestRow] = []
@@ -80,6 +81,11 @@ final class SeerrRequestsModel: ObservableObject {
     init(session: SeerrSession = .shared) {
         self.session = session
     }
+
+    /// Everyone's requests (MANAGE_REQUESTS or REQUEST_VIEW), not just mine.
+    var showsEveryone: Bool { session.permissions.canViewAllRequests }
+
+    var title: String { showsEveryone ? "Recent Requests" : "Your Requests" }
 
     /// Only while something waits or arrived in the last week.
     var homeRows: [SeerrRequestRow] {
@@ -97,11 +103,18 @@ final class SeerrRequestsModel: ObservableObject {
             hasLoaded = true
         }
         do {
-            let requests = try await client.requests(requestedBy: user.id)
+            let requests = showsEveryone
+                ? try await client.requestPage(filter: .all, take: 50, skip: 0, requestedBy: nil).results
+                : try await client.requests(requestedBy: user.id)
             await titles.fill(for: requests, client: client)
             guard !Task.isCancelled else { return }
             let now = Date()
-            rows = requests.compactMap { SeerrRequestRow($0, titles: titles, now: now) }
+            // Newest first, so the first request per title is the one shown:
+            // several people asking for one title is still one poster.
+            var seen = Set<String>()
+            rows = requests
+                .compactMap { SeerrRequestRow($0, titles: titles, now: now) }
+                .filter { seen.insert("\($0.kind.rawValue)-\($0.tmdbId)").inserted }
             errorMessage = nil
         } catch is CancellationError {
             return

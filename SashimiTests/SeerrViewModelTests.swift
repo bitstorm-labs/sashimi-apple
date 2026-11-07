@@ -19,10 +19,10 @@ final class SeerrViewModelTests: XCTestCase {
         super.tearDown()
     }
 
-    private func signedInSession() async -> SeerrSession {
+    private func signedInSession(user: String = SeerrFixtures.user()) async -> SeerrSession {
         let session = SeerrSession(defaults: SeerrFixtures.defaults(), credentials: credentials, pollInterval: .zero)
         _ = session.setServerAddress(SeerrFixtures.server.absoluteString)
-        SeerrStubServer.on("POST", "/api/v1/auth/local", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        SeerrStubServer.on("POST", "/api/v1/auth/local", body: user, headers: ["Set-Cookie": SeerrFixtures.setCookie])
         await session.signInLocal(email: "mom@example.com", password: "pw")
         SeerrStubServer.reset()
         return session
@@ -169,6 +169,40 @@ final class SeerrViewModelTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.state), [.pending, .coming(progress: nil)])
         XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v1/request").first?.url.query?.contains("requestedBy=7") == true)
         XCTAssertEqual(model.homeRows.count, 2)
+    }
+
+    /// An administrator's Home row is everyone's requests (#855), one poster
+    /// per title even when several people asked for it.
+    func testHomeRequestsRowIsEveryonesForThoseWhoMaySeeThem() async {
+        let session = await signedInSession(user: "{\"id\":1,\"displayName\":\"owner\",\"permissions\":2}")
+        SeerrStubServer.on("GET", "/api/v1/request", body: """
+        {"pageInfo":{"page":1,"pages":1,"results":3},"results":[
+          {"id":9,"status":2,"type":"movie","createdAt":"2026-11-06T10:00:00.000Z","media":{"tmdbId":1,"mediaType":"movie","status":3},"requestedBy":{"id":41}},
+          {"id":8,"status":2,"type":"movie","createdAt":"2026-11-05T10:00:00.000Z","media":{"tmdbId":1,"mediaType":"movie","status":3},"requestedBy":{"id":18}},
+          {"id":7,"status":1,"type":"movie","createdAt":"2026-11-04T10:00:00.000Z","media":{"tmdbId":2,"mediaType":"movie","status":2},"requestedBy":{"id":6}}
+        ]}
+        """)
+        SeerrStubServer.on("GET", "/api/v1/movie/1", body: "{\"id\":1,\"title\":\"First\"}")
+        SeerrStubServer.on("GET", "/api/v1/movie/2", body: "{\"id\":2,\"title\":\"Second\"}")
+        let model = SeerrRequestsModel(session: session)
+
+        await model.load()
+
+        let query = SeerrStubServer.requests("GET", "/api/v1/request").first?.url.query ?? ""
+        XCTAssertFalse(query.contains("requestedBy"), "everyone's, not just mine: \(query)")
+        XCTAssertEqual(model.rows.map(\.id), [9, 7], "the newest request per title")
+        XCTAssertEqual(model.title, "Recent Requests")
+    }
+
+    func testARequestOnlyAccountKeepsYourRequests() async {
+        let session = await signedInSession()
+        SeerrStubServer.on("GET", "/api/v1/request", body: requestsJSON)
+        let model = SeerrRequestsModel(session: session)
+
+        await model.load()
+
+        XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v1/request").first?.url.query?.contains("requestedBy=7") == true)
+        XCTAssertEqual(model.title, "Your Requests")
     }
 
     // MARK: Request missing seasons (library show's More menu)

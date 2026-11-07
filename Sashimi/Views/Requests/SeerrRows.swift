@@ -88,15 +88,16 @@ struct SeerrSearchRow: View {
     }
 }
 
-/// "Your requests" on Home: only while something waits or arrived in the
+/// The requests row on Home (everyone's or "Your Requests"): only while something waits or arrived in the
 /// last week (mockup E). Hidden entirely without a Seerr account.
 struct SeerrRequestsHomeRow: View {
+    let title: String
     let rows: [SeerrRequestRow]
     let onSelect: (SeerrRequestRow) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Your Requests")
+            Text(title)
                 .font(Typography.headlineSmall)
                 .foregroundStyle(SashimiTheme.textPrimary)
                 .padding(.horizontal, 80)
@@ -138,7 +139,7 @@ struct SeerrHomeSection: View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: 0)
             if session.isActive, !requests.homeRows.isEmpty {
-                SeerrRequestsHomeRow(rows: requests.homeRows) { row in
+                SeerrRequestsHomeRow(title: requests.title, rows: requests.homeRows) { row in
                     Task { await open(row) }
                 }
                 .padding(.top, 40)
