@@ -135,12 +135,8 @@ jobs:
           set -euo pipefail
           echo "Releasing from $GITHUB_REF @ $(git rev-parse --short HEAD)"
           current=$(grep -m1 -E '^\s*MARKETING_VERSION:' project.yml | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"?([0-9.]+).*/\1/')
-          if [ -z "$VERSION_IN" ]; then
-            IFS=. read -r ma mi pa <<< "$current"
-            version="$ma.$mi.$((pa + 1))"
-          else
-            version="$VERSION_IN"
-          fi
+          # main's version ships as-is if it was bumped but never tagged (#851).
+          version=$(scripts/next-version.sh "$current" "$VERSION_IN")
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version '$version' is not X.Y.Z"; exit 1; }
           [[ "$BETA_IN" =~ ^[0-9]+$ ]] || { echo "::error::beta '$BETA_IN' is not a number"; exit 1; }
           lowest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | head -1)
@@ -255,7 +251,7 @@ jobs:
             esac
             sleep 30
           done
-          echo "::error::$url did not merge in time; check its CI. Re-run this workflow once it merges (it will skip the bump)."
+          echo "::error::$url did not merge in time; check its CI. Re-run this workflow once it merges (it releases the merged bump without bumping again)."
           exit 1
 
   tag:

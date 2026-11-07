@@ -384,6 +384,9 @@ jobs:
       - name: Auto release change-detection tests
         run: scripts/test/app_changed_test.sh
 
+      - name: Release version planning tests
+        run: scripts/test/next_version_test.sh
+
       - name: CI and deploy toolchains match
         run: ruby scripts/check-toolchains.rb
 
