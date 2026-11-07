@@ -2,7 +2,7 @@ import NukeUI
 import SwiftUI
 
 /// The Requests page's request list (#845), like Seerr web's /requests:
-/// a filter, Mine / Everyone for those allowed to see everyone's, and each
+/// a filter, Everyone / Mine for those allowed to see everyone's, and each
 /// request with who asked and where it's at. Selecting one offers what the
 /// account may do with it; the destructive ones ask first.
 struct SeerrRequestListSection: View {
