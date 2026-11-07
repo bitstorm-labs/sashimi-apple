@@ -7,6 +7,8 @@ struct SeerrPosterButton: View {
     let posterPath: String?
     let tag: (label: String, color: Color)?
     var width: CGFloat = 200
+    /// A second line under the title (who asked, on Home's requests row).
+    var subtitle: String?
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -39,6 +41,14 @@ struct SeerrPosterButton: View {
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(SashimiTheme.textPrimary)
                     .frame(width: width, alignment: .center)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 19))
+                        .foregroundStyle(SashimiTheme.textSecondary)
+                        .lineLimit(1)
+                        .frame(width: width, alignment: .center)
+                }
             }
             .scaleEffect(isFocused ? 1.05 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
@@ -46,7 +56,7 @@ struct SeerrPosterButton: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(tag.map { "\(title), \($0.label)" } ?? title)
+        .accessibilityLabel(([title, tag?.label, subtitle.map { "requested by \($0)" }] as [String?]).compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -93,6 +103,7 @@ struct SeerrSearchRow: View {
 struct SeerrRequestsHomeRow: View {
     let title: String
     let rows: [SeerrRequestRow]
+    var requester: (SeerrRequestRow) -> String? = { _ in nil }
     let onSelect: (SeerrRequestRow) -> Void
 
     var body: some View {
@@ -109,7 +120,8 @@ struct SeerrRequestsHomeRow: View {
                             title: row.displayTitle,
                             posterPath: row.posterPath,
                             tag: (row.state.label, row.state.color),
-                            width: Sizing.posterWidth
+                            width: Sizing.posterWidth,
+                            subtitle: requester(row)
                         ) {
                             onSelect(row)
                         }
@@ -139,7 +151,7 @@ struct SeerrHomeSection: View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: 0)
             if session.isActive, !requests.homeRows.isEmpty {
-                SeerrRequestsHomeRow(title: requests.title, rows: requests.homeRows) { row in
+                SeerrRequestsHomeRow(title: requests.title, rows: requests.homeRows, requester: requests.requester(of:)) { row in
                     Task { await open(row) }
                 }
                 .padding(.top, 40)
