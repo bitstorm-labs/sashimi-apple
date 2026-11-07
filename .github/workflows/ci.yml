@@ -129,13 +129,26 @@ jobs:
           # (the nightly flaky-test run).
           ITERATIONS=()
           if [ "$TEST_ITERATIONS" -gt 1 ]; then ITERATIONS=(-test-iterations "$TEST_ITERATIONS"); fi
-          xcodebuild test \
-            -project Sashimi.xcodeproj \
-            -scheme Sashimi \
-            -destination 'platform=tvOS Simulator,name=ci-atv' \
-            "${ITERATIONS[@]}" \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcpretty --color
+          run_tests() {
+            xcodebuild test \
+              -project Sashimi.xcodeproj \
+              -scheme Sashimi \
+              -destination 'platform=tvOS Simulator,name=ci-atv' \
+              "${ITERATIONS[@]}" \
+              CODE_SIGNING_ALLOWED=NO \
+              2>&1 | tee test.log | xcpretty --color
+          }
+          # The simulator sometimes can't launch the test host ("unknown to
+          # FrontBoard") before a single test runs (#848). Retry that once;
+          # any other failure fails the job as before.
+          if run_tests; then exit 0; fi
+          if grep -q "Simulator device failed to launch" test.log; then
+            echo "::warning::Simulator could not launch the app; retrying once (#848)"
+            xcrun simctl shutdown ci-atv || true
+            run_tests
+          else
+            exit 1
+          fi
 
   build-ios:
     name: Build iOS App
