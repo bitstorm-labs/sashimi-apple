@@ -17,14 +17,24 @@ final class PlayerStatusBarTests: XCTestCase {
         window.windowLevel = .alert + 1
         window.rootViewController = UIHostingController(rootView: Presenter(item: nil))
         window.makeKeyAndVisible()
-        RunLoop.main.run(until: Date().addingTimeInterval(1))
-        let before = scene.statusBarManager?.isStatusBarHidden
+        let statusBar = try XCTUnwrap(scene.statusBarManager)
+        let before = Self.status(of: statusBar, settlingOn: false, within: 5)
         window.rootViewController = UIHostingController(rootView: Presenter(item: Self.item))
-        RunLoop.main.run(until: Date().addingTimeInterval(3))
-        let during = scene.statusBarManager?.isStatusBarHidden
+        let during = Self.status(of: statusBar, settlingOn: true, within: 15)
         window.isHidden = true
         XCTAssertEqual(before, false, "precondition: the presenter shows the status bar")
         XCTAssertEqual(during, true, "the player hides the status bar, controls up or not")
+    }
+
+    /// Runs the run loop until the status bar reaches `expected` or `timeout`
+    /// passes, then reports what it is. A fixed wait read it too early on a
+    /// slow CI runner (#853).
+    private static func status(of statusBar: UIStatusBarManager, settlingOn expected: Bool, within timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while statusBar.isStatusBarHidden != expected, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        return statusBar.isStatusBarHidden
     }
 
     private static let item = BaseItemDto(
