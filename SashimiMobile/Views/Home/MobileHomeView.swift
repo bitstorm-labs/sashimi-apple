@@ -7,6 +7,10 @@ struct MobileHomeView: View {
     @ObservedObject private var sharedLists = SharedListsStore.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
+    /// The Seerr requests row's model and the pages it opens (#861).
+    @StateObject private var seerrRequests = SeerrRequestsModel()
+    @State private var seerrTarget: SeerrTarget?
+    @State private var seerrItem: BaseItemDto?
     @State private var heroIndex = 0
     /// The fixed hero wallpaper dims to black as the rows scroll up over it.
     @State private var heroScrollFade: Double = 0
@@ -69,6 +73,7 @@ struct MobileHomeView: View {
             }
         }
         .continueWatchingRemovalToast(viewModel)
+        .seerrHomeRequests(seerrRequests, target: $seerrTarget, item: $seerrItem)
         .navigationDestination(item: $heroDestination) { item in
             AdaptiveDetailView(item: item, libraryName: viewModel.heroItemLibraryNames[item.id])
         }
@@ -214,15 +219,7 @@ struct MobileHomeView: View {
     private var contentView: some View {
         let enabledRows = rowSettings.rows.filter { $0.isEnabled }
         ForEach(enabledRows) { row in
-            if row.id == enabledRows.first?.id {
-                // "Your requests" (Seerr), second on Home.
-                VStack(alignment: .leading, spacing: 0) {
-                    rowView(for: row)
-                    MobileSeerrHomeRow(cardWidth: MobileSizing.posterWidth)
-                }
-            } else {
-                rowView(for: row)
-            }
+            rowView(for: row)
         }
 
         // Empty state
@@ -248,6 +245,11 @@ struct MobileHomeView: View {
                 ) { item in
                     AdaptiveDetailView(item: item, libraryName: libNames[item.id])
                 }
+            }
+
+        case .builtIn(.requests):
+            if seerrRequests.showsHomeRow {
+                MobileSeerrHomeRow(requests: seerrRequests, cardWidth: MobileSizing.posterWidth, openTarget: $seerrTarget, openItem: $seerrItem)
             }
 
         case .builtIn(.channels):

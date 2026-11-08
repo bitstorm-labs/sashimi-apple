@@ -169,6 +169,7 @@ final class SeerrViewModelTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.state), [.pending, .coming(progress: nil)])
         XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v1/request").first?.url.query?.contains("requestedBy=7") == true)
         XCTAssertEqual(model.homeRows.count, 2)
+        XCTAssertTrue(model.showsHomeRow, "Home draws the row (#861)")
     }
 
     /// An administrator's Home row is everyone's requests (#855), one poster
@@ -257,6 +258,7 @@ final class SeerrViewModelTests: XCTestCase {
         await model.load()
 
         XCTAssertTrue(model.rows.isEmpty)
+        XCTAssertFalse(model.showsHomeRow, "nothing on Home, not even an empty row's gap (#861)")
         XCTAssertTrue(SeerrStubServer.requests.isEmpty)
     }
 }

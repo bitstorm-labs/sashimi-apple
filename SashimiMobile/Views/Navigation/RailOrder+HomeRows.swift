@@ -28,10 +28,11 @@ extension RailOrder {
 
 extension HomeRowConfig {
     /// The side-menu entry this row stands for; nil for Continue Watching
-    /// and shared-list rows.
+    /// and shared-list rows. The Requests row carries Requests (#861).
     var railDestination: RailOrder.Destination? {
         switch type {
         case .builtIn(.channels): return .finTV
+        case .builtIn(.requests): return .requests
         case .builtIn: return nil
         case .library(let id, _): return .library(id)
         case .list: return nil

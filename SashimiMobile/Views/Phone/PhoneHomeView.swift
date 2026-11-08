@@ -7,6 +7,10 @@ struct PhoneHomeView: View {
     @ObservedObject private var sharedLists = SharedListsStore.shared
     @StateObject private var channelsViewModel = ChannelsViewModel()
     @State private var tunedChannel: TunedChannel?
+    /// The Seerr requests row's model and the pages it opens (#861).
+    @StateObject private var seerrRequests = SeerrRequestsModel()
+    @State private var seerrTarget: SeerrTarget?
+    @State private var seerrItem: BaseItemDto?
     @State private var showManageChannels = false
     @ObservedObject private var sessionManager = SessionManager.shared
     @State private var showAddServer = false
@@ -25,6 +29,7 @@ struct PhoneHomeView: View {
         }
         .background(MobileColors.background)
         .continueWatchingRemovalToast(viewModel)
+        .seerrHomeRequests(seerrRequests, target: $seerrTarget, item: $seerrItem)
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 8) {
@@ -101,15 +106,7 @@ struct PhoneHomeView: View {
     private var contentView: some View {
         let enabledRows = rowSettings.rows.filter { $0.isEnabled }
         ForEach(enabledRows) { row in
-            if row.id == enabledRows.first?.id {
-                // "Your requests" (Seerr), second on Home.
-                VStack(alignment: .leading, spacing: 0) {
-                    rowView(for: row)
-                    MobileSeerrHomeRow(cardWidth: PhoneSizing.posterWidth)
-                }
-            } else {
-                rowView(for: row)
-            }
+            rowView(for: row)
         }
 
         if viewModel.continueWatchingItems.isEmpty && viewModel.libraries.isEmpty {
@@ -140,6 +137,11 @@ struct PhoneHomeView: View {
                 ) { item in
                     PhoneDetailView(item: item, libraryName: libNames[item.id])
                 }
+            }
+
+        case .builtIn(.requests):
+            if seerrRequests.showsHomeRow {
+                MobileSeerrHomeRow(requests: seerrRequests, cardWidth: PhoneSizing.posterWidth, openTarget: $seerrTarget, openItem: $seerrItem)
             }
 
         case .builtIn(.channels):

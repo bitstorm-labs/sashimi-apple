@@ -22,7 +22,8 @@ enum SideMenuOrder {
     }
 
     /// One Home row as the side menu sees it: its config id, and the menu
-    /// entry it stands for (nil for Featured, Continue Watching, shared-list rows).
+    /// entry it stands for (nil for Featured, Continue Watching, shared-list
+    /// rows; `.requests` for the Requests row, #861).
     struct Row: Equatable {
         let id: String
         let destination: RailOrder.Destination?
@@ -32,10 +33,24 @@ enum SideMenuOrder {
     /// the libraries Home has no row for (server order), then Lists, then
     /// whichever of Requests and Dashboard are `available` (#845, see
     /// `RailOrder.conditionalDestinations`).
+    /// A destination a row stands for is never also menu-only: Requests has
+    /// a row on Home (#861), so a row order with it lists Requests once.
     static func menuOnly(rows: [Row], libraryIds: [String], available: [RailOrder.Destination] = []) -> [RailOrder.Destination] {
         let onHome = Set(rows.compactMap(\.destination))
         let conditional = RailOrder.trailingDestinations.filter { $0 != .lists && available.contains($0) }
-        return libraryIds.map(RailOrder.Destination.library).filter { !onHome.contains($0) } + [.lists] + conditional
+        return (libraryIds.map(RailOrder.Destination.library) + [.lists] + conditional).filter { !onHome.contains($0) }
+    }
+
+    /// Whether Settings lists this row now: a row standing for Requests only
+    /// while Seerr is `available`, the same rule as its menu entry (#861).
+    static func isListed(_ row: Row, available: [RailOrder.Destination]) -> Bool {
+        guard let destination = row.destination, RailOrder.isConditional(destination) else { return true }
+        return available.contains(destination)
+    }
+
+    /// iPhone's Row Order (no side menu): Home's rows Settings lists now.
+    static func rowEntries(rows: [Row], available: [RailOrder.Destination] = []) -> [Entry] {
+        rows.filter { isListed($0, available: available) }.map { .row($0.id) }
     }
 
     /// Home's rows, in their own order, with the menu-only entries among them.
@@ -49,9 +64,10 @@ enum SideMenuOrder {
     ///
     /// Requests and Dashboard are listed only while `available`; saved
     /// while signed in and absent now, they are skipped like a library
-    /// that left the server.
+    /// that left the server. The Requests row is left out the same way, and
+    /// `reordered` keeps it where it was when the others move.
     static func entries(rows: [Row], libraryIds: [String], saved: [String]?, available: [RailOrder.Destination] = []) -> [Entry] {
-        var result = rows.map { Entry.row($0.id) }
+        var result = rowEntries(rows: rows, available: available)
         var unplaced = menuOnly(rows: rows, libraryIds: libraryIds, available: available)
 
         let savedEntries = (saved ?? []).map(Entry.init(storageKey:))
@@ -109,17 +125,22 @@ enum SideMenuOrder {
         entries.map(\.storageKey)
     }
 
-    /// `rows` in the order `entries` puts them; rows `entries` does not
-    /// mention keep their relative order after the rest.
+    /// `rows` in the order `entries` puts them. A row `entries` does not
+    /// mention (Requests while signed out of Seerr, #861) stays straight
+    /// after the row it followed, or first if it led.
     static func reordered<Config>(_ rows: [Config], id: (Config) -> String, by entries: [Entry]) -> [Config] {
         let order = entries.compactMap { entry -> String? in
             if case .row(let rowId) = entry { return rowId }
             return nil
         }
-        let ranked = rows.enumerated().map { offset, row in
-            (rank: order.firstIndex(of: id(row)) ?? order.count + offset, row: row)
+        let ids = rows.map(id)
+        var result = order.compactMap { ids.firstIndex(of: $0) }
+        for index in ids.indices where !order.contains(ids[index]) {
+            // Straight after the nearest row before it that is placed.
+            let anchor = (0..<index).reversed().first { result.contains($0) }
+            result.insert(index, at: anchor.flatMap { result.firstIndex(of: $0) }.map { $0 + 1 } ?? 0)
         }
-        return ranked.sorted { $0.rank < $1.rank }.map(\.row)
+        return result.map { rows[$0] }
     }
 }
 

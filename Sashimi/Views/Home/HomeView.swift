@@ -14,6 +14,9 @@ struct HomeView: View {
     /// Subscribed shared lists. Loaded beside Home, never ahead of it.
     @ObservedObject private var sharedLists = SharedListsStore.shared
     @State private var openList: SharedList?
+    /// The Seerr requests row's model and the request page it opened (#861).
+    @StateObject private var seerrRequests = SeerrRequestsModel()
+    @State private var seerrTarget: SeerrTarget?
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var selectedItem: BaseItemDto?
     /// Set when a channel is tuned to. Carries the item and the context that
@@ -91,20 +94,8 @@ struct HomeView: View {
                                 .enumerated()),
                             id: \.element.id
                         ) { index, config in
-                            if index == 0 {
-                                // "Your requests" (Seerr), second on Home.
-                                VStack(alignment: .leading, spacing: 0) {
-                                    rowView(for: config)
-                                    SeerrHomeSection { item in
-                                        selectedItemIsYouTube = false
-                                        selectedItem = item
-                                    }
-                                }
+                            rowView(for: config)
                                 .id(index + 1)
-                            } else {
-                                rowView(for: config)
-                                    .id(index + 1)
-                            }
                         }
 
                         // Bottom spacing
@@ -137,6 +128,7 @@ struct HomeView: View {
             .fullScreenCover(item: $openList) { list in
                 ListDetailView(list: list)
             }
+            .seerrHomeRequests(seerrRequests, target: $seerrTarget)
             #if DEBUG
             // Test harness: SASHIMI_TUNE_STATION=<channel id> tunes that station
             // straight after launch, so on-device tests of channel flipping do
@@ -309,6 +301,13 @@ struct HomeView: View {
                 // The hero is rendered as a fixed backdrop in the body (behind the
                 // scrolling rows), so it is never a scrolling row here.
                 EmptyView()
+            case .requests:
+                if seerrRequests.showsHomeRow {
+                    SeerrHomeSection(requests: seerrRequests, onOpenTarget: { seerrTarget = $0 }, onOpenLibraryItem: { item in
+                        selectedItemIsYouTube = false
+                        selectedItem = item
+                    })
+                }
             case .channels:
                 if !channelsViewModel.cards.isEmpty {
                     ChannelsRow(cards: channelsViewModel.cards) { card in
