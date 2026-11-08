@@ -8,6 +8,7 @@ struct SeerrDemoRoot: View {
     @State private var ready = false
     @State private var plan: SeerrSeasonPlan?
     @StateObject private var search = SeerrSearchModel()
+    @StateObject private var demoRequests = SeerrRequestsModel()
 
     var body: some View {
         ZStack {
@@ -51,7 +52,8 @@ struct SeerrDemoRoot: View {
         default:
             VStack {
                 Spacer()
-                SeerrHomeSection { _ in }
+                SeerrHomeSection(requests: demoRequests, onOpenTarget: { _ in }, onOpenLibraryItem: { _ in })
+                    .seerrHomeRequests(demoRequests, target: .constant(nil))
                 Spacer()
             }
         }

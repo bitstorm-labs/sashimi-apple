@@ -275,6 +275,10 @@ struct SettingsSignOutButton: View {
 enum HomeRowType: String, Codable, CaseIterable {
     case hero
     case continueWatching
+    /// Seerr requests (#861). A saved order without it gets it right after
+    /// Continue Watching (`withRequestsRow`), where Home drew it before it
+    /// was a row. The raw value must never change once shipped.
+    case requests
     // Added after release. updateWithLibraries() appends any built-in type the
     // saved config lacks, so existing users gain the row without a bespoke
     // migration, and the raw value must never change once shipped.
@@ -284,6 +288,7 @@ enum HomeRowType: String, Codable, CaseIterable {
         switch self {
         case .hero: return "Featured"
         case .continueWatching: return "Continue Watching"
+        case .requests: return "Requests"
         case .channels: return "SashimiTV"
         }
     }
@@ -349,7 +354,17 @@ class HomeScreenSettings: ObservableObject {
         // schema change indistinguishable from "user never customised".
         guard let data = defaults.data(forKey: userDefaultsKey),
               let configs = decodeSavedConfigs(data) else { return }
-        rowConfigs = configs
+        rowConfigs = Self.withRequestsRow(configs)
+    }
+
+    /// `configs` with the Requests row (#861), straight after Continue
+    /// Watching if they were saved without it.
+    static func withRequestsRow(_ configs: [HomeRowConfig]) -> [HomeRowConfig] {
+        guard !configs.contains(where: { $0.type == .requests }) else { return configs }
+        var result = configs
+        let index = result.firstIndex { $0.type == .continueWatching }.map { $0 + 1 } ?? 0
+        result.insert(.builtIn(.requests), at: index)
+        return result
     }
 
     private func decodeSavedConfigs(_ data: Data) -> [HomeRowConfig]? {
@@ -412,7 +427,7 @@ class HomeScreenSettings: ObservableObject {
         // Preserve order from saved settings
         if let data = defaults.data(forKey: userDefaultsKey),
            let savedConfigs = decodeSavedConfigs(data) {
-            let savedOrder = savedConfigs.map { $0.id }
+            let savedOrder = Self.withRequestsRow(savedConfigs).map { $0.id }
             rowConfigs.sort { a, b in
                 let indexA = savedOrder.firstIndex(of: a.id) ?? Int.max
                 let indexB = savedOrder.firstIndex(of: b.id) ?? Int.max

@@ -135,36 +135,22 @@ struct SeerrRequestsHomeRow: View {
     }
 }
 
-/// Home's "Your requests" row with its own loading and the request page it
-/// opens. Draws nothing without a Seerr account or anything to show.
+/// Home's requests row (#861): a Home row like any other, drawn where its
+/// config sits. Home owns `requests` and only includes this view while
+/// `requests.showsHomeRow`, so an empty row leaves no gap; the loading and
+/// the request page are `seerrHomeRequests(_:target:)` on Home itself, so
+/// they carry on while the row is not drawn.
 struct SeerrHomeSection: View {
+    @ObservedObject var requests: SeerrRequestsModel
+    /// A request page to open (Seerr's own title page).
+    let onOpenTarget: (SeerrTarget) -> Void
     /// A ready request opens the library title through Home's own detail.
     let onOpenLibraryItem: (BaseItemDto) -> Void
 
-    @StateObject private var requests = SeerrRequestsModel()
-    @ObservedObject private var session = SeerrSession.shared
-    @State private var target: SeerrTarget?
-
     var body: some View {
-        // Zero height when there's nothing to show, so Home keeps its
-        // spacing; the row brings its own gap above it.
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 0)
-            if session.isActive, !requests.homeRows.isEmpty {
-                SeerrRequestsHomeRow(title: requests.title, rows: requests.homeRows, requester: requests.requester(of:)) { row in
-                    Task { await open(row) }
-                }
-                .padding(.top, 40)
-            }
+        SeerrRequestsHomeRow(title: requests.title, rows: requests.homeRows, requester: requests.requester(of:)) { row in
+            Task { await open(row) }
         }
-        .task(id: "\(session.isActive)-\(session.requestsRevision)") {
-            await requests.load()
-        }
-        .fullScreenCover(item: $target, onDismiss: {
-            Task { await requests.load() }
-        }, content: { target in
-            SeerrDetailView(target: target)
-        })
     }
 
     private func open(_ row: SeerrRequestRow) async {
@@ -172,7 +158,33 @@ struct SeerrHomeSection: View {
            let item = await SeerrDetailModel.findInLibrary(tmdbId: row.tmdbId, kind: row.kind, title: row.title) {
             onOpenLibraryItem(item)
         } else {
-            target = row.target
+            onOpenTarget(row.target)
         }
+    }
+}
+
+extension View {
+    /// Keeps Home's requests row loaded (on sign-in and after any request
+    /// changes) and presents the request page it opens (#861).
+    func seerrHomeRequests(_ requests: SeerrRequestsModel, target: Binding<SeerrTarget?>) -> some View {
+        modifier(SeerrHomeRequestsModifier(requests: requests, target: target))
+    }
+}
+
+private struct SeerrHomeRequestsModifier: ViewModifier {
+    @ObservedObject var requests: SeerrRequestsModel
+    @Binding var target: SeerrTarget?
+    @ObservedObject private var session = SeerrSession.shared
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: "\(session.isActive)-\(session.requestsRevision)") {
+                await requests.load()
+            }
+            .fullScreenCover(item: $target, onDismiss: {
+                Task { await requests.load() }
+            }, content: { target in
+                SeerrDetailView(target: target)
+            })
     }
 }

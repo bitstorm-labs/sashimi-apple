@@ -72,58 +72,43 @@ struct MobileSeerrSearchRow: View {
     }
 }
 
-/// Home's "Your requests" row: only with a Seerr account, and only while
-/// something waits or arrived in the last week. Ready items open the
-/// library title.
+/// Home's requests row (#861): a Home row like any other, drawn where its
+/// config sits. Home owns `requests` and only includes this view while
+/// `requests.showsHomeRow`, so an empty row leaves no gap; the loading and
+/// the pages it opens are `seerrHomeRequests(_:target:item:)` on Home
+/// itself, so they carry on while the row is not drawn. Ready items open
+/// the library title.
 struct MobileSeerrHomeRow: View {
+    @ObservedObject var requests: SeerrRequestsModel
     let cardWidth: CGFloat
-    @StateObject private var requests = SeerrRequestsModel()
-    @ObservedObject private var session = SeerrSession.shared
-    @State private var openTarget: SeerrTarget?
-    @State private var openItem: BaseItemDto?
+    @Binding var openTarget: SeerrTarget?
+    @Binding var openItem: BaseItemDto?
 
     var body: some View {
-        // Zero height when there's nothing to show; the row brings its own
-        // gap above it so Home's spacing is unchanged otherwise.
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 0)
-            if session.isActive, !requests.homeRows.isEmpty {
-                VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-                    Text(requests.title)
-                        .font(MobileTypography.headline)
-                        .foregroundStyle(MobileColors.textPrimary)
-                        .padding(.horizontal, MobileSpacing.md)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: MobileSpacing.sm) {
-                            ForEach(requests.homeRows) { row in
-                                Button {
-                                    Task { await open(row) }
-                                } label: {
-                                    MobileSeerrPosterCard(
-                                        title: row.displayTitle,
-                                        posterPath: row.posterPath,
-                                        tag: (row.state.label, row.state.color),
-                                        width: cardWidth,
-                                        subtitle: requests.requester(of: row)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
+            Text(requests.title)
+                .font(MobileTypography.headline)
+                .foregroundStyle(MobileColors.textPrimary)
+                .padding(.horizontal, MobileSpacing.md)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: MobileSpacing.sm) {
+                    ForEach(requests.homeRows) { row in
+                        Button {
+                            Task { await open(row) }
+                        } label: {
+                            MobileSeerrPosterCard(
+                                title: row.displayTitle,
+                                posterPath: row.posterPath,
+                                tag: (row.state.label, row.state.color),
+                                width: cardWidth,
+                                subtitle: requests.requester(of: row)
+                            )
                         }
-                        .padding(.horizontal, MobileSpacing.md)
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding(.top, MobileSpacing.lg)
+                .padding(.horizontal, MobileSpacing.md)
             }
-        }
-        .task(id: "\(session.isActive)-\(session.requestsRevision)") {
-            await requests.load()
-        }
-        .navigationDestination(item: $openTarget) { target in
-            MobileSeerrDetailView(target: target)
-        }
-        .navigationDestination(item: $openItem) { item in
-            AdaptiveDetailView(item: item, libraryName: item.libraryName)
         }
     }
 
@@ -134,6 +119,34 @@ struct MobileSeerrHomeRow: View {
         } else {
             openTarget = row.target
         }
+    }
+}
+
+extension View {
+    /// Keeps Home's requests row loaded (on sign-in and after any request
+    /// changes) and pushes the page a card opens (#861).
+    func seerrHomeRequests(_ requests: SeerrRequestsModel, target: Binding<SeerrTarget?>, item: Binding<BaseItemDto?>) -> some View {
+        modifier(SeerrHomeRequestsModifier(requests: requests, target: target, item: item))
+    }
+}
+
+private struct SeerrHomeRequestsModifier: ViewModifier {
+    @ObservedObject var requests: SeerrRequestsModel
+    @Binding var target: SeerrTarget?
+    @Binding var item: BaseItemDto?
+    @ObservedObject private var session = SeerrSession.shared
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: "\(session.isActive)-\(session.requestsRevision)") {
+                await requests.load()
+            }
+            .navigationDestination(item: $target) { target in
+                MobileSeerrDetailView(target: target)
+            }
+            .navigationDestination(item: $item) { item in
+                AdaptiveDetailView(item: item, libraryName: item.libraryName)
+            }
     }
 }
 

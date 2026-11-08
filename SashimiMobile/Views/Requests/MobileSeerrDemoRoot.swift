@@ -7,6 +7,7 @@ struct MobileSeerrDemoRoot: View {
     let screen: String
     @State private var ready = false
     @StateObject private var search = SeerrSearchModel()
+    @StateObject private var demoRequests = SeerrRequestsModel()
 
     var body: some View {
         NavigationStack {
@@ -49,7 +50,9 @@ struct MobileSeerrDemoRoot: View {
             MobileRequestsPage()
         default:
             ScrollView {
-                MobileSeerrHomeRow(cardWidth: PhoneSizing.posterWidth)
+                MobileSeerrHomeRow(requests: demoRequests, cardWidth: PhoneSizing.posterWidth,
+                                   openTarget: .constant(nil), openItem: .constant(nil))
+                    .seerrHomeRequests(demoRequests, target: .constant(nil), item: .constant(nil))
             }
             .navigationTitle("Home")
         }

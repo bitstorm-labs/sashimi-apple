@@ -286,13 +286,12 @@ struct HomeRowOrderView: View {
 
     /// iPad/Mac's one list (#841): Home's rows with Lists and the menu-only
     /// libraries among them, in side-menu order. iPhone lists Home rows only.
+    /// Either way the Requests row only while Seerr is connected (#861).
     private var entries: [SideMenuOrder.Entry] {
-        showsSideMenu
-            ? settings.sideMenuEntries(
-                libraryIds: railLibraries.map(\.id),
-                available: RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
-            )
-            : settings.rows.map { .row($0.id) }
+        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        return showsSideMenu
+            ? settings.sideMenuEntries(libraryIds: railLibraries.map(\.id), available: available)
+            : settings.homeRowEntries(available: available)
     }
 
     private func name(of destination: RailOrder.Destination) -> String {
@@ -404,7 +403,7 @@ struct HomeRowOrderView: View {
                     if showsSideMenu {
                         settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: source, to: destination))
                     } else {
-                        settings.moveRow(from: source, to: destination)
+                        settings.applyRowOrder(SideMenuOrder.moving(entries, from: source, to: destination))
                     }
                 }
                 .moveDisabled(showsSideMenu && !libraryLoadFinished)
