@@ -53,10 +53,10 @@ final class SeerrSession: ObservableObject {
         pollInterval: .seconds(2)
     )
 
-    static let defaultServer = "https://bitstorm.ca"
-
     @Published private(set) var state: SeerrAuthState = .notConfigured
-    @Published private(set) var serverURL: URL
+    /// Nil until the person enters one: there is no default server, and
+    /// with none the app makes no Seerr calls and shows no request UI.
+    @Published private(set) var serverURL: URL?
     /// The server's own name ("MondoVision"), for "from MondoVision".
     @Published private(set) var applicationTitle = "Seerr"
     @Published private(set) var partialRequestsEnabled = true
@@ -85,17 +85,25 @@ final class SeerrSession: ObservableObject {
         self.defaults = defaults
         self.credentials = credentials
         self.pollInterval = pollInterval
-        let saved = defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
-        serverURL = saved ?? Self.normalizedServerURL(Self.defaultServer) ?? URL(fileURLWithPath: "/")
+        serverURL = defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
         applicationTitle = defaults.string(forKey: Keys.title) ?? "Seerr"
     }
 
     var isActive: Bool { state.user != nil }
 
+    /// Signing in needs a request server to sign in to.
+    var canSignIn: Bool { serverURL != nil }
+
+    /// Settings enables the sign-in buttons only for an address that would
+    /// be accepted.
+    static func canSignIn(serverText: String) -> Bool {
+        normalizedServerURL(serverText) != nil
+    }
+
     /// What the signed-in account may do; none while signed out.
     var permissions: SeerrPermissions { state.user?.permissionSet ?? [] }
 
-    /// "bitstorm.ca" → https://bitstorm.ca; trailing slashes dropped. Only
+    /// "requests.example.com" → https://requests.example.com; trailing slashes dropped. Only
     /// http and https.
     static func normalizedServerURL(_ text: String) -> URL? {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,7 +140,8 @@ final class SeerrSession: ObservableObject {
     /// can't be reached keeps the last known account (it's not a sign-out).
     func restore() async {
         // No account: stay off the network entirely.
-        guard let cookie = credentials.cookie(forKey: Self.cookieKey(for: serverURL)) else { return }
+        guard let serverURL,
+              let cookie = credentials.cookie(forKey: Self.cookieKey(for: serverURL)) else { return }
         await refreshPublicSettings()
         let client = SeerrClient(baseURL: serverURL, cookie: cookie)
         do {
@@ -152,7 +161,8 @@ final class SeerrSession: ObservableObject {
     }
 
     func refreshPublicSettings() async {
-        guard let settings = try? await SeerrClient(baseURL: serverURL, cookie: nil).publicSettings() else { return }
+        guard let serverURL,
+              let settings = try? await SeerrClient(baseURL: serverURL, cookie: nil).publicSettings() else { return }
         if let title = settings.applicationTitle, !title.isEmpty {
             applicationTitle = title
             defaults.set(title, forKey: Keys.title)
@@ -164,6 +174,7 @@ final class SeerrSession: ObservableObject {
     // MARK: Sign in
 
     func signInLocal(email: String, password: String) async {
+        guard let serverURL else { return }
         errorMessage = nil
         let previous = state
         state = .signingIn
@@ -182,6 +193,7 @@ final class SeerrSession: ObservableObject {
     /// (`strong: false`, four characters for plex.tv/link); the phone opens
     /// Plex's sign-in page with it (`strong: true`).
     func beginPlexSignIn(strong: Bool) async -> PlexPin? {
+        guard canSignIn else { return nil }
         errorMessage = nil
         do {
             let pin = try await plexClient.createPin(strong: strong)
@@ -235,6 +247,10 @@ final class SeerrSession: ObservableObject {
     }
 
     private func exchangePlexToken(_ token: String) async {
+        guard let serverURL else {
+            state = .notConfigured
+            return
+        }
         state = .signingIn
         let client = SeerrClient(baseURL: serverURL, cookie: nil)
         do {
@@ -288,7 +304,9 @@ final class SeerrSession: ObservableObject {
     }
 
     private func signedIn(_ user: SeerrUser, cookie: String, client: SeerrClient) {
-        credentials.setCookie(cookie, forKey: Self.cookieKey(for: serverURL))
+        if let serverURL {
+            credentials.setCookie(cookie, forKey: Self.cookieKey(for: serverURL))
+        }
         defaults.set(user.id, forKey: Keys.userId)
         defaults.set(user.name, forKey: Keys.userName)
         defaults.set(user.permissions, forKey: Keys.permissions)
@@ -305,7 +323,9 @@ final class SeerrSession: ObservableObject {
     }
 
     private func forget() {
-        credentials.setCookie(nil, forKey: Self.cookieKey(for: serverURL))
+        if let serverURL {
+            credentials.setCookie(nil, forKey: Self.cookieKey(for: serverURL))
+        }
         defaults.removeObject(forKey: Keys.userId)
         defaults.removeObject(forKey: Keys.userName)
         defaults.removeObject(forKey: Keys.permissions)

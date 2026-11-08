@@ -140,7 +140,7 @@ struct MobileSeerrRequestListView: View {
 struct MobileSeerrRequestListRow: View {
     let row: SeerrRequestRow
     let showsRequester: Bool
-    let serverURL: URL
+    let serverURL: URL?
     let isBusy: Bool
 
     var body: some View {
@@ -184,7 +184,7 @@ struct MobileSeerrRequestListRow: View {
                 Image(systemName: "person.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(MobileColors.textTertiary)
-                if let url = row.request.requestedBy?.avatarURL(server: serverURL) {
+                if let serverURL, let url = row.request.requestedBy?.avatarURL(server: serverURL) {
                     LazyImage(url: url) { state in
                         if let image = state.image { image.resizable().scaledToFill() }
                     }
