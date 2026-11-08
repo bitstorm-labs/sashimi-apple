@@ -17,15 +17,16 @@ enum RailOrder {
         /// in `SideMenuOrder` puts it (after the libraries until moved, #841),
         /// and the side-menu setting can hide it like any library (#753).
         case lists
-        /// Seerr requests (#845). Menu-only like Lists, and only there while
-        /// a Seerr account is connected (or its sign-in has expired).
+        /// Seerr requests (#845). Home's Requests row stands for it (#861),
+        /// so it sits where that row is; it is only there while a Seerr
+        /// account is connected (or its sign-in has expired).
         case requests
         /// The admin Server dashboard (#845). Menu-only, administrators only.
         case dashboard
     }
 
-    /// The menu-only entries that come and go with the account: what is
-    /// available now, in their default order (after Lists). `seerr` is the
+    /// The entries that come and go with the account: what is available
+    /// now, in their default order (after Lists). `seerr` is the
     /// Seerr sign-in; an expired one keeps Requests so its page can say so.
     static func conditionalDestinations(seerr: SeerrAuthState, canViewDashboard: Bool) -> [Destination] {
         var result: [Destination] = []
@@ -38,8 +39,15 @@ enum RailOrder {
     }
 
     /// The menu-only entries that trail the list until the user moves them,
-    /// in that order.
+    /// in that order. Requests is here for row orders that have no Requests
+    /// row yet; once a row stands for it, the row decides.
     static let trailingDestinations: [Destination] = [.lists, .requests, .dashboard]
+
+    /// Requests and Dashboard: listed only while `conditionalDestinations`
+    /// holds them, as rows or menu entries alike.
+    static func isConditional(_ destination: Destination) -> Bool {
+        destination == .requests || destination == .dashboard
+    }
 
     /// `rowOrder` (the menu's entries in the user's order, see
     /// `SideMenuOrder`) wins; libraries it does not account for follow in

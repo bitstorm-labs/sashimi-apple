@@ -28,9 +28,11 @@ extension RailOrder {
 
 extension HomeRowConfig {
     /// The rail entry this row stands for; nil for rows that are not
-    /// destinations (Featured, Continue Watching, shared-list rows).
+    /// destinations (Featured, Continue Watching, shared-list rows). The
+    /// Requests row carries the Requests entry (#861).
     var railDestination: RailOrder.Destination? {
         if type == .channels { return .finTV }
+        if type == .requests { return .requests }
         return libraryId.map(RailOrder.Destination.library)
     }
 

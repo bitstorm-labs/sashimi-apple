@@ -98,6 +98,10 @@ final class SeerrRequestsModel: ObservableObject {
         rows.filter { SeerrRequestState.showsOnHome($0.request) }
     }
 
+    /// Whether Home draws the row at all (#861). Home owns this model, so
+    /// an empty row leaves Home's stack entirely rather than as a gap.
+    var showsHomeRow: Bool { session.isActive && !homeRows.isEmpty }
+
     func load() async {
         guard session.isActive, let client = session.client, let user = session.state.user else {
             rows = []

@@ -6,6 +6,10 @@ private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "Ho
 
 enum HomeRowType: String, Codable, Identifiable, CaseIterable {
     case continueWatching = "continue_watching"
+    /// Seerr requests (#861). A saved order without it gets it right after
+    /// Continue Watching, where Home drew it before it was a row. The raw
+    /// value must never change once shipped.
+    case requests
     // Added after release. loadRows() appends any built-in the saved config
     // lacks, so existing users gain the row without a bespoke migration, and
     // the raw value must never change once shipped.
@@ -16,6 +20,7 @@ enum HomeRowType: String, Codable, Identifiable, CaseIterable {
     var displayName: String {
         switch self {
         case .continueWatching: return "Continue Watching"
+        case .requests: return "Requests"
         case .channels: return "SashimiTV"
         }
     }
@@ -101,14 +106,16 @@ final class HomeRowSettings: ObservableObject {
             // A config saved before a built-in row existed has no entry for it.
             // Insert ahead of the library rows rather than appending: built-ins
             // lead on tvOS too, and a new row appended behind every library is
-            // one the user has to go looking for.
-            let firstLibrary = rows.firstIndex { if case .library = $0.type { return true }; return false }
+            // one the user has to go looking for. Requests goes straight after
+            // Continue Watching, where Home drew it before it was a row (#861).
             for type in HomeRowType.allCases where !savedRows.contains(where: {
                 if case .builtIn(let saved) = $0.type { return saved == type }
                 return false
             }) {
                 let config = HomeRowConfig(type: .builtIn(type), isEnabled: true)
-                if let firstLibrary {
+                if type == .requests, let continueWatching = rows.firstIndex(where: { $0.type == .builtIn(.continueWatching) }) {
+                    rows.insert(config, at: continueWatching + 1)
+                } else if let firstLibrary = rows.firstIndex(where: { if case .library = $0.type { return true }; return false }) {
                     rows.insert(config, at: firstLibrary)
                 } else {
                     rows.append(config)
@@ -188,11 +195,6 @@ final class HomeRowSettings: ObservableObject {
         saveRows()
     }
 
-    func moveRow(from source: IndexSet, to destination: Int) {
-        rows.move(fromOffsets: source, toOffset: destination)
-        saveRows()
-    }
-
     func toggleRow(at index: Int) {
         rows[index].isEnabled.toggle()
         saveRows()
@@ -203,6 +205,21 @@ final class HomeRowSettings: ObservableObject {
     /// `available`: Requests and Dashboard while the account allows them (#845).
     func sideMenuEntries(libraryIds: [String], available: [RailOrder.Destination] = []) -> [SideMenuOrder.Entry] {
         SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: sideMenuOrder, available: available)
+    }
+
+    /// iPhone's Row Order: Home's rows, the Requests row only while
+    /// `available` holds `.requests` (#861).
+    func homeRowEntries(available: [RailOrder.Destination] = []) -> [SideMenuOrder.Entry] {
+        SideMenuOrder.rowEntries(rows: rows.map(\.sideMenuRow), available: available)
+    }
+
+    /// Saves a drag in iPhone's Row Order. A row it does not list stays
+    /// after the row it followed.
+    func applyRowOrder(_ entries: [SideMenuOrder.Entry]) {
+        let reordered = SideMenuOrder.reordered(rows, id: \.id, by: entries)
+        guard reordered != rows else { return }
+        rows = reordered
+        saveRows()
     }
 
     /// Saves a drag in that list: the rows in their new order, as always, and
