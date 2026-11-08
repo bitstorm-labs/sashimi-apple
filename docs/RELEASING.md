@@ -63,9 +63,13 @@ Both checks use `scripts/app-changed.sh`; only a `MARKETING_VERSION` change in
 To pause it: Actions → Auto release → ⋯ → Disable workflow. The Release button
 still works either way.
 
-The tags are pushed with `GITHUB_TOKEN` on purpose: GitHub starts no workflows for
-pushes made with it, so the tag-triggered deploys don't fire a second time. The
-Release workflow deploys explicitly instead of hoping a tag push triggers
+The tags are pushed with `RELEASE_TOKEN`: the `release tags: maintainers only`
+ruleset lets only org admins create tags (a tag starts the deploys, which hold
+the signing secrets), and GitHub won't exempt `GITHUB_TOKEN` from a ruleset. A
+tag pushed with a personal token does start the tag-triggered deploys, so each
+Release tag's message carries a `Released-by: Release workflow` line, and those
+runs stand down when they see it (their "Tag pushed by the Release workflow?"
+job). The Release workflow deploys explicitly instead of hoping a tag push triggers
 something — a laptop going to sleep, a quoting slip or a merge race can't half-ship
 a release any more.
 
