@@ -29,17 +29,63 @@ final class SeerrSessionTests: XCTestCase {
 
     private var cookieKey: String { SeerrSession.cookieKey(for: SeerrFixtures.server) }
 
-    func testANewInstallIsNotSetUpAndPointsAtTheDefaultServer() {
+    func testANewInstallHasNoServerAndStaysOffTheNetwork() async {
         let session = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero)
 
         XCTAssertEqual(session.state, .notConfigured)
         XCTAssertFalse(session.isActive)
         XCTAssertNil(session.client)
-        XCTAssertEqual(session.serverURL.absoluteString, "https://bitstorm.ca")
+        XCTAssertNil(session.serverURL)
+        XCTAssertFalse(session.canSignIn)
+
+        await session.restore()
+        await session.refreshPublicSettings()
+        await session.signInLocal(email: "mom@example.com", password: "pw")
+        let pin = await session.beginPlexSignIn(strong: false)
+
+        XCTAssertNil(pin)
+        XCTAssertEqual(session.state, .notConfigured)
+        XCTAssertNil(session.client)
+        XCTAssertTrue(SeerrStubServer.requests.isEmpty, "no request server, no Seerr traffic")
+    }
+
+    func testASavedServerAddressSurvivesARelaunch() {
+        let first = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero)
+        XCTAssertTrue(first.setServerAddress("requests.example.com"))
+
+        let relaunched = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero)
+
+        XCTAssertEqual(relaunched.serverURL?.absoluteString, "https://requests.example.com")
+        XCTAssertTrue(relaunched.canSignIn)
+    }
+
+    func testAnAddressSavedByAnEarlierVersionKeepsWorking() {
+        defaults.set("https://requests.example.com", forKey: "seerr.serverURL")
+
+        let session = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero)
+
+        XCTAssertEqual(session.serverURL?.absoluteString, "https://requests.example.com")
+    }
+
+    func testSignInIsOfferedOnlyForAValidAddress() {
+        XCTAssertFalse(SeerrSession.canSignIn(serverText: ""))
+        XCTAssertFalse(SeerrSession.canSignIn(serverText: "   "))
+        XCTAssertFalse(SeerrSession.canSignIn(serverText: "ftp://requests.example.com"))
+        XCTAssertFalse(SeerrSession.canSignIn(serverText: "https://"))
+        XCTAssertTrue(SeerrSession.canSignIn(serverText: "requests.example.com"))
+        XCTAssertTrue(SeerrSession.canSignIn(serverText: "http://192.168.1.20:5055"))
+    }
+
+    func testAnEmptyAddressIsNotSaved() {
+        let session = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero)
+
+        XCTAssertFalse(session.setServerAddress(""))
+        XCTAssertNil(session.serverURL)
+        XCTAssertNil(defaults.string(forKey: "seerr.serverURL"))
     }
 
     func testServerAddressesAreNormalised() {
-        XCTAssertEqual(SeerrSession.normalizedServerURL("bitstorm.ca")?.absoluteString, "https://bitstorm.ca")
+        XCTAssertEqual(SeerrSession.normalizedServerURL("requests.example.com")?.absoluteString, "https://requests.example.com")
         XCTAssertEqual(SeerrSession.normalizedServerURL(" http://192.168.86.151:5055/ ")?.absoluteString, "http://192.168.86.151:5055")
         XCTAssertEqual(SeerrSession.normalizedServerURL("https://example.com/seerr/")?.absoluteString, "https://example.com/seerr")
         XCTAssertNil(SeerrSession.normalizedServerURL(""))
@@ -192,7 +238,7 @@ final class SeerrSessionTests: XCTestCase {
 
     func testCookiesAreScopedPerServer() {
         XCTAssertNotEqual(
-            SeerrSession.cookieKey(for: URL(string: "https://bitstorm.ca")!),
+            SeerrSession.cookieKey(for: URL(string: "https://requests.example.com")!),
             SeerrSession.cookieKey(for: URL(string: "http://192.168.86.151:5055")!)
         )
     }

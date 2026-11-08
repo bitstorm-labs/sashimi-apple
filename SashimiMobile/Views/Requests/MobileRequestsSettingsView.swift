@@ -16,9 +16,9 @@ struct MobileRequestsSettingsView: View {
         Form {
             Section {
                 if session.isActive {
-                    LabeledContent("Request server", value: session.serverURL.host ?? session.serverURL.absoluteString)
+                    LabeledContent("Request server", value: session.serverURL?.host ?? session.serverURL?.absoluteString ?? "")
                 } else {
-                    TextField("Request server", text: $serverText, prompt: Text("https://bitstorm.ca"))
+                    TextField("Request server", text: $serverText, prompt: Text("https://requests.example.com"))
                         .textContentType(.URL)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
@@ -49,7 +49,7 @@ struct MobileRequestsSettingsView: View {
         }
         .navigationTitle("Requests")
         .onAppear {
-            serverText = session.serverURL.absoluteString
+            serverText = session.serverURL?.absoluteString ?? ""
             Task { await session.refreshPublicSettings() }
         }
         .onDisappear {
@@ -87,6 +87,7 @@ struct MobileRequestsSettingsView: View {
                 } label: {
                     Label("Sign in with Plex", systemImage: "link")
                 }
+                .disabled(!canSignIn)
             }
         }
 
@@ -103,14 +104,18 @@ struct MobileRequestsSettingsView: View {
                     applyServer()
                     Task { await session.signInLocal(email: email, password: password) }
                 }
-                .disabled(email.isEmpty || password.isEmpty || session.state == .signingIn)
+                .disabled(email.isEmpty || password.isEmpty || session.state == .signingIn || !canSignIn)
             }
         }
     }
 
+    /// Sign-in waits for a valid address: there is no default server.
+    private var canSignIn: Bool { SeerrSession.canSignIn(serverText: serverText) }
+
+    /// An address that isn't valid goes back to the saved one (or empty).
     private func applyServer() {
         if !session.setServerAddress(serverText) {
-            serverText = session.serverURL.absoluteString
+            serverText = session.serverURL?.absoluteString ?? ""
         }
     }
 

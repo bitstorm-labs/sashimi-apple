@@ -138,7 +138,7 @@ struct SeerrRequestListSection: View {
 struct SeerrRequestListCard: View {
     let row: SeerrRequestRow
     let showsRequester: Bool
-    let serverURL: URL
+    let serverURL: URL?
     let isBusy: Bool
     let onSelect: () -> Void
     @FocusState private var isFocused: Bool
@@ -192,7 +192,7 @@ struct SeerrRequestListCard: View {
                 Image(systemName: "person.fill")
                     .font(.system(size: 14))
                     .foregroundStyle(SashimiTheme.textTertiary)
-                if let url = row.request.requestedBy?.avatarURL(server: serverURL) {
+                if let serverURL, let url = row.request.requestedBy?.avatarURL(server: serverURL) {
                     LazyImage(url: url) { state in
                         if let image = state.image { image.resizable().scaledToFill() }
                     }

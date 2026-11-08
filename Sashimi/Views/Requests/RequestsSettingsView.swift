@@ -25,7 +25,7 @@ struct RequestsSettingsView: View {
             .padding(.vertical, 60)
         }
         .onAppear {
-            serverText = session.serverURL.absoluteString
+            serverText = session.serverURL?.absoluteString ?? ""
             Task { await session.refreshPublicSettings() }
         }
         .onDisappear { session.cancelPlexSignIn() }
@@ -61,13 +61,17 @@ struct RequestsSettingsView: View {
                 }
                 SettingsOptionRow(icon: "link", title: "Sign in with Plex", subtitle: "Enter a code at plex.tv/link") {
                     showingLocalForm = false
+                    applyServer()
                     session.startPlexCodeSignIn()
                 }
+                .disabled(!canSignIn)
                 if session.localLoginEnabled {
                     SettingsOptionRow(icon: "person.text.rectangle", title: "Use a Seerr username instead", subtitle: "For accounts made on \(session.applicationTitle)") {
                         session.cancelPlexSignIn()
+                        applyServer()
                         showingLocalForm = true
                     }
+                    .disabled(!canSignIn)
                 }
             }
 
@@ -91,18 +95,16 @@ struct RequestsSettingsView: View {
                 .foregroundStyle(SashimiTheme.textSecondary)
             if session.isActive {
                 Spacer()
-                Text(session.serverURL.host ?? session.serverURL.absoluteString)
+                Text(session.serverURL?.host ?? session.serverURL?.absoluteString ?? "")
                     .font(Typography.bodySmall.weight(.medium))
                     .foregroundStyle(SashimiTheme.textPrimary)
             } else {
-                TextField("https://bitstorm.ca", text: $serverText)
+                TextField("https://requests.example.com", text: $serverText)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onSubmit {
-                        if !session.setServerAddress(serverText) {
-                            serverText = session.serverURL.absoluteString
-                        }
+                        applyServer()
                         Task { await session.refreshPublicSettings() }
                     }
             }
@@ -110,6 +112,16 @@ struct RequestsSettingsView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, session.isActive ? 16 : 4)
         .background(RoundedRectangle(cornerRadius: 12).fill(SashimiTheme.cardBackground))
+    }
+
+    /// Sign-in waits for a valid address: there is no default server.
+    private var canSignIn: Bool { SeerrSession.canSignIn(serverText: serverText) }
+
+    /// An address that isn't valid goes back to the saved one (or empty).
+    private func applyServer() {
+        if !session.setServerAddress(serverText) {
+            serverText = session.serverURL?.absoluteString ?? ""
+        }
     }
 
     // MARK: Right: Plex code, username form, or nothing
@@ -172,9 +184,10 @@ struct RequestsSettingsView: View {
             SecureField("Password", text: $password)
                 .textContentType(.password)
             ActionButton(title: "Sign In", icon: "arrow.right", isPrimary: true) {
+                applyServer()
                 Task { await session.signInLocal(email: email, password: password) }
             }
-            .disabled(email.isEmpty || password.isEmpty)
+            .disabled(email.isEmpty || password.isEmpty || !canSignIn)
         }
     }
 

@@ -18,6 +18,20 @@ final class SeerrMobileTests: XCTestCase {
         return defaults
     }
 
+    func testAFreshInstallHasNoRequestServerUntilOneIsEntered() {
+        let store = defaults()
+        let session = SeerrSession(defaults: store, credentials: MemoryCredentials(), pollInterval: .zero)
+
+        XCTAssertNil(session.serverURL)
+        XCTAssertFalse(session.canSignIn)
+        XCTAssertFalse(SeerrSession.canSignIn(serverText: ""))
+
+        XCTAssertTrue(session.setServerAddress("requests.example.com"))
+        let relaunched = SeerrSession(defaults: store, credentials: MemoryCredentials(), pollInterval: .zero)
+        XCTAssertEqual(relaunched.serverURL?.absoluteString, "https://requests.example.com")
+        XCTAssertTrue(relaunched.canSignIn)
+    }
+
     func testPlexWebSignInUsesOneClientIdPerInstallAndComesBackToTheApp() throws {
         let store = defaults()
         let session = SeerrSession(defaults: store, credentials: MemoryCredentials(), pollInterval: .zero)
