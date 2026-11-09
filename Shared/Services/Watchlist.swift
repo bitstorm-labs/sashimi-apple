@@ -31,8 +31,9 @@ enum Watchlist {
             tmdbId: String(target.tmdbId), tvdbId: nil, imdbId: nil)
     }
 
-    static func contains(_ entries: [WatchlistEntry], ids: WatchlistIds) -> Bool {
-        entries.contains { $0.ids.agrees(with: ids) }
+    /// TMDB numbers are separate for movies and shows, so the kind must match too.
+    static func contains(_ entries: [WatchlistEntry], kind: WatchlistKind, ids: WatchlistIds) -> Bool {
+        entries.contains { $0.kind == kind && $0.ids.agrees(with: ids) }
     }
 
     enum MissingTag: Equatable {

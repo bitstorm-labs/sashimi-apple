@@ -62,8 +62,8 @@ final class WatchlistStoreTests: XCTestCase {
         XCTAssertEqual(store.availability, .available)
         XCTAssertTrue(store.isAvailable)
         XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1"])
-        XCTAssertTrue(store.contains(WatchlistIds(tmdb: "949")))
-        XCTAssertFalse(store.contains(WatchlistIds(tmdb: "1")))
+        XCTAssertTrue(store.contains(WatchlistIds(tmdb: "949"), kind: .movie))
+        XCTAssertFalse(store.contains(WatchlistIds(tmdb: "1"), kind: .movie))
     }
 
     func testANetworkErrorAfterALoadKeepsTheWatchlist() async throws {

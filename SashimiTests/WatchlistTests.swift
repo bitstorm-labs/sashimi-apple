@@ -163,8 +163,9 @@ final class WatchlistTests: XCTestCase {
 
     func testContainsMatchesOnAnySharedId() {
         let entries = [WatchlistEntry(id: "a", kind: .movie, title: "Heat", ids: WatchlistIds(tmdb: "949"))]
-        XCTAssertTrue(Watchlist.contains(entries, ids: WatchlistIds(tmdb: "949", imdb: "tt1")))
-        XCTAssertFalse(Watchlist.contains(entries, ids: WatchlistIds(tmdb: "1")))
+        XCTAssertTrue(Watchlist.contains(entries, kind: .movie, ids: WatchlistIds(tmdb: "949", imdb: "tt1")))
+        XCTAssertFalse(Watchlist.contains(entries, kind: .movie, ids: WatchlistIds(tmdb: "1")))
+        XCTAssertFalse(Watchlist.contains(entries, kind: .series, ids: WatchlistIds(tmdb: "949")))
     }
 
     func testOnlyPendingAndComingReadAsRequested() {

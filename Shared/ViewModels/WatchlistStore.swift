@@ -68,9 +68,9 @@ final class WatchlistStore: ObservableObject {
         availability = loaded == nil ? .unavailable : .available
     }
 
-    func contains(_ ids: WatchlistIds) -> Bool {
+    func contains(_ ids: WatchlistIds, kind: WatchlistKind) -> Bool {
         guard let entries = watchlist?.entries else { return false }
-        return Watchlist.contains(entries, ids: ids)
+        return Watchlist.contains(entries, kind: kind, ids: ids)
     }
 
     func ids(for item: BaseItemDto) async -> WatchlistIds? {

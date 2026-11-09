@@ -330,14 +330,17 @@ final class AddToListViewModel: ObservableObject {
     private func showWatchlist() async {
         guard store.isAvailable else { return }
         let ids: WatchlistIds
+        let kind: WatchlistKind
         switch subject {
         case .seerr(let target, _):
             ids = WatchlistIds(tmdb: String(target.tmdbId))
+            kind = target.kind == .movie ? .movie : .series
         case .library(let item):
-            guard let found = await store.ids(for: item) else { return }
+            guard let found = await store.ids(for: item), let itemKind = Watchlist.kind(for: item.type) else { return }
             ids = found
+            kind = itemKind
         }
-        watchlist = WatchlistChoice(count: store.watchlist?.entries.count ?? 0, alreadyOn: store.contains(ids))
+        watchlist = WatchlistChoice(count: store.watchlist?.entries.count ?? 0, alreadyOn: store.contains(ids, kind: kind))
     }
 
     private func loadLists() async {

@@ -121,7 +121,7 @@ final class AddToListWatchlistTests: XCTestCase {
         let playlistCalls = JellyfinRouteStub.requests("GET", "/Items").filter { $0.query["IncludeItemTypes"] == "Playlist" }
         XCTAssertTrue(playlistCalls.isEmpty)
         let created = await model.create(name: "New", isPublic: false)
-        XCTAssertFalse(created.isEmpty)
+        XCTAssertEqual(created, "Only the Watchlist takes this title")
         XCTAssertTrue(JellyfinRouteStub.requests("POST", "/Playlists").isEmpty)
     }
 
@@ -140,5 +140,21 @@ final class AddToListWatchlistTests: XCTestCase {
         let body = try XCTUnwrap(posts.first?.body)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(json["tmdbId"] as? String, "949")
+    }
+
+    func testAShowWithTheSameTmdbNumberIsNotTheMovie() async throws {
+        let show = "{\"id\":\"e1\",\"type\":\"Series\",\"title\":\"Game\",\"tmdbId\":\"1399\"}"
+        func alreadyOn(_ kind: SeerrMediaKind) async throws -> AddToListViewModel.WatchlistChoice? {
+            serveWatchlist(entries: [show])
+            let model = AddToListViewModel(
+                seerrTarget: SeerrTarget(kind: kind, tmdbId: 1399, title: "T"), year: nil,
+                watchlist: WatchlistStore(service: WatchlistService(client: try client())))
+            await model.load()
+            return model.watchlist
+        }
+        let asMovie = try await alreadyOn(.movie)
+        let asShow = try await alreadyOn(.tv)
+        XCTAssertEqual(asMovie?.alreadyOn, false)
+        XCTAssertEqual(asShow?.alreadyOn, true)
     }
 }
