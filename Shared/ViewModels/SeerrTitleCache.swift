@@ -13,7 +13,7 @@ final class SeerrTitleCache {
     }
 
     private var entries: [String: Entry] = [:]
-    private var inFlight = Set<String>()
+    private var inFlight: [String: Task<Entry?, Never>] = [:]
 
     func entry(for target: SeerrTarget) -> Entry? {
         entries[target.id]
@@ -39,30 +39,59 @@ final class SeerrTitleCache {
         await fill(targets, client: client, maxConcurrent: Int.max)
     }
 
-    /// As `fill(_:client:)`, with at most `maxConcurrent` requests open at a time.
-    /// A title already being fetched by another call isn't fetched again.
+    /// As `fill(_:client:)`, with at most `maxConcurrent` of this call's requests
+    /// open at a time. A title another call is already fetching is joined, not
+    /// fetched again: every caller returns only once its titles have resolved.
     func fill(_ targets: [SeerrTarget], client: SeerrClient, maxConcurrent: Int) async {
+        let limiter = Limiter(max(1, maxConcurrent))
+        var waiting: [Task<Entry?, Never>] = []
         var seen = Set<String>()
-        var queue = targets
-            .map { SeerrTarget(kind: $0.kind, tmdbId: $0.tmdbId, title: "") }
-            .filter { entries[$0.id] == nil && !inFlight.contains($0.id) && seen.insert($0.id).inserted }
-        guard !queue.isEmpty else { return }
-        inFlight.formUnion(queue.map(\.id))
-        let limit = max(1, maxConcurrent)
-        await withTaskGroup(of: (SeerrTarget, Entry?).self) { group in
-            func startNext() {
-                guard !queue.isEmpty else { return }
-                let target = queue.removeFirst()
-                group.addTask {
-                    guard let details = try? await client.details(kind: target.kind, tmdbId: target.tmdbId) else { return (target, nil) }
-                    return (target, Entry(title: details.title, posterPath: details.posterPath, mediaInfo: details.mediaInfo))
-                }
+        for target in targets {
+            let bare = SeerrTarget(kind: target.kind, tmdbId: target.tmdbId, title: "")
+            guard entries[bare.id] == nil, seen.insert(bare.id).inserted else { continue }
+            if let running = inFlight[bare.id] {
+                waiting.append(running)
+                continue
             }
-            for _ in 0..<min(limit, queue.count) { startNext() }
-            for await (target, entry) in group {
-                inFlight.remove(target.id)
-                if let entry { entries[target.id] = entry }
-                startNext()
+            let task = Task { [weak self] () -> Entry? in
+                await limiter.acquire()
+                let details = try? await client.details(kind: bare.kind, tmdbId: bare.tmdbId)
+                await limiter.release()
+                let entry = details.map { Entry(title: $0.title, posterPath: $0.posterPath, mediaInfo: $0.mediaInfo) }
+                self?.finished(bare.id, entry)
+                return entry
+            }
+            inFlight[bare.id] = task
+            waiting.append(task)
+        }
+        for task in waiting { _ = await task.value }
+    }
+
+    private func finished(_ id: String, _ entry: Entry?) {
+        inFlight[id] = nil
+        if let entry { entries[id] = entry }
+    }
+
+    /// Lets at most `limit` holders run at once; the rest wait their turn.
+    private actor Limiter {
+        private var free: Int
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        init(_ limit: Int) { free = limit }
+
+        func acquire() async {
+            if free > 0 {
+                free -= 1
+            } else {
+                await withCheckedContinuation { waiters.append($0) }
+            }
+        }
+
+        func release() {
+            if waiters.isEmpty {
+                free += 1
+            } else {
+                waiters.removeFirst().resume()
             }
         }
     }

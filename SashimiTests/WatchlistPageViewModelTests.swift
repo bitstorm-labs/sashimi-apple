@@ -14,7 +14,7 @@ final class WatchlistPageViewModelTests: XCTestCase {
         JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
         SeerrClient.testURLProtocolClasses = [SeerrStubServer.self]
         credentials = InMemorySeerrCredentials()
-        WatchlistPageViewModel.titleCache = SeerrTitleCache()
+        WatchlistPageViewModel.resetSharedLookups()
     }
 
     override func tearDown() {
@@ -65,22 +65,6 @@ final class WatchlistPageViewModelTests: XCTestCase {
     private func makeModel(seerr: SeerrSession, lookup: RequestedLookup? = nil) throws -> WatchlistPageViewModel {
         let service = WatchlistService(client: try jellyfin())
         return WatchlistPageViewModel(store: WatchlistStore(service: service), service: service, seerr: seerr, lookup: lookup)
-    }
-
-    /// A lookup that counts how often it's asked and for what, and says `status` for every title.
-    private final class CountingLookup {
-        var batches: [[SeerrTarget]] = []
-        var status: Int?
-        var asked: [SeerrTarget] { batches.flatMap { $0 } }
-
-        func callAsFunction(_ targets: [SeerrTarget]) -> [String: SeerrMediaInfo?] {
-            batches.append(targets)
-            var result: [String: SeerrMediaInfo?] = [:]
-            for target in targets {
-                result.updateValue(status.map { SeerrMediaInfo(status: $0) }, forKey: target.id)
-            }
-            return result
-        }
     }
 
     private func tile(_ model: WatchlistPageViewModel, _ index: Int) throws -> WatchlistTile {
@@ -188,6 +172,7 @@ final class WatchlistPageViewModelTests: XCTestCase {
 
         await model.load()
         model.tiles.forEach(model.tileAppeared)
+        model.tiles.forEach(model.tileAppeared) // scrolled away and back before the answer
         await model.waitForLookups()
         await model.load()
         XCTAssertEqual(model.tiles.map(\.missingTag), [.requested, .requested], "known results apply at once")
@@ -214,6 +199,56 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertFalse(model.failed)
         XCTAssertEqual(model.tiles.map(\.missingTag), [.notOnServer, .notOnServer])
         XCTAssertEqual(SeerrStubServer.requests("GET", "/api/v1/movie/1").count, 1, "a failure isn't retried this session")
+
+        let nextVisit = try makeModel(seerr: session)
+        await nextVisit.load()
+        nextVisit.tiles.forEach(nextVisit.tileAppeared)
+        await nextVisit.waitForLookups()
+        XCTAssertEqual(SeerrStubServer.requests("GET", "/api/v1/movie/1").count, 1, "nor on the next visit to the page")
+    }
+
+    func testAnAnswerThatArrivesAfterTheSeerrUserChangedIsDropped() async throws {
+        serve([entryJSON("a", tmdb: 1)])
+        let fake = CountingLookup()
+        fake.status = 2
+        let session = await signedInSeerr()
+        let model = try makeModel(seerr: session, lookup: { targets in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return fake(targets)
+        })
+        await model.load()
+        model.tiles.forEach(model.tileAppeared)
+
+        SeerrStubServer.on("POST", "/api/v1/auth/local", body: SeerrFixtures.user(id: 8), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        await session.signInLocal(email: "other@example.com", password: "pw")
+        await model.waitForLookups()
+
+        XCTAssertEqual(model.tiles.first?.missingTag, .notOnServer, "the last person's answer isn't shown to this one")
+        model.tiles.forEach(model.tileAppeared)
+        await model.waitForLookups()
+        XCTAssertEqual(fake.batches.count, 2, "asked again for the new person")
+        XCTAssertEqual(model.tiles.first?.missingTag, .requested)
+    }
+
+    func testCancelledLookupsDropTheirAnswersAndCanBeAskedAgain() async throws {
+        serve([entryJSON("a", tmdb: 1)])
+        let fake = CountingLookup()
+        fake.status = 2
+        let model = try makeModel(seerr: await signedInSeerr(), lookup: { targets in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return fake(targets)
+        })
+        await model.load()
+        model.tiles.forEach(model.tileAppeared)
+        try await Task.sleep(nanoseconds: 50_000_000) // the lookup is under way
+
+        model.cancelLookups()
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertEqual(model.tiles.first?.missingTag, .notOnServer, "a page that went away takes no answers")
+        model.tiles.forEach(model.tileAppeared)
+        await model.waitForLookups()
+        XCTAssertEqual(model.tiles.first?.missingTag, .requested, "and can ask again when it comes back")
     }
 
     // MARK: Header and menu
@@ -326,5 +361,21 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertTrue(model.isGone)
         XCTAssertFalse(model.isLoading)
         XCTAssertTrue(model.tiles.isEmpty)
+    }
+}
+
+/// A lookup that counts how often it's asked and for what, and says `status` for every title.
+private final class CountingLookup {
+    var batches: [[SeerrTarget]] = []
+    var status: Int?
+    var asked: [SeerrTarget] { batches.flatMap { $0 } }
+
+    func callAsFunction(_ targets: [SeerrTarget]) -> [String: SeerrMediaInfo?] {
+        batches.append(targets)
+        var result: [String: SeerrMediaInfo?] = [:]
+        for target in targets {
+            result.updateValue(status.map { SeerrMediaInfo(status: $0) }, forKey: target.id)
+        }
+        return result
     }
 }

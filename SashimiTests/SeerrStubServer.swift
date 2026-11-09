@@ -67,6 +67,9 @@ final class SeerrStubServer: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// The held-back reply of a delayed details request; cancelled if the request is.
+    private var delayedReply: DispatchWorkItem?
+
     override func startLoading() {
         let url = request.url ?? URL(fileURLWithPath: "/")
         let method = request.httpMethod ?? "GET"
@@ -103,13 +106,27 @@ final class SeerrStubServer: URLProtocol {
             Self.detailsInFlight += 1
             Self.detailsPeak = max(Self.detailsPeak, Self.detailsInFlight)
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
-            Self.lock.withLock { Self.detailsInFlight -= 1 }
+        let work = DispatchWorkItem { [self] in
+            leaveDetails()
             answer()
         }
+        Self.lock.withLock { delayedReply = work }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    override func stopLoading() {}
+    /// Leaves the in-flight count once, whether the reply was sent or cancelled.
+    private func leaveDetails() {
+        let counted = Self.lock.withLock { () -> Bool in
+            defer { delayedReply = nil }
+            return delayedReply != nil
+        }
+        if counted { Self.lock.withLock { Self.detailsInFlight -= 1 } }
+    }
+
+    override func stopLoading() {
+        Self.lock.withLock { delayedReply }?.cancel()
+        leaveDetails()
+    }
 
     private static func read(_ stream: InputStream) -> Data {
         stream.open()

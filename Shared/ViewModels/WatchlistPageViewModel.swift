@@ -31,9 +31,18 @@ typealias RequestedLookup = @MainActor ([SeerrTarget]) async -> [String: SeerrMe
 @MainActor
 final class WatchlistPageViewModel: ObservableObject {
     /// Seerr's answers, kept for the process so a title is asked about once per
-    /// session. Reset when the Seerr user signs out or changes.
+    /// session. Reset, with `failedLookups`, when the Seerr user signs out or changes.
     static var titleCache = SeerrTitleCache()
+    /// Titles Seerr couldn't answer for: not retried this session, on any visit.
+    private static var failedLookups = Set<String>()
     private static var cacheOwner: Int?
+
+    /// Forgets everything Seerr said. Tests start from here.
+    static func resetSharedLookups() {
+        titleCache = SeerrTitleCache()
+        failedLookups = []
+        cacheOwner = nil
+    }
     private static let maxConcurrentLookups = 4
 
     @Published private(set) var tiles: [WatchlistTile] = []
@@ -48,8 +57,10 @@ final class WatchlistPageViewModel: ObservableObject {
     private var libraryItems: [String: BaseItemDto] = [:]
     /// Seerr's answers this model has seen (a nil value: asked, nothing known).
     private var known: [String: SeerrMediaInfo?] = [:]
-    /// Everything ever queued, so each title is asked about once, failure or not.
+    /// Queued or being looked up right now, so a tile that appears twice is asked about once.
     private var requested = Set<String>()
+    /// Bumped when the Seerr user changes; a batch started under another one is dropped.
+    private var ownerEpoch = 0
     private var pending: [SeerrTarget] = []
     private var drain: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -113,12 +124,21 @@ final class WatchlistPageViewModel: ObservableObject {
     /// with a TMDB id, while signed into Requests, and not asked about yet, is queued.
     func tileAppeared(_ tile: WatchlistTile) {
         guard seerr.client != nil, tile.isMissing, let target = Watchlist.seerrTarget(for: tile.entry),
-              cachedInfo(for: target) == nil, !requested.contains(target.id) else { return }
-        requested.insert(target.id)
+              cachedInfo(for: target) == nil, !Self.failedLookups.contains(target.id),
+              requested.insert(target.id).inserted else { return }
         pending.append(target)
         if drain == nil {
-            drain = Task { await drainQueue() }
+            drain = Task { [weak self] in await self?.drainQueue() }
         }
+    }
+
+    /// Stops looking things up (the page went away). What's queued is dropped and
+    /// may be asked again when its tile next appears; answers already in the cache stay.
+    func cancelLookups() {
+        drain?.cancel()
+        drain = nil
+        requested = []
+        pending = []
     }
 
     func action(for tile: WatchlistTile) -> WatchlistTileAction {
@@ -151,14 +171,19 @@ final class WatchlistPageViewModel: ObservableObject {
     // MARK: Lookups
 
     private func drainQueue() async {
-        while !pending.isEmpty {
+        defer { if !Task.isCancelled { drain = nil } }
+        while !pending.isEmpty, !Task.isCancelled {
             let batch = pending
             pending = []
+            let epoch = ownerEpoch
             let answers = await lookup(batch)
+            syncCacheOwner() // the person may have changed while we waited
+            guard !Task.isCancelled, epoch == ownerEpoch else { return }
             for (id, info) in answers { known.updateValue(info, forKey: id) }
+            for target in batch where !answers.keys.contains(target.id) { Self.failedLookups.insert(target.id) }
+            requested.subtract(batch.map(\.id))
             rebuildTiles()
         }
-        drain = nil
     }
 
     private func lookup(_ targets: [SeerrTarget]) async -> [String: SeerrMediaInfo?] {
@@ -206,8 +231,11 @@ final class WatchlistPageViewModel: ObservableObject {
         guard owner != Self.cacheOwner else { return }
         Self.cacheOwner = owner
         Self.titleCache = SeerrTitleCache()
+        Self.failedLookups = []
         known = [:]
         requested = []
+        pending = []
+        ownerEpoch += 1
     }
 
     private func seerrChanged() {
