@@ -135,14 +135,21 @@ enum WatchlistJSON {
 
     static func encoder() -> JSONEncoder { JSONEncoder() }
 
+    private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let plainFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     /// ISO-8601 with or without fractional seconds; nil when unreadable.
     static func date(from string: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: string) { return date }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: string)
+        fractionalFormatter.date(from: string) ?? plainFormatter.date(from: string)
     }
 
     private struct AnyKey: CodingKey {

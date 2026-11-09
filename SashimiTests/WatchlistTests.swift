@@ -149,6 +149,18 @@ final class WatchlistTests: XCTestCase {
         XCTAssertEqual(dict["type"] as? String, "Movie")
     }
 
+    func testNewEntryEncodesEveryWireName() throws {
+        let entry = NewWatchlistEntry(type: .series, title: "Severance", year: 2022,
+                                      posterUrl: "https://image.tmdb.org/p.jpg",
+                                      tmdbId: "1", tvdbId: "2", imdbId: "tt3")
+        let data = try WatchlistJSON.encoder().encode(entry)
+        let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(dict.keys), ["type", "title", "year", "posterUrl", "tmdbId", "tvdbId", "imdbId"])
+        XCTAssertEqual(dict["type"] as? String, "Series")
+        XCTAssertEqual(dict["year"] as? Int, 2022)
+        XCTAssertEqual(dict["imdbId"] as? String, "tt3")
+    }
+
     func testContainsMatchesOnAnySharedId() {
         let entries = [WatchlistEntry(id: "a", kind: .movie, title: "Heat", ids: WatchlistIds(tmdb: "949"))]
         XCTAssertTrue(Watchlist.contains(entries, ids: WatchlistIds(tmdb: "949", imdb: "tt1")))
