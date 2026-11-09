@@ -33,31 +33,39 @@ final class WatchlistStore: ObservableObject {
 
     var isAvailable: Bool { availability == .available }
 
+    /// Which user on which server a call was made for. A result that comes
+    /// back for another scope belongs to nobody and is dropped.
+    private struct Scope: Equatable {
+        let userId: String?
+        let server: URL?
+    }
+
+    private func currentScope() async -> Scope {
+        Scope(userId: await service.client.currentUserId, server: await service.client.currentServerURL)
+    }
+
     /// Reloads the Watchlist. Another user or server first loses everything of
     /// the last one. A failed load keeps what was there: a blip is not "no plugin".
     func refresh() async {
-        let userId = await service.client.currentUserId
-        let server = await service.client.currentServerURL
-        if userId != loadedUserId || server != loadedServer {
+        let scope = await currentScope()
+        if scope.userId != loadedUserId || scope.server != loadedServer {
             watchlist = nil
             availability = .unknown
             pendingSwitch = nil
             heldToken = nil
             notice = nil
-            loadedUserId = userId
-            loadedServer = server
+            loadedUserId = scope.userId
+            loadedServer = scope.server
         }
+        let loaded: WatchlistResponse?
         do {
-            if let loaded = try await service.load() {
-                watchlist = loaded
-                availability = .available
-            } else {
-                watchlist = nil
-                availability = .unavailable
-            }
+            loaded = try await service.load()
         } catch {
-            // Keep the previous values.
+            return // Keep the previous values.
         }
+        guard await currentScope() == scope else { return }
+        watchlist = loaded
+        availability = loaded == nil ? .unavailable : .available
     }
 
     func contains(_ ids: WatchlistIds) -> Bool {
@@ -108,9 +116,12 @@ final class WatchlistStore: ObservableObject {
         await refresh()
     }
 
-    /// Nil: the server couldn't be reached.
+    /// Nil: the server couldn't be reached, or the user or server changed while
+    /// waiting (the answer belongs to someone else and is dropped).
     func link(token: String, replace: Bool) async -> PlexLinkResult? {
-        guard let result = try? await service.client.linkWatchlistPlex(token: token, replace: replace) else { return nil }
+        let scope = await currentScope()
+        guard let result = try? await service.client.linkWatchlistPlex(token: token, replace: replace),
+              await currentScope() == scope else { return nil }
         if case .linked = result { await refresh() }
         return result
     }
@@ -128,28 +139,39 @@ final class WatchlistStore: ObservableObject {
     /// Links the Plex account the user just signed into Requests with. Silent
     /// unless it newly links or finds a different account already linked.
     func autoLink(token: String) async {
-        let userId = await service.client.currentUserId
-        if !(isAvailable && userId == loadedUserId) { await refresh() }
-        guard isAvailable else { return }
+        let scope = await currentScope()
+        if !(isAvailable && scope.userId == loadedUserId && scope.server == loadedServer) { await refresh() }
+        guard isAvailable, await currentScope() == scope else { return }
         let wasLinked = watchlist?.plex != nil
-        switch await link(token: token, replace: false) {
+        let result = await link(token: token, replace: false)
+        guard await currentScope() == scope else { return }
+        switch result {
         case .linked:
             if !wasLinked { notice = WatchlistText.nowSyncs }
         case .conflict(let current, let new):
             let switchId = UUID()
             heldToken = (switchId, token)
             pendingSwitch = PendingSwitch(id: switchId, currentUsername: current, newUsername: new)
-        case .rejected, nil:
+        case .rejected, .plexUnreachable, nil:
             break
         }
     }
 
+    /// False when the switch didn't happen. If the server or Plex couldn't be
+    /// reached the question stays, so the same "yes" can be tried again.
     func confirmSwitch() async -> Bool {
-        guard let held = heldToken, pendingSwitch?.id == held.switchId else { return false }
+        guard let held = heldToken, let question = pendingSwitch, question.id == held.switchId else { return false }
+        let scope = await currentScope()
         heldToken = nil
         pendingSwitch = nil
-        guard case .linked = await link(token: held.token, replace: true) else { return false }
-        return true
+        let result = await link(token: held.token, replace: true)
+        if case .linked = result { return true }
+        let unreachable = result == nil || result == .plexUnreachable
+        if unreachable, await currentScope() == scope, heldToken == nil, pendingSwitch == nil {
+            heldToken = held
+            pendingSwitch = question
+        }
+        return false
     }
 
     func declineSwitch() {

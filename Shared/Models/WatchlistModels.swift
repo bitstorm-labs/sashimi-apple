@@ -168,4 +168,6 @@ enum PlexLinkResult: Equatable, Sendable {
     /// This Watchlist is already linked to another Plex account (409).
     /// `newUsername` is nil from a plugin that doesn't say who the new one is.
     case conflict(currentUsername: String, newUsername: String?)
+    /// The server couldn't reach plex.tv (any 5xx). Not a verdict on the token.
+    case plexUnreachable
 }

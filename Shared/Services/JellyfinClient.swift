@@ -1014,7 +1014,8 @@ actor JellyfinClient {
         path: String,
         method: String,
         body: Data? = nil,
-        allowing: Set<Int>
+        allowing: Set<Int>,
+        allowingServerErrors: Bool = false
     ) async throws -> (status: Int, data: Data) {
         guard let serverURL else { throw JellyfinError.notConfigured }
         guard let url = URLComponents(
@@ -1037,8 +1038,10 @@ actor JellyfinClient {
                 }
                 throw JellyfinError.sessionExpired
             }
-            noteFailureIfUnreachable(statusCode: http.statusCode)
-            guard (200...299).contains(http.statusCode) || allowing.contains(http.statusCode) else {
+            // A 5xx the caller handles is the route's own answer, not Jellyfin being down.
+            let handled = allowingServerErrors && (500...599).contains(http.statusCode)
+            if !handled { noteFailureIfUnreachable(statusCode: http.statusCode) }
+            guard (200...299).contains(http.statusCode) || allowing.contains(http.statusCode) || handled else {
                 throw JellyfinError.httpError(statusCode: http.statusCode)
             }
             return (http.statusCode, data)
@@ -2795,7 +2798,7 @@ actor JellyfinClient {
         let (status, data) = try await requestReturningStatus(
             path: "/SashimiLists/Watchlist/Plex", method: "POST",
             body: WatchlistJSON.encoder().encode(Body(token: token, replace: replace)),
-            allowing: [409, 422])
+            allowing: [409, 422], allowingServerErrors: true)
         let decoder = WatchlistJSON.decoder()
         switch status {
         case 200...299:
@@ -2805,6 +2808,9 @@ actor JellyfinClient {
         case 409:
             let conflict = try decoder.decode(Conflict.self, from: data)
             return .conflict(currentUsername: conflict.username, newUsername: conflict.newUsername)
+        case 500...599:
+            // The plugin couldn't reach plex.tv; says nothing about the token.
+            return .plexUnreachable
         default:
             throw JellyfinError.httpError(statusCode: status)
         }

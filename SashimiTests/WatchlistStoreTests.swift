@@ -183,4 +183,87 @@ final class WatchlistStoreTests: XCTestCase {
         _ = await store.add(try movie())
         XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1"])
     }
+
+    func testAutoLinkIsSilentWhenPlexIsUnreachable() async throws {
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON())
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (503, "{}")
+        let store = store(try client())
+        await store.autoLink(token: "T")
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
+        XCTAssertNil(store.notice)
+        XCTAssertNil(store.pendingSwitch)
+    }
+
+    /// User A holds a Watchlist and a pending switch; returns the store and client.
+    private func storeWithAPendingSwitch() async throws -> (WatchlistStore, JellyfinClient) {
+        let client = try client(user: "a")
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge", entries: [entryJSON()]))
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"marge\",\"newUsername\":\"chad\"}")
+        let store = store(client)
+        await store.autoLink(token: "T")
+        XCTAssertNotNil(store.pendingSwitch)
+        XCTAssertNotNil(store.watchlist)
+        return (store, client)
+    }
+
+    func testAnotherUserWhoseLoadFailsSeesNothingOfTheLastOnes() async throws {
+        let (store, client) = try await storeWithAPendingSwitch()
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "b")
+        JellyfinRouteStub.routes["GET \(base)"] = (500, "")
+        await store.refresh()
+        XCTAssertNil(store.watchlist)
+        XCTAssertEqual(store.availability, .unknown)
+        XCTAssertNil(store.pendingSwitch)
+    }
+
+    func testAnotherServerSeesNothingOfTheLastOnes() async throws {
+        let (store, client) = try await storeWithAPendingSwitch()
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://other.local")), accessToken: "token", userId: "a")
+        JellyfinRouteStub.routes["GET \(base)"] = (500, "")
+        await store.refresh()
+        XCTAssertNil(store.watchlist)
+        XCTAssertEqual(store.availability, .unknown)
+        XCTAssertNil(store.pendingSwitch)
+    }
+
+    func testAResultForThePreviousUserIsDiscarded() async throws {
+        let client = try client(user: "a")
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge"))
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"marge\",\"newUsername\":\"chad\"}")
+        JellyfinRouteStub.delays["POST \(plexPath)"] = 0.5
+        let store = store(client)
+        let pending = Task { await store.autoLink(token: "T") }
+        // The link call is in flight (and held by the stub): the user changes under it.
+        for _ in 0..<200 where JellyfinRouteStub.requests("POST", plexPath).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "b")
+        await pending.value
+        XCTAssertNil(store.pendingSwitch, "user B must not be asked about user A's Plex token")
+        XCTAssertNil(store.notice)
+        let posts = JellyfinRouteStub.requests("POST", plexPath).count
+        let switched = await store.confirmSwitch()
+        XCTAssertFalse(switched)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, posts, "no token was held")
+    }
+
+    func testConfirmSwitchKeepsTheQuestionWhenTheServerCantBeReached() async throws {
+        let (store, _) = try await storeWithAPendingSwitch()
+        let question = try XCTUnwrap(store.pendingSwitch)
+        // 503: Plex unreachable. 403: the call itself failed (nil).
+        for status in [503, 403] {
+            JellyfinRouteStub.routes["POST \(plexPath)"] = (status, "{}")
+            let switched = await store.confirmSwitch()
+            XCTAssertFalse(switched, "status \(status)")
+            XCTAssertEqual(store.pendingSwitch, question, "status \(status)")
+        }
+        // Still answerable: the held token is still there.
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"chad\",\"needsReconnect\":false}")
+        let switched = await store.confirmSwitch()
+        XCTAssertTrue(switched)
+        XCTAssertNil(store.pendingSwitch)
+        XCTAssertEqual(try posted(2)["token"] as? String, "T")
+        XCTAssertEqual(try posted(2)["replace"] as? Bool, true)
+    }
 }

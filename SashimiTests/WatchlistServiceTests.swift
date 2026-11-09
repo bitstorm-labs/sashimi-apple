@@ -103,6 +103,17 @@ final class WatchlistServiceTests: XCTestCase {
         XCTAssertEqual(result, .rejected)
     }
 
+    func testPlexUnreachableIsNotARejection() async throws {
+        let client = try client()
+        for status in [503, 500] {
+            JellyfinRouteStub.recorded = []
+            JellyfinRouteStub.routes["POST \(base)/Plex"] = (status, "{\"error\":\"plex.tv unreachable\"}")
+            let result = try await client.linkWatchlistPlex(token: "t", replace: false)
+            XCTAssertEqual(result, .plexUnreachable, "status \(status)")
+            XCTAssertEqual(JellyfinRouteStub.requests("POST", "\(base)/Plex").count, 1, "status \(status) is never retried")
+        }
+    }
+
     func testPlexConflictCarriesBothUsernames() async throws {
         JellyfinRouteStub.routes["POST \(base)/Plex"] = (409, "{\"username\":\"marge\",\"newUsername\":\"chad\"}")
         let result = try await client().linkWatchlistPlex(token: "t", replace: false)

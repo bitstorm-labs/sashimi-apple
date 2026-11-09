@@ -13,6 +13,8 @@ final class JellyfinRouteStub: URLProtocol {
     nonisolated(unsafe) static var routes: [String: (Int, String)] = [:]
     /// Answers given in turn, before `routes`; the last one repeats.
     nonisolated(unsafe) static var sequences: [String: [(Int, String)]] = [:]
+    /// Seconds to hold the answer to "METHOD /path", so a test can change state while a call is in flight.
+    nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
     nonisolated(unsafe) static var recorded: [Recorded] = []
     private static let lock = NSLock()
 
@@ -26,6 +28,7 @@ final class JellyfinRouteStub: URLProtocol {
         var query: [String: String] = [:]
         for item in components?.queryItems ?? [] { query[item.name] = item.value }
         let body = request.httpBody ?? request.httpBodyStream.map(Self.read)
+        let delay = Self.lock.withLock { Self.delays["\(method) \(url.path)"] ?? 0 }
         let (status, text) = Self.lock.withLock {
             Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
             let key = "\(method) \(url.path)"
@@ -36,11 +39,18 @@ final class JellyfinRouteStub: URLProtocol {
             }
             return Self.routes[key] ?? (404, "")
         }
-        if let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        let answer = { [self] in
+            if let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            client?.urlProtocol(self, didLoad: Data(text.utf8))
+            client?.urlProtocolDidFinishLoading(self)
         }
-        client?.urlProtocol(self, didLoad: Data(text.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        if delay > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { answer() }
+        } else {
+            answer()
+        }
     }
 
     override func stopLoading() {}
