@@ -32,7 +32,7 @@ final class SeerrMobileTests: XCTestCase {
         XCTAssertTrue(relaunched.canSignIn)
     }
 
-    func testPlexWebSignInUsesOneClientIdPerInstallAndComesBackToTheApp() throws {
+    func testPlexWebSignInUsesOneClientIdPerInstall() throws {
         let store = defaults()
         let session = SeerrSession(defaults: store, credentials: MemoryCredentials(), pollInterval: .zero)
 
@@ -50,7 +50,52 @@ final class SeerrMobileTests: XCTestCase {
         XCTAssertEqual(clientID(relaunched), id)
         XCTAssertTrue(first.hasPrefix("https://app.plex.tv/auth/#!?"))
         XCTAssertTrue(first.contains("code=abc"))
-        XCTAssertTrue(first.contains("forwardUrl=sashimi%3A%2F%2Fplex-auth"), "returns to the app's URL scheme")
+        // Plex's page only forwards to its own app schemes or http(s); it
+        // answers `sashimi://` by leaving for watch.plex.tv without ever
+        // linking the PIN, so the page must open without a forwardUrl.
+        XCTAssertFalse(first.contains("forwardUrl"), "Plex rejects a sashimi:// forwardUrl")
+    }
+
+    /// Plex never sends the browser back, so the poll closes the page.
+    func testPlexWebSignInClosesThePageWhenThePollFinishes() async {
+        var pageClosed: CheckedContinuation<Void, Never>?
+        var closes = 0
+        var cancelled = false
+
+        await PlexWebSignIn.run(
+            poll: { await Task.yield() },
+            showPage: { await withCheckedContinuation { pageClosed = $0 } },
+            closePage: { closes += 1; pageClosed?.resume(); pageClosed = nil },
+            isWaiting: { false },
+            cancelWaiting: { cancelled = true },
+            grace: .zero
+        )
+
+        XCTAssertEqual(closes, 1)
+        XCTAssertFalse(cancelled, "a finished poll isn't called off")
+    }
+
+    /// The person closed the page without signing in: the poll is called off
+    /// after the grace period instead of waiting 15 minutes.
+    func testPlexWebSignInCallsOffThePollWhenThePageIsClosedFirst() async {
+        var waiting = true
+        var pollCancelled = false
+
+        await PlexWebSignIn.run(
+            poll: {
+                while !Task.isCancelled { await Task.yield() }
+                pollCancelled = true
+            },
+            showPage: {},
+            closePage: {},
+            isWaiting: { waiting },
+            cancelWaiting: { waiting = false },
+            grace: .zero
+        )
+        for _ in 0..<100 where !pollCancelled { await Task.yield() }
+
+        XCTAssertFalse(waiting)
+        XCTAssertTrue(pollCancelled)
     }
 
     func testTrailersOpenYouTubeOnTheWeb() {

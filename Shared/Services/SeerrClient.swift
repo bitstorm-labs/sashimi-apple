@@ -307,14 +307,16 @@ struct PlexPinClient: Sendable {
     }
 
     /// Plex's own sign-in page for a strong PIN, the way Seerr's website
-    /// opens it. `forwardURL` sends the browser back to the app afterwards.
-    static func webSignInURL(clientIdentifier: String, code: String, forwardURL: String?) -> URL {
-        var params: [(String, String)] = [
+    /// opens it: no `forwardUrl`. Plex's page only forwards to Plex's own app
+    /// schemes (`plex:`, `plexamp-auth:`…) or to http(s); anything else, such
+    /// as `sashimi://`, makes it leave for watch.plex.tv straight away without
+    /// linking the PIN. The app polls the PIN and closes the page itself.
+    static func webSignInURL(clientIdentifier: String, code: String) -> URL {
+        let params: [(String, String)] = [
             ("clientID", clientIdentifier),
             ("code", code),
             ("context[device][product]", product)
         ]
-        if let forwardURL { params.append(("forwardUrl", forwardURL)) }
         let query = params
             .map { "\(SeerrClient.encodeQuery($0.0))=\(SeerrClient.encodeQuery($0.1))" }
             .joined(separator: "&")

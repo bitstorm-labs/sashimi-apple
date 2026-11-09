@@ -258,13 +258,14 @@ final class SeerrClientTests: XCTestCase {
     }
 
     func testPlexWebSignInURLCarriesClientCodeAndProduct() throws {
-        let url = PlexPinClient.webSignInURL(clientIdentifier: "install-uuid", code: "abc123", forwardURL: "sashimi://plex-auth")
+        let url = PlexPinClient.webSignInURL(clientIdentifier: "install-uuid", code: "abc123")
         let string = url.absoluteString
 
         XCTAssertTrue(string.hasPrefix("https://app.plex.tv/auth/#!?"))
         XCTAssertTrue(string.contains("clientID=install-uuid"))
         XCTAssertTrue(string.contains("code=abc123"))
         XCTAssertTrue(string.contains("context%5Bdevice%5D%5Bproduct%5D=Sashimi"))
-        XCTAssertTrue(string.contains("forwardUrl=sashimi%3A%2F%2Fplex-auth"))
+        // Plex sends any non-Plex scheme to watch.plex.tv without linking the PIN.
+        XCTAssertFalse(string.contains("forwardUrl"))
     }
 }
