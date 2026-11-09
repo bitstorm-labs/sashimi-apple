@@ -59,6 +59,10 @@ final class ServerPluginsCatalogTests: XCTestCase {
         XCTAssertEqual(PluginRowBadge.adminOnly.label, "Only an admin can check this")
     }
 
+    func testListsPurposeMentionsTheWatchlist() {
+        XCTAssertEqual(SashimiPlugin.lists.purpose, "Shared lists, list owners and the Watchlist")
+    }
+
     func testAProblemStatusSaysWhatBreaks() throws {
         let rows = ServerPluginCatalog.adminRows(installed: [
             plugin("Channels", "0.11.0", .restart, "7a3f1c925d644b089f216c8e5b0a4d73")
@@ -68,7 +72,7 @@ final class ServerPluginsCatalogTests: XCTestCase {
         XCTAssertEqual(channels.version, "0.11.0")
         XCTAssertEqual(channels.detail, "SashimiTV channels won't appear until Jellyfin restarts")
         XCTAssertEqual(try row(rows, .lists).badge, .notInstalled)
-        XCTAssertEqual(try row(rows, .lists).detail, "Shared lists won't show who owns them until this is installed")
+        XCTAssertEqual(try row(rows, .lists).detail, "Shared lists won't show who owns them, and there's no Watchlist until this is installed")
         XCTAssertNil(try row(rows, .lists).version)
     }
 

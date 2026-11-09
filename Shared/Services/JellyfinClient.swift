@@ -1006,6 +1006,52 @@ actor JellyfinClient {
         }
     }
 
+    /// Like `request`, but the statuses in `allowing` come back with their
+    /// body instead of throwing. For calls that carry a secret: it never
+    /// retries and never logs the body. A 401 still means the Jellyfin
+    /// session expired.
+    private func requestReturningStatus(
+        path: String,
+        method: String,
+        body: Data? = nil,
+        allowing: Set<Int>
+    ) async throws -> (status: Int, data: Data) {
+        guard let serverURL else { throw JellyfinError.notConfigured }
+        guard let url = URLComponents(
+            url: serverURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)?.url
+        else { throw JellyfinError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = body
+
+        do {
+            let (data, response) = try await send(request, isSignInStep: false)
+            guard let http = response as? HTTPURLResponse else { throw JellyfinError.invalidResponse }
+            if http.statusCode == 401 {
+                let activeURL = await SessionManager.shared.serverURL
+                if let activeURL, self.serverURL == activeURL {
+                    await SessionManager.shared.logout(reason: .sessionExpired)
+                }
+                throw JellyfinError.sessionExpired
+            }
+            noteFailureIfUnreachable(statusCode: http.statusCode)
+            guard (200...299).contains(http.statusCode) || allowing.contains(http.statusCode) else {
+                throw JellyfinError.httpError(statusCode: http.statusCode)
+            }
+            return (http.statusCode, data)
+        } catch let error as JellyfinError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            noteFailureIfUnreachable(error)
+            throw JellyfinError.networkError(error)
+        }
+    }
+
     private func send(_ request: URLRequest, isSignInStep: Bool) async throws -> (Data, URLResponse) {
         guard isSignInStep else { return try await urlSession.data(for: request) }
         return try await SignInNetworking.data(
@@ -2716,6 +2762,60 @@ actor JellyfinClient {
     /// or a list this user cannot see.
     func getListOwner(playlistId: String) async throws -> ListOwner {
         try JSONDecoder().decode(ListOwner.self, from: await request(path: "/SashimiLists/Playlists/\(playlistId)/Owner"))
+    }
+
+    // MARK: Watchlist
+
+    /// The user's Watchlist. A 404 means no plugin, or one older than 0.2.0.
+    func getWatchlist() async throws -> WatchlistResponse {
+        try WatchlistJSON.decoder().decode(WatchlistResponse.self, from: await request(path: "/SashimiLists/Watchlist"))
+    }
+
+    func addToWatchlist(_ entry: NewWatchlistEntry) async throws -> WatchlistAddResponse {
+        let data = try await request(
+            path: "/SashimiLists/Watchlist/Items", method: "POST", body: WatchlistJSON.encoder().encode(entry))
+        return try WatchlistJSON.decoder().decode(WatchlistAddResponse.self, from: data)
+    }
+
+    func removeFromWatchlist(entryId: String) async throws {
+        _ = try await request(path: "/SashimiLists/Watchlist/Items/\(entryId)", method: "DELETE")
+    }
+
+    /// Links a Plex account. The token goes in the body only; it is never
+    /// logged, stored or put in an error.
+    func linkWatchlistPlex(token: String, replace: Bool) async throws -> PlexLinkResult {
+        struct Body: Encodable {
+            let token: String
+            let replace: Bool
+        }
+        struct Conflict: Decodable {
+            let username: String
+            let newUsername: String?
+        }
+        let (status, data) = try await requestReturningStatus(
+            path: "/SashimiLists/Watchlist/Plex", method: "POST",
+            body: WatchlistJSON.encoder().encode(Body(token: token, replace: replace)),
+            allowing: [409, 422])
+        let decoder = WatchlistJSON.decoder()
+        switch status {
+        case 200...299:
+            return .linked(try decoder.decode(PlexLink.self, from: data))
+        case 422:
+            return .rejected
+        case 409:
+            let conflict = try decoder.decode(Conflict.self, from: data)
+            return .conflict(currentUsername: conflict.username, newUsername: conflict.newUsername)
+        default:
+            throw JellyfinError.httpError(statusCode: status)
+        }
+    }
+
+    func unlinkWatchlistPlex() async throws {
+        _ = try await request(path: "/SashimiLists/Watchlist/Plex", method: "DELETE")
+    }
+
+    func dismissWatchlistCard() async throws {
+        _ = try await request(path: "/SashimiLists/Watchlist/DismissCard", method: "POST")
     }
 
     func createPlaylist(name: String, itemIds: [String], isPublic: Bool) async throws -> String {

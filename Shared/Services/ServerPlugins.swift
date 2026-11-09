@@ -25,7 +25,7 @@ enum SashimiPlugin: String, CaseIterable, Identifiable, Sendable {
     /// The Sashimi feature it powers, shown while it works.
     var purpose: String {
         switch self {
-        case .lists: return "Shared lists and list owners"
+        case .lists: return "Shared lists, list owners and the Watchlist"
         case .channels: return "SashimiTV channels and the guide"
         case .continueWatching: return "Server-ranked Continue Watching, Remove from row"
         case .themeSongs: return "Theme music on show and movie pages"
@@ -37,7 +37,7 @@ enum SashimiPlugin: String, CaseIterable, Identifiable, Sendable {
     /// sentence with why ("until this is installed").
     var lossWithout: String {
         switch self {
-        case .lists: return "Shared lists won't show who owns them"
+        case .lists: return "Shared lists won't show who owns them, and there's no Watchlist"
         case .channels: return "SashimiTV channels won't appear"
         case .continueWatching: return "Continue Watching falls back to the app's own order"
         case .themeSongs: return "Show and movie pages stay silent"

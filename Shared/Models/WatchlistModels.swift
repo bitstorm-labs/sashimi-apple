@@ -159,3 +159,13 @@ enum WatchlistJSON {
         init?(intValue: Int) { nil }
     }
 }
+
+/// How the plugin answered a request to link a Plex account.
+enum PlexLinkResult: Equatable, Sendable {
+    case linked(PlexLink)
+    /// Plex refused the token (422).
+    case rejected
+    /// This Watchlist is already linked to another Plex account (409).
+    /// `newUsername` is nil from a plugin that doesn't say who the new one is.
+    case conflict(currentUsername: String, newUsername: String?)
+}
