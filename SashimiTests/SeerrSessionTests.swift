@@ -151,6 +151,7 @@ final class SeerrSessionTests: XCTestCase {
 
         let pin = await session.beginPlexSignIn(strong: false)
         await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+        await session.lastPlexTokenHandOff?.value
 
         XCTAssertEqual(received, ["plex-token"])
         XCTAssertEqual(userIdAtCall, 7)
@@ -191,6 +192,7 @@ final class SeerrSessionTests: XCTestCase {
 
         let pin = await session.beginPlexSignIn(strong: false)
         await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+        await session.lastPlexTokenHandOff?.value
 
         XCTAssertTrue(finished)
         XCTAssertEqual(session.state.user?.id, 7)
@@ -305,5 +307,104 @@ final class SeerrSessionTests: XCTestCase {
             SeerrSession.cookieKey(for: try XCTUnwrap(URL(string: "https://requests.example.com"))),
             SeerrSession.cookieKey(for: try XCTUnwrap(URL(string: "http://192.168.86.151:5055")))
         )
+    }
+}
+
+/// The Watchlist auto-link runs in the background: it never holds up or fails sign-in.
+extension SeerrSessionTests {
+    // MARK: The Watchlist link never holds up sign-in
+
+    private func signInStubs() {
+        stubPlexSignIn()
+        SeerrStubServer.on("POST", "/api/v1/auth/plex", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+    }
+
+    private func watchlistStore(routes: [String: (Int, String)]) throws -> WatchlistStore {
+        JellyfinRouteStub.reset()
+        JellyfinRouteStub.routes = routes
+        JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
+        addTeardownBlock { JellyfinClient.testURLProtocolClasses = [] }
+        let jellyfin = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
+        return WatchlistStore(service: WatchlistService(client: jellyfin))
+    }
+
+    func testRequestsSignInDoesNotWaitForWatchlistLink() async throws {
+        signInStubs()
+        let session = session()
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var observerStarted = false
+        session.plexTokenObserver = { _ in
+            observerStarted = true
+            for await _ in gate { break }
+        }
+        let begun = await session.beginPlexSignIn(strong: false)
+        let pin = try XCTUnwrap(begun)
+        var returned = false
+        let signIn = Task { @MainActor in
+            await session.completePlexSignIn(pin: pin)
+            returned = true
+        }
+        for _ in 0..<100 where !returned { try await Task.sleep(for: .milliseconds(20)) }
+
+        XCTAssertTrue(returned, "sign-in waited for the Watchlist link")
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertNil(session.errorMessage)
+
+        release.yield()
+        release.finish()
+        await signIn.value
+        await session.lastPlexTokenHandOff?.value
+        XCTAssertTrue(observerStarted)
+    }
+
+    func testRequestsSignInSucceedsWhenWatchlistIsMissing() async throws {
+        signInStubs()
+        let store = try watchlistStore(routes: [:])
+        let session = session()
+        session.plexTokenObserver = { token in await store.autoLink(token: token) }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+        await session.lastPlexTokenHandOff?.value
+
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertNil(session.errorMessage)
+        XCTAssertEqual(JellyfinRouteStub.requests("GET", "/SashimiLists/Watchlist").count, 1)
+        XCTAssertTrue(JellyfinRouteStub.requests("POST", "/SashimiLists/Watchlist/Plex").isEmpty)
+    }
+
+    func testRequestsSignInIsPromptWhenTheWatchlistServerIsSlow() async throws {
+        signInStubs()
+        let store = try watchlistStore(routes: ["GET /SashimiLists/Watchlist": (404, "")])
+        JellyfinRouteStub.delays["GET /SashimiLists/Watchlist"] = 3
+        let session = session()
+        session.plexTokenObserver = { token in await store.autoLink(token: token) }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        let start = ContinuousClock.now
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertLessThan(elapsed, .seconds(1))
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertNil(session.errorMessage)
+        await session.lastPlexTokenHandOff?.value
+    }
+
+    func testRequestsSignInSucceedsWhenPlexRejectsTheWatchlistToken() async throws {
+        signInStubs()
+        let store = try watchlistStore(routes: [
+            "GET /SashimiLists/Watchlist": (200, "{\"items\":[]}"),
+            "POST /SashimiLists/Watchlist/Plex": (422, "")
+        ])
+        let session = session()
+        session.plexTokenObserver = { token in await store.autoLink(token: token) }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+        await session.lastPlexTokenHandOff?.value
+
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertNil(session.errorMessage)
     }
 }

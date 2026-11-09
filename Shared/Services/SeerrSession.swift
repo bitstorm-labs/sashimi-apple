@@ -63,9 +63,13 @@ final class SeerrSession: ObservableObject {
     @Published private(set) var localLoginEnabled = true
     @Published var errorMessage: String?
     /// Handed the Plex token once a Plex sign-in has succeeded, so the
-    /// Watchlist can link the same account. Its outcome never changes this
+    /// Watchlist can link the same account. It runs in the background and
+    /// never delays or fails sign-in; its outcome never changes this
     /// session's state or messages. The token is not kept.
     var plexTokenObserver: (@MainActor (_ token: String) async -> Void)?
+    /// The most recent hand-off to `plexTokenObserver`, so tests can wait for
+    /// it. Production code never waits on it.
+    private(set) var lastPlexTokenHandOff: Task<Void, Never>?
     /// Bumped after a request is sent or cancelled, so open lists reload.
     @Published private(set) var requestsRevision = 0
 
@@ -257,7 +261,9 @@ final class SeerrSession: ObservableObject {
             let result = try await client.signInWithPlex(authToken: token)
             signedIn(result.user, cookie: result.cookie, client: client)
             await refreshPublicSettings()
-            await plexTokenObserver?(token)
+            if let observer = plexTokenObserver {
+                lastPlexTokenHandOff = Task { @MainActor in await observer(token) }
+            }
         } catch {
             state = .notConfigured
             errorMessage = (error as? SeerrError) == .invalidCredentials
