@@ -183,6 +183,7 @@ struct ContentView: View {
                 #if DEBUG
                 guard SeerrDemo.screen == nil else { return }
                 #endif
+                SeerrSession.shared.plexTokenObserver = { token in await WatchlistStore.shared.autoLink(token: token) }
                 await SeerrSession.shared.restore()
             }
             await sessionManager.restoreSession()

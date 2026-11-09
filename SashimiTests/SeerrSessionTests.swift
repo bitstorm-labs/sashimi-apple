@@ -133,6 +133,70 @@ final class SeerrSessionTests: XCTestCase {
         XCTAssertEqual(credentials.cookie(forKey: cookieKey), SeerrFixtures.sessionCookie)
     }
 
+    private func stubPlexSignIn() {
+        SeerrStubServer.on("POST", "/api/v2/pins", status: 201, body: "{\"id\":42,\"code\":\"K7QF\"}")
+        SeerrStubServer.on("GET", "/api/v2/pins/42", body: "{\"id\":42,\"code\":\"K7QF\",\"authToken\":\"plex-token\"}")
+    }
+
+    func testPlexSignInHandsTheTokenToTheObserverAfterSigningIn() async throws {
+        stubPlexSignIn()
+        SeerrStubServer.on("POST", "/api/v1/auth/plex", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        let session = session()
+        var received: [String] = []
+        var userIdAtCall: Int?
+        session.plexTokenObserver = { token in
+            received.append(token)
+            userIdAtCall = session.state.user?.id
+        }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+
+        XCTAssertEqual(received, ["plex-token"])
+        XCTAssertEqual(userIdAtCall, 7)
+    }
+
+    func testAFailedPlexSignInNeverCallsTheObserver() async throws {
+        stubPlexSignIn()
+        SeerrStubServer.on("POST", "/api/v1/auth/plex", status: 403, body: "{\"message\":\"Access denied.\"}")
+        let session = session()
+        var calls = 0
+        session.plexTokenObserver = { _ in calls += 1 }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(session.state, .notConfigured)
+    }
+
+    func testSeerrSignInStaysSignedInWhenTheWatchlistLinkFails() async throws {
+        stubPlexSignIn()
+        SeerrStubServer.on("POST", "/api/v1/auth/plex", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        JellyfinRouteStub.reset()
+        JellyfinRouteStub.routes = [
+            "GET /SashimiLists/Watchlist": (500, ""),
+            "POST /SashimiLists/Watchlist/Plex": (500, "")
+        ]
+        JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
+        defer { JellyfinClient.testURLProtocolClasses = [] }
+        let jellyfin = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
+        let store = WatchlistStore(service: WatchlistService(client: jellyfin))
+        let session = session()
+        var finished = false
+        session.plexTokenObserver = { token in
+            await store.autoLink(token: token)
+            finished = true
+        }
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+
+        XCTAssertTrue(finished)
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertNil(session.errorMessage)
+    }
+
     func testCancellingPlexSignInGoesBackToSignedOut() async throws {
         SeerrStubServer.on("POST", "/api/v2/pins", status: 201, body: "{\"id\":42,\"code\":\"K7QF\"}")
         let session = session()
@@ -236,10 +300,10 @@ final class SeerrSessionTests: XCTestCase {
         XCTAssertEqual(session.serverURL, SeerrFixtures.server)
     }
 
-    func testCookiesAreScopedPerServer() {
+    func testCookiesAreScopedPerServer() throws {
         XCTAssertNotEqual(
-            SeerrSession.cookieKey(for: URL(string: "https://requests.example.com")!),
-            SeerrSession.cookieKey(for: URL(string: "http://192.168.86.151:5055")!)
+            SeerrSession.cookieKey(for: try XCTUnwrap(URL(string: "https://requests.example.com"))),
+            SeerrSession.cookieKey(for: try XCTUnwrap(URL(string: "http://192.168.86.151:5055")))
         )
     }
 }

@@ -279,6 +279,37 @@ actor SeerrClient {
 /// plex.tv/link, the phone opens Plex's sign-in page; either way the PIN is
 /// polled until it carries the person's Plex token, which is handed to Seerr
 /// once and never stored.
+/// The one plex.tv device identity per install, shared by Requests sign-in and
+/// Connect Plex so plex.tv lists a single "Sashimi" device.
+enum PlexClientIdentity {
+    private static let key = "seerr.plexClientIdentifier"
+
+    static func identifier(defaults: UserDefaults) -> String {
+        if let saved = defaults.string(forKey: key) { return saved }
+        let new = UUID().uuidString
+        defaults.set(new, forKey: key)
+        return new
+    }
+}
+
+extension PlexPinClient {
+    /// Polls the PIN until the person links it. Nil on cancel, on the deadline,
+    /// or once `isWaiting` turns false.
+    func waitForToken(pinId: Int, deadline: ContinuousClock.Instant, interval: Duration,
+                      isWaiting: @MainActor () -> Bool) async -> String? {
+        while await isWaiting(), ContinuousClock.now < deadline {
+            if Task.isCancelled { return nil }
+            if let token = try? await checkPin(id: pinId).authToken, !token.isEmpty { return token }
+            if interval > .zero {
+                try? await Task.sleep(for: interval)
+            } else {
+                await Task.yield()
+            }
+        }
+        return nil
+    }
+}
+
 struct PlexPinClient: Sendable {
     let clientIdentifier: String
     private let session: URLSession
