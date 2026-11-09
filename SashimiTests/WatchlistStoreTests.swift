@@ -9,9 +9,7 @@ final class WatchlistStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        JellyfinRouteStub.routes = [:]
-        JellyfinRouteStub.sequences = [:]
-        JellyfinRouteStub.recorded = []
+        JellyfinRouteStub.reset()
         JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
     }
 
@@ -263,7 +261,23 @@ final class WatchlistStoreTests: XCTestCase {
         let switched = await store.confirmSwitch()
         XCTAssertTrue(switched)
         XCTAssertNil(store.pendingSwitch)
-        XCTAssertEqual(try posted(2)["token"] as? String, "T")
-        XCTAssertEqual(try posted(2)["replace"] as? Bool, true)
+        XCTAssertEqual(try posted(3)["token"] as? String, "T")
+        XCTAssertEqual(try posted(3)["replace"] as? Bool, true)
+    }
+
+    func testARefreshForThePreviousUserIsDiscarded() async throws {
+        let client = try client(user: "a")
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge", entries: [entryJSON()]))
+        JellyfinRouteStub.delays["GET \(base)"] = 0.5
+        let store = store(client)
+        let pending = Task { await store.refresh() }
+        for _ in 0..<200 where JellyfinRouteStub.requests("GET", base).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(JellyfinRouteStub.requests("GET", base).count, 1)
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "b")
+        await pending.value
+        XCTAssertNil(store.watchlist, "user B must not see user A's list")
+        XCTAssertNotEqual(store.availability, .available)
     }
 }

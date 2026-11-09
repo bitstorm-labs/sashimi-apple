@@ -18,6 +18,16 @@ final class JellyfinRouteStub: URLProtocol {
     nonisolated(unsafe) static var recorded: [Recorded] = []
     private static let lock = NSLock()
 
+    /// Clears every static; call from each test class's setUp.
+    static func reset() {
+        lock.withLock {
+            routes = [:]
+            sequences = [:]
+            delays = [:]
+            recorded = []
+        }
+    }
+
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 

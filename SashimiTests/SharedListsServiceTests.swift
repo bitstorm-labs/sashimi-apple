@@ -9,9 +9,7 @@ final class SharedListsServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        JellyfinRouteStub.routes = [:]
-        JellyfinRouteStub.sequences = [:]
-        JellyfinRouteStub.recorded = []
+        JellyfinRouteStub.reset()
         JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
     }
 
