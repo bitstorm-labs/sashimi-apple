@@ -243,7 +243,7 @@ final class SeerrSession: ObservableObject {
     }
 
     func plexWebSignInURL(for pin: PlexPin) -> URL {
-        PlexPinClient.webSignInURL(clientIdentifier: plexClientIdentifier, code: pin.code, forwardURL: "sashimi://plex-auth")
+        PlexPinClient.webSignInURL(clientIdentifier: plexClientIdentifier, code: pin.code)
     }
 
     private func exchangePlexToken(_ token: String) async {

@@ -1,4 +1,3 @@
-import AuthenticationServices
 import SwiftUI
 
 /// Settings › Requests on iPhone and iPad: connect a Seerr account once.
@@ -6,7 +5,6 @@ import SwiftUI
 /// type); the Seerr username form is for the server's local accounts.
 struct MobileRequestsSettingsView: View {
     @ObservedObject private var session = SeerrSession.shared
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @State private var serverText = ""
     @State private var email = ""
     @State private var password = ""
@@ -119,28 +117,25 @@ struct MobileRequestsSettingsView: View {
         }
     }
 
-    /// Plex's web sign-in with the PIN polled alongside: whichever way the
-    /// page closes, a linked PIN finishes the sign-in.
+    /// Plex's web sign-in with the PIN polled alongside. The poll finishes
+    /// the sign-in and closes the page; if the person closes it first, the
+    /// poll gets a moment to see a token that just landed.
     private func signInWithPlex() {
         applyServer()
         plexTask?.cancel()
         plexTask = Task {
             guard let pin = await session.beginPlexSignIn(strong: true) else { return }
-            let poll = Task { await session.completePlexSignIn(pin: pin) }
-            _ = try? await webAuthenticationSession.authenticate(
-                using: session.plexWebSignInURL(for: pin),
-                callbackURLScheme: "sashimi"
+            let page = PlexSignInPage()
+            await PlexWebSignIn.run(
+                poll: { await session.completePlexSignIn(pin: pin) },
+                showPage: { await page.show(session.plexWebSignInURL(for: pin)) },
+                closePage: { page.close() },
+                isWaiting: {
+                    if case .awaitingPlex = session.state { return true }
+                    return false
+                },
+                cancelWaiting: { session.cancelPlexSignIn() }
             )
-            // The page closed (signed in, or dismissed). Give the poll a
-            // moment to see the token before calling it off.
-            for _ in 0..<5 {
-                guard case .awaitingPlex = session.state, !Task.isCancelled else { break }
-                try? await Task.sleep(for: .seconds(1))
-            }
-            if case .awaitingPlex = session.state {
-                poll.cancel()
-                session.cancelPlexSignIn()
-            }
         }
     }
 }
