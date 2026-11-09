@@ -18,7 +18,7 @@ struct AddToListView: View {
             if creating {
                 NewListForm(
                     title: "New List",
-                    subtitle: "Starts with \(model.item.name)",
+                    subtitle: "Starts with \(model.titleName)",
                     confirmTitle: "Create and Add",
                     isWorking: model.isWorking
                 ) { name, isPublic in

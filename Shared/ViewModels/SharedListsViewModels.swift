@@ -264,22 +264,84 @@ final class AddToListViewModel: ObservableObject {
         }
     }
 
-    let item: BaseItemDto
+    enum Subject: Equatable {
+        case library(BaseItemDto)
+        case seerr(SeerrTarget, year: Int?)
+    }
+
+    /// Where the title could go on the Watchlist.
+    struct WatchlistChoice: Equatable {
+        let count: Int
+        let alreadyOn: Bool
+
+        var detail: String { alreadyOn ? "Already on your Watchlist" : "Private · \(count)" }
+    }
+
+    let subject: Subject
     @Published private(set) var choices: [Choice] = []
+    @Published private(set) var watchlist: WatchlistChoice?
     @Published private(set) var isLoading = true
     @Published private(set) var isWorking = false
 
     private let service: SharedListsService
+    private let store: WatchlistStore
 
-    init(item: BaseItemDto, service: SharedListsService = SharedListsService()) {
-        self.item = item
+    init(item: BaseItemDto, service: SharedListsService = SharedListsService(), watchlist: WatchlistStore = .shared) {
+        self.subject = .library(item)
         self.service = service
+        self.store = watchlist
     }
 
-    var title: String { "Add “\(item.name)” to…" }
+    init(seerrTarget: SeerrTarget, year: Int?, watchlist: WatchlistStore = .shared) {
+        self.subject = .seerr(seerrTarget, year: year)
+        self.service = SharedListsService()
+        self.store = watchlist
+    }
+
+    var titleName: String {
+        switch subject {
+        case .library(let item): return item.name
+        case .seerr(let target, _): return target.title
+        }
+    }
+
+    var title: String { "Add “\(titleName)” to…" }
+
+    /// A Seerr title isn't on the server, so only the Watchlist takes it.
+    var offersLists: Bool {
+        if case .seerr = subject { return false }
+        return true
+    }
 
     /// Only your own lists: nobody can add to someone else's.
     func load() async {
+        async let watchlistRow: Void = loadWatchlist()
+        if offersLists { await loadLists() }
+        await watchlistRow
+        isLoading = false
+    }
+
+    /// The Watchlist row: only with the plugin, and only for a title it takes.
+    private func loadWatchlist() async {
+        await store.refresh()
+        await showWatchlist()
+    }
+
+    private func showWatchlist() async {
+        guard store.isAvailable else { return }
+        let ids: WatchlistIds
+        switch subject {
+        case .seerr(let target, _):
+            ids = WatchlistIds(tmdb: String(target.tmdbId))
+        case .library(let item):
+            guard let found = await store.ids(for: item) else { return }
+            ids = found
+        }
+        watchlist = WatchlistChoice(count: store.watchlist?.entries.count ?? 0, alreadyOn: store.contains(ids))
+    }
+
+    private func loadLists() async {
+        guard case .library(let item) = subject else { return }
         let userId = await service.client.currentUserId
         let lists = ((try? await service.lists()) ?? []).filter { $0.isOwned(by: userId) }
         var loaded: [Choice] = []
@@ -288,15 +350,33 @@ final class AddToListViewModel: ObservableObject {
             loaded.append(Choice(list: list, count: contents.items.count, alreadyOn: service.shows(item, in: contents)))
         }
         choices = loaded
-        isLoading = false
+    }
+
+    /// Returns the message to show.
+    func addToWatchlist() async -> String {
+        isWorking = true
+        defer { isWorking = false }
+        let message: String
+        switch subject {
+        case .library(let item): message = await store.add(item)
+        case .seerr(let target, let year): message = await store.add(target, year: year)
+        }
+        await showWatchlist()
+        return message
+    }
+
+    private var libraryItem: BaseItemDto? {
+        if case .library(let item) = subject { return item }
+        return nil
     }
 
     /// Returns the message to show.
     func add(to list: SharedList) async -> String {
+        guard let libraryItem else { return "Only the Watchlist takes this title" }
         isWorking = true
         defer { isWorking = false }
         do {
-            switch try await service.add(item, to: list.id) {
+            switch try await service.add(libraryItem, to: list.id) {
             case .added: return "Added to \(list.name)"
             case .alreadyOnList: return "Already on \(list.name)"
             }
@@ -307,12 +387,13 @@ final class AddToListViewModel: ObservableObject {
 
     /// Creates a list with this title on it. Returns the message to show.
     func create(name: String, isPublic: Bool) async -> String {
+        guard let libraryItem else { return "Only the Watchlist takes this title" }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "Give the list a name" }
         isWorking = true
         defer { isWorking = false }
         do {
-            _ = try await service.create(name: trimmed, isPublic: isPublic, adding: item)
+            _ = try await service.create(name: trimmed, isPublic: isPublic, adding: libraryItem)
             return "Added to \(trimmed)"
         } catch {
             return (error as? SharedListsError)?.errorDescription ?? "Couldn't create the list"
