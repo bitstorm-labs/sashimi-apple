@@ -27,12 +27,27 @@ final class SeerrStubServer: URLProtocol {
     nonisolated(unsafe) private static var routes: [String: [Reply]] = [:]
     nonisolated(unsafe) private static var recorded: [Recorded] = []
     private static let lock = NSLock()
+    /// Seconds to hold every title-details answer (GET /api/v1/movie|tv/{id}), so a
+    /// test can watch how many are in flight at once. Zero answers at once.
+    nonisolated(unsafe) static var detailsDelay: TimeInterval = 0
+    nonisolated(unsafe) private static var detailsInFlight = 0
+    nonisolated(unsafe) private static var detailsPeak = 0
+
+    /// The most title-details requests that were open at the same time since `reset()`.
+    static var peakDetailsInFlight: Int { lock.withLock { detailsPeak } }
 
     static func reset() {
         lock.withLock {
             routes = [:]
             recorded = []
+            detailsDelay = 0
+            detailsInFlight = 0
+            detailsPeak = 0
         }
+    }
+
+    private static func isDetails(_ method: String, _ path: String) -> Bool {
+        method == "GET" && (path.hasPrefix("/api/v1/movie/") || path.hasPrefix("/api/v1/tv/"))
     }
 
     /// Queue a reply. Several replies for one route are answered in order and
@@ -75,11 +90,23 @@ final class SeerrStubServer: URLProtocol {
         }
         var headers = reply.headers
         headers["Content-Type"] = headers["Content-Type"] ?? "application/json"
-        if let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: headers) {
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        let answer = { [self] in
+            if let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: headers) {
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
         }
-        client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let delay = Self.lock.withLock { Self.isDetails(method, url.path) ? Self.detailsDelay : 0 }
+        guard delay > 0 else { return answer() }
+        Self.lock.withLock {
+            Self.detailsInFlight += 1
+            Self.detailsPeak = max(Self.detailsPeak, Self.detailsInFlight)
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+            Self.lock.withLock { Self.detailsInFlight -= 1 }
+            answer()
+        }
     }
 
     override func stopLoading() {}
