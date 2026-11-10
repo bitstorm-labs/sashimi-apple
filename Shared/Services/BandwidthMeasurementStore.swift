@@ -128,6 +128,16 @@ final class BandwidthMeasurementStore: @unchecked Sendable {
         previous?.cancel()
     }
 
+    /// Cancels and forgets every probe. Tests call this after each case so a
+    /// probe one test started cannot retry into the next test's stub.
+    func cancelAllProbes() {
+        let running: [Task<Void, Never>] = locked {
+            defer { probes.removeAll() }
+            return Array(probes.values)
+        }
+        running.forEach { $0.cancel() }
+    }
+
     func skippedOnMeteredNetwork(for url: URL?) -> Bool {
         guard let url else { return false }
         return locked { skippedOnMeteredNetwork.contains(Self.key(for: url)) }

@@ -406,11 +406,21 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
         config.urlCache = nil
         config.protocolClasses = JellyfinClient.testURLProtocolClasses + (config.protocolClasses ?? [])
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        let result = await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
-            lock.lock()
-            continuation = cont
-            lock.unlock()
-            session.dataTask(with: request).resume()
+        // Cancelling the probe task (a server switch replaces it) stops the
+        // download at once. It used to run on, up to 25 MB, to its timeout.
+        let result = await withTaskCancellationHandler {
+            await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
+                lock.lock()
+                continuation = cont
+                lock.unlock()
+                if Task.isCancelled {
+                    complete(with: Outcome(bitsPerSecond: nil, bytesReceived: 0))
+                } else {
+                    session.dataTask(with: request).resume()
+                }
+            }
+        } onCancel: {
+            session.invalidateAndCancel()
         }
         session.invalidateAndCancel()
         return result
@@ -471,6 +481,24 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         authDelegate.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+}
+
+/// Resumes a continuation exactly once, from whichever caller gets there first.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func set(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.withLock { self.continuation = continuation }
+    }
+
+    func resume() {
+        let continuation: CheckedContinuation<Void, Never>? = lock.withLock {
+            defer { self.continuation = nil }
+            return self.continuation
+        }
+        continuation?.resume()
     }
 }
 
@@ -807,13 +835,26 @@ actor JellyfinClient {
     func waitForAnyBandwidthMeasurement(upTo timeout: Duration) async {
         guard measuredBitrate == nil,
               let probe = bandwidthStore.probe(for: serverURL) else { return }
-        await withTaskGroup(of: Void.self) { group in
-            // Cancelling the group never cancels the probe itself: it is an
-            // unstructured task we only observe.
-            group.addTask { await probe.value }
-            group.addTask { try? await Task.sleep(for: timeout) }
-            await group.next()
-            group.cancelAll()
+        await Self.wait(for: probe, upTo: timeout)
+    }
+
+    /// Resumes when the probe finishes or the timeout passes, whichever is
+    /// first, and never cancels the probe. This used to race the two in a
+    /// task group, but a group joins every child before it returns and
+    /// `Task.value` ignores cancellation, so the "bounded" wait lasted the
+    /// whole probe round: over a minute when attempts failed (#881).
+    private static func wait(for probe: Task<Void, Never>, upTo timeout: Duration) async {
+        let resumeOnce = ResumeOnce()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            resumeOnce.set(continuation)
+            Task {
+                await probe.value
+                resumeOnce.resume()
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                resumeOnce.resume()
+            }
         }
     }
 
