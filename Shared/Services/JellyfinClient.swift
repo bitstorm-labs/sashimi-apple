@@ -2831,6 +2831,32 @@ actor JellyfinClient {
         _ = try await request(path: "/SashimiLists/Watchlist/Items/\(entryId)", method: "DELETE")
     }
 
+    // MARK: Watchlist v2 (plugin 0.3.0; a 404 means an older plugin)
+
+    /// ＋ Add's search: "On your server" and "Not on server" results.
+    func searchWatchlist(query: String) async throws -> WatchlistSearchResponse {
+        let data = try await request(path: "/SashimiLists/Watchlist/Search", queryItems: [
+            URLQueryItem(name: "q", value: query)
+        ])
+        return try WatchlistJSON.decoder().decode(WatchlistSearchResponse.self, from: data)
+    }
+
+    /// A title the server doesn't have, from its metadata providers. Every id
+    /// known is sent; a 404 also means no provider knows the title.
+    func getWatchlistTitleDetails(kind: WatchlistKind, ids: WatchlistIds) async throws -> WatchlistTitleDetails {
+        var query = [URLQueryItem(name: "type", value: kind == .movie ? "movie" : "series")]
+        if let tmdb = ids.tmdb { query.append(URLQueryItem(name: "tmdbId", value: tmdb)) }
+        if let tvdb = ids.tvdb { query.append(URLQueryItem(name: "tvdbId", value: tvdb)) }
+        if let imdb = ids.imdb { query.append(URLQueryItem(name: "imdbId", value: imdb)) }
+        let data = try await request(path: "/SashimiLists/Watchlist/Details", queryItems: query)
+        return try WatchlistJSON.decoder().decode(WatchlistTitleDetails.self, from: data)
+    }
+
+    /// Server-wide settings for the apps (the Requests address).
+    func getSashimiListsConfig() async throws -> SashimiListsConfig {
+        try WatchlistJSON.decoder().decode(SashimiListsConfig.self, from: await request(path: "/SashimiLists/Config"))
+    }
+
     /// Links a Plex account. The token goes in the body only; it is never
     /// logged, stored or put in an error.
     func linkWatchlistPlex(token: String, replace: Bool) async throws -> PlexLinkResult {

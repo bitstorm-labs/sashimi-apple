@@ -259,8 +259,7 @@ struct PosterStackCover: View {
                     let poster = posters[layer.index]
                     posterFrame(isFront: layer.index == 0) {
                         WatchlistArtworkImage(artwork: poster.artwork, title: poster.title, width: width)
-                            .grayscale(poster.isDimmed ? 1 : 0)
-                            .brightness(poster.isDimmed ? -0.45 : 0)
+                            .notOnServerDimmed(poster.isDimmed)
                     }
                     .frame(width: width, height: height)
                     .scaleEffect(layer.scale)

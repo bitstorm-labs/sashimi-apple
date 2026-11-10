@@ -50,12 +50,17 @@ struct ListSpotlightPage<Actions: View, Notice: View, Posters: View>: View {
                     .padding(.horizontal, 80)
                 }
                 .scrollClipDisabled()
+                // A horizontal scroll view takes all the height it's offered:
+                // only its row's, so the row sits on the bottom edge.
+                .fixedSize(horizontal: false, vertical: true)
                 .focusSection()
                 .padding(.horizontal, -80)
             }
             .padding(.horizontal, 80)
             .padding(.top, 50)
             .padding(.bottom, 30)
+            // The posters stay along the bottom whatever the title above says.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
@@ -132,10 +137,15 @@ struct ListSpotlightBackdrop: View {
                 fallbackImageTypes: imageType == "Backdrop" ? ["Thumb", "Primary"] : []
             )
         case .remote(let url):
-            SeerrArtwork(url: url, title: "", cornerRadius: 0)
-                .blur(radius: 30)
-                .grayscale(1)
-                .brightness(-0.3)
+            if spotlight?.hasBackdropImage == true {
+                SeerrArtwork(url: url, title: "", cornerRadius: 0)
+            } else {
+                // A poster standing in for a backdrop: only a soft wash of it.
+                SeerrArtwork(url: url, title: "", cornerRadius: 0)
+                    .blur(radius: 30)
+                    .grayscale(1)
+                    .brightness(-0.3)
+            }
         case .none?, nil:
             Color.clear
         }

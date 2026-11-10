@@ -32,8 +32,7 @@ struct MobilePosterStackCover: View {
                 ForEach(PosterStack.layers(count: posters.count, fanned: isHovered), id: \.index) { layer in
                     let poster = posters[layer.index]
                     WatchlistArtworkView(artwork: poster.artwork, title: poster.title, width: width)
-                        .grayscale(poster.isDimmed ? 1 : 0)
-                        .brightness(poster.isDimmed ? -0.45 : 0)
+                        .notOnServerDimmed(poster.isDimmed)
                         .frame(width: width, height: height)
                         .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
                         .shadow(color: .black.opacity(layer.index == 0 ? 0.6 : 0.4), radius: layer.index == 0 ? 8 : 4,
@@ -146,10 +145,15 @@ struct MobileListSpotlightHeader<Actions: View>: View {
                 .pipeline(SashimiImagePipeline.shared)
             }
         case .remote(let url):
-            SeerrArtwork(url: url, title: "", cornerRadius: 0)
-                .blur(radius: 24)
-                .grayscale(1)
-                .brightness(-0.3)
+            if spotlight?.hasBackdropImage == true {
+                SeerrArtwork(url: url, title: "", cornerRadius: 0)
+            } else {
+                // A poster standing in for a backdrop: only a soft wash of it.
+                SeerrArtwork(url: url, title: "", cornerRadius: 0)
+                    .blur(radius: 24)
+                    .grayscale(1)
+                    .brightness(-0.3)
+            }
         case .none?, nil:
             MobileColors.cardBackground
         }

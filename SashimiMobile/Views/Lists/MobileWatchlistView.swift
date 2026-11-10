@@ -16,6 +16,7 @@ struct MobileWatchlistView: View {
     @State private var confirmDisconnect = false
     @State private var message: String?
     @State private var playing: BaseItemDto?
+    @State private var adding = false
     /// The title the Spotlight shows: the one under the pointer, else the first.
     @State private var spotlightId: String?
 
@@ -33,11 +34,20 @@ struct MobileWatchlistView: View {
         }
         .background(MobileColors.background)
         .fullScreenPlayer(item: $playing)
+        .task(id: spotlightTile?.id) {
+            if let tile = spotlightTile { await model.spotlightShown(tile) }
+        }
         .navigationTitle(WatchlistText.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if model.canAdd {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { adding = true } label: { Label(WatchlistV2Text.add, systemImage: "plus") }
+                }
+            }
             ToolbarItem(placement: .primaryAction) { menu }
         }
+        .sheet(isPresented: $adding, onDismiss: reload, content: { NavigationStack { MobileWatchlistSearchView() } })
         .listMessage($message)
         .task {
             await model.load()
@@ -209,6 +219,8 @@ struct MobileWatchlistView: View {
                 switch model.action(for: tile) {
                 case .openLibrary(let item):
                     NavigationLink { AdaptiveDetailView(item: item, libraryName: item.libraryName) } label: { label }
+                case .openTitle(let seed):
+                    NavigationLink { MobileWatchlistTitleView(seed: seed) } label: { label }
                 case .openRequest(let target):
                     NavigationLink { MobileSeerrDetailView(target: target) } label: { label }
                 case .explain(let text):
@@ -230,6 +242,10 @@ struct MobileWatchlistView: View {
         Task {
             if !(await model.remove(tile)) { message = WatchlistText.couldntChange }
         }
+    }
+
+    private func reload() {
+        Task { await model.load() }
     }
 
     private func startConnect() {
@@ -258,8 +274,7 @@ struct WatchlistTileView: View {
         } else {
             VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                 WatchlistArtworkView(artwork: tile.artwork, title: tile.entry.title, width: width)
-                    .grayscale(1)
-                    .brightness(-0.45)
+                    .notOnServerDimmed()
                     .frame(width: width, height: width / PosterAspectRatio.portrait)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
                     .overlay(alignment: .topLeading) {

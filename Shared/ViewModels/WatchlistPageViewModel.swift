@@ -20,6 +20,8 @@ enum WatchlistMenuItem: Equatable { case connectPlex, reconnectPlex, disconnectP
 
 enum WatchlistTileAction: Equatable {
     case openLibrary(BaseItemDto)
+    /// The title page for a title the server doesn't have (plugin 0.3.0+).
+    case openTitle(WatchlistTitleSeed)
     case openRequest(SeerrTarget)
     case explain(String)
 }
@@ -52,12 +54,16 @@ final class WatchlistPageViewModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var failed = false
     @Published private(set) var isGone = false
+    /// Provider details for the Spotlight, by entry id.
+    @Published private(set) var spotlightDetails: [String: WatchlistTitleDetails] = [:]
+    private var detailsAsked = Set<String>()
     /// Tiles whose remove is on its way.
     @Published private(set) var removingIds = Set<String>()
 
     private let store: WatchlistStore
     private let service: WatchlistService
     private let seerr: SeerrSession
+    private let features: SashimiListsFeatures
     private let injectedLookup: RequestedLookup?
     private var libraryItems: [String: BaseItemDto] = [:]
     /// Seerr's answers this model has seen (a nil value: asked, nothing known).
@@ -83,12 +89,15 @@ final class WatchlistPageViewModel: ObservableObject {
     private var removedIds = Set<String>()
 
     init(store: WatchlistStore = .shared, service: WatchlistService = WatchlistService(),
-         seerr: SeerrSession = .shared, lookup: RequestedLookup? = nil) {
+         seerr: SeerrSession = .shared, features: SashimiListsFeatures = .shared, lookup: RequestedLookup? = nil) {
         self.store = store
         self.service = service
         self.seerr = seerr
+        self.features = features
         self.injectedLookup = lookup
         syncCacheOwner()
+        // ＋ Add and the title page follow the plugin's answer.
+        features.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         // Header and menu read the store; the page redraws when it changes.
         store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         // @Published fires before the change lands: look again once it has.
@@ -124,11 +133,22 @@ final class WatchlistPageViewModel: ObservableObject {
 
     /// The Spotlight for a tile: Request needs this device signed into Requests.
     func spotlight(for tile: WatchlistTile) -> ListSpotlight {
-        ListSpotlight(tile: tile, signedIntoRequests: seerr.client != nil)
+        ListSpotlight(tile: tile, signedIntoRequests: seerr.client != nil, details: spotlightDetails[tile.id])
+    }
+
+    /// The Spotlight moved to this tile: a title the server doesn't have gets
+    /// its backdrop and overview from the server's providers (plugin 0.3.0+),
+    /// asked once per page.
+    func spotlightShown(_ tile: WatchlistTile) async {
+        guard features.hasWatchlistV2, tile.isMissing, detailsAsked.insert(tile.id).inserted else { return }
+        guard let details = try? await service.details(WatchlistTitleSeed(entry: tile.entry)) else { return }
+        spotlightDetails[tile.id] = details
     }
 
     func load() async {
+        async let featuresLoad: Void = features.refresh()
         await store.refresh()
+        await featuresLoad
         if store.availability == .unavailable {
             isGone = true
             failed = false
@@ -202,8 +222,12 @@ final class WatchlistPageViewModel: ObservableObject {
         inFlight = []
     }
 
+    /// ＋ Add: the plugin can search (0.3.0+).
+    var canAdd: Bool { features.hasWatchlistV2 }
+
     func action(for tile: WatchlistTile) -> WatchlistTileAction {
         if let item = tile.libraryItem { return .openLibrary(item) }
+        if features.hasWatchlistV2 { return .openTitle(WatchlistTitleSeed(entry: tile.entry)) }
         guard let target = Watchlist.seerrTarget(for: tile.entry) else {
             return .explain(WatchlistText.cantLookUp)
         }

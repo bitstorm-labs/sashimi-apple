@@ -30,7 +30,12 @@ struct RequestsSettingsView: View {
         }
         .onAppear {
             serverText = session.serverURL?.absoluteString ?? ""
-            Task { await session.refreshPublicSettings() }
+            Task {
+                // The server may set (or stop setting) the address at any time.
+                await SashimiListsFeatures.shared.refresh()
+                serverText = session.serverURL?.absoluteString ?? ""
+                await session.refreshPublicSettings()
+            }
         }
         .onDisappear {
             session.cancelPlexSignIn()
@@ -126,10 +131,15 @@ struct RequestsSettingsView: View {
 
     private var serverRow: some View {
         HStack(spacing: 20) {
-            Text("Request server")
+            Text(session.isServerAddressManaged ? WatchlistV2Text.requestsServer : "Request server")
                 .font(Typography.bodySmall)
                 .foregroundStyle(SashimiTheme.textSecondary)
-            if session.isActive {
+            if session.isServerAddressManaged {
+                Spacer()
+                Label(WatchlistV2Text.setByYourServer, systemImage: "lock.fill")
+                    .font(Typography.bodySmall.weight(.medium))
+                    .foregroundStyle(SashimiTheme.textPrimary)
+            } else if session.isActive {
                 Spacer()
                 Text(session.serverURL?.host ?? session.serverURL?.absoluteString ?? "")
                     .font(Typography.bodySmall.weight(.medium))
@@ -146,15 +156,16 @@ struct RequestsSettingsView: View {
             }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, session.isActive ? 16 : 4)
+        .padding(.vertical, session.isActive || session.isServerAddressManaged ? 16 : 4)
         .background(RoundedRectangle(cornerRadius: 12).fill(SashimiTheme.cardBackground))
     }
 
     /// Sign-in waits for a valid address: there is no default server.
-    private var canSignIn: Bool { SeerrSession.canSignIn(serverText: serverText) }
+    private var canSignIn: Bool { session.isServerAddressManaged || SeerrSession.canSignIn(serverText: serverText) }
 
     /// An address that isn't valid goes back to the saved one (or empty).
     private func applyServer() {
+        guard !session.isServerAddressManaged else { return }
         if !session.setServerAddress(serverText) {
             serverText = session.serverURL?.absoluteString ?? ""
         }

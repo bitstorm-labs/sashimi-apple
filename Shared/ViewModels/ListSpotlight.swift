@@ -83,6 +83,9 @@ struct ListSpotlight: Equatable {
     let tag: String?
     let action: Action
 
+    /// A real backdrop (not a poster standing in): drawn sharp, not blurred.
+    let hasBackdropImage: Bool
+
     var isMissing: Bool { tag != nil }
 
     init(item: BaseItemDto) {
@@ -101,17 +104,35 @@ struct ListSpotlight: Equatable {
         backdrop = .library(itemId: image.itemId, imageType: image.type)
         tag = nil
         action = .play(item)
+        hasBackdropImage = true
     }
 
-    init(tile: WatchlistTile, signedIntoRequests: Bool) {
+    /// `details`: what the server's providers say about a title it doesn't
+    /// have (plugin 0.3.0+), once looked up.
+    init(tile: WatchlistTile, signedIntoRequests: Bool, details: WatchlistTitleDetails? = nil) {
         if let item = tile.libraryItem {
             self.init(item: item)
             return
         }
         let entry = tile.entry
-        let kind = entry.kind == .movie ? "Movie" : "Show"
+        var parts: [String] = []
+        if let year = details?.year ?? entry.year { parts.append(String(year)) }
+        if let minutes = details?.runtimeMinutes, minutes > 0,
+           let runtime = DateFormatting.formatRuntime(Int64(minutes) * 600_000_000) {
+            parts.append(runtime)
+        } else if let seasons = details?.seasonCount, seasons > 0 {
+            parts.append(seasons == 1 ? "1 season" : "\(seasons) seasons")
+        } else {
+            parts.append(entry.kind == .movie ? "Movie" : "Show")
+        }
+        if let rating = details?.officialRating, !rating.isEmpty { parts.append(rating) }
+        if let genres = details?.genres, !genres.isEmpty { parts.append(genres.prefix(2).joined(separator: ", ")) }
         var backdrop = Backdrop.none
-        if case .remote(let url) = tile.artwork { backdrop = .remote(url) }
+        if let url = details?.backdropURL {
+            backdrop = .remote(url)
+        } else if case .remote(let url) = tile.artwork {
+            backdrop = .remote(url)
+        }
         var action = Action.none
         if let target = Watchlist.seerrTarget(for: entry) {
             action = signedIntoRequests ? .request(target) : .signInToRequests
@@ -119,16 +140,17 @@ struct ListSpotlight: Equatable {
         self.init(
             id: entry.id,
             title: entry.title,
-            details: ([entry.year.map(String.init)] + [kind]).compactMap { $0 }.joined(separator: " · "),
-            overview: nil,
+            details: parts.joined(separator: " · "),
+            overview: details?.overview.flatMap { $0.isEmpty ? nil : $0 },
             backdrop: backdrop,
             tag: (tile.missingTag ?? .notOnServer).label,
-            action: action
+            action: action,
+            hasBackdropImage: details?.backdropURL != nil
         )
     }
 
     private init(id: String, title: String, details: String, overview: String?, backdrop: Backdrop, tag: String?,
-                 action: Action) {
+                 action: Action, hasBackdropImage: Bool) {
         self.id = id
         self.title = title
         self.details = details
@@ -136,6 +158,7 @@ struct ListSpotlight: Equatable {
         self.backdrop = backdrop
         self.tag = tag
         self.action = action
+        self.hasBackdropImage = hasBackdropImage
     }
 }
 

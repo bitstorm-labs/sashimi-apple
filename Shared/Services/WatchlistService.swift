@@ -55,4 +55,43 @@ struct WatchlistService {
         guard !ids.isEmpty, let items = try? await client.getItemsForCards(itemIds: ids) else { return [:] }
         return Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
+
+    // MARK: v2 (plugin 0.3.0)
+
+    /// Nil on 404: a plugin older than 0.3.0 (＋ Add is hidden).
+    func search(_ query: String) async throws -> WatchlistSearchResponse? {
+        do {
+            return try await client.searchWatchlist(query: query)
+        } catch JellyfinError.httpError(let code) where code == 404 {
+            return nil
+        }
+    }
+
+    /// Nil on 404: no provider knows the title, or an older plugin. The page
+    /// then shows what it already has.
+    func details(_ seed: WatchlistTitleSeed) async throws -> WatchlistTitleDetails? {
+        do {
+            return try await client.getWatchlistTitleDetails(kind: seed.kind, ids: seed.ids)
+        } catch JellyfinError.httpError(let code) where code == 404 {
+            return nil
+        }
+    }
+
+    func add(_ entry: NewWatchlistEntry) async throws -> WatchlistAddResponse {
+        try await client.addToWatchlist(entry)
+    }
+
+    func remove(entryId: String) async throws {
+        try await client.removeFromWatchlist(entryId: entryId)
+    }
+
+    /// Nil on 404: a plugin older than 0.3.0, so no v2 features and no
+    /// server-set Requests address.
+    func config() async throws -> SashimiListsConfig? {
+        do {
+            return try await client.getSashimiListsConfig()
+        } catch JellyfinError.httpError(let code) where code == 404 {
+            return nil
+        }
+    }
 }
