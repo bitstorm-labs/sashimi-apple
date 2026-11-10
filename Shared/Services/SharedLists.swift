@@ -120,17 +120,17 @@ enum SharedLists {
     }
 
     /// A list's cover, from what the list shows (in display order, after
-    /// `displayEntries`): the first four DIFFERENT titles as a 2x2 collage,
-    /// else the first title alone, else nothing. The same rule on Apple,
-    /// Android and Roku (vectors in SharedListsTests).
+    /// `displayEntries`): the first three DIFFERENT titles, drawn as a poster
+    /// stack (design §6). The same rule on Apple, Android and Roku (vectors in
+    /// SharedListsTests).
     static func coverPosterIds(_ shown: [ListEntry]) -> [String] {
         var ids: [String] = []
         for entry in shown {
             let id = posterId(entry)
             if !ids.contains(id) { ids.append(id) }
-            if ids.count == 4 { return ids }
+            if ids.count == PosterStack.maxPosters { break }
         }
-        return Array(ids.prefix(1))
+        return ids
     }
 
     /// Whether `candidate` would show as something the list already shows.

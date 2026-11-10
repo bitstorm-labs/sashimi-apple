@@ -2743,7 +2743,9 @@ actor JellyfinClient {
 
     // MARK: - Shared lists (playlists)
 
-    private static let listEntryFields = "PrimaryImageAspectRatio,UserData,SeriesName,SeriesId,SeasonId,ParentIndexNumber,IndexNumber,ProductionYear,OfficialRating,LibraryName"
+    /// What a poster card needs, and what a list's Spotlight shows (overview,
+    /// genres, runtime).
+    private static let listEntryFields = "PrimaryImageAspectRatio,UserData,SeriesName,SeriesId,SeasonId,ParentIndexNumber,IndexNumber,ProductionYear,OfficialRating,LibraryName,Overview,Genres,RunTimeTicks"
 
     private func listBody(_ object: [String: Any]) throws -> Data {
         try JSONSerialization.data(withJSONObject: object)

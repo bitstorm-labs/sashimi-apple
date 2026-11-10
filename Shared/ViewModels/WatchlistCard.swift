@@ -39,15 +39,18 @@ extension WatchlistTile {
 /// The Watchlist's card on the Lists page.
 struct WatchlistCardInfo: Equatable {
     let subtitle: String
-    /// The posters of the first four titles that have one; empty when none
-    /// do (both apps then draw the bookmark).
-    let cover: [WatchlistArtwork]
+    /// The posters of the first three titles that have one, those the server
+    /// doesn't have dimmed; empty when none do (both apps then draw the bookmark).
+    let cover: [ListCoverPoster]
 
     init(_ list: WatchlistResponse) {
         var subtitle = WatchlistText.summary(count: list.entries.count)
         if let plex = list.plex, !plex.needsReconnect { subtitle += " · \(WatchlistText.synced)" }
         self.subtitle = subtitle
-        cover = Array(list.entries.lazy.map(WatchlistArtwork.init(entry:)).filter { $0 != .none }.prefix(4))
+        cover = Array(list.entries.lazy
+            .map { ListCoverPoster(artwork: WatchlistArtwork(entry: $0), title: $0.title, isDimmed: $0.itemId == nil) }
+            .filter { $0.artwork != .none }
+            .prefix(PosterStack.maxPosters))
     }
 }
 

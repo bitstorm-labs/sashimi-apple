@@ -356,7 +356,7 @@ final class SharedListsServiceTests: XCTestCase {
         await model.load()
 
         XCTAssertTrue(model.isOwner)
-        XCTAssertEqual(model.creatorLine, "Your list")
+        XCTAssertEqual(model.eyebrow, "L · 1 title")
         XCTAssertTrue(model.list.isPublic, "the server's OpenAccess, not the card's")
         XCTAssertTrue(JellyfinRouteStub.requests("GET", "/SashimiLists/Owners").isEmpty)
     }

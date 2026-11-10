@@ -11,6 +11,8 @@ struct MediaPosterButton: View {
     var isNew: Bool = false
     var serverURL: URL?
     var serverID: String?
+    /// Told when focus arrives (true) or leaves (false): a list's Spotlight follows it.
+    var onFocusChange: ((Bool) -> Void)?
     let onSelect: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -304,6 +306,7 @@ struct MediaPosterButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .onChange(of: isFocused) { _, focused in onFocusChange?(focused) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Double-tap to view details")

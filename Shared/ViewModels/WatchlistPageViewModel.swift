@@ -119,7 +119,13 @@ final class WatchlistPageViewModel: ObservableObject {
         return items
     }
 
-    var summary: String { WatchlistText.summary(count: tiles.count) }
+    /// Over the Spotlight: "Watchlist · 8 titles".
+    var eyebrow: String { "\(WatchlistText.name) · \(ListText.titles(tiles.count))" }
+
+    /// The Spotlight for a tile: Request needs this device signed into Requests.
+    func spotlight(for tile: WatchlistTile) -> ListSpotlight {
+        ListSpotlight(tile: tile, signedIntoRequests: seerr.client != nil)
+    }
 
     func load() async {
         await store.refresh()

@@ -89,7 +89,7 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertNil((try tile(model, 1)).libraryItem)
         XCTAssertEqual((try tile(model, 1)).missingTag, .notOnServer)
         XCTAssertTrue((try tile(model, 1)).isMissing)
-        XCTAssertEqual(model.summary, "Private · 2 titles")
+        XCTAssertEqual(model.eyebrow, "Watchlist · 2 titles")
     }
 
     func testAnItemTheViewerCantSeeIsMissing() async throws {
@@ -407,7 +407,7 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertTrue(done)
         XCTAssertEqual(JellyfinRouteStub.requests("DELETE", "\(base)/Items/a").count, 1)
         XCTAssertEqual(model.tiles.map(\.id), ["b"])
-        XCTAssertEqual(model.summary, "Private · 1 title")
+        XCTAssertEqual(model.eyebrow, "Watchlist · 1 title")
     }
 
     func testNoPluginMeansGone() async throws {
@@ -463,7 +463,7 @@ extension WatchlistPageViewModelTests {
 
         XCTAssertEqual(model.header, .synced)
         XCTAssertEqual(model.tiles.map(\.id), ["a", "b", "c"])
-        XCTAssertEqual(model.summary, "Private · 3 titles")
+        XCTAssertEqual(model.eyebrow, "Watchlist · 3 titles")
         XCTAssertEqual(try tile(model, 1).libraryItem?.id, "i2", "a synced title the server has isn't 'Not on server'")
         XCTAssertEqual(try tile(model, 2).missingTag, .notOnServer)
     }
@@ -575,7 +575,7 @@ extension WatchlistPageViewModelTests {
 
         XCTAssertTrue(removed)
         XCTAssertEqual(model.tiles.map(\.id), ["b"])
-        XCTAssertEqual(model.summary, "Private · 1 title")
+        XCTAssertEqual(model.eyebrow, "Watchlist · 1 title")
     }
 
     func testTappingRemoveTwiceSendsOneDelete() async throws {

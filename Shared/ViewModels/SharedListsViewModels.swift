@@ -6,8 +6,8 @@ struct ListCard: Identifiable, Hashable {
     let ownerName: String?
     /// What this user sees on it (parental limits applied).
     let count: Int
-    /// The cover's posters (`SharedLists.coverPosterIds`): four for a 2x2
-    /// collage, one shown full-bleed, or none.
+    /// The cover's posters (`SharedLists.coverPosterIds`): up to three, drawn
+    /// as a poster stack, or none.
     let coverIds: [String]
 
     var id: String { list.id }
@@ -24,10 +24,10 @@ enum ListText {
         count == 1 ? "1 title" : "\(count) titles"
     }
 
-    static func creator(ownerName: String?, isOwn: Bool) -> String {
-        if isOwn { return "Your list" }
-        guard let ownerName else { return "Shared list" }
-        return "A list by \(ownerName)"
+    /// Over a list page's Spotlight: "Picks · 3 titles", or
+    /// "Christmas Movies · Marge · 14 titles" for someone else's list.
+    static func eyebrow(listName: String, ownerName: String?, isOwn: Bool, count: Int) -> String {
+        [listName, isOwn ? nil : ownerName, titles(count)].compactMap { $0 }.joined(separator: " · ")
     }
 
     static let publicFootnote = "Everyone on the server can find and subscribe to it."
@@ -128,15 +128,10 @@ final class ListDetailViewModel: ObservableObject {
     var isOwner: Bool { list.isOwned(by: userId) }
     var isSubscribed: Bool { store.isSubscribed(list.id) }
     var ownerName: String? { store.ownerName(of: list) }
-    var creatorLine: String { ListText.creator(ownerName: ownerName, isOwn: isOwner) }
 
-    var summary: String {
-        var parts = [ListText.titles(contents.items.count)]
-        if isSubscribed, !newIds.isEmpty { parts.append("\(newIds.count) new since you last looked") }
-        if isOwner {
-            parts.append(list.isPublic ? "Public: everyone on the server can see and subscribe" : "Private: only you can see it")
-        }
-        return parts.joined(separator: " · ")
+    /// Over the Spotlight: the list, who made it (someone else's), how many titles.
+    var eyebrow: String {
+        ListText.eyebrow(listName: list.name, ownerName: ownerName, isOwn: isOwner, count: contents.items.count)
     }
 
     func load() async {

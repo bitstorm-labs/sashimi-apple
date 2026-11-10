@@ -1,9 +1,11 @@
 import NukeUI
 import SwiftUI
 
-/// The Watchlist on iPhone, iPad and Mac: "Use Plex too?" (or the Plex sync
-/// line), then every title, with those the server doesn't have dimmed and
-/// tagged "Not on server" or "Requested".
+/// The Watchlist on iPhone, iPad and Mac: the selected title's Spotlight
+/// (backdrop, details, and Play, or Request / Sign in to Requests for a title
+/// the server doesn't have), "Use Plex too?" (or the Plex sync line), then
+/// every title, with those the server doesn't have dimmed and tagged "Not on
+/// server" or "Requested".
 struct MobileWatchlistView: View {
     @StateObject private var model = WatchlistPageViewModel()
     @StateObject private var connect = PlexConnectModel()
@@ -13,6 +15,9 @@ struct MobileWatchlistView: View {
     @State private var removal: WatchlistTile?
     @State private var confirmDisconnect = false
     @State private var message: String?
+    @State private var playing: BaseItemDto?
+    /// The title the Spotlight shows: the one under the pointer, else the first.
+    @State private var spotlightId: String?
 
     private let columns = [GridItem(.adaptive(minimum: PhoneSizing.posterWidth, maximum: MobileSizing.posterWidth),
                                     spacing: MobileSpacing.sm, alignment: .top)]
@@ -22,10 +27,12 @@ struct MobileWatchlistView: View {
             VStack(alignment: .leading, spacing: MobileSpacing.md) {
                 header
                 content
+                    .padding(.horizontal, MobileSpacing.md)
             }
-            .padding(MobileSpacing.md)
+            .padding(.bottom, MobileSpacing.md)
         }
         .background(MobileColors.background)
+        .fullScreenPlayer(item: $playing)
         .navigationTitle(WatchlistText.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -57,16 +64,25 @@ struct MobileWatchlistView: View {
 
     // MARK: Header
 
+    private var spotlightTile: WatchlistTile? {
+        model.tiles.first { $0.id == spotlightId } ?? model.tiles.first
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-                Label(WatchlistText.name, systemImage: "bookmark.fill")
-                    .font(MobileTypography.displayLarge)
-                    .foregroundStyle(MobileColors.textPrimary)
-                Text(model.summary)
-                    .font(MobileTypography.caption)
-                    .foregroundStyle(MobileColors.textTertiary)
+            MobileListSpotlightHeader(eyebrow: model.eyebrow, spotlight: spotlightTile.map(model.spotlight(for:))) {
+                if let tile = spotlightTile {
+                    MobileListSpotlightAction(action: model.spotlight(for: tile).action) { playing = $0 }
+                }
             }
+            plexAndRemoval
+                .padding(.horizontal, MobileSpacing.md)
+        }
+    }
+
+    @ViewBuilder
+    private var plexAndRemoval: some View {
+        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
             if let progress = connect.progressText {
                 HStack {
                     ProgressView()
@@ -184,6 +200,7 @@ struct MobileWatchlistView: View {
     @ViewBuilder
     private func tileLink(_ tile: WatchlistTile) -> some View {
         let label = WatchlistTileView(tile: tile)
+            .onHover { if $0 { spotlightId = tile.id } }
         if removing {
             Button { removal = tile } label: { label }
                 .buttonStyle(.plain)
@@ -306,9 +323,7 @@ struct MobileWatchlistCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-            cover
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            MobilePosterStackCover(posters: card.cover, placeholder: "bookmark")
             Label(WatchlistText.name, systemImage: "bookmark.fill")
                 .font(MobileTypography.title)
                 .foregroundStyle(MobileColors.textPrimary)
@@ -319,35 +334,5 @@ struct MobileWatchlistCard: View {
                 .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private var cover: some View {
-        GeometryReader { geometry in
-            ZStack {
-                MobileColors.cardBackground
-                if card.cover.count == 4 {
-                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
-                    VStack(spacing: 0) {
-                        ForEach(0..<2, id: \.self) { row in
-                            HStack(spacing: 0) {
-                                ForEach(0..<2, id: \.self) { column in
-                                    WatchlistArtworkView(artwork: card.cover[row * 2 + column], title: "", width: cell.width)
-                                        .frame(width: cell.width, height: cell.height)
-                                        .clipped()
-                                }
-                            }
-                        }
-                    }
-                } else if let first = card.cover.first {
-                    WatchlistArtworkView(artwork: first, title: "", width: geometry.size.width)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                } else {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 30))
-                        .foregroundStyle(MobileColors.textTertiary)
-                }
-            }
-        }
     }
 }

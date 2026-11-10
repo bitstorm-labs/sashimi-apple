@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// One list: who made it, Subscribe, and its titles as a poster grid. The
-/// owner also gets Edit List (rename, public/private, reorder, remove,
+/// One list, as a Spotlight (design §6): the focused title's backdrop and
+/// details with Play, Subscribe and Shuffle, over a row of the list's posters.
+/// The owner also gets Edit List (rename, public/private, reorder, remove,
 /// delete). Opening a subscribed list marks what it shows as seen.
 struct ListDetailView: View {
     @StateObject private var model: ListDetailViewModel
@@ -16,27 +17,22 @@ struct ListDetailView: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
+    /// The title the Spotlight shows: the last poster focused, else the first.
+    @State private var spotlightId: String?
     @FocusState private var editMenuFocused: Bool
-
-    private let columns = Array(repeating: GridItem(.fixed(220), spacing: 48, alignment: .top), count: 6)
 
     init(list: SharedList) {
         _model = StateObject(wrappedValue: ListDetailViewModel(list: list))
     }
 
     var body: some View {
-        ZStack {
-            SashimiTheme.background.ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 40) {
-                    header
-                    content
-                }
-                .padding(.horizontal, 80)
-                .padding(.vertical, 60)
-            }
-            .scrollClipDisabled()
-        }
+        ListSpotlightPage(
+            eyebrow: model.eyebrow,
+            spotlight: spotlightItem.map(ListSpotlight.init(item:)),
+            actions: { actions },
+            notice: { notice },
+            posters: { content }
+        )
         // A full-screen cover: the app root's toasts draw under it (#875).
         .toastOverlay()
         .fullScreenCover(item: $selected) { item in
@@ -82,50 +78,37 @@ struct ListDetailView: View {
 
     // MARK: Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 14) {
-                if !model.isOwner, let name = model.ownerName {
-                    Text(String(name.prefix(1)).uppercased())
-                        .font(.system(size: 22, weight: .heavy))
-                        .frame(width: 44, height: 44)
-                        .background(SashimiTheme.accent, in: Circle())
-                }
-                Text(model.creatorLine)
-                    .font(.system(size: 24))
-                    .foregroundStyle(SashimiTheme.textSecondary)
-            }
-            Text(model.list.name)
-                .font(Typography.displayMedium)
-                .foregroundStyle(SashimiTheme.textPrimary)
-            Text(model.summary)
-                .font(.system(size: 22))
-                .foregroundStyle(SashimiTheme.textTertiary)
+    private var spotlightItem: BaseItemDto? {
+        let items = model.contents.items
+        return items.first { $0.id == spotlightId } ?? items.first
+    }
 
-            HStack(spacing: 30) {
-                ActionButton(
-                    title: model.isSubscribed ? "Subscribed" : "Subscribe",
-                    icon: model.isSubscribed ? "checkmark" : "plus",
-                    isPrimary: true
-                ) {
-                    Task {
-                        let message = await model.toggleSubscription()
-                        ToastManager.shared.show(message, type: message.hasPrefix("Couldn't") ? .error : .success)
-                    }
-                }
-                ActionButton(title: "Shuffle", icon: "shuffle") { Task { await shuffle() } }
-                    .disabled(model.contents.items.isEmpty)
-                if model.isOwner { editMenu }
-                Spacer()
+    @ViewBuilder
+    private var actions: some View {
+        if let item = spotlightItem {
+            ListSpotlightActionButton(action: .play(item), onPlay: { playing = $0 }, onRequest: { _ in }, onSignIn: {})
+        }
+        ActionButton(
+            title: model.isSubscribed ? "Subscribed" : "Subscribe",
+            icon: model.isSubscribed ? "checkmark" : "plus",
+            isPrimary: spotlightItem == nil
+        ) {
+            Task {
+                let message = await model.toggleSubscription()
+                ToastManager.shared.show(message, type: message.hasPrefix("Couldn't") ? .error : .success)
             }
-            .padding(.top, 10)
-            .focusSection()
+        }
+        ActionButton(title: "Shuffle", icon: "shuffle") { Task { await shuffle() } }
+            .disabled(model.contents.items.isEmpty)
+        if model.isOwner { editMenu }
+    }
 
-            if let editing {
-                Text(editing == .reorder ? "Select a title to move it. Press Menu when you're done." : "Select a title to remove it. Press Menu when you're done.")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(SashimiTheme.accentSecondary)
-            }
+    @ViewBuilder
+    private var notice: some View {
+        if let editing {
+            Text(editing == .reorder ? "Select a title to move it. Press Menu when you're done." : "Select a title to remove it. Press Menu when you're done.")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(SashimiTheme.accentSecondary)
         }
     }
 
@@ -179,14 +162,13 @@ struct ListDetailView: View {
                 .foregroundStyle(SashimiTheme.textTertiary)
                 .focusable()
         } else {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 50) {
-                ForEach(model.contents.items) { item in
-                    MediaPosterButton(item: item, libraryName: item.libraryName, isNew: model.newIds.contains(item.id)) {
-                        if editing != nil { actionItem = item } else { selected = item }
-                    }
+            ForEach(model.contents.items) { item in
+                let focus: (Bool) -> Void = { focused in if focused { spotlightId = item.id } }
+                MediaPosterButton(item: item, libraryName: item.libraryName, isNew: model.newIds.contains(item.id),
+                                  onFocusChange: focus) {
+                    if editing != nil { actionItem = item } else { selected = item }
                 }
             }
-            .focusSection()
         }
     }
 

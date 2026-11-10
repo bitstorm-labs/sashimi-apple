@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// One list: who made it, Subscribe, and its titles as a poster grid. The
+/// One list: the selected title's Spotlight (backdrop, details, Play) with
+/// Subscribe and Shuffle, then its titles as a poster grid. The
 /// owner also gets Edit List: rename, public/private, delete, and per title
 /// Move Earlier / Later and Remove (long-press a poster, or the Edit menu's
 /// Reorder / Remove modes, where a tap acts on the title).
@@ -16,6 +17,9 @@ struct MobileListDetailView: View {
     @State private var newName = ""
     @State private var confirmDelete = false
     @State private var message: String?
+    @State private var playing: BaseItemDto?
+    /// The title the Spotlight shows: the one under the pointer, else the first.
+    @State private var spotlightId: String?
 
     private let columns = [GridItem(.adaptive(minimum: PhoneSizing.posterWidth, maximum: MobileSizing.posterWidth), spacing: MobileSpacing.sm, alignment: .top)]
 
@@ -28,10 +32,12 @@ struct MobileListDetailView: View {
             VStack(alignment: .leading, spacing: MobileSpacing.md) {
                 header
                 content
+                    .padding(.horizontal, MobileSpacing.md)
             }
-            .padding(MobileSpacing.md)
+            .padding(.bottom, MobileSpacing.md)
         }
         .background(MobileColors.background)
+        .fullScreenPlayer(item: $playing)
         .navigationTitle(model.list.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -65,34 +71,27 @@ struct MobileListDetailView: View {
         }
     }
 
+    private var spotlightItem: BaseItemDto? {
+        let items = model.contents.items
+        return items.first { $0.id == spotlightId } ?? items.first
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.xs) {
-            HStack(spacing: MobileSpacing.xs) {
-                if !model.isOwner, let name = model.ownerName {
-                    Text(String(name.prefix(1)).uppercased())
-                        .font(.system(size: 13, weight: .heavy))
-                        .frame(width: 26, height: 26)
-                        .background(MobileColors.accent, in: Circle())
+            MobileListSpotlightHeader(eyebrow: model.eyebrow, spotlight: spotlightItem.map(ListSpotlight.init(item:))) {
+                if let item = spotlightItem {
+                    MobileListSpotlightAction(action: .play(item)) { playing = $0 }
                 }
-                Text(model.creatorLine)
-                    .font(MobileTypography.bodySmall)
-                    .foregroundStyle(MobileColors.textSecondary)
+                Button {
+                    Task { message = await model.toggleSubscription() }
+                } label: {
+                    Label(model.isSubscribed ? "Subscribed" : "Subscribe", systemImage: model.isSubscribed ? "checkmark" : "plus")
+                }
+                .buttonStyle(.bordered)
+                Button { Task { await shuffle() } } label: { Label("Shuffle", systemImage: "shuffle") }
+                    .buttonStyle(.bordered)
+                    .disabled(model.contents.items.isEmpty)
             }
-            Text(model.list.name)
-                .font(MobileTypography.displayLarge)
-                .foregroundStyle(MobileColors.textPrimary)
-            Text(model.summary)
-                .font(MobileTypography.caption)
-                .foregroundStyle(MobileColors.textTertiary)
-            Button {
-                Task { message = await model.toggleSubscription() }
-            } label: {
-                Label(model.isSubscribed ? "Subscribed" : "Subscribe", systemImage: model.isSubscribed ? "checkmark" : "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(maxWidth: 320)
-            }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, MobileSpacing.xs)
 
             if let editing {
                 HStack {
@@ -102,7 +101,18 @@ struct MobileListDetailView: View {
                     Spacer()
                     Button("Done") { self.editing = nil }
                 }
+                .padding(.horizontal, MobileSpacing.md)
             }
+        }
+    }
+
+    /// A random title; a show plays a random episode of itself.
+    private func shuffle() async {
+        guard let pick = model.contents.items.randomElement() else { return }
+        if pick.type == .series {
+            playing = try? await JellyfinClient.shared.getRandomItem(parentId: pick.id, itemTypes: [.episode])
+        } else {
+            playing = pick
         }
     }
 
@@ -148,6 +158,7 @@ struct MobileListDetailView: View {
     @ViewBuilder
     private func poster(_ item: BaseItemDto) -> some View {
         let card = ListPosterCard(item: item, isNew: model.newIds.contains(item.id))
+            .onHover { if $0 { spotlightId = item.id } }
         if editing != nil {
             Button { actionItem = item } label: { card }
                 .buttonStyle(.plain)
