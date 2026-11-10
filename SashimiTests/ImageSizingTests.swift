@@ -18,14 +18,22 @@ final class ImageSizingTests: XCTestCase {
         XCTAssertEqual(ImageSizing.pixelWidth(points: 740), 1480)
     }
 
-    /// tvOS hero: a 1920×540pt (32:9) frame, 30pt top inset, 16:9 backdrop
-    /// drawn `.fit` → ~907pt wide → 1840px (was a flat 1920).
+    /// tvOS hero: a 1920×540pt (32:9) frame, picture flush to the top, 16:9
+    /// backdrop drawn `.fit` → 960pt wide → 1920px.
     func testTVHeroRequestsTheDrawnWidth() {
-        let layout = HeroLayout(imageTopInset: 30, accent: .red)
+        let layout = HeroLayout.tv
         let size = CGSize(width: 1920, height: 540)
-        XCTAssertEqual(layout.displayedImagePoints(in: size), 510 * 16 / 9, accuracy: 0.01)
-        XCTAssertEqual(layout.imagePixelWidth(in: size), 1840)
+        XCTAssertEqual(layout.displayedImagePoints(in: size), 960, accuracy: 0.01)
+        XCTAssertEqual(layout.imagePixelWidth(in: size), 1920)
         XCTAssertEqual(layout.imagePixelWidth(in: .zero), 1920)
+    }
+
+    /// The tvOS hero picture touches the top edge like Roku's: no inset and no
+    /// feathered top, which together drew a dark strip above the art.
+    func testTVHeroPictureIsFlushToTheTop() {
+        XCTAssertEqual(HeroLayout.tv.imageTopInset, 0)
+        XCTAssertFalse(HeroLayout.tv.fadesImageTop)
+        XCTAssertTrue(HeroLayout(accent: .red).fadesImageTop) // iPad default keeps #787
     }
 
     /// iPad portrait hero widens to fill its height: 834×600pt → full width.
