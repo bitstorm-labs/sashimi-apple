@@ -47,6 +47,8 @@ struct AddToChannelView: View {
                 list
             }
         }
+        // A full-screen cover: the app root's toasts draw under it (#875).
+        .toastOverlay()
         .onExitCommand(perform: back)
         .task { await model.loadMenu(itemId: target.itemId) }
         // Opens with Cancel focused: a stray press of the remote must not

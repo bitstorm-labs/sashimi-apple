@@ -133,6 +133,8 @@ struct MediaDetailView: View {
             )
         }
         .themeSong(for: item)
+        // A full-screen cover: the app root's toasts draw under it (#875).
+        .toastOverlay()
         .fullScreenCover(isPresented: $showingPlayer) {
             PlayerView(
                 item: selectedEpisode ?? item,

@@ -47,6 +47,8 @@ struct SeasonDetailView: View {
             )
         }
         .themeSong(for: model.season)
+        // A full-screen cover: the app root's toasts draw under it (#875).
+        .toastOverlay()
         .fullScreenCover(item: $playingItem) { episode in
             PlayerView(item: episode, serverID: serverID, startFromBeginning: startFromBeginning)
         }

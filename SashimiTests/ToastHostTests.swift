@@ -47,4 +47,25 @@ final class ToastHostTests: XCTestCase {
         XCTAssertTrue(toasts.isTopHost(root))
         XCTAssertFalse(toasts.isTopHost(cover))
     }
+
+    /// #875: every full-screen cover that raises toasts carries its own
+    /// overlay, or its toasts draw under it at the app root. MediaDetailView
+    /// also covers SeerrDetailView's library branch, which shows it as is.
+    func testCoversThatRaiseToastsCarryTheirOwnOverlay() {
+        let covers: [(String, Any.Type)] = [
+            ("MediaDetailView", MediaDetailView.Body.self),
+            ("SeasonDetailView", SeasonDetailView.Body.self),
+            ("ListDetailView", ListDetailView.Body.self),
+            // NewChannelForm's "Created" toast, inside either channel cover.
+            ("ManageChannelsView", ManageChannelsView.Body.self),
+            ("AddToChannelView", AddToChannelView.Body.self),
+            ("SeerrDetailView", SeerrDetailView.Body.self),
+            ("WatchlistPageView", WatchlistPageView.Body.self),
+            ("AddToListView", AddToListView.Body.self)
+        ]
+        for (name, body) in covers {
+            XCTAssertTrue(String(reflecting: body).contains("ToastModifier"),
+                          "\(name) is shown as a full-screen cover and raises toasts, so it needs .toastOverlay()")
+        }
+    }
 }
