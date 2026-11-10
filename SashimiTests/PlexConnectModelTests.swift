@@ -26,8 +26,9 @@ final class PlexConnectModelTests: XCTestCase {
         super.tearDown()
     }
 
-    private func model(pinLifetime: Duration = .seconds(15 * 60), now: @escaping () -> Date = Date.init) throws -> PlexConnectModel {
-        let client = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
+    private func model(pinLifetime: Duration = .seconds(15 * 60), now: @escaping () -> Date = Date.init,
+                       server: String = "http://stub.local", user: String = "me") throws -> PlexConnectModel {
+        let client = JellyfinClient(serverURL: try XCTUnwrap(URL(string: server)), accessToken: "token", userId: user)
         let store = WatchlistStore(service: WatchlistService(client: client))
         return PlexConnectModel(store: store, defaults: defaults, pollInterval: .zero, pinLifetime: pinLifetime, now: now)
     }
@@ -236,6 +237,39 @@ final class PlexConnectModelTests: XCTestCase {
         XCTAssertNil(pendingRecord())
     }
 
+    /// Someone else signed in after the relaunch: the PIN isn't theirs to
+    /// collect. It is dropped without asking plex.tv.
+    func testAPendingPinFromAnotherUserIsDropped() async throws {
+        _ = try await model(user: "me").begin(strong: true)
+        XCTAssertNotNil(pendingRecord())
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+
+        let relaunched = try model(user: "someone-else")
+        await relaunched.resumePendingIfAny()
+
+        XCTAssertEqual(relaunched.state, .idle)
+        XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v2/pins/42").isEmpty, "no network call")
+        XCTAssertTrue(JellyfinRouteStub.requests("POST", plexPath).isEmpty)
+        XCTAssertNil(pendingRecord())
+    }
+
+    /// The same user id on another server is another account.
+    func testAPendingPinFromAnotherServerIsDropped() async throws {
+        _ = try await model(server: "http://stub.local").begin(strong: true)
+        XCTAssertNotNil(pendingRecord())
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+
+        let relaunched = try model(server: "http://other.local")
+        await relaunched.resumePendingIfAny()
+
+        XCTAssertEqual(relaunched.state, .idle)
+        XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v2/pins/42").isEmpty, "no network call")
+        XCTAssertTrue(JellyfinRouteStub.requests("POST", plexPath).isEmpty)
+        XCTAssertNil(pendingRecord())
+    }
+
     func testThePendingPinNeverStoresTheToken() async throws {
         pinAlwaysLinked()
         JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"marge\",\"newUsername\":\"homer\"}")
@@ -244,7 +278,9 @@ final class PlexConnectModelTests: XCTestCase {
 
         let pin = await model.begin(strong: true)
         let record = try XCTUnwrap(pendingRecord())
-        XCTAssertEqual(Set(record.keys), ["pinId", "code", "expiresAt"])
+        XCTAssertEqual(Set(record.keys), ["pinId", "code", "expiresAt", "userId", "serverURL"])
+        XCTAssertEqual(record["userId"] as? String, "me")
+        XCTAssertEqual(record["serverURL"] as? String, "http://stub.local")
         XCTAssertEqual(record["pinId"] as? Int, 42)
         XCTAssertEqual(record["code"] as? String, "K7QF")
 
@@ -335,4 +371,3 @@ final class PlexConnectModelTests: XCTestCase {
         XCTAssertNil(model.message, "a new answer clears it")
     }
 }
-

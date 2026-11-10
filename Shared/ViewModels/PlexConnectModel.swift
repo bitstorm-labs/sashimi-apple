@@ -24,7 +24,8 @@ final class PlexConnectModel: ObservableObject {
     private(set) var pinChecks = 0
 
     /// The PIN of a Connect Plex still waiting, kept so it can be collected
-    /// after a relaunch: its id, code and expiry only, never a token.
+    /// after a relaunch: its id, code, expiry and who started it (Jellyfin
+    /// user and server), never a token.
     static let pendingPinKey = "watchlist.pendingPlexPin"
 
     /// PINs this process is polling or collecting right now, so a second
@@ -74,8 +75,9 @@ final class PlexConnectModel: ObservableObject {
         message = nil
         do {
             let pin = try await plexClient.createPin(strong: strong)
+            let owner = await store.currentOwner()
             state = .awaitingPlex(code: pin.code)
-            savePending(pin)
+            savePending(pin, owner: owner)
             return pin
         } catch {
             state = .failed(WatchlistText.couldntReachPlex)
@@ -110,10 +112,13 @@ final class PlexConnectModel: ObservableObject {
     /// Collects a PIN begun before the app was relaunched (or suspended until
     /// its flow was gone): one check, no long poll. Linked → the Watchlist is
     /// linked; another account → the switch question; not linked yet → left
-    /// for later, until it expires.
+    /// for later, until it expires. A PIN started by another Jellyfin user or
+    /// on another server, or an expired one, is dropped without a network call.
     func resumePendingIfAny() async {
         guard state == .idle, let pending = loadPending() else { return }
-        guard pending.expiresAt > now() else {
+        let owner = await store.currentOwner()
+        guard pending.expiresAt > now(), let userId = owner.userId, pending.userId == userId,
+              let server = owner.server, pending.serverURL == server.absoluteString else {
             clearPending()
             return
         }
@@ -201,11 +206,14 @@ final class PlexConnectModel: ObservableObject {
         let pinId: Int
         let code: String
         let expiresAt: Date
+        let userId: String?
+        let serverURL: String?
     }
 
-    private func savePending(_ pin: PlexPin) {
+    private func savePending(_ pin: PlexPin, owner: (userId: String?, server: URL?)) {
         let pending = PendingPin(pinId: pin.id, code: pin.code,
-                                 expiresAt: now().addingTimeInterval(Self.seconds(pinLifetime)))
+                                 expiresAt: now().addingTimeInterval(Self.seconds(pinLifetime)),
+                                 userId: owner.userId, serverURL: owner.server?.absoluteString)
         guard let data = try? JSONEncoder().encode(pending) else { return }
         defaults.set(data, forKey: Self.pendingPinKey)
     }

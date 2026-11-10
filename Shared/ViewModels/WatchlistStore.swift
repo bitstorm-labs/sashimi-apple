@@ -48,6 +48,12 @@ final class WatchlistStore: ObservableObject {
         Scope(userId: await service.client.currentUserId, server: await service.client.currentServerURL)
     }
 
+    /// Who the Watchlist calls are made for right now.
+    func currentOwner() async -> (userId: String?, server: URL?) {
+        let scope = await currentScope()
+        return (scope.userId, scope.server)
+    }
+
     /// Reloads the Watchlist. Another user or server first loses everything of
     /// the last one. A failed load keeps what was there: a blip is not "no plugin".
     /// Only the latest load lands: a slower, older one can't put back what a
