@@ -157,6 +157,16 @@ struct TVPlayerView: UIViewControllerRepresentable {
         )
     }
 
+    /// The screen is going away (Back, or the view model swapping the player
+    /// out during a rebuild). Let go of the player here rather than relying on
+    /// the controller being deallocated: nothing that outlives the screen may
+    /// keep the AVPlayer, and with it the stream and its audio, alive.
+    static func dismantleUIViewController(_ container: PlayerContainerVC, coordinator: Coordinator) {
+        coordinator.readyForDisplayObservation?.invalidate()
+        coordinator.readyForDisplayObservation = nil
+        coordinator.playerVC?.player = nil
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(onDismiss: onDismiss)
     }
@@ -194,9 +204,13 @@ struct TVPlayerView: UIViewControllerRepresentable {
         // and the container's preferredFocusEnvironments override forces the
         // focus engine onto the button while a segment is active.
         let skipVC = SkipButtonViewController()
-        let coordinator = context.coordinator
-        skipVC.onSkip = {
-            coordinator.skipSegmentTapped()
+        // Weak: the coordinator holds this button (and the
+        // AVPlayerViewController). A strong capture here made a cycle that
+        // leaked every player screen together with its AVPlayer, which kept
+        // loading — and, once something resumed it, playing — after the
+        // viewer had left.
+        skipVC.onSkip = { [weak coordinator = context.coordinator] in
+            coordinator?.skipSegmentTapped()
         }
         skipVC.view.translatesAutoresizingMaskIntoConstraints = false
         skipVC.view.isHidden = true

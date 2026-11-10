@@ -132,7 +132,7 @@ extension PlayerViewModel {
             self.endObserver = nil
         }
         invalidatePlayerObservers()
-        player = nil
+        retirePlayer()
         isLoading = true
         // Armed before the first await, not after the rebuild: leaving while
         // the new stream loads must still report where the viewer was (#593).
