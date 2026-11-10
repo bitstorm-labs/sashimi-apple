@@ -58,7 +58,7 @@ struct WatchlistPageView: View {
             confirmTitle: WatchlistText.disconnect
         ) {
             Task {
-                if !(await model.disconnect()) { ToastManager.shared.show("Couldn't disconnect Plex. Try again.") }
+                if !(await model.disconnect()) { ToastManager.shared.show(WatchlistText.couldntDisconnect) }
             }
         }
         .onExitCommand {
@@ -110,7 +110,7 @@ struct WatchlistPageView: View {
             .focusSection()
 
             if removing {
-                Text("Select a title to remove it. Press Menu when you're done.")
+                Text(WatchlistText.selectToRemove)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(SashimiTheme.accentSecondary)
             }
@@ -132,14 +132,14 @@ struct WatchlistPageView: View {
             .padding(.horizontal, 30)
             .padding(.vertical, 24)
             .frame(maxWidth: 1000, alignment: .leading)
-            .background(Color(red: 0.11, green: 0.16, blue: 0.23), in: RoundedRectangle(cornerRadius: CornerRadius.large))
+            .background(SashimiTheme.plexCardBackground, in: RoundedRectangle(cornerRadius: CornerRadius.large))
         case .synced:
             Label(WatchlistText.synced, systemImage: "checkmark")
                 .font(Typography.bodySmall.weight(.semibold))
-                .foregroundStyle(Color(red: 0.62, green: 0.86, blue: 0.70))
+                .foregroundStyle(SashimiTheme.syncedText)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-                .background(Color(red: 0.09, green: 0.15, blue: 0.11), in: RoundedRectangle(cornerRadius: CornerRadius.medium))
+                .background(SashimiTheme.syncedBackground, in: RoundedRectangle(cornerRadius: CornerRadius.medium))
         case .needsReconnect:
             Label(WatchlistText.stoppedSyncing, systemImage: "exclamationmark.triangle.fill")
                 .font(Typography.bodySmall.weight(.semibold))
@@ -162,7 +162,7 @@ struct WatchlistPageView: View {
                         Label(WatchlistText.disconnect, systemImage: "xmark.circle")
                     }
                 case .removeTitles:
-                    Button { removing = true } label: { Label("Remove a Title", systemImage: "minus.circle") }
+                    Button { removing = true } label: { Label(WatchlistText.removeATitle, systemImage: "minus.circle") }
                 }
             }
         } label: {
@@ -193,7 +193,7 @@ struct WatchlistPageView: View {
                 .focusable()
                 .focusEffectDisabled()
         } else if model.tiles.isEmpty {
-            Text(model.failed ? "Couldn't load your Watchlist." : WatchlistText.empty)
+            Text(model.failed ? WatchlistText.couldntLoad : WatchlistText.empty)
                 .font(Typography.body)
                 .foregroundStyle(SashimiTheme.textTertiary)
                 .focusable()
@@ -236,7 +236,7 @@ struct WatchlistPageView: View {
 
     private func remove(_ tile: WatchlistTile) {
         Task {
-            if !(await model.remove(tile)) { ToastManager.shared.show("Couldn't change the Watchlist") }
+            if !(await model.remove(tile)) { ToastManager.shared.show(WatchlistText.couldntChange) }
         }
     }
 }
@@ -291,16 +291,24 @@ struct WatchlistArtworkImage: View {
     let title: String
     let width: CGFloat
 
+    /// The server had no image for the id: the saved poster instead.
+    @State private var serverImageFailed = false
+
     var body: some View {
         switch artwork {
-        case .library(let itemId):
-            AsyncItemImage(
-                itemId: itemId,
-                imageType: "Primary",
-                // tvOS draws at 2x.
-                maxWidth: Int(width * 2),
-                contentMode: .fill
-            )
+        case .library(let itemId, let fallback):
+            if serverImageFailed {
+                SeerrArtwork(url: fallback, title: title, cornerRadius: 0, titleFont: .system(size: 20, weight: .bold))
+            } else {
+                AsyncItemImage(
+                    itemId: itemId,
+                    imageType: "Primary",
+                    // tvOS draws at 2x.
+                    maxWidth: Int(width * 2),
+                    contentMode: .fill,
+                    onLoadFailed: { serverImageFailed = true }
+                )
+            }
         case .remote(let url):
             SeerrArtwork(url: url, title: title, cornerRadius: 0, titleFont: .system(size: 20, weight: .bold))
         case .none:

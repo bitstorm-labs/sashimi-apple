@@ -60,6 +60,10 @@ private struct PlexConnectFeedback: ViewModifier {
                     Text(WatchlistText.switchMessage(currentUsername: current))
                 }
             }
+            // "Switch" couldn't reach Plex: say so beside the question that comes back.
+            .onChange(of: model.message) { _, text in
+                if let text { message = text }
+            }
             .onChange(of: model.state) { _, state in
                 switch state {
                 case .conflict: break
@@ -111,10 +115,10 @@ struct MobilePlexSettingsSection: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if connect.isWaiting || connect.state == .linking {
+                    if let progress = connect.progressText {
                         HStack {
                             ProgressView()
-                            Text(connect.state == .linking ? "Connecting…" : "Waiting for Plex…")
+                            Text(progress)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Cancel") { cancel() }
@@ -134,7 +138,7 @@ struct MobilePlexSettingsSection: View {
         // away, and the sign-in flow ends itself when Plex's page closes.
         .plexConnectFeedback(connect, message: $message)
         .disconnectPlexConfirmation(isPresented: $confirmDisconnect) {
-            Task { if !(await model.disconnect()) { message = "Couldn't disconnect Plex. Try again." } }
+            Task { if !(await model.disconnect()) { message = WatchlistText.couldntDisconnect } }
         }
     }
 

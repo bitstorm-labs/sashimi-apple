@@ -39,6 +39,10 @@ struct MobileRequestsSettingsView: View {
                             .lineLimit(1)
                             .foregroundStyle(MobileColors.success)
                     }
+                    if let failure = watchlist.switchFailure {
+                        Label(failure, systemImage: "exclamationmark.circle")
+                            .foregroundStyle(MobileColors.warning)
+                    }
                     Button("Sign Out", role: .destructive) {
                         Task { await session.signOut() }
                     }

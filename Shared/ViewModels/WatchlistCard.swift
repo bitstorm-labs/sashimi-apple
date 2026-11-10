@@ -2,16 +2,23 @@ import Foundation
 
 /// Where a Watchlist title's poster comes from.
 enum WatchlistArtwork: Equatable {
-    /// The server has it: its own poster.
-    case library(itemId: String)
+    /// The server has it: its own poster, or `fallback` (the poster the plugin
+    /// saved) when the server has none for that id.
+    case library(itemId: String, fallback: URL? = nil)
     /// Not on the server: the poster the plugin saved with the title.
     case remote(URL)
     /// Nothing to show; the title stands in.
     case none
 
+    /// The saved poster to show when the server's image doesn't load.
+    var fallback: URL? {
+        if case .library(_, let fallback) = self { return fallback }
+        return nil
+    }
+
     init(entry: WatchlistEntry) {
         if let itemId = entry.itemId {
-            self = .library(itemId: itemId)
+            self = .library(itemId: itemId, fallback: entry.posterURL)
         } else if let url = entry.posterURL {
             self = .remote(url)
         } else {

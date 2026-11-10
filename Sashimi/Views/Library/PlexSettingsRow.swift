@@ -44,7 +44,7 @@ struct PlexSettingsRow: View {
                 confirmTitle: WatchlistText.disconnect
             ) {
                 Task {
-                    if !(await model.disconnect()) { ToastManager.shared.show("Couldn't disconnect Plex. Try again.") }
+                    if !(await model.disconnect()) { ToastManager.shared.show(WatchlistText.couldntDisconnect) }
                 }
             }
         }

@@ -27,6 +27,10 @@ enum SashimiTheme {
     static let warning = Color.orange
     static let error = Color.red
     static let overlay = Color.black.opacity(0.7)
+    // Watchlist: the "Use Plex too?" card and the "Synced with Plex" line.
+    static let plexCardBackground = Color(red: 0.11, green: 0.16, blue: 0.23)
+    static let syncedText = Color(red: 0.62, green: 0.86, blue: 0.70)
+    static let syncedBackground = Color(red: 0.09, green: 0.15, blue: 0.11)
 }
 
 // MARK: - Corner Radius

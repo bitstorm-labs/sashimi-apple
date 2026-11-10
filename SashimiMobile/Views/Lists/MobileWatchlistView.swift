@@ -47,7 +47,7 @@ struct MobileWatchlistView: View {
         }
         .plexConnectFeedback(connect, message: $message)
         .disconnectPlexConfirmation(isPresented: $confirmDisconnect) {
-            Task { if !(await model.disconnect()) { message = "Couldn't disconnect Plex. Try again." } }
+            Task { if !(await model.disconnect()) { message = WatchlistText.couldntDisconnect } }
         }
         .confirmationDialog(removal?.entry.title ?? "", isPresented: removalShown, titleVisibility: .visible) {
             if let tile = removal {
@@ -68,10 +68,10 @@ struct MobileWatchlistView: View {
                     .font(MobileTypography.caption)
                     .foregroundStyle(MobileColors.textTertiary)
             }
-            if connect.isWaiting || connect.state == .linking {
+            if let progress = connect.progressText {
                 HStack {
                     ProgressView()
-                    Text(connect.state == .linking ? "Connecting…" : "Waiting for Plex…")
+                    Text(progress)
                         .font(MobileTypography.bodySmall)
                         .foregroundStyle(MobileColors.textSecondary)
                     Spacer()
@@ -82,7 +82,7 @@ struct MobileWatchlistView: View {
             }
             if removing {
                 HStack {
-                    Text("Tap a title to remove it.")
+                    Text(WatchlistText.tapToRemove)
                         .font(MobileTypography.bodySmall)
                         .foregroundStyle(MobileColors.accentSecondary)
                     Spacer()
@@ -116,15 +116,15 @@ struct MobileWatchlistView: View {
             }
             .padding(MobileSpacing.sm)
             .frame(maxWidth: 560, alignment: .leading)
-            .background(Color(red: 0.11, green: 0.16, blue: 0.23), in: RoundedRectangle(cornerRadius: MobileCornerRadius.large))
+            .background(MobileColors.plexCardBackground, in: RoundedRectangle(cornerRadius: MobileCornerRadius.large))
         case .synced:
             Label(WatchlistText.synced, systemImage: "checkmark")
                 .font(MobileTypography.bodySmall.weight(.semibold))
-                .foregroundStyle(Color(red: 0.62, green: 0.86, blue: 0.70))
+                .foregroundStyle(MobileColors.syncedText)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .frame(maxWidth: 560, alignment: .leading)
-                .background(Color(red: 0.09, green: 0.15, blue: 0.11), in: RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
+                .background(MobileColors.syncedBackground, in: RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
         case .needsReconnect:
             HStack(spacing: MobileSpacing.sm) {
                 Label(WatchlistText.stoppedSyncing, systemImage: "exclamationmark.triangle.fill")
@@ -152,7 +152,7 @@ struct MobileWatchlistView: View {
                         Label(WatchlistText.disconnect, systemImage: "xmark.circle")
                     }
                 case .removeTitles:
-                    Button { removing = true } label: { Label("Remove a Title", systemImage: "minus.circle") }
+                    Button { removing = true } label: { Label(WatchlistText.removeATitle, systemImage: "minus.circle") }
                 }
             }
         } label: {
@@ -167,7 +167,7 @@ struct MobileWatchlistView: View {
         if model.isLoading {
             ProgressView().frame(maxWidth: .infinity, minHeight: 200)
         } else if model.tiles.isEmpty {
-            Text(model.failed ? "Couldn't load your Watchlist." : WatchlistText.empty)
+            Text(model.failed ? WatchlistText.couldntLoad : WatchlistText.empty)
                 .font(MobileTypography.body)
                 .foregroundStyle(MobileColors.textTertiary)
         } else {
@@ -212,7 +212,7 @@ struct MobileWatchlistView: View {
 
     private func remove(_ tile: WatchlistTile) {
         Task {
-            if !(await model.remove(tile)) { message = "Couldn't change the Watchlist" }
+            if !(await model.remove(tile)) { message = WatchlistText.couldntChange }
         }
     }
 
@@ -278,7 +278,7 @@ struct WatchlistArtworkView: View {
 
     var body: some View {
         switch artwork {
-        case .library(let itemId):
+        case .library(let itemId, let fallback):
             ZStack {
                 MobileColors.cardBackground
                 LazyImage(url: JellyfinClient.shared.syncImageURL(
@@ -286,6 +286,9 @@ struct WatchlistArtworkView: View {
                 )) { state in
                     if let image = state.image {
                         image.resizable().scaledToFill()
+                    } else if state.error != nil {
+                        // The server has no image for that id: the saved poster.
+                        SeerrArtwork(url: fallback, title: title, cornerRadius: 0)
                     }
                 }
                 .pipeline(SashimiImagePipeline.shared)

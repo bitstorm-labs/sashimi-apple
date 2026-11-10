@@ -71,7 +71,7 @@ struct AddToListView: View {
                         }
                     } else if !model.offersLists {
                         // Nothing to choose, but focus needs somewhere to rest.
-                        Text("Only the Watchlist takes this title, and this server doesn't have one.")
+                        Text(WatchlistText.onlyWatchlistTakesIt)
                             .font(Typography.body)
                             .foregroundStyle(SashimiTheme.textTertiary)
                             .focusable()

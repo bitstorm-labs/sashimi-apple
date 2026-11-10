@@ -322,4 +322,28 @@ final class WatchlistStoreTests: XCTestCase {
         XCTAssertEqual(store.watchlist?.plex?.username, "marge", "the older answer landed last and won")
         XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1", "e2"])
     }
+
+    /// "Switch" in Settings › Requests couldn't reach Plex: the question comes
+    /// back with a reason, not silently.
+    func testAFailedSwitchSaysPlexCouldntBeReached() async throws {
+        let (store, _) = try await storeWithAPendingSwitch()
+        XCTAssertNil(store.switchFailure)
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (503, "{}")
+
+        let failed = await store.confirmSwitch()
+
+        XCTAssertFalse(failed)
+        XCTAssertNotNil(store.pendingSwitch)
+        XCTAssertEqual(store.switchFailure, WatchlistText.couldntReachPlex)
+
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"chad\",\"needsReconnect\":false}")
+        let switched = await store.confirmSwitch()
+        XCTAssertTrue(switched)
+        XCTAssertNil(store.switchFailure)
+
+        _ = try await storeWithAPendingSwitch()
+        store.declineSwitch()
+        XCTAssertNil(store.switchFailure)
+    }
 }
+

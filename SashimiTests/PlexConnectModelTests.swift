@@ -290,4 +290,49 @@ final class PlexConnectModelTests: XCTestCase {
         cancelled.cancel()
         XCTAssertNil(pendingRecord(), "cancelled")
     }
+
+    // MARK: Progress and messages
+
+    func testProgressTextSaysWhatTheConnectIsWaitingOn() async throws {
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        JellyfinRouteStub.delays["POST \(plexPath)"] = 0.3
+        let model = try model()
+        XCTAssertNil(model.progressText)
+
+        let begun = await model.begin(strong: true)
+        let pin = try XCTUnwrap(begun)
+        XCTAssertEqual(model.progressText, "Waiting for Plex…")
+
+        let completing = Task { await model.complete(pin: pin) }
+        for _ in 0..<200 where model.state != .linking { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(model.state, .linking)
+        XCTAssertEqual(model.progressText, "Connecting…")
+
+        await completing.value
+        XCTAssertEqual(model.state, .linked)
+        XCTAssertNil(model.progressText)
+    }
+
+    /// "Switch" couldn't reach Plex: the question comes back with a reason,
+    /// not silently.
+    func testAFailedSwitchSaysPlexCouldntBeReached() async throws {
+        JellyfinRouteStub.sequences["POST \(plexPath)"] = [
+            (409, "{\"username\":\"marge\",\"newUsername\":\"homer\"}"),
+            (503, ""),
+            (200, "{\"username\":\"homer\",\"needsReconnect\":false}")
+        ]
+        let model = try model()
+        try await connect(model)
+        XCTAssertNil(model.message)
+
+        await model.confirmSwitch()
+
+        XCTAssertEqual(model.state, .conflict(currentUsername: "marge", newUsername: "homer"))
+        XCTAssertEqual(model.message, WatchlistText.couldntReachPlex)
+
+        await model.confirmSwitch()
+        XCTAssertEqual(model.state, .linked)
+        XCTAssertNil(model.message, "a new answer clears it")
+    }
 }
+

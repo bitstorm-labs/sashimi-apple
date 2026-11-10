@@ -64,6 +64,11 @@ final class WatchlistPageViewModel: ObservableObject {
     /// Bumped when the Seerr user changes; a batch started under another one is dropped.
     private var ownerEpoch = 0
     private var pending: [SeerrTarget] = []
+    /// The batch being looked up right now.
+    private var inFlight: [SeerrTarget] = []
+    /// Cut short by `cancelLookups()`: asked again on the next load, since the
+    /// grid's visible tiles don't appear again when a cover over the page closes.
+    private var interrupted = Set<String>()
     private var drain: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
     /// The entry ids `libraryItems` was last asked for, in order.
@@ -131,6 +136,15 @@ final class WatchlistPageViewModel: ObservableObject {
         failed = false
         await followEntries(list.entries)
         isLoading = false
+        resumeInterruptedLookups()
+    }
+
+    private func resumeInterruptedLookups() {
+        let cut = interrupted
+        interrupted = []
+        for tile in tiles {
+            if let target = Watchlist.seerrTarget(for: tile.entry), cut.contains(target.id) { tileAppeared(tile) }
+        }
     }
 
     /// Looks up the server's items for these entries and rebuilds the grid,
@@ -170,16 +184,18 @@ final class WatchlistPageViewModel: ObservableObject {
     /// Stops looking things up (the page went away). What's queued is dropped and
     /// may be asked again when its tile next appears; answers already in the cache stay.
     func cancelLookups() {
+        interrupted.formUnion((pending + inFlight).map(\.id))
         drain?.cancel()
         drain = nil
         requested = []
         pending = []
+        inFlight = []
     }
 
     func action(for tile: WatchlistTile) -> WatchlistTileAction {
         if let item = tile.libraryItem { return .openLibrary(item) }
         guard let target = Watchlist.seerrTarget(for: tile.entry) else {
-            return .explain("Requests can't look this title up.")
+            return .explain(WatchlistText.cantLookUp)
         }
         return seerr.client == nil ? .explain(WatchlistText.signIntoRequests) : .openRequest(target)
     }
@@ -220,8 +236,10 @@ final class WatchlistPageViewModel: ObservableObject {
         while !pending.isEmpty, !Task.isCancelled {
             let batch = pending
             pending = []
+            inFlight = batch
             let epoch = ownerEpoch
             let answers = await lookup(batch)
+            if !Task.isCancelled { inFlight = [] } // a cancelled batch's slot may be a newer one's now
             syncCacheOwner() // the person may have changed while we waited
             guard !Task.isCancelled else { return }
             // Another person's answers are dropped, but what was queued since is theirs to ask.

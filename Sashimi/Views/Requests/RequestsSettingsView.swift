@@ -79,6 +79,12 @@ struct RequestsSettingsView: View {
                         .lineLimit(1)
                         .padding(.horizontal, 24)
                 }
+                if let failure = watchlist.switchFailure {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .font(Typography.caption)
+                        .foregroundStyle(SashimiTheme.warning)
+                        .padding(.horizontal, 24)
+                }
                 SettingsOptionRow(icon: "rectangle.portrait.and.arrow.right", title: "Sign Out", subtitle: "Stop requesting from this Apple TV") {
                     Task { await session.signOut() }
                 }

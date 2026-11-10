@@ -16,6 +16,9 @@ final class PlexConnectModel: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    /// Something to tell the person beside the current state: why the last
+    /// "Switch" didn't happen.
+    @Published private(set) var message: String?
     /// How many PIN checks have started, so Plex's web page can give the poll
     /// one more after it closes.
     private(set) var pinChecks = 0
@@ -46,6 +49,15 @@ final class PlexConnectModel: ObservableObject {
         self.now = now
     }
 
+    /// The one line shown while a Connect Plex is under way; nil otherwise.
+    var progressText: String? {
+        switch state {
+        case .awaitingPlex: return WatchlistText.waitingForPlex
+        case .linking: return WatchlistText.connecting
+        default: return nil
+        }
+    }
+
     var isWaiting: Bool {
         if case .awaitingPlex = state { return true }
         return false
@@ -59,6 +71,7 @@ final class PlexConnectModel: ObservableObject {
     /// opens Plex's sign-in page with it (`strong: true`).
     func begin(strong: Bool) async -> PlexPin? {
         heldToken = nil
+        message = nil
         do {
             let pin = try await plexClient.createPin(strong: strong)
             state = .awaitingPlex(code: pin.code)
@@ -83,7 +96,7 @@ final class PlexConnectModel: ObservableObject {
         )
         guard let token else {
             if !Task.isCancelled, state == .awaitingPlex(code: pin.code) {
-                state = .failed("The Plex code expired. Try again.")
+                state = .failed(WatchlistText.codeExpired)
                 clearPending()
             }
             return
@@ -132,12 +145,14 @@ final class PlexConnectModel: ObservableObject {
     func confirmSwitch() async {
         guard case .conflict = state, let token = heldToken else { return }
         let question = state
+        message = nil
         state = .linking
         let result = await store.link(token: token, replace: true)
         guard state == .linking else { return }
         if result == nil || result == .plexUnreachable {
-            // The same "yes" can be tried again.
+            // The same "yes" can be tried again, and the person is told why.
             state = question
+            message = WatchlistText.couldntReachPlex
             return
         }
         apply(result, token: token)
@@ -147,6 +162,7 @@ final class PlexConnectModel: ObservableObject {
         flow?.cancel()
         flow = nil
         heldToken = nil
+        message = nil
         state = .idle
         clearPending()
     }
@@ -170,11 +186,11 @@ final class PlexConnectModel: ObservableObject {
             state = .conflict(currentUsername: current, newUsername: new)
             return
         case .rejected:
-            state = .failed("Plex didn't accept that sign-in. Try again.")
+            state = .failed(WatchlistText.plexRejected)
         case .plexUnreachable:
             state = .failed(WatchlistText.couldntReachPlex)
         case nil:
-            state = .failed("Couldn't reach your server. Try again.")
+            state = .failed(WatchlistText.couldntReachServer)
         }
         clearPending()
     }

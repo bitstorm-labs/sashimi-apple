@@ -19,6 +19,8 @@ final class WatchlistStore: ObservableObject {
     @Published private(set) var watchlist: WatchlistResponse?
     @Published var pendingSwitch: PendingSwitch?
     @Published var notice: String?
+    /// Why the last "Switch" didn't happen, while its question waits again.
+    @Published private(set) var switchFailure: String?
 
     private let service: WatchlistService
     private var loadedUserId: String?
@@ -60,6 +62,7 @@ final class WatchlistStore: ObservableObject {
             pendingSwitch = nil
             heldToken = nil
             notice = nil
+            switchFailure = nil
             loadedUserId = scope.userId
             loadedServer = scope.server
         }
@@ -95,11 +98,11 @@ final class WatchlistStore: ObservableObject {
         do {
             let result = try await request()
             await refresh()
-            return result.added ? "Added to Watchlist" : "Already on your Watchlist"
+            return result.added ? WatchlistText.added : WatchlistText.alreadyOn
         } catch let error as WatchlistError {
             return error.localizedDescription
         } catch {
-            return "Couldn't add to Watchlist"
+            return WatchlistText.couldntAdd
         }
     }
 
@@ -172,12 +175,14 @@ final class WatchlistStore: ObservableObject {
         let scope = await currentScope()
         heldToken = nil
         pendingSwitch = nil
+        switchFailure = nil
         let result = await link(token: held.token, replace: true)
         if case .linked = result { return true }
         let unreachable = result == nil || result == .plexUnreachable
         if unreachable, await currentScope() == scope, heldToken == nil, pendingSwitch == nil {
             heldToken = held
             pendingSwitch = question
+            switchFailure = WatchlistText.couldntReachPlex
         }
         return false
     }
@@ -185,5 +190,6 @@ final class WatchlistStore: ObservableObject {
     func declineSwitch() {
         heldToken = nil
         pendingSwitch = nil
+        switchFailure = nil
     }
 }

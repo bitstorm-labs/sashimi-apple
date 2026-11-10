@@ -51,8 +51,18 @@ final class WatchlistCardTests: XCTestCase {
         let entries = [entry("1", itemId: "lib1", poster: poster), entry("2", poster: poster), entry("3"),
                        entry("4", itemId: "lib4"), entry("5", itemId: "lib5")]
         let card = WatchlistCardInfo(list(entries: entries))
-        XCTAssertEqual(card.cover, [.library(itemId: "lib1"), .remote(try XCTUnwrap(URL(string: poster))), .none,
-                                    .library(itemId: "lib4")])
+        XCTAssertEqual(card.cover, [.library(itemId: "lib1", fallback: URL(string: poster)),
+                                    .remote(try XCTUnwrap(URL(string: poster))), .none, .library(itemId: "lib4")])
+    }
+
+    /// The card can't tell whether the server still has an item: its saved
+    /// poster stands by for when the server's image doesn't load.
+    func testACoverTitleTheServerCantShowFallsBackToItsSavedPoster() throws {
+        let poster = "https://image.tmdb.org/t/p/w342/a.jpg"
+        let artwork = WatchlistArtwork(entry: entry("1", itemId: "gone", poster: poster))
+        XCTAssertEqual(artwork, .library(itemId: "gone", fallback: URL(string: poster)))
+        XCTAssertEqual(artwork.fallback, URL(string: poster))
+        XCTAssertNil(WatchlistArtwork(entry: entry("2", itemId: "lib2")).fallback)
     }
 
     func testAnOnServerTileUsesTheServersPoster() throws {

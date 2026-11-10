@@ -61,7 +61,7 @@ struct WatchlistPlexConnectView: View {
                     .scaleEffect(1.5)
                     .focusable()
                     .focusEffectDisabled()
-                Text(model.state == .idle ? "Getting a code…" : "Connecting…")
+                Text(model.progressText ?? (model.state == .idle ? WatchlistText.gettingCode : WatchlistText.connecting))
                     .font(Typography.body)
                     .foregroundStyle(SashimiTheme.textSecondary)
             }
@@ -73,6 +73,11 @@ struct WatchlistPlexConnectView: View {
                 Text(WatchlistText.switchMessage(currentUsername: current))
                     .font(Typography.body)
                     .foregroundStyle(SashimiTheme.textSecondary)
+                if let message = model.message {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(Typography.body)
+                        .foregroundStyle(SashimiTheme.warning)
+                }
                 HStack(spacing: 30) {
                     ActionButton(title: WatchlistText.switchButton, icon: "arrow.left.arrow.right", isPrimary: true) {
                         Task { await model.confirmSwitch() }

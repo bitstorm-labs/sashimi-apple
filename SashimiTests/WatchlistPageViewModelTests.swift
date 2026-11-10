@@ -229,6 +229,29 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertEqual(model.tiles.first?.missingTag, .requested)
     }
 
+    /// A detail cover hides the page (cancelling its lookups) and the grid's
+    /// visible tiles don't appear again when it closes: the reload asks again.
+    func testLookupsCutShortByACoverRunAgainOnTheReload() async throws {
+        serve([entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])
+        let fake = CountingLookup()
+        fake.status = 2
+        let model = try makeModel(seerr: await signedInSeerr(), lookup: { targets in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            return fake(targets)
+        })
+        await model.load()
+        model.tiles.forEach(model.tileAppeared)
+        try await Task.sleep(nanoseconds: 50_000_000) // under way
+
+        model.cancelLookups() // the cover opened
+        await model.load()    // and closed: no tileAppeared this time
+        await model.waitForLookups()
+
+        XCTAssertEqual(model.tiles.map(\.missingTag), [.requested, .requested])
+        XCTAssertEqual(fake.batches.count, 2, "the cut-short batch, then once more")
+        XCTAssertEqual(fake.batches.last?.map(\.tmdbId).sorted(), [1, 2])
+    }
+
     func testCancelledLookupsDropTheirAnswersAndCanBeAskedAgain() async throws {
         serve([entryJSON("a", tmdb: 1)])
         let fake = CountingLookup()
