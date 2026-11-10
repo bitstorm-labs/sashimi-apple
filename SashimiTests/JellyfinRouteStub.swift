@@ -15,6 +15,8 @@ final class JellyfinRouteStub: URLProtocol {
     nonisolated(unsafe) static var sequences: [String: [(Int, String)]] = [:]
     /// Seconds to hold the answer to "METHOD /path", so a test can change state while a call is in flight.
     nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
+    /// "METHOD /path" routes that fail at the transport level (no response).
+    nonisolated(unsafe) static var transportFailures: Set<String> = []
     nonisolated(unsafe) static var recorded: [Recorded] = []
     private static let lock = NSLock()
 
@@ -24,6 +26,7 @@ final class JellyfinRouteStub: URLProtocol {
             routes = [:]
             sequences = [:]
             delays = [:]
+            transportFailures = []
             recorded = []
         }
     }
@@ -39,6 +42,13 @@ final class JellyfinRouteStub: URLProtocol {
         for item in components?.queryItems ?? [] { query[item.name] = item.value }
         let body = request.httpBody ?? request.httpBodyStream.map(Self.read)
         let delay = Self.lock.withLock { Self.delays["\(method) \(url.path)"] ?? 0 }
+        if Self.lock.withLock({ Self.transportFailures.contains("\(method) \(url.path)") }) {
+            Self.lock.withLock {
+                Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
+            }
+            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            return
+        }
         let (status, text) = Self.lock.withLock {
             Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
             let key = "\(method) \(url.path)"

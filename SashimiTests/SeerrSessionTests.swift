@@ -409,17 +409,42 @@ extension SeerrSessionTests {
     func testRequestsSignInSucceedsWhenPlexRejectsTheWatchlistToken() async throws {
         signInStubs()
         let store = try watchlistStore(routes: [
-            "GET /SashimiLists/Watchlist": (200, "{\"items\":[]}"),
+            "GET /SashimiLists/Watchlist": (200, "{\"cardDismissed\":false,\"entries\":[]}"),
             "POST /SashimiLists/Watchlist/Plex": (422, "")
         ])
+        try await assertSignInIgnoresTheWatchlistLink(store)
+    }
+
+    /// The link call never gets an answer (connection lost): sign-in still
+    /// finishes, signed in, with no error.
+    func testRequestsSignInSucceedsWhenTheWatchlistLinkCantBeSent() async throws {
+        signInStubs()
+        let store = try watchlistStore(routes: [
+            "GET /SashimiLists/Watchlist": (200, "{\"cardDismissed\":false,\"entries\":[]}")
+        ])
+        JellyfinRouteStub.transportFailures = ["POST /SashimiLists/Watchlist/Plex"]
+        try await assertSignInIgnoresTheWatchlistLink(store)
+    }
+
+    /// Signs in with Plex while the Watchlist link fails: the link is tried
+    /// exactly once, after sign-in has finished, and never changes its outcome.
+    private func assertSignInIgnoresTheWatchlistLink(_ store: WatchlistStore,
+                                                    file: StaticString = #filePath, line: UInt = #line) async throws {
         let session = session()
-        session.plexTokenObserver = { token in await store.autoLink(token: token) }
+        var signedInWhenHandedOff: Bool?
+        session.plexTokenObserver = { token in
+            signedInWhenHandedOff = session.state.user != nil
+            await store.autoLink(token: token)
+        }
 
         let pin = await session.beginPlexSignIn(strong: false)
         await session.completePlexSignIn(pin: try XCTUnwrap(pin))
         await session.lastPlexTokenHandOff?.value
 
-        XCTAssertEqual(session.state.user?.id, 7)
-        XCTAssertNil(session.errorMessage)
+        XCTAssertEqual(session.state.user?.id, 7, file: file, line: line)
+        XCTAssertNil(session.errorMessage, file: file, line: line)
+        XCTAssertEqual(signedInWhenHandedOff, true, "the link runs after sign-in, never inside it", file: file, line: line)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", "/SashimiLists/Watchlist/Plex").count, 1,
+                       "the link was attempted", file: file, line: line)
     }
 }
