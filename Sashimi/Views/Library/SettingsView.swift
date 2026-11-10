@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var navigationPath = NavigationPath()
     @StateObject private var serverPlugins = ServerPluginsViewModel()
     @ObservedObject private var seerr = SeerrSession.shared
+    @StateObject private var plexSettings = PlexSettingsModel()
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -63,6 +64,11 @@ struct SettingsView: View {
                             ) {
                                 navigationPath.append(SettingsDestination.requests)
                             }
+
+                            // Settings › Plex: keeps the Watchlist in sync with
+                            // Plex. Hidden without the Watchlist plugin; needs
+                            // nothing from Requests.
+                            PlexSettingsRow(model: plexSettings)
 
                             SettingsOptionRow(
                                 icon: "house",
@@ -142,6 +148,9 @@ struct SettingsView: View {
         // the row's subtitle; the screen itself only adds Refresh.
         .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
             await serverPlugins.loadIfNeeded(for: sessionManager)
+        }
+        .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
+            await plexSettings.load()
         }
         .confirmationDialog(
             "Sign Out",

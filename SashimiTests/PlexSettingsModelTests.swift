@@ -69,6 +69,35 @@ final class PlexSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.actions, [.reconnect, .disconnect])
     }
 
+    func testActionTitlesAreTheFixedCopy() {
+        XCTAssertEqual(PlexSettingsModel.Action.connect.title, "Connect Plex")
+        XCTAssertEqual(PlexSettingsModel.Action.reconnect.title, "Reconnect Plex")
+        XCTAssertEqual(PlexSettingsModel.Action.disconnect.title, "Disconnect Plex")
+    }
+
+    func testSummarySaysTheStatusThenWhatSelectingDoes() async throws {
+        serve()
+        let notConnected = PlexSettingsModel(store: try makeStore())
+        await notConnected.load()
+        XCTAssertEqual(notConnected.summary, "Not connected · Connect Plex")
+
+        serve(plex: "chad")
+        let connected = PlexSettingsModel(store: try makeStore())
+        await connected.load()
+        XCTAssertEqual(connected.summary, "Connected as chad · Disconnect Plex")
+
+        serve(plex: "chad", needsReconnect: true)
+        let stale = PlexSettingsModel(store: try makeStore())
+        await stale.load()
+        XCTAssertEqual(stale.summary, "Connected as chad · Reconnect Plex")
+    }
+
+    func testSummaryIsEmptyWhenHidden() async throws {
+        let model = PlexSettingsModel(store: try makeStore())
+        await model.load()
+        XCTAssertEqual(model.summary, "")
+    }
+
     func testDisconnectUnlinksAndShowsNotConnected() async throws {
         JellyfinRouteStub.sequences["GET \(base)"] = [(200, listJSON(plex: "chad")), (200, listJSON())]
         JellyfinRouteStub.routes["DELETE \(plexPath)"] = (204, "")

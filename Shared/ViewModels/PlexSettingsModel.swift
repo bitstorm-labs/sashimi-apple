@@ -48,6 +48,12 @@ final class PlexSettingsModel: ObservableObject {
 
     var footer: String { WatchlistText.plexRowFooter }
 
+    /// The row's one line on Apple TV: the status, then what selecting it does.
+    var summary: String {
+        guard let first = actions.first else { return status }
+        return "\(status) · \(first.title)"
+    }
+
     func load() async {
         await store.refresh()
     }
@@ -60,5 +66,15 @@ final class PlexSettingsModel: ObservableObject {
         guard availability == .available else { return .hidden }
         guard let plex else { return .notConnected }
         return plex.needsReconnect ? .needsReconnect(username: plex.username) : .connected(username: plex.username)
+    }
+}
+
+extension PlexSettingsModel.Action {
+    var title: String {
+        switch self {
+        case .connect: return WatchlistText.connect
+        case .reconnect: return WatchlistText.reconnect
+        case .disconnect: return WatchlistText.disconnect
+        }
     }
 }

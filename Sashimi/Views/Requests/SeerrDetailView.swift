@@ -6,7 +6,9 @@ import SwiftUI
 /// arrived it turns into the normal library page.
 struct SeerrDetailView: View {
     @StateObject private var model: SeerrDetailModel
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @State private var seasonPlan: SeerrSeasonPlan?
+    @State private var addingToList = false
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
 
@@ -26,6 +28,11 @@ struct SeerrDetailView: View {
         } else {
             page
                 .task { await loadOnce() }
+                // Whether the Watchlist exists decides Add to List.
+                .task { await watchlist.refresh() }
+                .fullScreenCover(isPresented: $addingToList) {
+                    AddToListView(seerrTarget: model.target, year: model.details?.year)
+                }
                 .sheet(item: $seasonPlan) { plan in
                     SeerrSeasonPickerView(title: model.details?.title ?? model.target.title, plan: plan) { chosen in
                         seasonPlan = nil
@@ -189,6 +196,11 @@ struct SeerrDetailView: View {
                         }
                     }
                 }
+            }
+
+            // Only the Watchlist takes a title the server doesn't have.
+            if watchlist.isAvailable {
+                ActionButton(title: WatchlistText.addToList, icon: "text.badge.plus") { addingToList = true }
             }
         }
     }
