@@ -404,6 +404,7 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
         config.timeoutIntervalForRequest = maxDuration + 10
         config.timeoutIntervalForResource = maxDuration + 15
         config.urlCache = nil
+        config.protocolClasses = JellyfinClient.testURLProtocolClasses + (config.protocolClasses ?? [])
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         let result = await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
             lock.lock()
@@ -568,7 +569,9 @@ actor JellyfinClient {
     }
 
     /// Tests only: URLProtocol classes put in front of every client created
-    /// afterwards, so a test can answer requests without a server.
+    /// afterwards, so a test can answer requests without a server. The
+    /// bandwidth and reachability probes use them too, so activating a server
+    /// in a test never reaches the network (#874).
     nonisolated(unsafe) static var testURLProtocolClasses: [AnyClass] = []
 
     private static func makeSocketSession(delegate: CertificateValidationDelegate) -> URLSession {
@@ -586,6 +589,7 @@ actor JellyfinClient {
         config.timeoutIntervalForResource = ServerReachabilityTracker.probeTimeout + 1
         config.waitsForConnectivity = false
         config.urlCache = nil
+        config.protocolClasses = testURLProtocolClasses + (config.protocolClasses ?? [])
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
 
