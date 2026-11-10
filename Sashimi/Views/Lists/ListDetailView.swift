@@ -37,6 +37,8 @@ struct ListDetailView: View {
             }
             .scrollClipDisabled()
         }
+        // A full-screen cover: the app root's toasts draw under it (#875).
+        .toastOverlay()
         .fullScreenCover(item: $selected) { item in
             MediaDetailView(item: item)
         }

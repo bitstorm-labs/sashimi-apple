@@ -66,6 +66,8 @@ struct ManageChannelsView: View {
                 }
             }
         }
+        // A full-screen cover: the app root's toasts draw under it (#875).
+        .toastOverlay()
         .onExitCommand(perform: back)
         .task { await model.loadChannels() }
         // Both open with Cancel focused: a stray press of the remote must not
