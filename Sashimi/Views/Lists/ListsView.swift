@@ -16,7 +16,7 @@ struct ListsView: View {
     @State private var watchlistChecked = false
     @State private var creating = false
 
-    private let columns = Array(repeating: GridItem(.fixed(400), spacing: 50, alignment: .top), count: 4)
+    private let columns = Array(repeating: GridItem(.fixed(ListCardSize.width), spacing: 50, alignment: .top), count: 4)
 
     var body: some View {
         ZStack {
@@ -161,9 +161,8 @@ struct ListCardButton: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
-                ListCover(card: card)
-                    .frame(width: 400, height: 225)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                PosterStackCover(posters: card.coverPosters, placeholder: "list.bullet.rectangle", isFanned: isFocused)
+                    .frame(width: ListCardSize.width, height: ListCardSize.coverHeight)
                     .overlay(alignment: .topTrailing) {
                         if isSubscribed {
                             Label("Subscribed", systemImage: "checkmark")
@@ -174,11 +173,6 @@ struct ListCardButton: View {
                                 .padding(12)
                         }
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
-                    )
-                    .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 16)
                 Text(card.list.name)
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(SashimiTheme.textPrimary)
@@ -188,7 +182,7 @@ struct ListCardButton: View {
                     .foregroundStyle(SashimiTheme.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: 400, alignment: .leading)
+            .frame(width: ListCardSize.width, alignment: .leading)
             .scaleEffect(isFocused ? 1.04 : 1)
             .animation(Animation.focusSpring, value: isFocused)
         }
@@ -208,14 +202,8 @@ struct WatchlistCardButton: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
-                WatchlistCover(cover: card.cover)
-                    .frame(width: 400, height: 225)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
-                    )
-                    .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 16)
+                PosterStackCover(posters: card.cover, placeholder: "bookmark", isFanned: isFocused)
+                    .frame(width: ListCardSize.width, height: ListCardSize.coverHeight)
                 Label(WatchlistText.name, systemImage: "bookmark.fill")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(SashimiTheme.textPrimary)
@@ -225,7 +213,7 @@ struct WatchlistCardButton: View {
                     .foregroundStyle(SashimiTheme.textSecondary)
                     .lineLimit(1)
             }
-            .frame(width: 400, alignment: .leading)
+            .frame(width: ListCardSize.width, alignment: .leading)
             .scaleEffect(isFocused ? 1.04 : 1)
             .animation(Animation.focusSpring, value: isFocused)
         }
@@ -235,84 +223,65 @@ struct WatchlistCardButton: View {
     }
 }
 
-/// The Watchlist's first four posters as a 2x2 collage, or the first alone.
-private struct WatchlistCover: View {
-    let cover: [WatchlistArtwork]
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                SashimiTheme.cardBackground
-                if cover.count == 4 {
-                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
-                    VStack(spacing: 0) {
-                        ForEach(0..<2, id: \.self) { row in
-                            HStack(spacing: 0) {
-                                ForEach(0..<2, id: \.self) { column in
-                                    WatchlistArtworkImage(artwork: cover[row * 2 + column], title: "", width: cell.width)
-                                        .frame(width: cell.width, height: cell.height)
-                                        .clipped()
-                                }
-                            }
-                        }
-                    }
-                } else if let first = cover.first {
-                    WatchlistArtworkImage(artwork: first, title: "", width: geometry.size.width)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                } else {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 60))
-                        .foregroundStyle(SashimiTheme.textTertiary)
-                }
-            }
-        }
-    }
+enum ListCardSize {
+    static let width: CGFloat = 400
+    static let coverHeight: CGFloat = width / PosterStack.aspectRatio
 }
 
-/// The first four different titles as a 2x2 collage of posters, or the
-/// first title's poster alone (`SharedLists.coverPosterIds`).
-struct ListCover: View {
-    let card: ListCard
+/// A list's cover (design §6, "Poster stack"): the first poster full size, the
+/// next two fanned behind it. Fans out a little and lifts the front poster's
+/// focus ring when its card is focused.
+struct PosterStackCover: View {
+    let posters: [ListCoverPoster]
+    /// The SF Symbol on the placeholder poster of an empty list.
+    let placeholder: String
+    let isFanned: Bool
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                SashimiTheme.cardBackground
-                if card.coverIds.count == 4 {
-                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
-                    VStack(spacing: 0) {
-                        ForEach(0..<2, id: \.self) { row in
-                            HStack(spacing: 0) {
-                                ForEach(0..<2, id: \.self) { column in
-                                    poster(card.coverIds[row * 2 + column], width: cell.width)
-                                        .frame(width: cell.width, height: cell.height)
-                                        .clipped()
-                                }
-                            }
+            let height = geometry.size.height * PosterStack.frontHeight
+            let width = height * 2 / 3
+            let left = geometry.size.width * PosterStack.leadingInset
+            ZStack(alignment: .topLeading) {
+                if posters.isEmpty {
+                    posterFrame(isFront: true) {
+                        ZStack {
+                            SashimiTheme.cardBackground
+                            Image(systemName: placeholder)
+                                .font(.system(size: 60))
+                                .foregroundStyle(SashimiTheme.textTertiary)
                         }
                     }
-                } else if let first = card.coverIds.first {
-                    poster(first, width: geometry.size.width)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                } else {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(.system(size: 60))
-                        .foregroundStyle(SashimiTheme.textTertiary)
+                    .frame(width: width, height: height)
+                    .offset(x: left, y: (geometry.size.height - height) / 2)
+                }
+                ForEach(PosterStack.layers(count: posters.count, fanned: isFanned), id: \.index) { layer in
+                    let poster = posters[layer.index]
+                    posterFrame(isFront: layer.index == 0) {
+                        WatchlistArtworkImage(artwork: poster.artwork, title: poster.title, width: width)
+                            .grayscale(poster.isDimmed ? 1 : 0)
+                            .brightness(poster.isDimmed ? -0.45 : 0)
+                    }
+                    .frame(width: width, height: height)
+                    .scaleEffect(layer.scale)
+                    .rotationEffect(.degrees(layer.rotation))
+                    .opacity(layer.opacity)
+                    .offset(x: left + layer.xOffset * width, y: (geometry.size.height - height) / 2)
                 }
             }
+            .animation(Animation.focusSpring, value: isFanned)
         }
     }
 
-    private func poster(_ itemId: String, width: CGFloat) -> some View {
-        AsyncItemImage(
-            itemId: itemId,
-            imageType: "Primary",
-            // tvOS draws at 2x.
-            maxWidth: Int(width * 2),
-            contentMode: .fill
-        )
+    private func posterFrame<Content: View>(isFront: Bool, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isFront && isFanned ? SashimiTheme.focus : .clear, lineWidth: 4)
+            )
+            .shadow(color: isFront ? (isFanned ? SashimiTheme.focusGlow : .black.opacity(0.6)) : .black.opacity(0.4),
+                    radius: isFront ? 16 : 8, x: isFront ? 6 : 2)
     }
 }
 
@@ -325,7 +294,7 @@ private struct NewListCard: View {
             Label("New List", systemImage: "plus")
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(SashimiTheme.textSecondary)
-                .frame(width: 400, height: 225)
+                .frame(width: ListCardSize.width, height: ListCardSize.coverHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
                         .strokeBorder(isFocused ? SashimiTheme.focus : SashimiTheme.textTertiary,

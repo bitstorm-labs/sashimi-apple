@@ -153,13 +153,14 @@ final class SharedListsTests: XCTestCase {
 
     /// Input is what the list shows, in display order (after V2). An episode
     /// is its series' title, so two episodes of one show are one title.
-    func testCoverIsTheFirstFourDifferentTitles() {
+    func testCoverIsTheFirstThreeDifferentTitles() {
         let shown = [series("show1"), ep("e2", "show1", 1, 2), mv("m1"), ep("e7", "show2", 2, 3), mv("m2"), mv("m3")]
-        XCTAssertEqual(SharedLists.coverPosterIds(shown), ["show1", "m1", "show2", "m2"])
+        XCTAssertEqual(SharedLists.coverPosterIds(shown), ["show1", "m1", "show2"])
     }
 
-    func testFewerThanFourDifferentTitlesShowTheFirstAlone() {
-        XCTAssertEqual(SharedLists.coverPosterIds([mv("m1"), ep("e2", "show1", 1, 2), ep("e3", "show1", 1, 3), mv("m2")]), ["m1"])
+    /// The poster stack draws one, two or three posters (design §6).
+    func testFewerThanThreeDifferentTitlesShowThoseThereAre() {
+        XCTAssertEqual(SharedLists.coverPosterIds([mv("m1"), ep("e2", "show1", 1, 2), ep("e3", "show1", 1, 3)]), ["m1", "show1"])
         XCTAssertEqual(SharedLists.coverPosterIds([series("show1"), ep("e2", "show1", 1, 2), ep("e3", "show1", 1, 3), ep("e4", "show1", 1, 4)]),
                        ["show1"], "four entries of one show are ONE title, not four copies of its poster")
         XCTAssertEqual(SharedLists.coverPosterIds([]), [])
@@ -167,7 +168,7 @@ final class SharedListsTests: XCTestCase {
 
     func testAnEpisodeWithNoSeriesIsItsOwnTitle() {
         XCTAssertEqual(SharedLists.coverPosterIds([ep("e1", nil, 2, 1), ep("e2", nil, 2, 2), mv("m1"), mv("m2")]),
-                       ["e1", "e2", "m1", "m2"])
+                       ["e1", "e2", "m1"])
     }
 
     // MARK: V8: who made it (#784)

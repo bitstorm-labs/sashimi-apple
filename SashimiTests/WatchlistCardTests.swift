@@ -46,21 +46,21 @@ final class WatchlistCardTests: XCTestCase {
         XCTAssertEqual(card.subtitle, "Private · 1 title")
     }
 
-    func testCoverIsTheFirstFourTitlesArtwork() throws {
+    func testCoverIsTheFirstThreeTitlesArtwork() throws {
         let poster = "https://image.tmdb.org/t/p/w342/a.jpg"
         let entries = [entry("1", itemId: "lib1", poster: poster), entry("2", poster: poster), entry("3"),
                        entry("4", itemId: "lib4"), entry("5", itemId: "lib5")]
         let card = WatchlistCardInfo(list(entries: entries))
-        XCTAssertEqual(card.cover, [.library(itemId: "lib1", fallback: URL(string: poster)),
-                                    .remote(try XCTUnwrap(URL(string: poster))), .library(itemId: "lib4"),
-                                    .library(itemId: "lib5")], "a title with no artwork is skipped")
+        XCTAssertEqual(card.cover.map(\.artwork), [.library(itemId: "lib1", fallback: URL(string: poster)),
+                                                   .remote(try XCTUnwrap(URL(string: poster))), .library(itemId: "lib4")],
+                       "a title with no artwork is skipped")
     }
 
     /// The newest title has no artwork: the cover uses the next ones, not a blank.
     func testTheCoverSkipsTitlesWithoutArtwork() throws {
         let poster = "https://image.tmdb.org/t/p/w342/a.jpg"
         let card = WatchlistCardInfo(list(entries: [entry("1"), entry("2", poster: poster)]))
-        XCTAssertEqual(card.cover, [.remote(try XCTUnwrap(URL(string: poster)))])
+        XCTAssertEqual(card.cover.map(\.artwork), [.remote(try XCTUnwrap(URL(string: poster)))])
     }
 
     /// Nothing has artwork: an empty cover, which both apps draw as the bookmark.

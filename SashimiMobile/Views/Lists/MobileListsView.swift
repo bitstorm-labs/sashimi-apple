@@ -1,5 +1,4 @@
 import SwiftUI
-import NukeUI
 
 /// The Lists destination on iPhone (from Libraries) and iPad/Mac (the side
 /// menu): your lists, then everyone's public lists.
@@ -32,11 +31,11 @@ struct MobileListsView: View {
                                 cardLink(card, isOwn: true)
                             }
                             Button { creating = true } label: {
-                                // A definite 16:9 frame with the label laid over it,
+                                // A definite frame with the label laid over it,
                                 // the same size as a list's cover.
                                 RoundedRectangle(cornerRadius: 12)
                                     .strokeBorder(MobileColors.textTertiary, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                                    .aspectRatio(16 / 9, contentMode: .fit)
+                                    .aspectRatio(PosterStack.aspectRatio, contentMode: .fit)
                                     .overlay {
                                         Label("New List", systemImage: "plus")
                                             .font(MobileTypography.title)
@@ -109,9 +108,7 @@ struct MobileListCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
-            MobileListCover(card: card)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            MobilePosterStackCover(posters: card.coverPosters, placeholder: "list.bullet.rectangle")
                 .overlay(alignment: .topTrailing) {
                     if isSubscribed {
                         Label("Subscribed", systemImage: "checkmark")
@@ -132,53 +129,6 @@ struct MobileListCard: View {
                 .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// The first four different titles as a 2x2 collage of posters, or the
-/// first title's poster alone (`SharedLists.coverPosterIds`).
-struct MobileListCover: View {
-    let card: ListCard
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                MobileColors.cardBackground
-                if card.coverIds.count == 4 {
-                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
-                    VStack(spacing: 0) {
-                        ForEach(0..<2, id: \.self) { row in
-                            HStack(spacing: 0) {
-                                ForEach(0..<2, id: \.self) { column in
-                                    poster(card.coverIds[row * 2 + column], width: cell.width)
-                                        .frame(width: cell.width, height: cell.height)
-                                        .clipped()
-                                }
-                            }
-                        }
-                    }
-                } else if let first = card.coverIds.first {
-                    poster(first, width: geometry.size.width)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                } else {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(.system(size: 30))
-                        .foregroundStyle(MobileColors.textTertiary)
-                }
-            }
-        }
-    }
-
-    private func poster(_ itemId: String, width: CGFloat) -> some View {
-        LazyImage(url: JellyfinClient.shared.syncImageURL(
-            itemId: itemId, imageType: "Primary", maxWidth: ImageSizing.pixelWidth(points: width)
-        )) { state in
-            if let image = state.image {
-                image.resizable().scaledToFill()
-            }
-        }
-        .pipeline(SashimiImagePipeline.shared)
     }
 }
 

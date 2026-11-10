@@ -1,37 +1,43 @@
 import SwiftUI
 
-/// The Watchlist on Apple TV: "Use Plex too?" (or the Plex sync line), then
-/// every title, with those the server doesn't have dimmed and tagged "Not on
-/// server" or "Requested". Remove a Title works as Edit List's does.
+/// The Watchlist on Apple TV, as a Spotlight (design §6): the focused title's
+/// backdrop and details with Play, or Request / Sign in to Requests for a title
+/// the server doesn't have, over a row of every title (those the server
+/// doesn't have dimmed and tagged "Not on server" or "Requested"). "Use Plex
+/// too?" (or the Plex sync line) sits under the actions. Remove a Title works
+/// as Edit List's does.
 struct WatchlistPageView: View {
     @StateObject private var model = WatchlistPageViewModel()
     @Environment(\.dismiss) private var dismiss
 
     @State private var selected: BaseItemDto?
+    @State private var playing: BaseItemDto?
     @State private var request: SeerrTarget?
+    @State private var signingIn = false
+    /// The title the Spotlight shows: the last poster focused, else the first.
+    @State private var spotlightId: String?
     @State private var connecting = false
     @State private var removing = false
     @State private var removal: WatchlistTile?
     @State private var confirmDisconnect = false
     @FocusState private var menuFocused: Bool
 
-    private let columns = Array(repeating: GridItem(.fixed(220), spacing: 48, alignment: .top), count: 6)
-
     var body: some View {
-        ZStack {
-            SashimiTheme.background.ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 40) {
-                    header
-                    content
-                }
-                .padding(.horizontal, 80)
-                .padding(.vertical, 60)
-            }
-            .scrollClipDisabled()
-        }
+        ListSpotlightPage(
+            eyebrow: model.eyebrow,
+            spotlight: spotlightTile.map(model.spotlight(for:)),
+            actions: { actions },
+            notice: { notice },
+            posters: { content }
+        )
         .fullScreenCover(item: $selected) { item in
             MediaDetailView(item: item)
+        }
+        .fullScreenCover(item: $playing) { item in
+            PlayerView(item: item, startFromBeginning: false)
+        }
+        .fullScreenCover(isPresented: $signingIn) {
+            RequestsSignInCover()
         }
         .fullScreenCover(item: $request) { target in
             SeerrDetailView(target: target)
@@ -83,43 +89,43 @@ struct WatchlistPageView: View {
 
     // MARK: Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(WatchlistText.name, systemImage: "bookmark.fill")
-                .font(Typography.displayMedium)
-                .foregroundStyle(SashimiTheme.textPrimary)
-            Text(model.summary)
-                .font(.system(size: 22))
-                .foregroundStyle(SashimiTheme.textTertiary)
+    private var spotlightTile: WatchlistTile? {
+        model.tiles.first { $0.id == spotlightId } ?? model.tiles.first
+    }
 
-            plexLine
-                .padding(.top, 10)
-
-            HStack(spacing: 30) {
-                switch model.header {
-                case .connectCard:
-                    ActionButton(title: WatchlistText.connect, icon: "link", isPrimary: true) { connecting = true }
-                    ActionButton(title: WatchlistText.notNow, icon: "xmark") {
-                        Task { await model.dismissCard() }
-                    }
-                case .needsReconnect:
-                    ActionButton(title: WatchlistText.reconnect, icon: "arrow.clockwise", isPrimary: true) {
-                        connecting = true
-                    }
-                case .synced, .none:
-                    EmptyView()
-                }
-                moreMenu
-                Spacer()
+    @ViewBuilder
+    private var actions: some View {
+        if let tile = spotlightTile {
+            ListSpotlightActionButton(
+                action: model.spotlight(for: tile).action,
+                onPlay: { playing = $0 },
+                onRequest: { request = $0 },
+                onSignIn: { signingIn = true }
+            )
+        }
+        switch model.header {
+        case .connectCard:
+            ActionButton(title: WatchlistText.connect, icon: "link", isPrimary: spotlightTile == nil) { connecting = true }
+            ActionButton(title: WatchlistText.notNow, icon: "xmark") {
+                Task { await model.dismissCard() }
             }
-            .padding(.top, 10)
-            .focusSection()
-
-            if removing {
-                Text(WatchlistText.selectToRemove)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(SashimiTheme.accentSecondary)
+        case .needsReconnect:
+            ActionButton(title: WatchlistText.reconnect, icon: "arrow.clockwise", isPrimary: spotlightTile == nil) {
+                connecting = true
             }
+        case .synced, .none:
+            EmptyView()
+        }
+        moreMenu
+    }
+
+    @ViewBuilder
+    private var notice: some View {
+        plexLine
+        if removing {
+            Text(WatchlistText.selectToRemove)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(SashimiTheme.accentSecondary)
         }
     }
 
@@ -127,18 +133,12 @@ struct WatchlistPageView: View {
     private var plexLine: some View {
         switch model.header {
         case .connectCard:
-            VStack(alignment: .leading, spacing: 10) {
-                Text(WatchlistText.cardTitle)
-                    .font(Typography.title)
-                    .foregroundStyle(SashimiTheme.textPrimary)
-                Text(WatchlistText.cardBody)
-                    .font(Typography.bodySmall)
-                    .foregroundStyle(SashimiTheme.textSecondary)
-            }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 24)
-            .frame(maxWidth: 1000, alignment: .leading)
-            .background(SashimiTheme.plexCardBackground, in: RoundedRectangle(cornerRadius: CornerRadius.large))
+            (Text(WatchlistText.cardTitle + " ").bold().foregroundColor(SashimiTheme.textPrimary)
+                + Text(WatchlistText.cardBody).foregroundColor(SashimiTheme.textSecondary))
+                .font(Typography.bodySmall)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(SashimiTheme.plexCardBackground, in: RoundedRectangle(cornerRadius: CornerRadius.large))
         case .synced:
             Label(WatchlistText.synced, systemImage: "checkmark")
                 .font(Typography.bodySmall.weight(.semibold))
@@ -204,23 +204,21 @@ struct WatchlistPageView: View {
                 .foregroundStyle(SashimiTheme.textTertiary)
                 .focusable()
         } else {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 50) {
-                ForEach(model.tiles) { tile in
-                    tileButton(tile)
-                        .opacity(model.isRemoving(tile) ? 0.4 : 1)
-                        .onAppear { model.tileAppeared(tile) }
-                }
+            ForEach(model.tiles) { tile in
+                tileButton(tile)
+                    .opacity(model.isRemoving(tile) ? 0.4 : 1)
+                    .onAppear { model.tileAppeared(tile) }
             }
-            .focusSection()
         }
     }
 
     @ViewBuilder
     private func tileButton(_ tile: WatchlistTile) -> some View {
+        let focus: (Bool) -> Void = { focused in if focused { spotlightId = tile.id } }
         if let item = tile.libraryItem {
-            MediaPosterButton(item: item, libraryName: item.libraryName) { select(tile) }
+            MediaPosterButton(item: item, libraryName: item.libraryName, onFocusChange: focus) { select(tile) }
         } else {
-            WatchlistMissingTileButton(tile: tile) { select(tile) }
+            WatchlistMissingTileButton(tile: tile, onFocusChange: focus) { select(tile) }
         }
     }
 
@@ -251,6 +249,7 @@ struct WatchlistPageView: View {
 /// over it undimmed. Focusable like any poster, so it can be opened or removed.
 struct WatchlistMissingTileButton: View {
     let tile: WatchlistTile
+    var onFocusChange: ((Bool) -> Void)?
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -285,6 +284,7 @@ struct WatchlistMissingTileButton: View {
         }
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
+        .onChange(of: isFocused) { _, focused in onFocusChange?(focused) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tile.entry.title), \(tile.missingTag?.label ?? WatchlistText.notOnServer)")
     }
