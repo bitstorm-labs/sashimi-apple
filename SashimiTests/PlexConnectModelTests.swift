@@ -370,4 +370,23 @@ final class PlexConnectModelTests: XCTestCase {
         XCTAssertEqual(model.state, .linked)
         XCTAssertNil(model.message, "a new answer clears it")
     }
+
+    /// Cancel while plex.tv is still making the code: it stays cancelled, and
+    /// nothing is saved to resume.
+    func testCancelWhileTheCodeIsBeingFetchedStaysCancelled() async throws {
+        SeerrStubServer.delays["POST /api/v2/pins"] = 0.3
+        let model = try model()
+        let beginning = Task { await model.begin(strong: true) }
+        for _ in 0..<200 where SeerrStubServer.requests("POST", "/api/v2/pins").isEmpty {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        model.cancel()
+        let pin = await beginning.value
+
+        XCTAssertNil(pin)
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertNil(pendingRecord())
+    }
 }
+

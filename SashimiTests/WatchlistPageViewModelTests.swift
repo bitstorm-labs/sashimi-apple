@@ -427,6 +427,24 @@ extension WatchlistPageViewModelTests {
         XCTAssertEqual(try tile(model, 2).missingTag, .notOnServer)
     }
 
+    /// The first load failed; a later load (the store's, from anywhere)
+    /// brings the Watchlist: the page shows it instead of the error.
+    func testAFailedFirstLoadRecoversWhenTheWatchlistArrives() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, "not json"),
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1)]))
+        ]
+        let (model, store) = try makeModelAndStore(seerr: signedOutSeerr())
+        await model.load()
+        XCTAssertTrue(model.failed)
+
+        await store.refresh()
+        await eventually { !model.failed }
+
+        XCTAssertFalse(model.failed)
+        XCTAssertEqual(model.tiles.map(\.id), ["a"])
+    }
+
     func testTilesFollowADisconnectAndAQuietRelink() async throws {
         JellyfinRouteStub.sequences["GET \(base)"] = [
             (200, listJSON(entries: [entryJSON("a", tmdb: 1)], plex: "marge", needsReconnect: true)),

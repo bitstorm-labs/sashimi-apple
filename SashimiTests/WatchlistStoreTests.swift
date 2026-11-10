@@ -341,9 +341,65 @@ final class WatchlistStoreTests: XCTestCase {
         XCTAssertTrue(switched)
         XCTAssertNil(store.switchFailure)
 
-        _ = try await storeWithAPendingSwitch()
-        store.declineSwitch()
-        XCTAssertNil(store.switchFailure)
+        // "Keep" after a failed "Switch" takes the reason away with the question.
+        let (other, _) = try await storeWithAPendingSwitch()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (503, "{}")
+        _ = await other.confirmSwitch()
+        XCTAssertEqual(other.switchFailure, WatchlistText.couldntReachPlex)
+        other.declineSwitch()
+        XCTAssertNil(other.switchFailure)
+        XCTAssertNil(other.pendingSwitch)
+    }
+
+    /// A slow load whose newer one then fails is still the best answer there
+    /// is: its caller sees the Watchlist, not an unloaded store.
+    func testASlowRefreshStillLandsWhenANewerOneFails() async throws {
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge", entries: [entryJSON()]))
+        JellyfinRouteStub.delays["GET \(base)"] = 0.5
+        let store = store(try client())
+        let slow = Task { () -> (WatchlistStore.Availability, [String]?) in
+            await store.refresh()
+            return (store.availability, store.watchlist?.entries.map(\.id))
+        }
+        for _ in 0..<200 where JellyfinRouteStub.requests("GET", base).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        JellyfinRouteStub.delays["GET \(base)"] = 0
+        JellyfinRouteStub.routes["GET \(base)"] = (200, "not json") // the newer load fails
+
+        await store.refresh()
+        let (availability, ids) = await slow.value
+
+        XCTAssertEqual(availability, .available)
+        XCTAssertEqual(ids, ["e1"])
+        XCTAssertEqual(store.watchlist?.plex?.username, "marge")
+    }
+
+    /// The newer load is still on its way when the older one answers: the
+    /// older one lands for its caller, and the newer one replaces it after.
+    func testASlowRefreshLandsWhileANewerOneIsStillOnItsWay() async throws {
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(entries: [entryJSON()]))
+        JellyfinRouteStub.delays["GET \(base)"] = 0.3
+        let store = store(try client())
+        let first = Task { () -> [String]? in
+            await store.refresh()
+            return store.watchlist?.entries.map(\.id)
+        }
+        for _ in 0..<200 where JellyfinRouteStub.requests("GET", base).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        JellyfinRouteStub.delays["GET \(base)"] = 1.0
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge", entries: [entryJSON(), entryJSON(id: "e2")]))
+        let second = Task { await store.refresh() }
+        for _ in 0..<200 where JellyfinRouteStub.requests("GET", base).count < 2 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let firstSaw = await first.value
+        XCTAssertEqual(firstSaw, ["e1"])
+        XCTAssertEqual(store.availability, .available)
+
+        await second.value
+        XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1", "e2"])
     }
 }
-

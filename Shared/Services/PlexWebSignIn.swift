@@ -12,6 +12,7 @@ enum PlexWebSignIn {
     ///   that landed meanwhile is seen even if the app was suspended past the
     ///   grace), then gets `grace` more, then is called off.
     /// - `checksStarted`: how many PIN checks the poll has started so far.
+    /// - `lastCheckCap`: the longest the wait for that check may take.
     ///
     /// Six hooks, each supplied separately by the page and the poll's owner.
     static func run( // swiftlint:disable:this function_parameter_count
@@ -21,7 +22,8 @@ enum PlexWebSignIn {
         isWaiting: @MainActor () -> Bool,
         cancelWaiting: @MainActor () -> Void,
         checksStarted: @MainActor () -> Int,
-        grace: Duration = .seconds(5)
+        grace: Duration = .seconds(5),
+        lastCheckCap: Duration = .seconds(30)
     ) async {
         let pollTask = Task { @MainActor in
             await poll()
@@ -31,8 +33,10 @@ enum PlexWebSignIn {
         // Checks run one after another: once the second check after the page
         // closed has started, the first one finished without a token. A check
         // that finds the token ends the wait instead (`isWaiting` turns false).
+        // Capped, so a poll stuck on plex.tv can't hold the sign-in open.
         let closedAt = checksStarted()
-        while isWaiting(), !Task.isCancelled, checksStarted() < closedAt + 2 {
+        let capped = ContinuousClock.now + lastCheckCap
+        while isWaiting(), !Task.isCancelled, checksStarted() < closedAt + 2, ContinuousClock.now < capped {
             try? await Task.sleep(for: .milliseconds(50))
         }
         let deadline = ContinuousClock.now + grace

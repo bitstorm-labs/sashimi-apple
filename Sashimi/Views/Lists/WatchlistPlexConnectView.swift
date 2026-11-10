@@ -121,18 +121,20 @@ struct WatchlistPlexConnectView: View {
 extension View {
     /// Collects a Connect Plex PIN begun before the app was relaunched. A
     /// different account already syncing brings up the switch question.
-    func resumingPlexConnect() -> some View {
-        modifier(ResumePlexConnect())
+    func resumingPlexConnect(session: String = "") -> some View {
+        modifier(ResumePlexConnect(session: session))
     }
 }
 
 private struct ResumePlexConnect: ViewModifier {
+    /// Resumes again when this changes (another signed-in session).
+    let session: String
     @StateObject private var model = PlexConnectModel()
     @State private var asking = false
 
     func body(content: Content) -> some View {
         content
-            .task { await model.resumePendingIfAny() }
+            .task(id: session) { await model.resumePendingIfAny() }
             .onChange(of: model.state) { _, state in
                 switch state {
                 case .conflict:

@@ -18,6 +18,13 @@ func connectPlex(model: PlexConnectModel) async {
 }
 
 extension View {
+    /// Collects a Connect Plex PIN begun before the app was relaunched, once
+    /// per signed-in session: "Your Watchlist now syncs with Plex" when it
+    /// links, the switch question when another account already syncs.
+    func resumingPlexConnect(session: String) -> some View {
+        modifier(ResumePlexConnect(session: session))
+    }
+
     /// What a Connect Plex run says: the switch question when the Watchlist
     /// already syncs with another account, a failure, or that it's linked.
     func plexConnectFeedback(_ model: PlexConnectModel, message: Binding<String?>) -> some View {
@@ -164,5 +171,18 @@ struct MobilePlexSettingsSection: View {
         connectTask?.cancel()
         connectTask = nil
         if connect.isWaiting { connect.cancel() }
+    }
+}
+
+private struct ResumePlexConnect: ViewModifier {
+    let session: String
+    @StateObject private var model = PlexConnectModel()
+    @State private var message: String?
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: session) { await model.resumePendingIfAny() }
+            .plexConnectFeedback(model, message: $message)
+            .listMessage($message)
     }
 }

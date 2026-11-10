@@ -116,9 +116,10 @@ struct ContentView: View {
                     deepLinkCovering: deepLinkDestination != nil,
                     deepLinkDismissals: deepLinkDismissals
                 )
+                // A Connect Plex the app was relaunched in the middle of; again
+                // for each signed-in session (a server switch).
+                .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
                 .id(sessionManager.activeSessionIdentity)
-                // A Connect Plex the app was relaunched in the middle of.
-                .resumingPlexConnect()
             } else {
                 ServerConnectionView(
                     prefillServerURL: sessionManager.reauthServer?.url,

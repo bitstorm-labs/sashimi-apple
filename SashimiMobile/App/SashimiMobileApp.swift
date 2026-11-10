@@ -139,6 +139,9 @@ struct ContentView: View {
                         )
                     }
                 }
+                // A Connect Plex the app was killed in the middle of, in its
+                // own task so it never holds up the download sync below.
+                .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
                 .id(sessionManager.activeSessionIdentity)
                 .task {
                     // Re-runs on a server switch (the id above), which starts
@@ -146,8 +149,6 @@ struct ContentView: View {
                     networkMonitor.startServerProbing {
                         await JellyfinClient.shared.probeReachability()
                     }
-                    // A Connect Plex the app was killed in the middle of.
-                    await PlexConnectModel().resumePendingIfAny()
                     await DownloadManager.shared.syncPendingProgress()
                     await DownloadManager.shared.backfillAllSubtitles()
                 }

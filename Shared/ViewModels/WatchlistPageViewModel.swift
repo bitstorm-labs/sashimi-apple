@@ -162,6 +162,7 @@ final class WatchlistPageViewModel: ObservableObject {
     private func watchlistChanged() {
         // Before the first load, and once the page is gone, load() decides.
         guard !isLoading, !isGone, let entries = store.watchlist?.entries else { return }
+        failed = false // a load that failed here was answered by a later one
         guard entries.map(\.id) != queriedIds else {
             rebuildTiles() // same titles; nothing to look up
             return

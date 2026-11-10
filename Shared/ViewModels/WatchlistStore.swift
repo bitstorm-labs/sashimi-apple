@@ -28,8 +28,11 @@ final class WatchlistStore: ObservableObject {
     /// The Plex token a pending switch waits on. In memory only; never logged,
     /// stored or published.
     private var heldToken: (switchId: UUID, token: String)?
-    /// Bumped by each load, so an older answer that arrives late is dropped.
+    /// Bumped by each load; `landedGeneration` is the newest load whose answer
+    /// was applied. An answer older than one already applied is dropped, but
+    /// one whose newer loads are still on their way (or fail) still lands.
     private var refreshGeneration = 0
+    private var landedGeneration = 0
 
     init(service: WatchlistService = WatchlistService()) {
         self.service = service
@@ -56,8 +59,8 @@ final class WatchlistStore: ObservableObject {
 
     /// Reloads the Watchlist. Another user or server first loses everything of
     /// the last one. A failed load keeps what was there: a blip is not "no plugin".
-    /// Only the latest load lands: a slower, older one can't put back what a
-    /// newer one (after a link, unlink or remove) replaced.
+    /// A slower, older load can't put back what a newer one (after a link,
+    /// unlink or remove) already replaced.
     func refresh() async {
         refreshGeneration += 1
         let generation = refreshGeneration
@@ -78,7 +81,8 @@ final class WatchlistStore: ObservableObject {
         } catch {
             return // Keep the previous values.
         }
-        guard await currentScope() == scope, generation == refreshGeneration else { return }
+        guard await currentScope() == scope, generation > landedGeneration else { return }
+        landedGeneration = generation
         watchlist = loaded
         availability = loaded == nil ? .unavailable : .available
     }

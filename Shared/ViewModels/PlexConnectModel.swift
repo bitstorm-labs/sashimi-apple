@@ -39,6 +39,9 @@ final class PlexConnectModel: ObservableObject {
     private let now: () -> Date
     private var heldToken: String?
     private var flow: Task<Void, Never>?
+    /// Bumped by `cancel()`, so a `begin` that was waiting on plex.tv when
+    /// the person cancelled doesn't bring the code back.
+    private var cancelEpoch = 0
 
     init(store: WatchlistStore = .shared, defaults: UserDefaults = .standard,
          pollInterval: Duration = .seconds(2), pinLifetime: Duration = .seconds(15 * 60),
@@ -73,14 +76,16 @@ final class PlexConnectModel: ObservableObject {
     func begin(strong: Bool) async -> PlexPin? {
         heldToken = nil
         message = nil
+        let epoch = cancelEpoch
         do {
             let pin = try await plexClient.createPin(strong: strong)
             let owner = await store.currentOwner()
+            guard epoch == cancelEpoch else { return nil } // cancelled meanwhile
             state = .awaitingPlex(code: pin.code)
             savePending(pin, owner: owner)
             return pin
         } catch {
-            state = .failed(WatchlistText.couldntReachPlex)
+            if epoch == cancelEpoch { state = .failed(WatchlistText.couldntReachPlex) }
             return nil
         }
     }
@@ -164,6 +169,7 @@ final class PlexConnectModel: ObservableObject {
     }
 
     func cancel() {
+        cancelEpoch += 1
         flow?.cancel()
         flow = nil
         heldToken = nil

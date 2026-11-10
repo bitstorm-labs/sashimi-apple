@@ -30,6 +30,8 @@ final class SeerrStubServer: URLProtocol {
     /// Seconds to hold every title-details answer (GET /api/v1/movie|tv/{id}), so a
     /// test can watch how many are in flight at once. Zero answers at once.
     nonisolated(unsafe) static var detailsDelay: TimeInterval = 0
+    /// Seconds to hold the answer to "METHOD /path" (other than title details).
+    nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
     nonisolated(unsafe) private static var detailsInFlight = 0
     nonisolated(unsafe) private static var detailsPeak = 0
 
@@ -41,6 +43,7 @@ final class SeerrStubServer: URLProtocol {
             routes = [:]
             recorded = []
             detailsDelay = 0
+            delays = [:]
             detailsInFlight = 0
             detailsPeak = 0
         }
@@ -69,6 +72,8 @@ final class SeerrStubServer: URLProtocol {
 
     /// The held-back reply of a delayed details request; cancelled if the request is.
     private var delayedReply: DispatchWorkItem?
+    /// The held-back reply of a request delayed through `delays`.
+    private var delayedRouteReply: DispatchWorkItem?
 
     override func startLoading() {
         let url = request.url ?? URL(fileURLWithPath: "/")
@@ -100,6 +105,13 @@ final class SeerrStubServer: URLProtocol {
             client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
+        let routeDelay = Self.lock.withLock { Self.delays["\(method) \(url.path)"] ?? 0 }
+        if routeDelay > 0, !Self.isDetails(method, url.path) {
+            let work = DispatchWorkItem { answer() }
+            Self.lock.withLock { delayedRouteReply = work }
+            DispatchQueue.global().asyncAfter(deadline: .now() + routeDelay, execute: work)
+            return
+        }
         let delay = Self.lock.withLock { Self.isDetails(method, url.path) ? Self.detailsDelay : 0 }
         guard delay > 0 else { return answer() }
         Self.lock.withLock {
@@ -124,6 +136,7 @@ final class SeerrStubServer: URLProtocol {
     }
 
     override func stopLoading() {
+        Self.lock.withLock { delayedRouteReply }?.cancel()
         Self.lock.withLock { delayedReply }?.cancel()
         leaveDetails()
     }

@@ -88,4 +88,33 @@ final class PlexWebSignInTests: XCTestCase {
         XCTAssertFalse(calledOff)
         XCTAssertEqual(checks, 1)
     }
+
+    /// A poll that never looks again (plex.tv hanging) doesn't hold the page
+    /// open: the wait for the last check has a cap, then the grace, then it's off.
+    func testTheWaitForTheLastCheckIsCapped() async throws {
+        var waiting = true
+        var calledOff = false
+        var finished = false
+
+        let running = Task {
+            await PlexWebSignIn.run(
+                poll: { while waiting { try? await Task.sleep(for: .milliseconds(20)) } },
+                showPage: {},
+                closePage: {},
+                isWaiting: { waiting },
+                cancelWaiting: { calledOff = true },
+                checksStarted: { 0 },
+                grace: .zero,
+                lastCheckCap: .milliseconds(100)
+            )
+            finished = true
+        }
+        for _ in 0..<200 where !finished { try await Task.sleep(nanoseconds: 10_000_000) }
+        waiting = false // let a run that never ends finish after the test
+        running.cancel()
+
+        XCTAssertTrue(finished, "still waiting after 2 s with a 100 ms cap")
+        XCTAssertTrue(calledOff)
+    }
 }
+
