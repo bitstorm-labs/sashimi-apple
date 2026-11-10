@@ -5,6 +5,10 @@ import SwiftUI
 /// type); the Seerr username form is for the server's local accounts.
 struct MobileRequestsSettingsView: View {
     @ObservedObject private var session = SeerrSession.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
+    /// The switch question just answered: its alert stays down while the
+    /// answer runs (the store may ask the same question again if it fails).
+    @State private var answeredSwitch: UUID?
     @State private var serverText = ""
     @State private var email = ""
     @State private var password = ""
@@ -30,6 +34,11 @@ struct MobileRequestsSettingsView: View {
             if let user = session.state.user {
                 Section {
                     LabeledContent("Signed in as", value: user.name)
+                    if let notice = watchlist.notice {
+                        Label(notice, systemImage: "checkmark")
+                            .lineLimit(1)
+                            .foregroundStyle(MobileColors.success)
+                    }
                     Button("Sign Out", role: .destructive) {
                         Task { await session.signOut() }
                     }
@@ -53,6 +62,23 @@ struct MobileRequestsSettingsView: View {
         .onDisappear {
             plexTask?.cancel()
             session.cancelPlexSignIn()
+            watchlist.notice = nil
+        }
+        .alert(WatchlistText.switchQuestion(newUsername: openQuestion?.newUsername),
+               isPresented: switchQuestionShown, presenting: openQuestion) { question in
+            Button(WatchlistText.switchButton) {
+                answeredSwitch = question.id
+                Task { _ = await watchlist.confirmSwitch() }
+            }
+            Button(WatchlistText.keep(question.currentUsername), role: .cancel) {
+                answeredSwitch = question.id
+                watchlist.declineSwitch()
+            }
+        } message: { question in
+            Text(WatchlistText.switchMessage(currentUsername: question.currentUsername))
+        }
+        .onChange(of: watchlist.pendingSwitch) { _, question in
+            if question == nil { answeredSwitch = nil }
         }
         .onChange(of: session.isActive) { _, active in
             if active { password = "" }
@@ -105,6 +131,20 @@ struct MobileRequestsSettingsView: View {
                 .disabled(email.isEmpty || password.isEmpty || session.state == .signingIn || !canSignIn)
             }
         }
+    }
+
+    /// The store's switch question, unless it was just answered: dismissing the
+    /// alert doesn't clear it, because "Switch" needs the question (and its held
+    /// token) still there to answer it.
+    private var openQuestion: WatchlistStore.PendingSwitch? {
+        watchlist.pendingSwitch.flatMap { $0.id == answeredSwitch ? nil : $0 }
+    }
+
+    private var switchQuestionShown: Binding<Bool> {
+        Binding(
+            get: { openQuestion != nil },
+            set: { if !$0 { answeredSwitch = watchlist.pendingSwitch?.id } }
+        )
     }
 
     /// Sign-in waits for a valid address: there is no default server.

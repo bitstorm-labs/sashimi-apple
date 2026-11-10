@@ -79,7 +79,21 @@ enum WatchlistText {
     static let plexRowFooter = "Keeps your Watchlist in sync with your Plex watchlist."
     static let couldntReachPlex = "Couldn't reach Plex. Try again."
 
+    static let stoppedSyncing = "Plex stopped syncing."
+    static let disconnectQuestion = "Disconnect Plex?"
+    static let disconnectMessage = "Your Watchlist stays as it is and stops syncing."
+    static let empty = "Nothing on your Watchlist yet. Use Add to List on any movie or show."
+    static let remove = "Remove from Watchlist"
+    static let addToList = "Add to List"
+    static let switchButton = "Switch"
+
     static func connectedAs(_ username: String) -> String { "Connected as \(username)" }
+
+    static func summary(count: Int) -> String { "Private · \(ListText.titles(count))" }
+
+    static func switchMessage(currentUsername: String) -> String { "It syncs with \(currentUsername) now." }
+
+    static func keep(_ currentUsername: String) -> String { "Keep \(currentUsername)" }
 
     static func switchQuestion(newUsername: String?) -> String {
         "Sync your Watchlist with \(newUsername.map { "Plex account \($0)" } ?? "this Plex account") instead?"

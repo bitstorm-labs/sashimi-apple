@@ -6,6 +6,7 @@ import NukeUI
 struct MobileListsView: View {
     @StateObject private var model = ListsPageViewModel()
     @ObservedObject private var store = SharedListsStore.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @State private var creating = false
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: MobileSpacing.md, alignment: .top)]
@@ -19,6 +20,14 @@ struct MobileListsView: View {
                 } else {
                     section("Your lists") {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: MobileSpacing.md) {
+                            if let card = watchlist.card {
+                                NavigationLink {
+                                    MobileWatchlistView()
+                                } label: {
+                                    MobileWatchlistCard(card: card)
+                                }
+                                .buttonStyle(.plain)
+                            }
                             ForEach(model.mine) { card in
                                 cardLink(card, isOwn: true)
                             }
@@ -56,8 +65,13 @@ struct MobileListsView: View {
         }
         .background(MobileColors.background)
         .navigationTitle("Lists")
-        .refreshable { await model.load() }
+        .refreshable {
+            async let watchlistLoad: Void = watchlist.refresh()
+            await model.load()
+            await watchlistLoad
+        }
         .task { await model.load() }
+        .task { await watchlist.refresh() }
         .sheet(isPresented: $creating) {
             MobileNewListSheet(title: "New List", confirmTitle: "Create") { name, isPublic in
                 Task {

@@ -97,7 +97,7 @@ final class WatchlistPageViewModel: ObservableObject {
         return items
     }
 
-    var summary: String { "Private · \(ListText.titles(tiles.count))" }
+    var summary: String { WatchlistText.summary(count: tiles.count) }
 
     func load() async {
         await store.refresh()

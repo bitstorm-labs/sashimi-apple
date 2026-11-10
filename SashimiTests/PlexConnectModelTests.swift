@@ -121,6 +121,26 @@ final class PlexConnectModelTests: XCTestCase {
         XCTAssertFalse(model.isWaiting)
     }
 
+    /// Requests never set up on this device: no Seerr address, no session.
+    func testConnectWorksWithNoSeerrServerConfigured() async throws {
+        let name = "plex-connect-no-seerr-\(UUID().uuidString)"
+        let empty = try XCTUnwrap(UserDefaults(suiteName: name))
+        empty.removePersistentDomain(forName: name)
+        defer { empty.removePersistentDomain(forName: name) }
+        XCTAssertTrue(empty.dictionaryRepresentation().keys.filter { $0.hasPrefix("seerr.") }.isEmpty)
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        let client = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
+        let model = PlexConnectModel(store: WatchlistStore(service: WatchlistService(client: client)),
+                                     defaults: empty, pollInterval: .zero)
+
+        let pin = await model.begin(strong: true)
+        XCTAssertEqual(model.state, .awaitingPlex(code: "K7QF"))
+        await model.complete(pin: try XCTUnwrap(pin))
+
+        XCTAssertEqual(model.state, .linked)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
+    }
+
     func testConnectUsesTheSameClientIdentifierAsRequests() async throws {
         let session = SeerrSession(defaults: defaults, credentials: InMemorySeerrCredentials(), pollInterval: .zero)
         _ = session.setServerAddress(SeerrFixtures.server.absoluteString)
