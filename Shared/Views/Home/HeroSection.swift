@@ -145,10 +145,10 @@ struct HeroSection: View {
                     HStack(spacing: 0) {
                         Spacer()
                         heroImage(maxWidth: layout.imagePixelWidth(in: geometry.size))
-                        // The top feathers too: the picture starts below the
-                        // screen's top (tvOS overscan inset, iPad status bar)
-                        // and its top edge was a hard line (#787).
-                        .backdropFade(fadesTop: true)
+                        // The top feathers on iPad, where the picture's top edge
+                        // under the status bar was a hard line (#787); not on
+                        // tvOS (see `HeroLayout.fadesImageTop`).
+                        .backdropFade(fadesTop: layout.fadesImageTop)
                         .id(currentItem.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .frame(
@@ -450,6 +450,10 @@ struct HeroLayout {
     /// top safe-area inset is 60pt), which cut the top off backdrops whose
     /// subject sits high. The dark hero background still runs to the edge.
     var imageTopInset: CGFloat = 0
+    /// Feather the picture's top edge (#787): the iPad picture sits under the
+    /// status bar and header, where a hard top line showed. Off on tvOS, whose
+    /// picture is flush to the screen's top: a feather there drew a dark strip.
+    var fadesImageTop = true
     /// Pin the text block this far (before scaling) below `topInset` instead
     /// of centring it. tvOS centres it in a short 32:9 frame, which lands it
     /// near the top; a taller iPad hero centres it visibly low, so the iPad

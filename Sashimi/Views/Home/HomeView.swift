@@ -385,10 +385,10 @@ struct HomeView: View {
 
 extension HeroLayout {
     /// The ten-foot hero the shared `HeroSection` was drawn for: 32:9 of the
-    /// content width, every size at its original value. The picture starts
-    /// 30pt below the top edge (chosen by eye on the living-room TV); the hero
-    /// itself still bleeds to the top edge.
-    static let tv = HeroLayout(imageTopInset: 30, accent: SashimiTheme.accent)
+    /// content width, every size at its original value. The picture runs
+    /// flush to the top edge with no feathered top, like the Roku hero: the
+    /// 30pt inset (#636) plus the top feather read as a gap above the art.
+    static let tv = HeroLayout(fadesImageTop: false, accent: SashimiTheme.accent)
 }
 
 // MARK: - Recently Added Library Row
