@@ -64,6 +64,10 @@ final class WatchlistPageViewModel: ObservableObject {
     private var pending: [SeerrTarget] = []
     private var drain: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
+    /// The entry ids `libraryItems` was last asked for, in order.
+    private var queriedIds: [String]?
+    /// Bumped by each library query, so an older one that answers late is dropped.
+    private var libraryGeneration = 0
 
     init(store: WatchlistStore = .shared, service: WatchlistService = WatchlistService(),
          seerr: SeerrSession = .shared, lookup: RequestedLookup? = nil) {
@@ -77,6 +81,11 @@ final class WatchlistPageViewModel: ObservableObject {
         // @Published fires before the change lands: look again once it has.
         seerr.$state.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.seerrChanged()
+        }.store(in: &cancellables)
+        // A link, unlink or Plex sync made anywhere changes the entries: the
+        // grid follows, with the server's items looked up again.
+        store.$watchlist.dropFirst().receive(on: DispatchQueue.main).sink { [weak self] _ in
+            self?.watchlistChanged()
         }.store(in: &cancellables)
     }
 
@@ -115,9 +124,30 @@ final class WatchlistPageViewModel: ObservableObject {
         }
         isGone = false
         failed = false
-        libraryItems = await service.libraryItems(for: list.entries)
-        rebuildTiles()
+        await followEntries(list.entries)
         isLoading = false
+    }
+
+    /// Looks up the server's items for these entries and rebuilds the grid,
+    /// unless a newer lookup started meanwhile.
+    private func followEntries(_ entries: [WatchlistEntry]) async {
+        queriedIds = entries.map(\.id)
+        libraryGeneration += 1
+        let generation = libraryGeneration
+        let items = await service.libraryItems(for: entries)
+        guard generation == libraryGeneration else { return }
+        libraryItems = items
+        rebuildTiles()
+    }
+
+    private func watchlistChanged() {
+        // Before the first load, and once the page is gone, load() decides.
+        guard !isLoading, !isGone, let entries = store.watchlist?.entries else { return }
+        guard entries.map(\.id) != queriedIds else {
+            rebuildTiles() // same titles; nothing to look up
+            return
+        }
+        Task { await followEntries(entries) }
     }
 
     /// Called from each tile's `.onAppear`. Only a title missing from the server,
@@ -159,7 +189,7 @@ final class WatchlistPageViewModel: ObservableObject {
 
     func remove(_ tile: WatchlistTile) async -> Bool {
         guard await store.remove(tile.entry) else { return false }
-        rebuildTiles()
+        await followEntries(store.watchlist?.entries ?? [])
         return true
     }
 

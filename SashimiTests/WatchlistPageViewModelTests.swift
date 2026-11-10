@@ -63,8 +63,7 @@ final class WatchlistPageViewModelTests: XCTestCase {
     }
 
     private func makeModel(seerr: SeerrSession, lookup: RequestedLookup? = nil) throws -> WatchlistPageViewModel {
-        let service = WatchlistService(client: try jellyfin())
-        return WatchlistPageViewModel(store: WatchlistStore(service: service), service: service, seerr: seerr, lookup: lookup)
+        try makeModelAndStore(seerr: seerr, lookup: lookup).model
     }
 
     private func tile(_ model: WatchlistPageViewModel, _ index: Int) throws -> WatchlistTile {
@@ -361,6 +360,74 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertTrue(model.isGone)
         XCTAssertFalse(model.isLoading)
         XCTAssertTrue(model.tiles.isEmpty)
+    }
+}
+
+// MARK: Link changes made elsewhere
+
+extension WatchlistPageViewModelTests {
+    private func makeModelAndStore(seerr: SeerrSession, lookup: RequestedLookup? = nil) throws
+        -> (model: WatchlistPageViewModel, store: WatchlistStore) {
+        let service = WatchlistService(client: try jellyfin())
+        let store = WatchlistStore(service: service)
+        return (WatchlistPageViewModel(store: store, service: service, seerr: seerr, lookup: lookup), store)
+    }
+
+    /// Waits (bounded) for something the page does on its own after a store change.
+    private func eventually(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    /// Connect Plex (or Settings, or Requests' auto-link) links while the page
+    /// is open; Plex's sync brings titles the server has: the grid follows.
+    func testTilesFollowALinkMadeElsewhere() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1, itemId: "i1")])),
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1, itemId: "i1"), entryJSON("b", tmdb: 2, itemId: "i2"),
+                                     entryJSON("c", tmdb: 3)], plex: "marge"))
+        ]
+        JellyfinRouteStub.routes["POST \(base)/Plex"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        serveItems(["i1", "i2"])
+        let (model, store) = try makeModelAndStore(seerr: signedOutSeerr())
+        await model.load()
+        XCTAssertEqual(model.tiles.map(\.id), ["a"])
+
+        _ = await store.link(token: "T", replace: false)
+        await eventually { model.tiles.count == 3 }
+
+        XCTAssertEqual(model.header, .synced)
+        XCTAssertEqual(model.tiles.map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(model.summary, "Private · 3 titles")
+        XCTAssertEqual(try tile(model, 1).libraryItem?.id, "i2", "a synced title the server has isn't 'Not on server'")
+        XCTAssertEqual(try tile(model, 2).missingTag, .notOnServer)
+    }
+
+    func testTilesFollowADisconnectAndAQuietRelink() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1)], plex: "marge", needsReconnect: true)),
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1)])),
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2, itemId: "i2")], plex: "marge"))
+        ]
+        JellyfinRouteStub.routes["DELETE \(base)/Plex"] = (204, "")
+        JellyfinRouteStub.routes["POST \(base)/Plex"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        serveItems(["i2"])
+        let (model, store) = try makeModelAndStore(seerr: signedOutSeerr())
+        await model.load()
+        XCTAssertEqual(model.header, .needsReconnect)
+
+        let disconnected = await model.disconnect()
+        XCTAssertTrue(disconnected)
+        XCTAssertEqual(model.header, .connectCard)
+        XCTAssertEqual(model.tiles.map(\.id), ["a"])
+
+        await store.autoLink(token: "T") // Requests sign-in with the same account
+        await eventually { model.tiles.count == 2 }
+
+        XCTAssertEqual(model.header, .synced, "needsReconnect is gone")
+        XCTAssertEqual(model.tiles.map(\.id), ["a", "b"])
+        XCTAssertEqual(try tile(model, 1).libraryItem?.id, "i2")
     }
 }
 

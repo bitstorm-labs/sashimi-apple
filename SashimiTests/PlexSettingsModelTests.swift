@@ -146,4 +146,43 @@ final class PlexSettingsModelTests: XCTestCase {
         XCTAssertEqual(page.header, .connectCard)
         XCTAssertEqual(page.menuItems, [.connectPlex])
     }
+
+    /// Every way the link changes reaches the row without a load() of its own.
+    func testSettingsRowFollowsConnectSwitchDisconnectAndQuietRelink() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON()),
+            (200, listJSON(plex: "chad")),                       // after Connect
+            (200, listJSON(plex: "homer")),                      // after Switch
+            (200, listJSON()),                                   // after Disconnect
+            (200, listJSON(plex: "homer", needsReconnect: true)), // Plex stopped syncing
+            (200, listJSON(plex: "homer"))                       // after the quiet relink
+        ]
+        let store = try makeStore()
+        let model = PlexSettingsModel(store: store)
+        await model.load()
+        XCTAssertEqual(model.row, .notConnected)
+
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"chad\",\"needsReconnect\":false}")
+        _ = await store.link(token: "T1", replace: false)
+        XCTAssertEqual(model.row, .connected(username: "chad"), "Connect")
+
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"chad\",\"newUsername\":\"homer\"}")
+        await store.autoLink(token: "T2")
+        XCTAssertNotNil(store.pendingSwitch)
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"homer\",\"needsReconnect\":false}")
+        let switched = await store.confirmSwitch()
+        XCTAssertTrue(switched)
+        XCTAssertEqual(model.row, .connected(username: "homer"), "Switch")
+
+        JellyfinRouteStub.routes["DELETE \(plexPath)"] = (204, "")
+        let unlinked = await store.unlink()
+        XCTAssertTrue(unlinked)
+        XCTAssertEqual(model.row, .notConnected, "Disconnect")
+
+        await store.refresh()
+        XCTAssertEqual(model.row, .needsReconnect(username: "homer"))
+        await store.autoLink(token: "T2")
+        XCTAssertEqual(model.row, .connected(username: "homer"), "quiet relink")
+        XCTAssertNil(store.notice, "the same account relinks silently")
+    }
 }

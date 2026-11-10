@@ -301,4 +301,25 @@ final class WatchlistStoreTests: XCTestCase {
         XCTAssertNil(store.watchlist, "user B must not see user A's list")
         XCTAssertNotEqual(store.availability, .available)
     }
+
+    /// A slow load (the page opening) that answers after a newer one (a link's)
+    /// would put the old Watchlist back: only the latest load lands.
+    func testOlderRefreshCannotOverwriteANewerOne() async throws {
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(entries: [entryJSON()]))
+        JellyfinRouteStub.delays["GET \(base)"] = 0.5
+        let store = store(try client())
+        let slow = Task { await store.refresh() }
+        for _ in 0..<200 where JellyfinRouteStub.requests("GET", base).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        JellyfinRouteStub.delays["GET \(base)"] = 0
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(plex: "marge", entries: [entryJSON(), entryJSON(id: "e2")]))
+
+        await store.refresh()
+        XCTAssertEqual(store.watchlist?.plex?.username, "marge")
+        await slow.value
+
+        XCTAssertEqual(store.watchlist?.plex?.username, "marge", "the older answer landed last and won")
+        XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1", "e2"])
+    }
 }
