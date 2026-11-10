@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Add to List, over a detail page: your lists ("Already on this list" where
-/// the title is), then "New List…". One cover whose content changes, as Add to
+/// Add to List, over a detail page: the Watchlist first (with the plugin, for
+/// movies and shows), then your lists ("Already on this list" where the title
+/// is), then "New List…". A Seerr title, not on the server, goes on the
+/// Watchlist only. One cover whose content changes, as Add to
 /// Channel does, so Menu steps back and focus always has a row to land on.
 struct AddToListView: View {
     @StateObject private var model: AddToListViewModel
@@ -12,13 +14,17 @@ struct AddToListView: View {
         _model = StateObject(wrappedValue: AddToListViewModel(item: item))
     }
 
+    init(seerrTarget: SeerrTarget, year: Int?) {
+        _model = StateObject(wrappedValue: AddToListViewModel(seerrTarget: seerrTarget, year: year))
+    }
+
     var body: some View {
         ZStack {
             SashimiTheme.background.ignoresSafeArea()
             if creating {
                 NewListForm(
                     title: "New List",
-                    subtitle: "Starts with \(model.item.name)",
+                    subtitle: "Starts with \(model.titleName)",
                     confirmTitle: "Create and Add",
                     isWorking: model.isWorking
                 ) { name, isPublic in
@@ -37,6 +43,8 @@ struct AddToListView: View {
         .onExitCommand {
             if creating { creating = false } else { dismiss() }
         }
+        // A full-screen cover hides the app root's toasts: show them here too.
+        .toastOverlay()
         .task { await model.load() }
     }
 
@@ -52,26 +60,28 @@ struct AddToListView: View {
                         .focusable()
                         .focusEffectDisabled()
                 } else {
-                    ForEach(model.choices) { choice in
+                    if let choice = model.watchlist {
                         ChannelChoiceRow(
                             logoKey: nil,
-                            showsLogo: false,
-                            title: choice.list.name,
+                            title: WatchlistText.name,
                             detail: choice.detail,
+                            systemImage: "bookmark",
                             trailing: choice.alreadyOn ? .checkmark : .none,
                             isEnabled: !model.isWorking
                         ) {
-                            add(to: choice)
+                            addToWatchlist(choice)
                         }
+                    } else if !model.offersLists {
+                        // Nothing to choose, but focus needs somewhere to rest.
+                        Text(WatchlistText.onlyWatchlistTakesIt)
+                            .font(Typography.body)
+                            .foregroundStyle(SashimiTheme.textTertiary)
+                            .focusable()
                     }
 
-                    ChannelChoiceRow(
-                        logoKey: nil,
-                        title: "New List…",
-                        systemImage: "plus",
-                        isEnabled: !model.isWorking
-                    ) { creating = true }
-                    .padding(.top, 10)
+                    if model.offersLists {
+                        lists
+                    }
                 }
             }
             .frame(maxWidth: 1100, alignment: .leading)
@@ -82,6 +92,43 @@ struct AddToListView: View {
         .scrollClipDisabled()
     }
 
+    @ViewBuilder
+    private var lists: some View {
+        ForEach(model.choices) { choice in
+            ChannelChoiceRow(
+                logoKey: nil,
+                showsLogo: false,
+                title: choice.list.name,
+                detail: choice.detail,
+                trailing: choice.alreadyOn ? .checkmark : .none,
+                isEnabled: !model.isWorking
+            ) {
+                add(to: choice)
+            }
+        }
+
+        ChannelChoiceRow(
+            logoKey: nil,
+            title: "New List…",
+            systemImage: "plus",
+            isEnabled: !model.isWorking
+        ) { creating = true }
+        .padding(.top, 10)
+    }
+
+    private func addToWatchlist(_ choice: AddToListViewModel.WatchlistChoice) {
+        guard !choice.alreadyOn else {
+            ToastManager.shared.show(choice.detail, type: .info)
+            return
+        }
+        Task {
+            let message = await model.addToWatchlist()
+            ToastManager.shared.show(message, type: message.hasPrefix("Added") ? .success : .info)
+            // A failure stays here to try again, as on iPhone.
+            if message.hasPrefix("Added") { dismiss() }
+        }
+    }
+
     private func add(to choice: AddToListViewModel.Choice) {
         guard !choice.alreadyOn else {
             ToastManager.shared.show("Already on \(choice.list.name)", type: .info)
@@ -90,7 +137,7 @@ struct AddToListView: View {
         Task {
             let message = await model.add(to: choice.list)
             ToastManager.shared.show(message, type: message.hasPrefix("Added") ? .success : .info)
-            dismiss()
+            if message.hasPrefix("Added") { dismiss() }
         }
     }
 }

@@ -225,6 +225,9 @@ final class SessionManager: ObservableObject {
     /// deliberately separate from activeServerId because a detail route can
     /// temporarily use another saved server without changing app chrome.
     private var configuredServerID: String?
+    /// The signed-in account the shared Watchlist store belongs to. Temporary
+    /// server scopes and Add Server probes don't change it.
+    private var watchlistSessionServerID: String?
     private var clientScopeStack = ServerClientScopeStack()
     /// Bumped on every activation and sign-out, so a policy lookup that
     /// returns after the user switched servers cannot grant the new server's
@@ -544,6 +547,12 @@ final class SessionManager: ObservableObject {
     }
 
     private func activate(_ server: ServerConfig, token: String) async {
+        // Another account: the Watchlist forgets the last one's list, card,
+        // Plex link and any held Plex token before a view can read them.
+        if watchlistSessionServerID != server.id {
+            WatchlistStore.shared.reset()
+            watchlistSessionServerID = server.id
+        }
         // Keep the legacy single-server keys in sync for unscoped legacy routes
         // that still read them directly. Multi-server downloads, subtitles, and
         // scoped artwork resolve their own server URL and token explicitly, so
@@ -822,6 +831,7 @@ final class SessionManager: ObservableObject {
                 await JellyfinClient.shared.clearCredentials()
                 configuredServerID = nil
                 await clientConfigurationMutex.unlock()
+                forgetWatchlistSession()
                 self.serverURL = nil
                 self.currentUser = nil
                 clearAdministratorFlag()
@@ -851,6 +861,7 @@ final class SessionManager: ObservableObject {
     /// every request until it was force-quit. Sign-out also silently became
     /// "switch to my other server", which is not what the button says.
     func logout(reason: LogoutReason = .userInitiated) {
+        forgetWatchlistSession()
         self.serverURL = nil
         self.currentUser = nil
         clearAdministratorFlag()
@@ -858,6 +869,12 @@ final class SessionManager: ObservableObject {
         self.reauthServer = nil
         self.isAuthenticated = false
         Task { await teardownSession(reason: reason) }
+    }
+
+    /// Signed out: nothing of the last account's Watchlist stays on screen or in memory.
+    private func forgetWatchlistSession() {
+        WatchlistStore.shared.reset()
+        watchlistSessionServerID = nil
     }
 
     private func teardownSession(reason: LogoutReason) async {

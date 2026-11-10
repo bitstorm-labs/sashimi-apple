@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Add to List for one title: your lists ("Already on this list" where it
-/// is) and "New List…" (name, Public switch).
+/// Add to List for one title: the Watchlist first (with the plugin), then
+/// your lists ("Already on this list" where it is) and "New List…" (name,
+/// Public switch). A Seerr title, not on the server, goes on the Watchlist only.
 struct MobileAddToListSheet: View {
     @StateObject private var model: AddToListViewModel
     @Environment(\.dismiss) private var dismiss
@@ -14,19 +15,23 @@ struct MobileAddToListSheet: View {
         _model = StateObject(wrappedValue: AddToListViewModel(item: item))
     }
 
+    init(seerrTarget: SeerrTarget, year: Int?) {
+        _model = StateObject(wrappedValue: AddToListViewModel(seerrTarget: seerrTarget, year: year))
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {
-                    Section {
-                        ForEach(model.choices) { choice in
+                    if let choice = model.watchlist {
+                        Section {
                             Button {
-                                add(to: choice)
+                                addToWatchlist(choice)
                             } label: {
                                 HStack {
-                                    Text(choice.list.name)
+                                    Label(WatchlistText.name, systemImage: "bookmark")
                                         .foregroundStyle(choice.alreadyOn ? MobileColors.textTertiary : MobileColors.textPrimary)
                                     Spacer()
                                     Text(choice.detail)
@@ -36,24 +41,13 @@ struct MobileAddToListSheet: View {
                             }
                             .disabled(model.isWorking)
                         }
+                    } else if !model.offersLists {
+                        // A Seerr title without the Watchlist plugin: nothing to choose.
+                        Text(WatchlistText.onlyWatchlistTakesIt)
+                            .foregroundStyle(MobileColors.textTertiary)
                     }
-                    Section {
-                        if creating {
-                            TextField("Name", text: $newName)
-                            Toggle("Public", isOn: $isPublic)
-                            Button("Create and Add") { create() }
-                                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || model.isWorking)
-                        } else {
-                            Button {
-                                creating = true
-                            } label: {
-                                Label("New List…", systemImage: "plus")
-                            }
-                        }
-                    } footer: {
-                        if creating {
-                            Text(isPublic ? ListText.publicFootnote : "Only you can see it.")
-                        }
+                    if model.offersLists {
+                        listSections
                     }
                 }
             }
@@ -68,6 +62,60 @@ struct MobileAddToListSheet: View {
         }
         .presentationDetents([.medium, .large])
         .task { await model.load() }
+    }
+
+    @ViewBuilder
+    private var listSections: some View {
+        Section {
+            ForEach(model.choices) { choice in
+                Button {
+                    add(to: choice)
+                } label: {
+                    HStack {
+                        Text(choice.list.name)
+                            .foregroundStyle(choice.alreadyOn ? MobileColors.textTertiary : MobileColors.textPrimary)
+                        Spacer()
+                        Text(choice.detail)
+                            .font(MobileTypography.caption)
+                            .foregroundStyle(MobileColors.textTertiary)
+                    }
+                }
+                .disabled(model.isWorking)
+            }
+        }
+        Section {
+            if creating {
+                TextField("Name", text: $newName)
+                Toggle("Public", isOn: $isPublic)
+                Button("Create and Add") { create() }
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || model.isWorking)
+            } else {
+                Button {
+                    creating = true
+                } label: {
+                    Label("New List…", systemImage: "plus")
+                }
+            }
+        } footer: {
+            if creating {
+                Text(isPublic ? ListText.publicFootnote : "Only you can see it.")
+            }
+        }
+    }
+
+    private func addToWatchlist(_ choice: AddToListViewModel.WatchlistChoice) {
+        guard !choice.alreadyOn else {
+            message = choice.detail
+            return
+        }
+        Task {
+            let result = await model.addToWatchlist()
+            message = result
+            if result.hasPrefix("Added") {
+                try? await Task.sleep(for: .seconds(0.8))
+                dismiss()
+            }
+        }
     }
 
     private func add(to choice: AddToListViewModel.Choice) {

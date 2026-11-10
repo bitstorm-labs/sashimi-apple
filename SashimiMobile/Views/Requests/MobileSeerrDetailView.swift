@@ -7,6 +7,8 @@ import SwiftUI
 struct MobileSeerrDetailView: View {
     @StateObject private var model: SeerrDetailModel
     @State private var seasonPlan: SeerrSeasonPlan?
+    @State private var addingToList = false
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @Environment(\.openURL) private var openURL
     private let opensSeasonPicker: Bool
 
@@ -21,6 +23,10 @@ struct MobileSeerrDetailView: View {
         } else {
             page
                 .task { await loadOnce() }
+                .task { await watchlist.refresh() }
+                .sheet(isPresented: $addingToList) {
+                    MobileAddToListSheet(seerrTarget: model.target, year: model.details?.year)
+                }
                 .sheet(item: $seasonPlan) { plan in
                     MobileSeerrSeasonSheet(title: model.details?.title ?? model.target.title, plan: plan) { chosen in
                         seasonPlan = nil
@@ -174,6 +180,20 @@ struct MobileSeerrDetailView: View {
                     openURL(url)
                 } label: {
                     Label("Trailer", systemImage: "play.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+
+            // Only the Watchlist takes a title the server doesn't have.
+            if watchlist.isAvailable {
+                Button {
+                    addingToList = true
+                } label: {
+                    Label(WatchlistText.addToList, systemImage: "text.badge.plus")
                         .font(.system(size: 15, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)

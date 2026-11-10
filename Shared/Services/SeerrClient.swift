@@ -275,6 +275,43 @@ actor SeerrClient {
     }
 }
 
+/// The one plex.tv device identity per install, shared by Requests sign-in and
+/// Connect Plex so plex.tv lists a single "Sashimi" device.
+enum PlexClientIdentity {
+    private static let key = "seerr.plexClientIdentifier"
+
+    static func identifier(defaults: UserDefaults) -> String {
+        if let saved = defaults.string(forKey: key) { return saved }
+        let new = UUID().uuidString
+        defaults.set(new, forKey: key)
+        return new
+    }
+}
+
+extension PlexPinClient {
+    /// Polls the PIN until the person links it. Nil on cancel, on the deadline,
+    /// or once `isWaiting` turns false. `onCheck` runs as each check starts.
+    /// The deadline is a continuous clock, which keeps running while the app
+    /// is suspended, so the PIN is always checked once more after it passes:
+    /// a link made while the app slept still counts.
+    func waitForToken(pinId: Int, deadline: ContinuousClock.Instant, interval: Duration,
+                      isWaiting: @MainActor () -> Bool, onCheck: @MainActor () -> Void = {}) async -> String? {
+        while await isWaiting() {
+            if Task.isCancelled { return nil }
+            let isLastCheck = ContinuousClock.now >= deadline
+            await onCheck()
+            if let token = try? await checkPin(id: pinId).authToken, !token.isEmpty { return token }
+            if isLastCheck { return nil }
+            if interval > .zero {
+                try? await Task.sleep(for: interval)
+            } else {
+                await Task.yield()
+            }
+        }
+        return nil
+    }
+}
+
 /// Plex's PIN sign-in (what the Plex apps use): the TV shows a short code for
 /// plex.tv/link, the phone opens Plex's sign-in page; either way the PIN is
 /// polled until it carries the person's Plex token, which is handed to Seerr

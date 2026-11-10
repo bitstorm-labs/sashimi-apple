@@ -56,48 +56,6 @@ final class SeerrMobileTests: XCTestCase {
         XCTAssertFalse(first.contains("forwardUrl"), "Plex rejects a sashimi:// forwardUrl")
     }
 
-    /// Plex never sends the browser back, so the poll closes the page.
-    func testPlexWebSignInClosesThePageWhenThePollFinishes() async {
-        var pageClosed: CheckedContinuation<Void, Never>?
-        var closes = 0
-        var cancelled = false
-
-        await PlexWebSignIn.run(
-            poll: { await Task.yield() },
-            showPage: { await withCheckedContinuation { pageClosed = $0 } },
-            closePage: { closes += 1; pageClosed?.resume(); pageClosed = nil },
-            isWaiting: { false },
-            cancelWaiting: { cancelled = true },
-            grace: .zero
-        )
-
-        XCTAssertEqual(closes, 1)
-        XCTAssertFalse(cancelled, "a finished poll isn't called off")
-    }
-
-    /// The person closed the page without signing in: the poll is called off
-    /// after the grace period instead of waiting 15 minutes.
-    func testPlexWebSignInCallsOffThePollWhenThePageIsClosedFirst() async {
-        var waiting = true
-        var pollCancelled = false
-
-        await PlexWebSignIn.run(
-            poll: {
-                while !Task.isCancelled { await Task.yield() }
-                pollCancelled = true
-            },
-            showPage: {},
-            closePage: {},
-            isWaiting: { waiting },
-            cancelWaiting: { waiting = false },
-            grace: .zero
-        )
-        for _ in 0..<100 where !pollCancelled { await Task.yield() }
-
-        XCTAssertFalse(waiting)
-        XCTAssertTrue(pollCancelled)
-    }
-
     func testTrailersOpenYouTubeOnTheWeb() {
         XCTAssertEqual(SeerrTrailer.url(key: "abc123")?.absoluteString, "https://www.youtube.com/watch?v=abc123")
     }

@@ -1,0 +1,94 @@
+import XCTest
+@testable import Sashimi
+
+/// Answers "METHOD /path" from a table and records every request with its body.
+final class JellyfinRouteStub: URLProtocol {
+    struct Recorded {
+        let method: String
+        let path: String
+        let query: [String: String]
+        let body: Data?
+    }
+
+    nonisolated(unsafe) static var routes: [String: (Int, String)] = [:]
+    /// Answers given in turn, before `routes`; the last one repeats.
+    nonisolated(unsafe) static var sequences: [String: [(Int, String)]] = [:]
+    /// Seconds to hold the answer to "METHOD /path", so a test can change state while a call is in flight.
+    nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
+    /// "METHOD /path" routes that fail at the transport level (no response).
+    nonisolated(unsafe) static var transportFailures: Set<String> = []
+    nonisolated(unsafe) static var recorded: [Recorded] = []
+    private static let lock = NSLock()
+
+    /// Clears every static; call from each test class's setUp.
+    static func reset() {
+        lock.withLock {
+            routes = [:]
+            sequences = [:]
+            delays = [:]
+            transportFailures = []
+            recorded = []
+        }
+    }
+
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url ?? URL(fileURLWithPath: "/")
+        let method = request.httpMethod ?? "GET"
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var query: [String: String] = [:]
+        for item in components?.queryItems ?? [] { query[item.name] = item.value }
+        let body = request.httpBody ?? request.httpBodyStream.map(Self.read)
+        let delay = Self.lock.withLock { Self.delays["\(method) \(url.path)"] ?? 0 }
+        if Self.lock.withLock({ Self.transportFailures.contains("\(method) \(url.path)") }) {
+            Self.lock.withLock {
+                Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
+            }
+            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            return
+        }
+        let (status, text) = Self.lock.withLock {
+            Self.recorded.append(Recorded(method: method, path: url.path, query: query, body: body))
+            let key = "\(method) \(url.path)"
+            if var answers = Self.sequences[key], let first = answers.first {
+                if answers.count > 1 { answers.removeFirst() }
+                Self.sequences[key] = answers
+                return first
+            }
+            return Self.routes[key] ?? (404, "")
+        }
+        let answer = { [self] in
+            if let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            client?.urlProtocol(self, didLoad: Data(text.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        if delay > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { answer() }
+        } else {
+            answer()
+        }
+    }
+
+    override func stopLoading() {}
+
+    private static func read(_ stream: InputStream) -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
+    static func requests(_ method: String, _ path: String) -> [Recorded] {
+        lock.withLock { recorded.filter { $0.method == method && $0.path == path } }
+    }
+}

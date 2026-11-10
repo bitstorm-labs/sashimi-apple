@@ -57,6 +57,7 @@ struct SashimiApp: App {
                 #if DEBUG
                 guard SeerrDemo.screen == nil else { return }
                 #endif
+                SeerrSession.shared.plexTokenObserver = { token in await WatchlistStore.shared.autoLink(token: token) }
                 await SeerrSession.shared.restore()
             }
         }
@@ -115,6 +116,9 @@ struct ContentView: View {
                     deepLinkCovering: deepLinkDestination != nil,
                     deepLinkDismissals: deepLinkDismissals
                 )
+                // A Connect Plex the app was relaunched in the middle of; again
+                // for each signed-in session (a server switch).
+                .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
                 .id(sessionManager.activeSessionIdentity)
             } else {
                 ServerConnectionView(

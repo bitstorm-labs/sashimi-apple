@@ -62,6 +62,16 @@ final class SeerrSession: ObservableObject {
     @Published private(set) var partialRequestsEnabled = true
     @Published private(set) var localLoginEnabled = true
     @Published var errorMessage: String?
+    /// Handed the Plex token once a Plex sign-in has succeeded, so the
+    /// Watchlist can link the same account. It runs in the background and
+    /// never delays or fails sign-in; its outcome never changes this
+    /// session's state or messages. The token is not kept.
+    var plexTokenObserver: (@MainActor (_ token: String) async -> Void)?
+    #if DEBUG
+    /// The most recent hand-off to `plexTokenObserver`, so tests can wait for
+    /// it. Debug builds only; nothing waits on it.
+    private(set) var lastPlexTokenHandOff: Task<Void, Never>?
+    #endif
     /// Bumped after a request is sent or cancelled, so open lists reload.
     @Published private(set) var requestsRevision = 0
 
@@ -69,6 +79,10 @@ final class SeerrSession: ObservableObject {
     private let defaults: UserDefaults
     private let credentials: SeerrCredentialStore
     private let pollInterval: Duration
+    private let plexPinLifetime: Duration
+    /// How many PIN checks have started, so Plex's web page can give the poll
+    /// one more after it closes.
+    private(set) var plexPinChecks = 0
     private var plexWait: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "SeerrSession")
 
@@ -78,13 +92,14 @@ final class SeerrSession: ObservableObject {
         static let userName = "seerr.user.name"
         static let permissions = "seerr.user.permissions"
         static let title = "seerr.applicationTitle"
-        static let plexClientId = "seerr.plexClientIdentifier"
     }
 
-    init(defaults: UserDefaults, credentials: SeerrCredentialStore, pollInterval: Duration) {
+    init(defaults: UserDefaults, credentials: SeerrCredentialStore, pollInterval: Duration,
+         plexPinLifetime: Duration = .seconds(15 * 60)) {
         self.defaults = defaults
         self.credentials = credentials
         self.pollInterval = pollInterval
+        self.plexPinLifetime = plexPinLifetime
         serverURL = defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
         applicationTitle = defaults.string(forKey: Keys.title) ?? "Seerr"
     }
@@ -209,19 +224,17 @@ final class SeerrSession: ObservableObject {
     /// token for a Seerr session. Ends on cancel, on expiry (15 minutes), or
     /// on sign-in.
     func completePlexSignIn(pin: PlexPin) async {
-        let deadline = ContinuousClock.now + .seconds(15 * 60)
-        while state == .awaitingPlex(code: pin.code), ContinuousClock.now < deadline {
-            if Task.isCancelled { return }
-            if let token = try? await plexClient.checkPin(id: pin.id).authToken, !token.isEmpty {
-                await exchangePlexToken(token)
-                return
-            }
-            if pollInterval > .zero {
-                try? await Task.sleep(for: pollInterval)
-            } else {
-                await Task.yield()
-            }
+        let deadline = ContinuousClock.now + plexPinLifetime
+        let token = await plexClient.waitForToken(
+            pinId: pin.id, deadline: deadline, interval: pollInterval,
+            isWaiting: { self.state == .awaitingPlex(code: pin.code) },
+            onCheck: { self.plexPinChecks += 1 }
+        )
+        if let token {
+            await exchangePlexToken(token)
+            return
         }
+        if Task.isCancelled { return }
         if state == .awaitingPlex(code: pin.code) {
             state = .notConfigured
             errorMessage = "The Plex code expired. Try again."
@@ -257,6 +270,14 @@ final class SeerrSession: ObservableObject {
             let result = try await client.signInWithPlex(authToken: token)
             signedIn(result.user, cookie: result.cookie, client: client)
             await refreshPublicSettings()
+            if let observer = plexTokenObserver {
+                let handOff = Task { @MainActor in await observer(token) }
+                #if DEBUG
+                lastPlexTokenHandOff = handOff
+                #else
+                _ = handOff
+                #endif
+            }
         } catch {
             state = .notConfigured
             errorMessage = (error as? SeerrError) == .invalidCredentials
@@ -268,13 +289,8 @@ final class SeerrSession: ObservableObject {
     private var plexClient: PlexPinClient { PlexPinClient(clientIdentifier: plexClientIdentifier) }
 
     /// Stable per install, so plex.tv lists one "Sashimi" device, not one per
-    /// sign-in.
-    private var plexClientIdentifier: String {
-        if let saved = defaults.string(forKey: Keys.plexClientId) { return saved }
-        let new = UUID().uuidString
-        defaults.set(new, forKey: Keys.plexClientId)
-        return new
-    }
+    /// sign-in (shared with Connect Plex).
+    private var plexClientIdentifier: String { PlexClientIdentity.identifier(defaults: defaults) }
 
     // MARK: Sign out and expiry
 

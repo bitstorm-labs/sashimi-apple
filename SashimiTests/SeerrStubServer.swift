@@ -27,12 +27,30 @@ final class SeerrStubServer: URLProtocol {
     nonisolated(unsafe) private static var routes: [String: [Reply]] = [:]
     nonisolated(unsafe) private static var recorded: [Recorded] = []
     private static let lock = NSLock()
+    /// Seconds to hold every title-details answer (GET /api/v1/movie|tv/{id}), so a
+    /// test can watch how many are in flight at once. Zero answers at once.
+    nonisolated(unsafe) static var detailsDelay: TimeInterval = 0
+    /// Seconds to hold the answer to "METHOD /path" (other than title details).
+    nonisolated(unsafe) static var delays: [String: TimeInterval] = [:]
+    nonisolated(unsafe) private static var detailsInFlight = 0
+    nonisolated(unsafe) private static var detailsPeak = 0
+
+    /// The most title-details requests that were open at the same time since `reset()`.
+    static var peakDetailsInFlight: Int { lock.withLock { detailsPeak } }
 
     static func reset() {
         lock.withLock {
             routes = [:]
             recorded = []
+            detailsDelay = 0
+            delays = [:]
+            detailsInFlight = 0
+            detailsPeak = 0
         }
+    }
+
+    private static func isDetails(_ method: String, _ path: String) -> Bool {
+        method == "GET" && (path.hasPrefix("/api/v1/movie/") || path.hasPrefix("/api/v1/tv/"))
     }
 
     /// Queue a reply. Several replies for one route are answered in order and
@@ -51,6 +69,11 @@ final class SeerrStubServer: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    /// The held-back reply of a delayed details request; cancelled if the request is.
+    private var delayedReply: DispatchWorkItem?
+    /// The held-back reply of a request delayed through `delays`.
+    private var delayedRouteReply: DispatchWorkItem?
 
     override func startLoading() {
         let url = request.url ?? URL(fileURLWithPath: "/")
@@ -75,14 +98,48 @@ final class SeerrStubServer: URLProtocol {
         }
         var headers = reply.headers
         headers["Content-Type"] = headers["Content-Type"] ?? "application/json"
-        if let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: headers) {
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        let answer = { [self] in
+            if let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: headers) {
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
         }
-        client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let routeDelay = Self.lock.withLock { Self.delays["\(method) \(url.path)"] ?? 0 }
+        if routeDelay > 0, !Self.isDetails(method, url.path) {
+            let work = DispatchWorkItem { answer() }
+            Self.lock.withLock { delayedRouteReply = work }
+            DispatchQueue.global().asyncAfter(deadline: .now() + routeDelay, execute: work)
+            return
+        }
+        let delay = Self.lock.withLock { Self.isDetails(method, url.path) ? Self.detailsDelay : 0 }
+        guard delay > 0 else { return answer() }
+        Self.lock.withLock {
+            Self.detailsInFlight += 1
+            Self.detailsPeak = max(Self.detailsPeak, Self.detailsInFlight)
+        }
+        let work = DispatchWorkItem { [self] in
+            leaveDetails()
+            answer()
+        }
+        Self.lock.withLock { delayedReply = work }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    override func stopLoading() {}
+    /// Leaves the in-flight count once, whether the reply was sent or cancelled.
+    private func leaveDetails() {
+        let counted = Self.lock.withLock { () -> Bool in
+            defer { delayedReply = nil }
+            return delayedReply != nil
+        }
+        if counted { Self.lock.withLock { Self.detailsInFlight -= 1 } }
+    }
+
+    override func stopLoading() {
+        Self.lock.withLock { delayedRouteReply }?.cancel()
+        Self.lock.withLock { delayedReply }?.cancel()
+        leaveDetails()
+    }
 
     private static func read(_ stream: InputStream) -> Data {
         stream.open()

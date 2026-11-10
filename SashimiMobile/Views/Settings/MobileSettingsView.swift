@@ -6,6 +6,7 @@ struct MobileSettingsView: View {
     @StateObject private var serverPlugins = ServerPluginsViewModel()
     @StateObject private var quickConnectApproval = QuickConnectApprovalViewModel()
     @ObservedObject private var seerr = SeerrSession.shared
+    @StateObject private var plexSettings = PlexSettingsModel()
 
     /// Same list as the tvOS LanguagePickerView.
     private static let languages: [(code: String, name: String)] = [
@@ -75,6 +76,10 @@ struct MobileSettingsView: View {
                     }
                 }
             }
+
+            // Settings › Plex: keeps the Watchlist in sync with Plex. Hidden
+            // without the Watchlist plugin; needs nothing from Requests.
+            MobilePlexSettingsSection(model: plexSettings)
 
             // Servers (multi-server switcher; swipe to remove)
             Section("Servers") {
@@ -258,6 +263,9 @@ struct MobileSettingsView: View {
         }
         .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
             await quickConnectApproval.refreshAvailability()
+        }
+        .task(id: ServerPluginsViewModel.key(for: sessionManager)) {
+            await plexSettings.load()
         }
         .confirmationDialog("Delete All Downloads?", isPresented: $showingDeleteAllDownloads) {
             Button("Delete All", role: .destructive) {

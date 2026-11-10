@@ -139,6 +139,9 @@ struct ContentView: View {
                         )
                     }
                 }
+                // A Connect Plex the app was killed in the middle of, in its
+                // own task so it never holds up the download sync below.
+                .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
                 .id(sessionManager.activeSessionIdentity)
                 .task {
                     // Re-runs on a server switch (the id above), which starts
@@ -183,6 +186,7 @@ struct ContentView: View {
                 #if DEBUG
                 guard SeerrDemo.screen == nil else { return }
                 #endif
+                SeerrSession.shared.plexTokenObserver = { token in await WatchlistStore.shared.autoLink(token: token) }
                 await SeerrSession.shared.restore()
             }
             await sessionManager.restoreSession()

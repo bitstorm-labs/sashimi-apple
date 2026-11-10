@@ -12,6 +12,8 @@ struct AsyncItemImage: View {
     /// or a child such as the episode whose series backdrop is shown). Each
     /// fallback type gets its own tag, so a changed server image busts the cache.
     var tagSource: BaseItemDto?
+    /// Called once every image type has failed, so a caller can show something else.
+    var onLoadFailed: (() -> Void)?
 
     @State private var currentTypeIndex: Int = 0
     @State private var loadFailed: Bool = false
@@ -73,6 +75,7 @@ struct AsyncItemImage: View {
             attemptId = UUID()
         } else {
             loadFailed = true
+            onLoadFailed?()
         }
     }
 

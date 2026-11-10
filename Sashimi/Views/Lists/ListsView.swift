@@ -8,7 +8,12 @@ struct ListsView: View {
 
     @StateObject private var model = ListsPageViewModel()
     @ObservedObject private var store = SharedListsStore.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @State private var openList: SharedList?
+    @State private var openWatchlist = false
+    /// The Watchlist has been asked for once, so the first card (which takes
+    /// default focus) is known before the cards appear.
+    @State private var watchlistChecked = false
     @State private var creating = false
 
     private let columns = Array(repeating: GridItem(.fixed(400), spacing: 50, alignment: .top), count: 4)
@@ -41,13 +46,28 @@ struct ListsView: View {
         .fullScreenCover(item: $openList) { list in
             ListDetailView(list: list)
         }
+        .fullScreenCover(isPresented: $openWatchlist) {
+            WatchlistPageView()
+        }
         .onChange(of: openList) { old, new in
-            if old != nil && new == nil { Task { await model.load() } }
+            if old != nil && new == nil { Task { await reload() } }
+        }
+        .onChange(of: openWatchlist) { old, new in
+            if old && !new { Task { await reload() } }
         }
         .onExitCommand {
             if creating { creating = false } else { onBackAtRoot?() }
         }
-        .task { await model.load() }
+        .task {
+            await reload()
+            watchlistChecked = true
+        }
+    }
+
+    private func reload() async {
+        async let watchlistLoad: Void = watchlist.refresh()
+        await model.load()
+        await watchlistLoad
     }
 
     private var page: some View {
@@ -57,7 +77,7 @@ struct ListsView: View {
                     .font(Typography.displayMedium)
                     .foregroundStyle(SashimiTheme.textPrimary)
 
-                if model.isLoading {
+                if model.isLoading || !watchlistChecked {
                     // Something focusable while loading, or focus falls back
                     // to the rail's first row and takes the selection with it.
                     ProgressView()
@@ -80,14 +100,20 @@ struct ListsView: View {
             sectionTitle("Your lists")
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 50) {
+                    // The Watchlist comes first and takes default focus (index 0).
+                    let watchlistCard = watchlist.card
+                    if let watchlistCard {
+                        WatchlistCardButton(card: watchlistCard) { openWatchlist = true }
+                            .listsDefaultFocus(in: focusNamespace)
+                    }
                     ForEach(Array(model.mine.enumerated()), id: \.element.id) { index, card in
                         ListCardButton(card: card, isOwn: true, isSubscribed: store.isSubscribed(card.id)) {
                             openList = card.list
                         }
-                        .listsDefaultFocus(in: index == 0 ? focusNamespace : nil)
+                        .listsDefaultFocus(in: index == 0 && watchlistCard == nil ? focusNamespace : nil)
                     }
                     NewListCard { creating = true }
-                        .listsDefaultFocus(in: model.mine.isEmpty ? focusNamespace : nil)
+                        .listsDefaultFocus(in: model.mine.isEmpty && watchlistCard == nil ? focusNamespace : nil)
                 }
                 .padding(.vertical, 20)
             }
@@ -169,6 +195,78 @@ struct ListCardButton: View {
         .buttonStyle(PlainNoHighlightButtonStyle())
         .focused($isFocused)
         .accessibilityLabel("\(card.list.name), \(card.subtitle(isOwn: isOwn))")
+    }
+}
+
+/// The Watchlist's card, first under "Your lists": the same frame as a list's.
+struct WatchlistCardButton: View {
+    let card: WatchlistCardInfo
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                WatchlistCover(cover: card.cover)
+                    .frame(width: 400, height: 225)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(isFocused ? SashimiTheme.focus : .clear, lineWidth: 4)
+                    )
+                    .shadow(color: isFocused ? SashimiTheme.focusGlow : .clear, radius: 16)
+                Label(WatchlistText.name, systemImage: "bookmark.fill")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(SashimiTheme.textPrimary)
+                    .lineLimit(1)
+                Text(card.subtitle)
+                    .font(.system(size: 20))
+                    .foregroundStyle(SashimiTheme.textSecondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 400, alignment: .leading)
+            .scaleEffect(isFocused ? 1.04 : 1)
+            .animation(Animation.focusSpring, value: isFocused)
+        }
+        .buttonStyle(PlainNoHighlightButtonStyle())
+        .focused($isFocused)
+        .accessibilityLabel("\(WatchlistText.name), \(card.subtitle)")
+    }
+}
+
+/// The Watchlist's first four posters as a 2x2 collage, or the first alone.
+private struct WatchlistCover: View {
+    let cover: [WatchlistArtwork]
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                SashimiTheme.cardBackground
+                if cover.count == 4 {
+                    let cell = CGSize(width: geometry.size.width / 2, height: geometry.size.height / 2)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { row in
+                            HStack(spacing: 0) {
+                                ForEach(0..<2, id: \.self) { column in
+                                    WatchlistArtworkImage(artwork: cover[row * 2 + column], title: "", width: cell.width)
+                                        .frame(width: cell.width, height: cell.height)
+                                        .clipped()
+                                }
+                            }
+                        }
+                    }
+                } else if let first = cover.first {
+                    WatchlistArtworkImage(artwork: first, title: "", width: geometry.size.width)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 60))
+                        .foregroundStyle(SashimiTheme.textTertiary)
+                }
+            }
+        }
     }
 }
 
