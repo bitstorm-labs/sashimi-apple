@@ -66,6 +66,8 @@ struct WatchlistPageView: View {
         }
         .task { await model.load() }
         .resumingPlexConnect()
+        // A full-screen cover hides the app root's toasts: show them here too.
+        .toastOverlay()
         .onDisappear { model.cancelLookups() }
         .onChange(of: model.isGone) { _, gone in
             if gone { dismiss() }

@@ -47,6 +47,8 @@ final class ToastManager: ObservableObject {
     static let shared = ToastManager()
 
     @Published var currentToast: ToastMessage?
+    /// Toast overlays on screen, oldest first.
+    @Published private(set) var hosts: [UUID] = []
 
     private var dismissTask: Task<Void, Never>?
 
@@ -65,6 +67,23 @@ final class ToastManager: ObservableObject {
             }
         }
     }
+
+    // MARK: Overlay hosts
+
+    /// Registers a toast overlay that has appeared (the app root, or a
+    /// full-screen cover's own overlay).
+    func registerHost(_ id: UUID) {
+        hosts.removeAll { $0 == id }
+        hosts.append(id)
+    }
+
+    func unregisterHost(_ id: UUID) {
+        hosts.removeAll { $0 == id }
+    }
+
+    /// Only the most recently shown overlay draws the toast, so one inside a
+    /// full-screen cover shows it above the cover and it is never drawn twice.
+    func isTopHost(_ id: UUID) -> Bool { hosts.last == id }
 
     func dismiss() {
         dismissTask?.cancel()
@@ -112,11 +131,14 @@ struct ToastView: View {
 
 struct ToastModifier: ViewModifier {
     @ObservedObject var toastManager = ToastManager.shared
+    @State private var hostId = UUID()
 
     func body(content: Content) -> some View {
         content
+            .onAppear { toastManager.registerHost(hostId) }
+            .onDisappear { toastManager.unregisterHost(hostId) }
             .overlay(alignment: .top) {
-                if let toast = toastManager.currentToast {
+                if let toast = toastManager.currentToast, toastManager.isTopHost(hostId) {
                     ToastView(toast: toast, onDismiss: { toastManager.dismiss() })
                         .padding(.top, 40)
                         .transition(.asymmetric(
@@ -131,6 +153,9 @@ struct ToastModifier: ViewModifier {
 }
 
 extension View {
+    /// Shows `ToastManager`'s toasts. The app root has one; a full-screen
+    /// cover that raises toasts adds its own, since the root's is drawn under
+    /// every cover. Only the topmost one draws.
     func toastOverlay() -> some View {
         modifier(ToastModifier())
     }

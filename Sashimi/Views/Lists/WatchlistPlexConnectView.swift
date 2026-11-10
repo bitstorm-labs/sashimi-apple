@@ -42,6 +42,8 @@ struct WatchlistPlexConnectView: View {
             }
         }
         .onExitCommand { close() }
+        // A full-screen cover hides the app root's toasts: show them here too.
+        .toastOverlay()
     }
 
     @ViewBuilder

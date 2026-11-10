@@ -163,6 +163,23 @@ final class WatchlistPageViewModelTests: XCTestCase {
         XCTAssertEqual(model.tiles.filter { $0.missingTag == .requested }.count, 40)
     }
 
+    /// A missing title saved without a poster gets Requests' poster once
+    /// Requests has looked it up, instead of staying a blank tile.
+    func testAMissingTitleWithoutAPosterUsesRequestsPosterOnceKnown() async throws {
+        serve([entryJSON("a", tmdb: 1)])
+        let session = await signedInSeerr()
+        SeerrStubServer.on("GET", "/api/v1/movie/1",
+                           body: "{\"id\":1,\"title\":\"T1\",\"posterPath\":\"/p1.jpg\",\"mediaInfo\":{\"status\":2}}")
+        let model = try makeModel(seerr: session)
+        await model.load()
+        XCTAssertEqual(try tile(model, 0).artwork, .none)
+
+        model.tiles.forEach(model.tileAppeared)
+        await model.waitForLookups()
+
+        XCTAssertEqual(try tile(model, 0).artwork, .remote(try XCTUnwrap(SeerrImages.poster("/p1.jpg"))))
+    }
+
     func testATitleIsLookedUpOnceAcrossReloads() async throws {
         serve([entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])
         let fake = CountingLookup()

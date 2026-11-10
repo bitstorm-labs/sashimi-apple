@@ -27,6 +27,8 @@ struct SeerrDetailView: View {
             MediaDetailView(item: libraryItem)
         } else {
             page
+                // Always a full-screen cover, which hides the app root's toasts.
+                .toastOverlay()
                 .task { await loadOnce() }
                 // Whether the Watchlist exists decides Add to List.
                 .task { await watchlist.refresh() }

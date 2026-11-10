@@ -43,6 +43,8 @@ struct AddToListView: View {
         .onExitCommand {
             if creating { creating = false } else { dismiss() }
         }
+        // A full-screen cover hides the app root's toasts: show them here too.
+        .toastOverlay()
         .task { await model.load() }
     }
 

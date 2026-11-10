@@ -7,6 +7,8 @@ struct WatchlistTile: Identifiable, Equatable {
     let libraryItem: BaseItemDto?
     /// Nil exactly when `libraryItem` is non-nil.
     let missingTag: Watchlist.MissingTag?
+    /// Requests' poster for a missing title, once it has been looked up.
+    var seerrPoster: URL?
 
     var id: String { entry.id }
     var isMissing: Bool { libraryItem == nil }
@@ -286,7 +288,11 @@ final class WatchlistPageViewModel: ObservableObject {
                 info = answer
             }
             let badge = info.map { SeerrBadge(mediaInfo: $0, userId: userId) }
-            return WatchlistTile(entry: entry, libraryItem: nil, missingTag: Watchlist.missingTag(badge: badge))
+            let poster = signedIn ? Watchlist.seerrTarget(for: entry)
+                .flatMap { Self.titleCache.entry(for: $0)?.posterPath }
+                .flatMap { SeerrImages.poster($0) } : nil
+            return WatchlistTile(entry: entry, libraryItem: nil, missingTag: Watchlist.missingTag(badge: badge),
+                                 seerrPoster: poster)
         }
     }
 

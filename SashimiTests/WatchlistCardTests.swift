@@ -52,7 +52,21 @@ final class WatchlistCardTests: XCTestCase {
                        entry("4", itemId: "lib4"), entry("5", itemId: "lib5")]
         let card = WatchlistCardInfo(list(entries: entries))
         XCTAssertEqual(card.cover, [.library(itemId: "lib1", fallback: URL(string: poster)),
-                                    .remote(try XCTUnwrap(URL(string: poster))), .none, .library(itemId: "lib4")])
+                                    .remote(try XCTUnwrap(URL(string: poster))), .library(itemId: "lib4"),
+                                    .library(itemId: "lib5")], "a title with no artwork is skipped")
+    }
+
+    /// The newest title has no artwork: the cover uses the next ones, not a blank.
+    func testTheCoverSkipsTitlesWithoutArtwork() throws {
+        let poster = "https://image.tmdb.org/t/p/w342/a.jpg"
+        let card = WatchlistCardInfo(list(entries: [entry("1"), entry("2", poster: poster)]))
+        XCTAssertEqual(card.cover, [.remote(try XCTUnwrap(URL(string: poster)))])
+    }
+
+    /// Nothing has artwork: an empty cover, which both apps draw as the bookmark.
+    func testACoverWithNoArtworkAtAllIsEmpty() {
+        let card = WatchlistCardInfo(list(entries: [entry("1"), entry("2")]))
+        XCTAssertEqual(card.cover, [])
     }
 
     /// The card can't tell whether the server still has an item: its saved

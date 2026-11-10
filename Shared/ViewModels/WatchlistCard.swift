@@ -29,24 +29,25 @@ enum WatchlistArtwork: Equatable {
 
 extension WatchlistTile {
     /// The page has looked the title up: an id the server no longer has falls
-    /// back to the saved poster.
+    /// back to the saved poster, and a title saved without one to Requests'.
     var artwork: WatchlistArtwork {
         if let item = libraryItem { return .library(itemId: item.id) }
-        return entry.posterURL.map(WatchlistArtwork.remote) ?? .none
+        return (entry.posterURL ?? seerrPoster).map(WatchlistArtwork.remote) ?? .none
     }
 }
 
 /// The Watchlist's card on the Lists page.
 struct WatchlistCardInfo: Equatable {
     let subtitle: String
-    /// The first four titles' posters.
+    /// The posters of the first four titles that have one; empty when none
+    /// do (both apps then draw the bookmark).
     let cover: [WatchlistArtwork]
 
     init(_ list: WatchlistResponse) {
         var subtitle = WatchlistText.summary(count: list.entries.count)
         if let plex = list.plex, !plex.needsReconnect { subtitle += " · \(WatchlistText.synced)" }
         self.subtitle = subtitle
-        cover = list.entries.prefix(4).map(WatchlistArtwork.init(entry:))
+        cover = Array(list.entries.lazy.map(WatchlistArtwork.init(entry:)).filter { $0 != .none }.prefix(4))
     }
 }
 
