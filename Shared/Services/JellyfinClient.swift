@@ -406,11 +406,21 @@ final class SustainedBandwidthProbe: NSObject, URLSessionDataDelegate, @unchecke
         config.urlCache = nil
         config.protocolClasses = JellyfinClient.testURLProtocolClasses + (config.protocolClasses ?? [])
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        let result = await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
-            lock.lock()
-            continuation = cont
-            lock.unlock()
-            session.dataTask(with: request).resume()
+        // Cancelling the probe task (a server switch replaces it) stops the
+        // download at once. It used to run on, up to 25 MB, to its timeout.
+        let result = await withTaskCancellationHandler {
+            await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
+                lock.lock()
+                continuation = cont
+                lock.unlock()
+                if Task.isCancelled {
+                    complete(with: Outcome(bitsPerSecond: nil, bytesReceived: 0))
+                } else {
+                    session.dataTask(with: request).resume()
+                }
+            }
+        } onCancel: {
+            session.invalidateAndCancel()
         }
         session.invalidateAndCancel()
         return result

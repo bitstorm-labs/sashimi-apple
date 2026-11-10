@@ -279,6 +279,8 @@ targets:
         DEVELOPMENT_TEAM: S6WU9SVVDW
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
+        # Registers TestHygiene, which runs after every test case.
+        INFOPLIST_KEY_NSPrincipalClass: TestHygiene
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Sashimi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sashimi"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
