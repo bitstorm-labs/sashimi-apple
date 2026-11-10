@@ -201,6 +201,7 @@ struct WatchlistPageView: View {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 50) {
                 ForEach(model.tiles) { tile in
                     tileButton(tile)
+                        .opacity(model.isRemoving(tile) ? 0.4 : 1)
                         .onAppear { model.tileAppeared(tile) }
                 }
             }

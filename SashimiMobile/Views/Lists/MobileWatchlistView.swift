@@ -174,6 +174,8 @@ struct MobileWatchlistView: View {
             LazyVGrid(columns: columns, alignment: .leading, spacing: MobileSpacing.md) {
                 ForEach(model.tiles) { tile in
                     tileLink(tile)
+                        .opacity(model.isRemoving(tile) ? 0.4 : 1)
+                        .disabled(model.isRemoving(tile))
                         .onAppear { model.tileAppeared(tile) }
                 }
             }

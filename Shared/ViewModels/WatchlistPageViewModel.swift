@@ -49,6 +49,8 @@ final class WatchlistPageViewModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var failed = false
     @Published private(set) var isGone = false
+    /// Tiles whose remove is on its way.
+    @Published private(set) var removingIds = Set<String>()
 
     private let store: WatchlistStore
     private let service: WatchlistService
@@ -68,6 +70,9 @@ final class WatchlistPageViewModel: ObservableObject {
     private var queriedIds: [String]?
     /// Bumped by each library query, so an older one that answers late is dropped.
     private var libraryGeneration = 0
+    /// Removed on the server, but still in the store's last answer (its reload
+    /// failed or hasn't come back): kept off the grid until the server agrees.
+    private var removedIds = Set<String>()
 
     init(store: WatchlistStore = .shared, service: WatchlistService = WatchlistService(),
          seerr: SeerrSession = .shared, lookup: RequestedLookup? = nil) {
@@ -187,9 +192,19 @@ final class WatchlistPageViewModel: ObservableObject {
         await store.unlink()
     }
 
+    /// True while this tile's remove is on its way: the view dims it.
+    func isRemoving(_ tile: WatchlistTile) -> Bool { removingIds.contains(tile.id) }
+
+    /// False only when the server didn't remove it. A second tap while the
+    /// first is on its way is ignored. Once the server has removed it, the
+    /// tile goes even if the reload after it fails.
     func remove(_ tile: WatchlistTile) async -> Bool {
+        guard removingIds.insert(tile.id).inserted else { return true }
+        defer { removingIds.remove(tile.id) }
         guard await store.remove(tile.entry) else { return false }
+        removedIds.insert(tile.id)
         await followEntries(store.watchlist?.entries ?? [])
+        rebuildTiles() // in case a newer lookup took over: the tile still goes now
         return true
     }
 
@@ -238,7 +253,9 @@ final class WatchlistPageViewModel: ObservableObject {
     }
 
     private func rebuildTiles() {
-        let entries = store.watchlist?.entries ?? []
+        let all = store.watchlist?.entries ?? []
+        removedIds.formIntersection(all.map(\.id)) // the server's list agrees: forget them
+        let entries = all.filter { !removedIds.contains($0.id) }
         let userId = seerr.state.user?.id
         let signedIn = seerr.client != nil
         tiles = entries.map { entry in

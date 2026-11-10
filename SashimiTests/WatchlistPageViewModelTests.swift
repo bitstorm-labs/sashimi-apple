@@ -431,6 +431,96 @@ extension WatchlistPageViewModelTests {
     }
 }
 
+// MARK: Removing titles
+
+extension WatchlistPageViewModelTests {
+    /// Two quick removes, the first fails: nothing is lost, moved or doubled.
+    func testAFailedRemoveLeavesEveryTitleInItsPlaceAndALaterRemoveRemovesOnlyItsOwn() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2), entryJSON("c", tmdb: 3)])),
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("c", tmdb: 3)]))
+        ]
+        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (500, "")
+        JellyfinRouteStub.routes["DELETE \(base)/Items/b"] = (204, "")
+        let model = try makeModel(seerr: signedOutSeerr())
+        await model.load()
+        let (tileA, tileB) = (try tile(model, 0), try tile(model, 1))
+
+        async let first = model.remove(tileA)
+        async let second = model.remove(tileB)
+        let (removedA, removedB) = await (first, second)
+
+        XCTAssertFalse(removedA)
+        XCTAssertTrue(removedB)
+        XCTAssertEqual(model.tiles.map(\.id), ["a", "c"])
+        XCTAssertFalse(model.isRemoving(tileA))
+    }
+
+    /// Remove A's reload is slow and answers after remove B's: B stays gone.
+    func testASlowerEarlierRefreshDoesNotResurrectARemovedTitle() async throws {
+        serve([entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2), entryJSON("c", tmdb: 3)])
+        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (204, "")
+        JellyfinRouteStub.routes["DELETE \(base)/Items/b"] = (204, "")
+        let model = try makeModel(seerr: signedOutSeerr())
+        await model.load()
+        let (tileA, tileB) = (try tile(model, 0), try tile(model, 1))
+
+        serve([entryJSON("b", tmdb: 2), entryJSON("c", tmdb: 3)]) // after A only
+        JellyfinRouteStub.delays["GET \(base)"] = 0.5
+        let removeA = Task { await model.remove(tileA) }
+        await eventually { JellyfinRouteStub.requests("GET", base).count == 2 }
+        JellyfinRouteStub.delays["GET \(base)"] = 0
+        serve([entryJSON("c", tmdb: 3)]) // after A and B
+        let removedB = await model.remove(tileB)
+        let removedA = await removeA.value
+
+        XCTAssertTrue(removedA)
+        XCTAssertTrue(removedB)
+        XCTAssertEqual(model.tiles.map(\.id), ["c"])
+    }
+
+    /// The DELETE worked but the reload after it didn't: the title still goes.
+    func testRemoveWhoseRefreshFailsStillDropsTheTile() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])),
+            (500, "")
+        ]
+        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (204, "")
+        let model = try makeModel(seerr: signedOutSeerr())
+        await model.load()
+
+        let removed = await model.remove(try tile(model, 0))
+
+        XCTAssertTrue(removed)
+        XCTAssertEqual(model.tiles.map(\.id), ["b"])
+        XCTAssertEqual(model.summary, "Private · 1 title")
+    }
+
+    func testTappingRemoveTwiceSendsOneDelete() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [
+            (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])),
+            (200, listJSON(entries: [entryJSON("b", tmdb: 2)]))
+        ]
+        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (204, "")
+        JellyfinRouteStub.delays["DELETE \(base)/Items/a"] = 0.3
+        let model = try makeModel(seerr: signedOutSeerr())
+        await model.load()
+        let tileA = try tile(model, 0)
+
+        let first = Task { await model.remove(tileA) }
+        await eventually { !JellyfinRouteStub.requests("DELETE", "\(base)/Items/a").isEmpty }
+        XCTAssertTrue(model.isRemoving(tileA), "dimmed while on its way")
+        let second = await model.remove(tileA)
+        let firstResult = await first.value
+
+        XCTAssertTrue(firstResult)
+        XCTAssertTrue(second, "an ignored tap reports no failure")
+        XCTAssertEqual(JellyfinRouteStub.requests("DELETE", "\(base)/Items/a").count, 1)
+        XCTAssertEqual(model.tiles.map(\.id), ["b"])
+        XCTAssertFalse(model.isRemoving(tileA))
+    }
+}
+
 // MARK: Lookups across an owner change
 
 extension WatchlistPageViewModelTests {
