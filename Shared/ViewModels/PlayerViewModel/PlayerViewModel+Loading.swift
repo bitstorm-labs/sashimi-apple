@@ -102,7 +102,7 @@ extension PlayerViewModel {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
         }
-        player = nil
+        retirePlayer()
         // Loading from the same moment the old player goes, as changeQuality
         // and recovery already do. Set after the await below, it left a
         // window — the whole transcode DELETE round trip — with no player,

@@ -108,7 +108,7 @@ extension PlayerViewModel {
         }
 
         invalidatePlayerObservers()
-        player = nil
+        retirePlayer()
         isLoading = true
 
         // Armed now, before anything awaits, and applied by the status

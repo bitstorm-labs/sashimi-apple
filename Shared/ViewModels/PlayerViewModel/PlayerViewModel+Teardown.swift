@@ -155,7 +155,7 @@ extension PlayerViewModel {
 
         player?.pause()
         invalidatePlayerObservers()
-        player = nil
+        retirePlayer()
         isPlayerReady = false
         pendingResumeTicks = 0
         activeTrackRequest = nil
@@ -163,6 +163,28 @@ extension PlayerViewModel {
         transitionState = .empty
         playbackStartDate = nil
         return work
+    }
+
+    /// Lets go of the current player AND empties it, so it can never be heard
+    /// again.
+    ///
+    /// Pausing was not enough. On tvOS the AVPlayerViewController (and AVKit
+    /// finishing a scrub, which restores the rate it had before the scrub, or
+    /// the system's play/pause routing) can still call `play()` on an instance
+    /// the view model has dropped, and a paused player keeps its stream: its
+    /// audio came back under the rebuilt player and went on after the viewer
+    /// left. The server saw it as segment requests for play sessions the app
+    /// had already stopped. A player with no item has nothing to play or to
+    /// fetch, whoever still holds it.
+    ///
+    /// Call after `invalidatePlayerObservers()`: emptying the player changes
+    /// its status and time-control state, which the observers would otherwise
+    /// report as the viewer pausing.
+    func retirePlayer() {
+        guard let outgoing = player else { return }
+        player = nil
+        outgoing.pause()
+        outgoing.replaceCurrentItem(with: nil)
     }
 
     private static func stopActiveEncoding(
