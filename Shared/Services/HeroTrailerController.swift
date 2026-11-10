@@ -30,6 +30,12 @@ final class HeroTrailerController: ObservableObject {
     @Published private(set) var player: AVPlayer?
     /// True once the trailer is actually producing frames; drives the fade.
     @Published private(set) var isVisible = false
+    /// The trailer's picture inside its frame, without the black bars a
+    /// letterboxed file carries, so the hero fills with picture, flush to
+    /// the screen's top and right edges, not with a band of black.
+    @Published private(set) var pictureContent = HeroTrailerCrop.Content.full
+    /// The playing trailer's frame size; zero until AVFoundation knows it.
+    @Published private(set) var videoSize = CGSize.zero
 
     private var owners = HeroTrailerOwners()
     private var playingSourceId: String?
@@ -42,6 +48,8 @@ final class HeroTrailerController: ObservableObject {
     private var timeObserver: Any?
     private var fadeObserver: Any?
     private var clip: HeroTrailerClip?
+    /// Measures the playing trailer's letterbox bars.
+    private var barMeter: HeroTrailerBarMeter?
     /// The playing trailer's length rules and reported length.
     private var kind: HeroTrailerPolicy.Kind?
     private var trailerSeconds: Double?
@@ -227,6 +235,7 @@ final class HeroTrailerController: ObservableObject {
 
     private func play(stream: HeroTrailerStream, sourceId: String, kind: HeroTrailerPolicy.Kind, trailerSeconds: Double?) {
         let item = AVPlayerItem(url: stream.url)
+        barMeter = HeroTrailerBarMeter(item: item)
         // No forwardPlaybackEndTime: set past the real end of a short trailer,
         // it suppresses the end-of-item notification and the player sits on
         // the last frame. The fade point below ends the clip; the item's own
@@ -249,15 +258,20 @@ final class HeroTrailerController: ObservableObject {
             }
         }
         // Reveal only once frames are actually flowing, so a slow transcode
-        // start never fades the image out to black.
+        // start never fades the image out to black, and once a frame has
+        // shown where any letterbox bars are, so the picture never appears
+        // with a black band and then jumps to fill the hero.
         timeObserver = p.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
         ) { [weak self, weak p] time in
             MainActor.assumeIsolated {
                 // Not while finishing: the observer keeps firing during the
                 // fade-out and would snap the picture back.
-                guard let self, let p, self.player === p, !self.isVisible, !self.isFinishing,
-                      time.seconds > clip.start + 0.1 else { return }
+                guard let self, let p, self.player === p, !self.isFinishing else { return }
+                let elapsed = time.seconds - clip.start
+                if elapsed < HeroTrailerCrop.samplingWindow { self.measureBars() }
+                guard !self.isVisible, elapsed > 0.1,
+                      self.barMeter?.content != nil || elapsed > HeroTrailerCrop.revealWait else { return }
                 self.isVisible = true
             }
         }
@@ -271,6 +285,13 @@ final class HeroTrailerController: ObservableObject {
         }
         p.play()
         logger.debug("hero trailer started")
+    }
+
+    private func measureBars() {
+        guard let barMeter, let item = player?.currentItem else { return }
+        barMeter.sample(item)
+        if barMeter.videoSize != videoSize { videoSize = barMeter.videoSize }
+        if let content = barMeter.content, content != pictureContent { pictureContent = content }
     }
 
     /// Where a trailer starting now ends. A series' trailer starting under a
@@ -352,6 +373,9 @@ final class HeroTrailerController: ObservableObject {
         endObservers.forEach { NotificationCenter.default.removeObserver($0) }
         endObservers = []
         clip = nil
+        barMeter = nil
+        pictureContent = .full
+        videoSize = .zero
         kind = nil
         trailerSeconds = nil
         isFollowingTheme = false
@@ -416,7 +440,11 @@ private struct HeroTrailerOverlay: View {
         // mask the image and this overlay together; removing a UIKit view from
         // inside a SwiftUI mask left the image underneath undrawn, a blank
         // spot where the image should come back.
-        HeroTrailerVideo(player: isOwner ? controller.player : nil)
+        HeroTrailerVideo(
+            player: isOwner ? controller.player : nil,
+            content: isOwner ? controller.pictureContent : .full,
+            videoSize: isOwner ? controller.videoSize : .zero
+        )
             .opacity(isOwner && controller.isVisible ? 1 : 0)
             .animation(.easeInOut(duration: HeroTrailerTimings().crossFade), value: controller.isVisible)
         .allowsHitTesting(false)
@@ -427,12 +455,15 @@ private struct HeroTrailerOverlay: View {
 }
 
 /// An `AVPlayerLayer` filling its frame, cropped like the image it covers.
+/// The picture fills the frame, not the video's frame: a letterboxed file's
+/// black bars are cropped off with the overflow (`HeroTrailerCrop`).
 private struct HeroTrailerVideo: UIViewRepresentable {
     let player: AVPlayer?
+    let content: HeroTrailerCrop.Content
+    let videoSize: CGSize
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
-        view.playerLayer.videoGravity = .resizeAspectFill
         view.playerLayer.player = player
         view.isUserInteractionEnabled = false
         return view
@@ -440,12 +471,48 @@ private struct HeroTrailerVideo: UIViewRepresentable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        view.update(content: content, videoSize: videoSize)
     }
 
     final class PlayerLayerView: UIView {
-        override static var layerClass: AnyClass { AVPlayerLayer.self }
-        // swiftlint:disable:next force_cast
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        let playerLayer = AVPlayerLayer()
+        private var content = HeroTrailerCrop.Content.full
+        private var videoSize = CGSize.zero
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            // The layer runs past the bounds when bars are cropped off.
+            clipsToBounds = true
+            playerLayer.videoGravity = .resizeAspectFill
+            layer.addSublayer(playerLayer)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        func update(content: HeroTrailerCrop.Content, videoSize: CGSize) {
+            guard content != self.content || videoSize != self.videoSize else { return }
+            self.content = content
+            self.videoSize = videoSize
+            layoutPlayerLayer(animated: true)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layoutPlayerLayer(animated: false)
+        }
+
+        private func layoutPlayerLayer(animated: Bool) {
+            CATransaction.begin()
+            // A sublayer's frame animates implicitly; only a bar
+            // measurement mid-play should, never a SwiftUI layout pass.
+            CATransaction.setDisableActions(!animated)
+            CATransaction.setAnimationDuration(0.3)
+            // Until the size is known, plain aspect-fill of the whole frame.
+            playerLayer.frame = HeroTrailerCrop.videoFrame(box: bounds.size, videoSize: videoSize, content: content)
+                ?? bounds
+            CATransaction.commit()
+        }
     }
 }
 
