@@ -35,13 +35,9 @@ struct WatchlistService {
     }
 
     func add(_ item: BaseItemDto) async throws -> WatchlistAddResponse {
-        guard let ids = await ids(for: item), let kind = Watchlist.kind(for: item.type) else {
+        guard let ids = await ids(for: item), let entry = Watchlist.newEntry(for: item, ids: ids) else {
             throw WatchlistError.notEligible
         }
-        // No poster: the plugin fills it from Jellyfin's remote images.
-        let entry = NewWatchlistEntry(
-            type: kind, title: item.name, year: item.productionYear, posterUrl: nil,
-            tmdbId: ids.tmdb, tvdbId: ids.tvdb, imdbId: ids.imdb)
         return try await client.addToWatchlist(entry)
     }
 

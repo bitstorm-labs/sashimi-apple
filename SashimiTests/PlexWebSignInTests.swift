@@ -116,5 +116,32 @@ final class PlexWebSignInTests: XCTestCase {
         XCTAssertTrue(finished, "still waiting after 2 s with a 100 ms cap")
         XCTAssertTrue(calledOff)
     }
+
+    /// The last check after the page closed found nothing: the poll is called
+    /// off then, without sitting out the rest of the grace.
+    func testNoExtraWaitAfterTheLastCheck() async {
+        var waiting = true
+        var checks = 0
+        var calledOff = false
+        let start = ContinuousClock.now
+
+        await PlexWebSignIn.run(
+            poll: {
+                while !Task.isCancelled {
+                    checks += 1 // a check that finds no token
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+            },
+            showPage: {},
+            closePage: {},
+            isWaiting: { waiting },
+            cancelWaiting: { calledOff = true; waiting = false },
+            checksStarted: { checks },
+            grace: .seconds(5)
+        )
+
+        XCTAssertTrue(calledOff)
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(1), "sat out the 5 s grace after the last check")
+    }
 }
 

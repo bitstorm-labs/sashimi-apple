@@ -25,7 +25,10 @@ final class PlexConnectModel: ObservableObject {
 
     /// The PIN of a Connect Plex still waiting, kept so it can be collected
     /// after a relaunch: its id, code, expiry and who started it (Jellyfin
-    /// user and server), never a token.
+    /// user and server), never a token. The PIN id plus this install's client
+    /// identifier can still fetch the person's Plex token from plex.tv until the
+    /// PIN expires (at most 15 minutes), which is why the record is scoped to
+    /// its user and server and cleared on every outcome.
     static let pendingPinKey = "watchlist.pendingPlexPin"
 
     /// PINs this process is polling or collecting right now, so a second

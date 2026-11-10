@@ -45,6 +45,10 @@ struct WatchlistPageView: View {
         .onChange(of: request) { old, new in
             if old != nil && new == nil { Task { await model.load() } }
         }
+        // Connect Plex's cover hid the page too: reload, so lookups cut short resume.
+        .onChange(of: connecting) { old, new in
+            if old && !new { Task { await model.load() } }
+        }
         .confirmationDialog(removal?.entry.title ?? "", isPresented: removalShown, titleVisibility: .visible) {
             if let tile = removal {
                 Button(WatchlistText.remove, role: .destructive) { remove(tile) }

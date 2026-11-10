@@ -41,6 +41,10 @@ struct MobileAddToListSheet: View {
                             }
                             .disabled(model.isWorking)
                         }
+                    } else if !model.offersLists {
+                        // A Seerr title without the Watchlist plugin: nothing to choose.
+                        Text(WatchlistText.onlyWatchlistTakesIt)
+                            .foregroundStyle(MobileColors.textTertiary)
                     }
                     if model.offersLists {
                         listSections

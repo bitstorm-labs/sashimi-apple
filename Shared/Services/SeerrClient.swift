@@ -275,10 +275,6 @@ actor SeerrClient {
     }
 }
 
-/// Plex's PIN sign-in (what the Plex apps use): the TV shows a short code for
-/// plex.tv/link, the phone opens Plex's sign-in page; either way the PIN is
-/// polled until it carries the person's Plex token, which is handed to Seerr
-/// once and never stored.
 /// The one plex.tv device identity per install, shared by Requests sign-in and
 /// Connect Plex so plex.tv lists a single "Sashimi" device.
 enum PlexClientIdentity {
@@ -316,6 +312,10 @@ extension PlexPinClient {
     }
 }
 
+/// Plex's PIN sign-in (what the Plex apps use): the TV shows a short code for
+/// plex.tv/link, the phone opens Plex's sign-in page; either way the PIN is
+/// polled until it carries the person's Plex token, which is handed to Seerr
+/// once and never stored.
 struct PlexPinClient: Sendable {
     let clientIdentifier: String
     private let session: URLSession

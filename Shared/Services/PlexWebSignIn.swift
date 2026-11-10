@@ -9,8 +9,9 @@ enum PlexWebSignIn {
     /// - `showPage`: returns when the page is closed, by the person or by `closePage`.
     /// - `isWaiting` / `cancelWaiting`: once the person closes the page, the
     ///   poll finishes one check that started after the page closed (a token
-    ///   that landed meanwhile is seen even if the app was suspended past the
-    ///   grace), then gets `grace` more, then is called off.
+    ///   that landed meanwhile is seen even if the app was suspended), then is
+    ///   called off; only if it couldn't look again within `lastCheckCap`
+    ///   does it get `grace` more first.
     /// - `checksStarted`: how many PIN checks the poll has started so far.
     /// - `lastCheckCap`: the longest the wait for that check may take.
     ///
@@ -39,7 +40,10 @@ enum PlexWebSignIn {
         while isWaiting(), !Task.isCancelled, checksStarted() < closedAt + 2, ContinuousClock.now < capped {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        let deadline = ContinuousClock.now + grace
+        // That check found nothing: no point sitting out the grace as well. The
+        // grace is only for a poll that couldn't look again within the cap.
+        let lookedAgain = checksStarted() >= closedAt + 2
+        let deadline = ContinuousClock.now + (lookedAgain ? .zero : grace)
         while isWaiting(), !Task.isCancelled, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(250))
         }

@@ -37,7 +37,8 @@ final class WatchlistPageViewModel: ObservableObject {
     static var titleCache = SeerrTitleCache()
     /// Titles Seerr couldn't answer for: not retried this session, on any visit.
     private static var failedLookups = Set<String>()
-    private static var cacheOwner: Int?
+    /// The Seerr server and user the shared answers belong to ("server#user").
+    private static var cacheOwner: String?
 
     /// Forgets everything Seerr said. Tests start from here.
     static func resetSharedLookups() {
@@ -227,10 +228,12 @@ final class WatchlistPageViewModel: ObservableObject {
         return true
     }
 
+    #if DEBUG
     /// For tests: returns when every queued Requested lookup has finished.
     func waitForLookups() async {
         while let running = drain { await running.value }
     }
+    #endif
 
     // MARK: Lookups
 
@@ -299,9 +302,10 @@ final class WatchlistPageViewModel: ObservableObject {
     // MARK: Seerr user
 
     /// Another Seerr user, or none, has no use for the last one's answers
-    /// ("Declined" is per person).
+    /// ("Declined" is per person). User ids are per request server, so the
+    /// same id on another server is another person.
     private func syncCacheOwner() {
-        let owner = seerr.state.user?.id
+        let owner = seerr.state.user.map { "\(seerr.serverURL?.absoluteString ?? "")#\($0.id)" }
         guard owner != Self.cacheOwner else { return }
         Self.cacheOwner = owner
         Self.titleCache = SeerrTitleCache()

@@ -274,7 +274,7 @@ final class AddToListViewModel: ObservableObject {
         let count: Int
         let alreadyOn: Bool
 
-        var detail: String { alreadyOn ? "Already on your Watchlist" : "Private · \(count)" }
+        var detail: String { alreadyOn ? WatchlistText.alreadyOn : "Private · \(count)" }
     }
 
     let subject: Subject
@@ -375,7 +375,7 @@ final class AddToListViewModel: ObservableObject {
 
     /// Returns the message to show.
     func add(to list: SharedList) async -> String {
-        guard let libraryItem else { return "Only the Watchlist takes this title" }
+        guard let libraryItem else { return WatchlistText.onlyWatchlist }
         isWorking = true
         defer { isWorking = false }
         do {
@@ -390,7 +390,7 @@ final class AddToListViewModel: ObservableObject {
 
     /// Creates a list with this title on it. Returns the message to show.
     func create(name: String, isPublic: Bool) async -> String {
-        guard let libraryItem else { return "Only the Watchlist takes this title" }
+        guard let libraryItem else { return WatchlistText.onlyWatchlist }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "Give the list a name" }
         isWorking = true

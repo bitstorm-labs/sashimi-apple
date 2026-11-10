@@ -17,8 +17,10 @@ enum Watchlist {
     }
 
     /// No poster: the plugin fills it from Jellyfin's remote images.
-    static func newEntry(for item: BaseItemDto) -> NewWatchlistEntry? {
-        guard let kind = kind(for: item.type), let ids = ids(for: item) else { return nil }
+    /// `ids` as `WatchlistService` resolved them (a thin item is fetched in full
+    /// first). Nil for anything but a movie or a show.
+    static func newEntry(for item: BaseItemDto, ids: WatchlistIds) -> NewWatchlistEntry? {
+        guard let kind = kind(for: item.type), !ids.isEmpty else { return nil }
         return NewWatchlistEntry(type: kind, title: item.name, year: item.productionYear, posterUrl: nil,
                                  tmdbId: ids.tmdb, tvdbId: ids.tvdb, imdbId: ids.imdb)
     }
@@ -90,6 +92,7 @@ enum WatchlistText {
     static let removeATitle = "Remove a Title"
     static let tapToRemove = "Tap a title to remove it."
     static let selectToRemove = "Select a title to remove it. Press Menu when you're done."
+    static let onlyWatchlist = "Only the Watchlist takes this title"
     static let onlyWatchlistTakesIt = "Only the Watchlist takes this title, and this server doesn't have one."
     static let cantLookUp = "Requests can't look this title up."
     static let added = "Added to Watchlist"

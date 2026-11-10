@@ -67,9 +67,11 @@ final class SeerrSession: ObservableObject {
     /// never delays or fails sign-in; its outcome never changes this
     /// session's state or messages. The token is not kept.
     var plexTokenObserver: (@MainActor (_ token: String) async -> Void)?
+    #if DEBUG
     /// The most recent hand-off to `plexTokenObserver`, so tests can wait for
-    /// it. Production code never waits on it.
+    /// it. Debug builds only; nothing waits on it.
     private(set) var lastPlexTokenHandOff: Task<Void, Never>?
+    #endif
     /// Bumped after a request is sent or cancelled, so open lists reload.
     @Published private(set) var requestsRevision = 0
 
@@ -269,7 +271,12 @@ final class SeerrSession: ObservableObject {
             signedIn(result.user, cookie: result.cookie, client: client)
             await refreshPublicSettings()
             if let observer = plexTokenObserver {
-                lastPlexTokenHandOff = Task { @MainActor in await observer(token) }
+                let handOff = Task { @MainActor in await observer(token) }
+                #if DEBUG
+                lastPlexTokenHandOff = handOff
+                #else
+                _ = handOff
+                #endif
             }
         } catch {
             state = .notConfigured

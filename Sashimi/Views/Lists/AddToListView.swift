@@ -124,7 +124,8 @@ struct AddToListView: View {
         Task {
             let message = await model.addToWatchlist()
             ToastManager.shared.show(message, type: message.hasPrefix("Added") ? .success : .info)
-            dismiss()
+            // A failure stays here to try again, as on iPhone.
+            if message.hasPrefix("Added") { dismiss() }
         }
     }
 
@@ -136,7 +137,7 @@ struct AddToListView: View {
         Task {
             let message = await model.add(to: choice.list)
             ToastManager.shared.show(message, type: message.hasPrefix("Added") ? .success : .info)
-            dismiss()
+            if message.hasPrefix("Added") { dismiss() }
         }
     }
 }

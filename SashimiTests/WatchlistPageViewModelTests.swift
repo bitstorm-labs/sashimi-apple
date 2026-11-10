@@ -49,9 +49,9 @@ final class WatchlistPageViewModelTests: XCTestCase {
         JellyfinRouteStub.routes["GET /Users/me/Items"] = (200, "{\"Items\":[\(items.joined(separator: ","))],\"TotalRecordCount\":\(ids.count)}")
     }
 
-    private func signedInSeerr() async -> SeerrSession {
+    private func signedInSeerr(server: String = SeerrFixtures.server.absoluteString) async -> SeerrSession {
         let session = SeerrSession(defaults: SeerrFixtures.defaults(), credentials: credentials, pollInterval: .zero)
-        _ = session.setServerAddress(SeerrFixtures.server.absoluteString)
+        _ = session.setServerAddress(server)
         SeerrStubServer.on("POST", "/api/v1/auth/local", body: SeerrFixtures.user(id: 7), headers: ["Set-Cookie": SeerrFixtures.setCookie])
         await session.signInLocal(email: "test@example.com", password: "pw")
         SeerrStubServer.reset()
@@ -178,6 +178,25 @@ final class WatchlistPageViewModelTests: XCTestCase {
         await model.waitForLookups()
 
         XCTAssertEqual(try tile(model, 0).artwork, .remote(try XCTUnwrap(SeerrImages.poster("/p1.jpg"))))
+    }
+
+    /// User 7 on another request server is someone else: their "Requested"
+    /// answers aren't reused.
+    func testTheSameSeerrUserIdOnAnotherServerStartsFresh() async throws {
+        serve([entryJSON("a", tmdb: 1)])
+        let first = await signedInSeerr()
+        SeerrStubServer.on("GET", "/api/v1/movie/1", body: detailsJSON(1))
+        let model = try makeModel(seerr: first)
+        await model.load()
+        model.tiles.forEach(model.tileAppeared)
+        await model.waitForLookups()
+        let target = SeerrTarget(kind: .movie, tmdbId: 1, title: "Title a")
+        XCTAssertNotNil(WatchlistPageViewModel.titleCache.entry(for: target))
+
+        let elsewhere = await signedInSeerr(server: "https://requests-two.example.com") // also user 7
+        _ = try makeModel(seerr: elsewhere)
+
+        XCTAssertNil(WatchlistPageViewModel.titleCache.entry(for: target), "another server's user 7 starts fresh")
     }
 
     func testATitleIsLookedUpOnceAcrossReloads() async throws {

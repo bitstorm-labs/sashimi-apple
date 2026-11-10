@@ -121,12 +121,14 @@ final class WatchlistTests: XCTestCase {
         XCTAssertNil(Watchlist.ids(for: item(.episode, ids: ["Tmdb": "1"])))
         XCTAssertNil(Watchlist.ids(for: item(.movie, ids: [:])))
         XCTAssertNil(Watchlist.ids(for: item(.video, ids: ["Tmdb": "1"])))
-        XCTAssertNil(Watchlist.newEntry(for: item(.movie, ids: nil)))
+        XCTAssertNil(Watchlist.newEntry(for: item(.episode, ids: ["Tmdb": "1"]), ids: WatchlistIds(tmdb: "1")))
+        XCTAssertNil(Watchlist.newEntry(for: item(.movie, ids: nil), ids: WatchlistIds()))
         XCTAssertEqual(Watchlist.ids(for: item(.series, ids: ["Tvdb": "7"])), WatchlistIds(tvdb: "7"))
     }
 
     func testServerItemBecomesAnEntryWithoutAPoster() throws {
-        let entry = try XCTUnwrap(Watchlist.newEntry(for: item(.movie, ids: ["Tmdb": "1", "Imdb": "tt1"], year: 1999)))
+        let movie = item(.movie, ids: ["Tmdb": "1", "Imdb": "tt1"], year: 1999)
+        let entry = try XCTUnwrap(Watchlist.newEntry(for: movie, ids: try XCTUnwrap(Watchlist.ids(for: movie))))
         XCTAssertEqual(entry, NewWatchlistEntry(type: .movie, title: "Title", year: 1999, posterUrl: nil,
                                                 tmdbId: "1", tvdbId: nil, imdbId: "tt1"))
         XCTAssertEqual(Watchlist.kind(for: .series), .series)
