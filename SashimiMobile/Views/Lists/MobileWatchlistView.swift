@@ -37,11 +37,10 @@ struct MobileWatchlistView: View {
             await connect.resumePendingIfAny()
         }
         .refreshable { await model.load() }
-        .onDisappear {
-            model.cancelLookups()
-            connectTask?.cancel()
-            if connect.isWaiting { connect.cancel() }
-        }
+        // Connect Plex is not cancelled here: presenting Plex's sign-in page can
+        // make this view "disappear", and the flow ends itself when that page
+        // closes (one last PIN check, capped, then the grace), as in Settings.
+        .onDisappear { model.cancelLookups() }
         .onChange(of: model.isGone) { _, gone in
             if gone { dismiss() }
         }
