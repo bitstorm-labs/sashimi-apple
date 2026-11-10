@@ -14,6 +14,8 @@ struct WatchlistPageView: View {
     @State private var playing: BaseItemDto?
     @State private var request: SeerrTarget?
     @State private var signingIn = false
+    @State private var adding = false
+    @State private var titleSeed: WatchlistTitleSeed?
     /// The title the Spotlight shows: the last poster focused, else the first.
     @State private var spotlightId: String?
     @State private var connecting = false
@@ -38,6 +40,18 @@ struct WatchlistPageView: View {
         }
         .fullScreenCover(isPresented: $signingIn) {
             RequestsSignInCover()
+        }
+        .fullScreenCover(isPresented: $adding) {
+            WatchlistSearchView()
+        }
+        .fullScreenCover(item: $titleSeed) { seed in
+            WatchlistTitleView(seed: seed)
+        }
+        .onChange(of: adding) { old, new in
+            if old && !new { Task { await model.load() } }
+        }
+        .onChange(of: titleSeed) { old, new in
+            if old != nil && new == nil { Task { await model.load() } }
         }
         .fullScreenCover(item: $request) { target in
             SeerrDetailView(target: target)
@@ -102,6 +116,9 @@ struct WatchlistPageView: View {
                 onRequest: { request = $0 },
                 onSignIn: { signingIn = true }
             )
+        }
+        if model.canAdd {
+            ActionButton(title: WatchlistV2Text.add, icon: "plus", isPrimary: spotlightTile == nil) { adding = true }
         }
         switch model.header {
         case .connectCard:
@@ -229,6 +246,7 @@ struct WatchlistPageView: View {
         }
         switch model.action(for: tile) {
         case .openLibrary(let item): selected = item
+        case .openTitle(let seed): titleSeed = seed
         case .openRequest(let target): request = target
         case .explain(let text): ToastManager.shared.show(text, type: .info)
         }

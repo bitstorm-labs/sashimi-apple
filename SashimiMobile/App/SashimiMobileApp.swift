@@ -142,6 +142,9 @@ struct ContentView: View {
                 // A Connect Plex the app was killed in the middle of, in its
                 // own task so it never holds up the download sync below.
                 .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
+                // The server's Sashimi Lists features and Requests address, again
+                // for each signed-in session (a server switch).
+                .task(id: sessionManager.activeSessionIdentity) { await SashimiListsFeatures.shared.refresh() }
                 .id(sessionManager.activeSessionIdentity)
                 .task {
                     // Re-runs on a server switch (the id above), which starts

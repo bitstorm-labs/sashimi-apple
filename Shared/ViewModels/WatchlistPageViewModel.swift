@@ -20,6 +20,8 @@ enum WatchlistMenuItem: Equatable { case connectPlex, reconnectPlex, disconnectP
 
 enum WatchlistTileAction: Equatable {
     case openLibrary(BaseItemDto)
+    /// The title page for a title the server doesn't have (plugin 0.3.0+).
+    case openTitle(WatchlistTitleSeed)
     case openRequest(SeerrTarget)
     case explain(String)
 }
@@ -58,6 +60,7 @@ final class WatchlistPageViewModel: ObservableObject {
     private let store: WatchlistStore
     private let service: WatchlistService
     private let seerr: SeerrSession
+    private let features: SashimiListsFeatures
     private let injectedLookup: RequestedLookup?
     private var libraryItems: [String: BaseItemDto] = [:]
     /// Seerr's answers this model has seen (a nil value: asked, nothing known).
@@ -83,12 +86,15 @@ final class WatchlistPageViewModel: ObservableObject {
     private var removedIds = Set<String>()
 
     init(store: WatchlistStore = .shared, service: WatchlistService = WatchlistService(),
-         seerr: SeerrSession = .shared, lookup: RequestedLookup? = nil) {
+         seerr: SeerrSession = .shared, features: SashimiListsFeatures = .shared, lookup: RequestedLookup? = nil) {
         self.store = store
         self.service = service
         self.seerr = seerr
+        self.features = features
         self.injectedLookup = lookup
         syncCacheOwner()
+        // ＋ Add and the title page follow the plugin's answer.
+        features.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         // Header and menu read the store; the page redraws when it changes.
         store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         // @Published fires before the change lands: look again once it has.
@@ -128,7 +134,9 @@ final class WatchlistPageViewModel: ObservableObject {
     }
 
     func load() async {
+        async let featuresLoad: Void = features.refresh()
         await store.refresh()
+        await featuresLoad
         if store.availability == .unavailable {
             isGone = true
             failed = false
@@ -202,8 +210,12 @@ final class WatchlistPageViewModel: ObservableObject {
         inFlight = []
     }
 
+    /// ＋ Add: the plugin can search (0.3.0+).
+    var canAdd: Bool { features.hasWatchlistV2 }
+
     func action(for tile: WatchlistTile) -> WatchlistTileAction {
         if let item = tile.libraryItem { return .openLibrary(item) }
+        if features.hasWatchlistV2 { return .openTitle(WatchlistTitleSeed(entry: tile.entry)) }
         guard let target = Watchlist.seerrTarget(for: tile.entry) else {
             return .explain(WatchlistText.cantLookUp)
         }

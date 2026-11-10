@@ -54,9 +54,15 @@ final class SeerrSession: ObservableObject {
     )
 
     @Published private(set) var state: SeerrAuthState = .notConfigured
-    /// Nil until the person enters one: there is no default server, and
-    /// with none the app makes no Seerr calls and shows no request UI.
+    /// The request server in use: the one the Jellyfin server sets (Sashimi
+    /// Lists' Requests address), else the one the person entered. Nil until
+    /// one exists: there is no default server, and with none the app makes no
+    /// Seerr calls and shows no request UI.
     @Published private(set) var serverURL: URL?
+    /// The Jellyfin server sets the address: Settings shows it locked and the
+    /// address stored on this device is ignored (but kept, for when the
+    /// server stops setting one).
+    @Published private(set) var isServerAddressManaged = false
     /// The server's own name ("MondoVision"), for "from MondoVision".
     @Published private(set) var applicationTitle = "Seerr"
     @Published private(set) var partialRequestsEnabled = true
@@ -88,6 +94,9 @@ final class SeerrSession: ObservableObject {
 
     private enum Keys {
         static let server = "seerr.serverURL"
+        /// The address the Jellyfin server last set, so a launch without the
+        /// server (offline) still uses it.
+        static let managedServer = "seerr.managedServerURL"
         static let userId = "seerr.user.id"
         static let userName = "seerr.user.name"
         static let permissions = "seerr.user.permissions"
@@ -100,7 +109,9 @@ final class SeerrSession: ObservableObject {
         self.credentials = credentials
         self.pollInterval = pollInterval
         self.plexPinLifetime = plexPinLifetime
-        serverURL = defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
+        let managed = defaults.string(forKey: Keys.managedServer).flatMap(Self.normalizedServerURL)
+        serverURL = managed ?? defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
+        isServerAddressManaged = managed != nil
         applicationTitle = defaults.string(forKey: Keys.title) ?? "Seerr"
     }
 
@@ -120,7 +131,7 @@ final class SeerrSession: ObservableObject {
 
     /// "requests.example.com" → https://requests.example.com; trailing slashes dropped. Only
     /// http and https.
-    static func normalizedServerURL(_ text: String) -> URL? {
+    nonisolated static func normalizedServerURL(_ text: String) -> URL? {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if !trimmed.contains("://") { trimmed = "https://" + trimmed }
@@ -137,16 +148,40 @@ final class SeerrSession: ObservableObject {
         "seerr.session.\(url.absoluteString.lowercased())"
     }
 
-    /// Only while signed out: a session belongs to the server that issued it.
+    /// Only while signed out, and not while the server sets the address: a
+    /// session belongs to the server that issued it.
     @discardableResult
     func setServerAddress(_ text: String) -> Bool {
-        guard !isActive, let url = Self.normalizedServerURL(text) else { return false }
+        guard !isActive, !isServerAddressManaged, let url = Self.normalizedServerURL(text) else { return false }
         if url != serverURL {
             serverURL = url
             defaults.set(url.absoluteString, forKey: Keys.server)
             if state == .expired { state = .notConfigured }
         }
         return true
+    }
+
+    /// The Jellyfin server's Requests address (nil: it sets none, or its
+    /// plugin is too old). When the address in use changes, this device's
+    /// session for the old one is set aside (its cookie stays, keyed by that
+    /// server) and a saved session for the new one is restored.
+    func setServerManagedAddress(_ url: URL?) async {
+        if let url {
+            defaults.set(url.absoluteString, forKey: Keys.managedServer)
+        } else {
+            defaults.removeObject(forKey: Keys.managedServer)
+        }
+        isServerAddressManaged = url != nil
+        let effective = url ?? defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
+        guard effective != serverURL else { return }
+        plexWait?.cancel()
+        client = nil
+        defaults.removeObject(forKey: Keys.userId)
+        defaults.removeObject(forKey: Keys.userName)
+        defaults.removeObject(forKey: Keys.permissions)
+        state = .notConfigured
+        serverURL = effective
+        await restore()
     }
 
     // MARK: Launch

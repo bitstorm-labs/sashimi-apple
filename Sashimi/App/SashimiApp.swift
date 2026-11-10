@@ -119,6 +119,9 @@ struct ContentView: View {
                 // A Connect Plex the app was relaunched in the middle of; again
                 // for each signed-in session (a server switch).
                 .resumingPlexConnect(session: sessionManager.activeSessionIdentity)
+                // The server's Sashimi Lists features and Requests address, again
+                // for each signed-in session (a server switch).
+                .task(id: sessionManager.activeSessionIdentity) { await SashimiListsFeatures.shared.refresh() }
                 .id(sessionManager.activeSessionIdentity)
             } else {
                 ServerConnectionView(

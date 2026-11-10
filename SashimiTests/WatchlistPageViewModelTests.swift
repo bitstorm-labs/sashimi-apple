@@ -428,7 +428,8 @@ extension WatchlistPageViewModelTests {
         -> (model: WatchlistPageViewModel, store: WatchlistStore) {
         let service = WatchlistService(client: try jellyfin())
         let store = WatchlistStore(service: service)
-        return (WatchlistPageViewModel(store: store, service: service, seerr: seerr, lookup: lookup), store)
+        let features = SashimiListsFeatures(service: service, seerr: seerr)
+        return (WatchlistPageViewModel(store: store, service: service, seerr: seerr, features: features, lookup: lookup), store)
     }
 
     /// Returns once everything already queued on the main queue has run (the
