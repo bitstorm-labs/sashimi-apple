@@ -364,6 +364,34 @@ final class WatchlistPageViewModelTests: XCTestCase {
     }
 }
 
+// MARK: Lookups across an owner change
+
+extension WatchlistPageViewModelTests {
+    func testATitleQueuedAfterTheOwnerChangedIsStillLookedUp() async throws {
+        serve([entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])
+        let fake = CountingLookup()
+        fake.status = 2
+        let session = await signedInSeerr()
+        let model = try makeModel(seerr: session, lookup: { targets in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return fake(targets)
+        })
+        await model.load()
+        model.tileAppeared(try tile(model, 0)) // a batch is now in flight
+
+        SeerrStubServer.on("POST", "/api/v1/auth/local", body: SeerrFixtures.user(id: 8), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        await session.signInLocal(email: "other@example.com", password: "pw")
+        try await Task.sleep(nanoseconds: 50_000_000) // the model has seen the new owner
+        model.tileAppeared(try tile(model, 1)) // queued behind the stale batch
+        await model.waitForLookups()
+
+        XCTAssertEqual(fake.batches.count, 2, "the second title is asked about without another tileAppeared")
+        XCTAssertEqual(fake.batches.last?.map(\.tmdbId), [2])
+        XCTAssertEqual(try tile(model, 1).missingTag, .requested)
+        XCTAssertEqual(try tile(model, 0).missingTag, .notOnServer, "the last person's answer for a is still dropped")
+    }
+}
+
 /// A lookup that counts how often it's asked and for what, and says `status` for every title.
 private final class CountingLookup {
     var batches: [[SeerrTarget]] = []

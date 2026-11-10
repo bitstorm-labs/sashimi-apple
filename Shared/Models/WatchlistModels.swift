@@ -102,6 +102,26 @@ struct WatchlistResponse: Decodable, Equatable, Sendable {
     let plex: PlexLink?
     let cardDismissed: Bool
     let entries: [WatchlistEntry]
+    /// True once the person disconnected Plex themselves; auto-link then stays out.
+    /// Plugins before 0.2.2 don't say, which reads as false.
+    let plexOptedOut: Bool
+
+    private enum CodingKeys: String, CodingKey { case plex, cardDismissed, entries, plexOptedOut }
+
+    init(plex: PlexLink?, cardDismissed: Bool, entries: [WatchlistEntry], plexOptedOut: Bool = false) {
+        self.plex = plex
+        self.cardDismissed = cardDismissed
+        self.entries = entries
+        self.plexOptedOut = plexOptedOut
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        plex = try c.decodeIfPresent(PlexLink.self, forKey: .plex)
+        cardDismissed = try c.decode(Bool.self, forKey: .cardDismissed)
+        entries = try c.decode([WatchlistEntry].self, forKey: .entries)
+        plexOptedOut = try c.decodeIfPresent(Bool.self, forKey: .plexOptedOut) ?? false
+    }
 }
 
 struct WatchlistAddResponse: Decodable, Equatable, Sendable {

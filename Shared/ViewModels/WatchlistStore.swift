@@ -142,6 +142,8 @@ final class WatchlistStore: ObservableObject {
         let scope = await currentScope()
         if !(isAvailable && scope.userId == loadedUserId && scope.server == loadedServer) { await refresh() }
         guard isAvailable, await currentScope() == scope else { return }
+        // Someone who disconnected Plex is never reconnected behind their back.
+        guard watchlist?.plexOptedOut != true else { return }
         let wasLinked = watchlist?.plex != nil
         let result = await link(token: token, replace: false)
         guard await currentScope() == scope else { return }

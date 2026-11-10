@@ -30,9 +30,10 @@ final class WatchlistStoreTests: XCTestCase {
         "{\"id\":\"\(id)\",\"type\":\"Movie\",\"title\":\"Heat\",\"year\":1995,\"tmdbId\":\"949\"}"
     }
 
-    private func listJSON(plex: String? = nil, entries: [String] = []) -> String {
+    private func listJSON(plex: String? = nil, entries: [String] = [], optedOut: Bool = false) -> String {
         let plexPart = plex.map { "\"plex\":{\"username\":\"\($0)\",\"needsReconnect\":false}," } ?? ""
-        return "{\(plexPart)\"cardDismissed\":false,\"entries\":[\(entries.joined(separator: ","))]}"
+        let optedOutPart = optedOut ? "\"plexOptedOut\":true," : ""
+        return "{\(plexPart)\(optedOutPart)\"cardDismissed\":false,\"entries\":[\(entries.joined(separator: ","))]}"
     }
 
     private func movie(providerIds: String? = "{\"Tmdb\":\"949\"}") throws -> BaseItemDto {
@@ -94,6 +95,26 @@ final class WatchlistStoreTests: XCTestCase {
         let posts = JellyfinRouteStub.requests("POST", plexPath).count
         _ = await store.confirmSwitch()
         XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, posts)
+    }
+
+    func testAutoLinkSkipsSomeoneWhoDisconnectedPlex() async throws {
+        JellyfinRouteStub.routes["GET \(base)"] = (200, listJSON(optedOut: true))
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        let store = store(try client())
+        await store.autoLink(token: "T")
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 0)
+        XCTAssertNil(store.notice)
+        XCTAssertNil(store.watchlist?.plex)
+    }
+
+    func testAnExplicitConnectStillLinksAfterOptingOut() async throws {
+        JellyfinRouteStub.sequences["GET \(base)"] = [(200, listJSON(optedOut: true)), (200, listJSON(plex: "marge"))]
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        let store = store(try client())
+        await store.refresh()
+        let result = await store.link(token: "T", replace: false)
+        XCTAssertEqual(result, .linked(PlexLink(username: "marge", needsReconnect: false)))
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
     }
 
     func testAutoLinkWhenNotLinkedLinksAndSaysSo() async throws {

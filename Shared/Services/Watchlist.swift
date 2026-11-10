@@ -74,7 +74,12 @@ enum WatchlistText {
     static let requested = "Requested"
     static let signIntoRequests = "Sign into Requests to ask for this"
     static let nowSyncs = "Your Watchlist now syncs with Plex"
+    static let plexRowTitle = "Plex"
+    static let notConnected = "Not connected"
+    static let plexRowFooter = "Keeps your Watchlist in sync with your Plex watchlist."
     static let couldntReachPlex = "Couldn't reach Plex. Try again."
+
+    static func connectedAs(_ username: String) -> String { "Connected as \(username)" }
 
     static func switchQuestion(newUsername: String?) -> String {
         "Sync your Watchlist with \(newUsername.map { "Plex account \($0)" } ?? "this Plex account") instead?"

@@ -46,6 +46,13 @@ final class WatchlistTests: XCTestCase {
         return dto
     }
 
+    func testPlexOptedOutDecodesAndDefaultsToFalse() throws {
+        let optedOut = try decode("{\"plexOptedOut\":true,\"cardDismissed\":false,\"entries\":[]}")
+        XCTAssertTrue(optedOut.plexOptedOut)
+        XCTAssertTrue(try decode(pascal("{\"plexOptedOut\":true,\"cardDismissed\":false,\"entries\":[]}")).plexOptedOut)
+        XCTAssertFalse(try decode(camelJSON).plexOptedOut, "an older plugin doesn't say")
+    }
+
     func testDecodesTheContractShapeInCamelCase() throws {
         let response = try decode(camelJSON)
         XCTAssertEqual(response.plex, PlexLink(username: "chad", needsReconnect: false))

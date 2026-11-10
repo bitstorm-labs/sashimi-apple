@@ -178,7 +178,9 @@ final class WatchlistPageViewModel: ObservableObject {
             let epoch = ownerEpoch
             let answers = await lookup(batch)
             syncCacheOwner() // the person may have changed while we waited
-            guard !Task.isCancelled, epoch == ownerEpoch else { return }
+            guard !Task.isCancelled else { return }
+            // Another person's answers are dropped, but what was queued since is theirs to ask.
+            guard epoch == ownerEpoch else { continue }
             for (id, info) in answers { known.updateValue(info, forKey: id) }
             for target in batch where !answers.keys.contains(target.id) { Self.failedLookups.insert(target.id) }
             requested.subtract(batch.map(\.id))
