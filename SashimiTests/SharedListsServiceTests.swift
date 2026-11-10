@@ -251,13 +251,18 @@ final class SharedListsServiceTests: XCTestCase {
     /// The picker offers only your own lists, and says where the title is.
     func testThePickerOffersYourListsAndMarksWhereTheTitleIs() async throws {
         routeTwoLists()
-        let model = AddToListViewModel(item: .listFixture(id: "m1", type: .movie), service: try service())
+        // Its own Watchlist store on the stub: the shared one talks to whatever
+        // server JellyfinClient.shared last pointed at, over the real network.
+        let watchlist = WatchlistStore(service: WatchlistService(client: JellyfinClient(
+            serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: user)))
+        let model = AddToListViewModel(item: .listFixture(id: "m1", type: .movie), service: try service(), watchlist: watchlist)
 
         await model.load()
 
         XCTAssertEqual(model.choices.map(\.id), ["mine"])
         XCTAssertEqual(model.choices.first?.alreadyOn, true)
         XCTAssertEqual(model.choices.first?.detail, "Already on this list")
+        XCTAssertEqual(JellyfinRouteStub.requests("GET", "/SashimiLists/Watchlist").count, 1, "the Watchlist row asked the stub")
     }
 
     // MARK: Who made it (#784)
