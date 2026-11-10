@@ -41,6 +41,9 @@ struct WatchlistPageView: View {
         .fullScreenCover(isPresented: $signingIn) {
             RequestsSignInCover()
         }
+        .task(id: spotlightTile?.id) {
+            if let tile = spotlightTile { await model.spotlightShown(tile) }
+        }
         .fullScreenCover(isPresented: $adding) {
             WatchlistSearchView()
         }
@@ -276,8 +279,7 @@ struct WatchlistMissingTileButton: View {
         Button(action: action) {
             VStack(alignment: .center, spacing: 10) {
                 WatchlistArtworkImage(artwork: tile.artwork, title: tile.entry.title, width: 220)
-                    .grayscale(1)
-                    .brightness(-0.45)
+                    .notOnServerDimmed()
                     .frame(width: 220, height: 330)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(alignment: .topLeading) {

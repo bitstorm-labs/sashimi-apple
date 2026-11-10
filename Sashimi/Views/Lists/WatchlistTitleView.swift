@@ -169,6 +169,7 @@ struct WatchlistSearchView: View {
                         .onSubmit { model.searchNow() }
                     results
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 80)
                 .padding(.vertical, 60)
             }

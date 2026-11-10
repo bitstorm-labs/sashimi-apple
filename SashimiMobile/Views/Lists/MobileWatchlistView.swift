@@ -34,6 +34,9 @@ struct MobileWatchlistView: View {
         }
         .background(MobileColors.background)
         .fullScreenPlayer(item: $playing)
+        .task(id: spotlightTile?.id) {
+            if let tile = spotlightTile { await model.spotlightShown(tile) }
+        }
         .navigationTitle(WatchlistText.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -271,8 +274,7 @@ struct WatchlistTileView: View {
         } else {
             VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                 WatchlistArtworkView(artwork: tile.artwork, title: tile.entry.title, width: width)
-                    .grayscale(1)
-                    .brightness(-0.45)
+                    .notOnServerDimmed()
                     .frame(width: width, height: width / PosterAspectRatio.portrait)
                     .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
                     .overlay(alignment: .topLeading) {

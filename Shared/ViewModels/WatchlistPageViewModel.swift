@@ -54,6 +54,9 @@ final class WatchlistPageViewModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var failed = false
     @Published private(set) var isGone = false
+    /// Provider details for the Spotlight, by entry id.
+    @Published private(set) var spotlightDetails: [String: WatchlistTitleDetails] = [:]
+    private var detailsAsked = Set<String>()
     /// Tiles whose remove is on its way.
     @Published private(set) var removingIds = Set<String>()
 
@@ -130,7 +133,16 @@ final class WatchlistPageViewModel: ObservableObject {
 
     /// The Spotlight for a tile: Request needs this device signed into Requests.
     func spotlight(for tile: WatchlistTile) -> ListSpotlight {
-        ListSpotlight(tile: tile, signedIntoRequests: seerr.client != nil)
+        ListSpotlight(tile: tile, signedIntoRequests: seerr.client != nil, details: spotlightDetails[tile.id])
+    }
+
+    /// The Spotlight moved to this tile: a title the server doesn't have gets
+    /// its backdrop and overview from the server's providers (plugin 0.3.0+),
+    /// asked once per page.
+    func spotlightShown(_ tile: WatchlistTile) async {
+        guard features.hasWatchlistV2, tile.isMissing, detailsAsked.insert(tile.id).inserted else { return }
+        guard let details = try? await service.details(WatchlistTitleSeed(entry: tile.entry)) else { return }
+        spotlightDetails[tile.id] = details
     }
 
     func load() async {

@@ -291,6 +291,35 @@ final class WatchlistV2Tests: XCTestCase {
         XCTAssertEqual(model.action(for: tile), .openTitle(WatchlistTitleSeed(entry: entry)))
     }
 
+    /// The Spotlight of a title the server doesn't have shows the provider's
+    /// backdrop and overview once they're known (asked once, only with v2).
+    func testTheSpotlightOfAMissingTitleUsesTheProvidersDetails() async throws {
+        let service = try service()
+        let seerr = signedOutSeerr()
+        let features = SashimiListsFeatures(service: service, seerr: seerr)
+        let model = WatchlistPageViewModel(store: WatchlistStore(service: service), service: service, seerr: seerr,
+                                           features: features)
+        let entry = WatchlistEntry(id: "e1", kind: .movie, title: "Sinners", year: 2025, ids: WatchlistIds(tmdb: "1233413"))
+        let tile = WatchlistTile(entry: entry, libraryItem: nil, missingTag: .notOnServer)
+        JellyfinRouteStub.routes["GET /SashimiLists/Watchlist/Details"] = (200, detailsJSON)
+
+        await model.spotlightShown(tile)
+        XCTAssertTrue(JellyfinRouteStub.recorded.isEmpty, "no v2: nothing asked")
+        XCTAssertEqual(model.spotlight(for: tile).details, "2025 · Movie")
+
+        JellyfinRouteStub.routes["GET /SashimiLists/Config"] = (200, "{\"requestsUrl\":null}")
+        await features.refresh()
+        await model.spotlightShown(tile)
+        await model.spotlightShown(tile)
+
+        let spotlight = model.spotlight(for: tile)
+        XCTAssertEqual(spotlight.details, "2025 · 2h 17m · R · Horror, Thriller")
+        XCTAssertEqual(spotlight.overview, "Twin brothers.")
+        XCTAssertEqual(spotlight.backdrop, .remote(try XCTUnwrap(URL(string: "https://image.tmdb.org/b.jpg"))))
+        XCTAssertTrue(spotlight.hasBackdropImage)
+        XCTAssertEqual(JellyfinRouteStub.recorded.filter { $0.path == "/SashimiLists/Watchlist/Details" }.count, 1)
+    }
+
     // MARK: The Requests address
 
     func testTheConfigDecodesTheAddressOrNone() throws {
