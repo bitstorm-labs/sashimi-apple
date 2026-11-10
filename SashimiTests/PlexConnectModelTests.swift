@@ -26,10 +26,23 @@ final class PlexConnectModelTests: XCTestCase {
         super.tearDown()
     }
 
-    private func model(pinLifetime: Duration = .seconds(15 * 60)) throws -> PlexConnectModel {
+    private func model(pinLifetime: Duration = .seconds(15 * 60), now: @escaping () -> Date = Date.init) throws -> PlexConnectModel {
         let client = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
         let store = WatchlistStore(service: WatchlistService(client: client))
-        return PlexConnectModel(store: store, defaults: defaults, pollInterval: .zero, pinLifetime: pinLifetime)
+        return PlexConnectModel(store: store, defaults: defaults, pollInterval: .zero, pinLifetime: pinLifetime, now: now)
+    }
+
+    /// The saved pending PIN, as stored.
+    private func pendingRecord() -> [String: Any]? {
+        guard let data = defaults.data(forKey: PlexConnectModel.pendingPinKey) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    /// plex.tv answers every check of PIN 42 with the token.
+    private func pinAlwaysLinked() {
+        SeerrStubServer.reset()
+        SeerrStubServer.on("POST", "/api/v2/pins", status: 201, body: "{\"id\":42,\"code\":\"K7QF\"}")
+        SeerrStubServer.on("GET", "/api/v2/pins/42", body: "{\"id\":42,\"code\":\"K7QF\",\"authToken\":\"plex-token\"}")
     }
 
     private func connect(_ model: PlexConnectModel) async throws {
@@ -153,5 +166,128 @@ final class PlexConnectModelTests: XCTestCase {
         let connectId = SeerrStubServer.requests("POST", "/api/v2/pins").last?.headers["X-Plex-Client-Identifier"]
         XCTAssertEqual(connectId, requestsId)
         XCTAssertEqual(defaults.string(forKey: "seerr.plexClientIdentifier"), requestsId)
+    }
+
+    // MARK: Suspend and relaunch
+
+    /// The app was suspended past the PIN's deadline while the person linked
+    /// it: one last check still collects the token.
+    func testAPinLinkedJustBeforeTheDeadlineStillLinks() async throws {
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        let model = try model(pinLifetime: .zero)
+
+        try await connect(model)
+
+        XCTAssertEqual(model.state, .linked)
+        XCTAssertGreaterThanOrEqual(SeerrStubServer.requests("GET", "/api/v2/pins/42").count, 1)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
+    }
+
+    /// The app was killed while the person was on Plex's page: on the next
+    /// launch the saved PIN is checked once and the Watchlist linked.
+    func testAPinFromBeforeARelaunchIsCollected() async throws {
+        let before = try model()
+        _ = await before.begin(strong: true)
+        XCTAssertNotNil(pendingRecord(), "the PIN is saved while it waits")
+
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}")
+        let relaunched = try model()
+        await relaunched.resumePendingIfAny()
+
+        XCTAssertEqual(relaunched.state, .linked)
+        XCTAssertEqual(SeerrStubServer.requests("GET", "/api/v2/pins/42").count, 1, "one check, no long poll")
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1)
+        XCTAssertEqual(try body()["replace"] as? Bool, false)
+        XCTAssertNil(pendingRecord(), "collected: nothing left to resume")
+
+        try await model().resumePendingIfAny()
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1, "never linked twice")
+    }
+
+    /// Relaunched into another account's link: the switch question, with the
+    /// PIN kept until it's answered.
+    func testAResumedPinThatFindsAnotherAccountAsks() async throws {
+        _ = try await model().begin(strong: true)
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"marge\",\"newUsername\":\"homer\"}")
+        let relaunched = try model()
+
+        await relaunched.resumePendingIfAny()
+
+        XCTAssertEqual(relaunched.state, .conflict(currentUsername: "marge", newUsername: "homer"))
+        XCTAssertNotNil(pendingRecord(), "not answered yet")
+        relaunched.cancel()
+        XCTAssertNil(pendingRecord(), "answered: Keep")
+    }
+
+    func testAnExpiredPendingPinIsDropped() async throws {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        _ = try await model(now: { start }).begin(strong: true)
+        XCTAssertNotNil(pendingRecord())
+        SeerrStubServer.reset()
+
+        let relaunched = try model(now: { start.addingTimeInterval(16 * 60) })
+        await relaunched.resumePendingIfAny()
+
+        XCTAssertEqual(relaunched.state, .idle)
+        XCTAssertTrue(SeerrStubServer.requests("GET", "/api/v2/pins/42").isEmpty, "an expired PIN isn't checked")
+        XCTAssertNil(pendingRecord())
+    }
+
+    func testThePendingPinNeverStoresTheToken() async throws {
+        pinAlwaysLinked()
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (409, "{\"username\":\"marge\",\"newUsername\":\"homer\"}")
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let model = try model(now: { start })
+
+        let pin = await model.begin(strong: true)
+        let record = try XCTUnwrap(pendingRecord())
+        XCTAssertEqual(Set(record.keys), ["pinId", "code", "expiresAt"])
+        XCTAssertEqual(record["pinId"] as? Int, 42)
+        XCTAssertEqual(record["code"] as? String, "K7QF")
+
+        await model.complete(pin: try XCTUnwrap(pin))
+        XCTAssertEqual(model.state, .conflict(currentUsername: "marge", newUsername: "homer"), "the token is held now")
+
+        XCTAssertNotNil(pendingRecord())
+        for (key, value) in defaults.dictionaryRepresentation() {
+            let text = (value as? Data).flatMap { String(data: $0, encoding: .utf8) } ?? "\(value)"
+            XCTAssertFalse(text.contains("plex-token"), "the token was written under \(key)")
+        }
+    }
+
+    /// Every end of a Connect Plex leaves no PIN to resume.
+    func testEveryEndClearsThePendingPin() async throws {
+        let ends: [(String, () async throws -> Void)] = [
+            ("linked", { JellyfinRouteStub.routes["POST \(self.plexPath)"] = (200, "{\"username\":\"marge\",\"needsReconnect\":false}") }),
+            ("rejected", { JellyfinRouteStub.routes["POST \(self.plexPath)"] = (422, "") }),
+            ("unreachable", { JellyfinRouteStub.routes["POST \(self.plexPath)"] = (503, "") })
+        ]
+        for (name, arrange) in ends {
+            pinAlwaysLinked()
+            try await arrange()
+            let model = try model()
+            let pin = await model.begin(strong: true)
+            XCTAssertNotNil(pendingRecord(), name)
+            await model.complete(pin: try XCTUnwrap(pin))
+            XCTAssertNil(pendingRecord(), name)
+        }
+
+        SeerrStubServer.reset()
+        SeerrStubServer.on("POST", "/api/v2/pins", status: 201, body: "{\"id\":42,\"code\":\"K7QF\"}")
+        SeerrStubServer.on("GET", "/api/v2/pins/42", body: "{\"id\":42,\"code\":\"K7QF\",\"authToken\":null}")
+        let expiring = try model(pinLifetime: .milliseconds(20))
+        let pin = await expiring.begin(strong: true)
+        XCTAssertNotNil(pendingRecord(), "expired")
+        await expiring.complete(pin: try XCTUnwrap(pin))
+        XCTAssertNil(pendingRecord(), "expired")
+
+        let cancelled = try model()
+        _ = await cancelled.begin(strong: true)
+        XCTAssertNotNil(pendingRecord(), "cancelled")
+        cancelled.cancel()
+        XCTAssertNil(pendingRecord(), "cancelled")
     }
 }

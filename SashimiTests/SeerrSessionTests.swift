@@ -133,6 +133,21 @@ final class SeerrSessionTests: XCTestCase {
         XCTAssertEqual(credentials.cookie(forKey: cookieKey), SeerrFixtures.sessionCookie)
     }
 
+    /// Requests sign-in suspended past its PIN's deadline while the person
+    /// linked it: one last check still signs in.
+    func testARequestsPinLinkedJustBeforeTheDeadlineStillSignsIn() async throws {
+        stubPlexSignIn()
+        SeerrStubServer.on("POST", "/api/v1/auth/plex", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
+        let session = SeerrSession(defaults: defaults, credentials: credentials, pollInterval: .zero, plexPinLifetime: .zero)
+        _ = session.setServerAddress(SeerrFixtures.server.absoluteString)
+
+        let pin = await session.beginPlexSignIn(strong: false)
+        await session.completePlexSignIn(pin: try XCTUnwrap(pin))
+
+        XCTAssertEqual(session.state.user?.id, 7)
+        XCTAssertGreaterThanOrEqual(SeerrStubServer.requests("GET", "/api/v2/pins/42").count, 1)
+    }
+
     private func stubPlexSignIn() {
         SeerrStubServer.on("POST", "/api/v2/pins", status: 201, body: "{\"id\":42,\"code\":\"K7QF\"}")
         SeerrStubServer.on("GET", "/api/v2/pins/42", body: "{\"id\":42,\"code\":\"K7QF\",\"authToken\":\"plex-token\"}")

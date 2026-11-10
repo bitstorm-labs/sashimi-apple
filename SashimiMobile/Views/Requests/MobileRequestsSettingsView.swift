@@ -174,7 +174,8 @@ struct MobileRequestsSettingsView: View {
                     if case .awaitingPlex = session.state { return true }
                     return false
                 },
-                cancelWaiting: { session.cancelPlexSignIn() }
+                cancelWaiting: { session.cancelPlexSignIn() },
+                checksStarted: { session.plexPinChecks }
             )
         }
     }

@@ -65,6 +65,7 @@ struct WatchlistPageView: View {
             if removing { removing = false } else { dismiss() }
         }
         .task { await model.load() }
+        .resumingPlexConnect()
         .onDisappear { model.cancelLookups() }
         .onChange(of: model.isGone) { _, gone in
             if gone { dismiss() }

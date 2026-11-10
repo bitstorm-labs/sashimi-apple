@@ -16,20 +16,34 @@ final class PlexConnectModel: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    /// How many PIN checks have started, so Plex's web page can give the poll
+    /// one more after it closes.
+    private(set) var pinChecks = 0
+
+    /// The PIN of a Connect Plex still waiting, kept so it can be collected
+    /// after a relaunch: its id, code and expiry only, never a token.
+    static let pendingPinKey = "watchlist.pendingPlexPin"
+
+    /// PINs this process is polling or collecting right now, so a second
+    /// model (Settings, the page, launch) never links the same PIN twice.
+    private static var pinsInHand = Set<Int>()
 
     private let store: WatchlistStore
     private let defaults: UserDefaults
     private let pollInterval: Duration
     private let pinLifetime: Duration
+    private let now: () -> Date
     private var heldToken: String?
     private var flow: Task<Void, Never>?
 
     init(store: WatchlistStore = .shared, defaults: UserDefaults = .standard,
-         pollInterval: Duration = .seconds(2), pinLifetime: Duration = .seconds(15 * 60)) {
+         pollInterval: Duration = .seconds(2), pinLifetime: Duration = .seconds(15 * 60),
+         now: @escaping () -> Date = Date.init) {
         self.store = store
         self.defaults = defaults
         self.pollInterval = pollInterval
         self.pinLifetime = pinLifetime
+        self.now = now
     }
 
     var isWaiting: Bool {
@@ -48,6 +62,7 @@ final class PlexConnectModel: ObservableObject {
         do {
             let pin = try await plexClient.createPin(strong: strong)
             state = .awaitingPlex(code: pin.code)
+            savePending(pin)
             return pin
         } catch {
             state = .failed(WatchlistText.couldntReachPlex)
@@ -57,21 +72,50 @@ final class PlexConnectModel: ObservableObject {
 
     /// Step 2: wait for the person to link the code, then link the Watchlist.
     func complete(pin: PlexPin) async {
+        Self.pinsInHand.insert(pin.id)
+        defer { Self.pinsInHand.remove(pin.id) }
         let token = await plexClient.waitForToken(
             pinId: pin.id,
             deadline: .now + pinLifetime,
             interval: pollInterval,
-            isWaiting: { self.state == .awaitingPlex(code: pin.code) }
+            isWaiting: { self.state == .awaitingPlex(code: pin.code) },
+            onCheck: { self.pinChecks += 1 }
         )
         guard let token else {
             if !Task.isCancelled, state == .awaitingPlex(code: pin.code) {
                 state = .failed("The Plex code expired. Try again.")
+                clearPending()
             }
             return
         }
         state = .linking
         let result = await store.link(token: token, replace: false)
         guard state == .linking else { return } // Cancelled meanwhile.
+        apply(result, token: token)
+    }
+
+    /// Collects a PIN begun before the app was relaunched (or suspended until
+    /// its flow was gone): one check, no long poll. Linked → the Watchlist is
+    /// linked; another account → the switch question; not linked yet → left
+    /// for later, until it expires.
+    func resumePendingIfAny() async {
+        guard state == .idle, let pending = loadPending() else { return }
+        guard pending.expiresAt > now() else {
+            clearPending()
+            return
+        }
+        guard Self.pinsInHand.insert(pending.pinId).inserted else { return }
+        defer { Self.pinsInHand.remove(pending.pinId) }
+        guard let token = try? await plexClient.checkPin(id: pending.pinId).authToken, !token.isEmpty,
+              state == .idle, loadPending()?.pinId == pending.pinId else { return }
+        state = .linking
+        let result = await store.link(token: token, replace: false)
+        guard state == .linking else { return }
+        if result == nil || result == .plexUnreachable {
+            // Nothing was decided: try again on the next resume.
+            state = .idle
+            return
+        }
         apply(result, token: token)
     }
 
@@ -104,6 +148,7 @@ final class PlexConnectModel: ObservableObject {
         flow = nil
         heldToken = nil
         state = .idle
+        clearPending()
     }
 
     func webSignInURL(for pin: PlexPin) -> URL {
@@ -119,8 +164,11 @@ final class PlexConnectModel: ObservableObject {
         case .linked:
             state = .linked
         case .conflict(let current, let new):
+            // The PIN stays saved until the question is answered, so a
+            // relaunch asks it again.
             heldToken = token
             state = .conflict(currentUsername: current, newUsername: new)
+            return
         case .rejected:
             state = .failed("Plex didn't accept that sign-in. Try again.")
         case .plexUnreachable:
@@ -128,5 +176,34 @@ final class PlexConnectModel: ObservableObject {
         case nil:
             state = .failed("Couldn't reach your server. Try again.")
         }
+        clearPending()
+    }
+
+    // MARK: Pending PIN
+
+    private struct PendingPin: Codable {
+        let pinId: Int
+        let code: String
+        let expiresAt: Date
+    }
+
+    private func savePending(_ pin: PlexPin) {
+        let pending = PendingPin(pinId: pin.id, code: pin.code,
+                                 expiresAt: now().addingTimeInterval(Self.seconds(pinLifetime)))
+        guard let data = try? JSONEncoder().encode(pending) else { return }
+        defaults.set(data, forKey: Self.pendingPinKey)
+    }
+
+    private func loadPending() -> PendingPin? {
+        defaults.data(forKey: Self.pendingPinKey).flatMap { try? JSONDecoder().decode(PendingPin.self, from: $0) }
+    }
+
+    private func clearPending() {
+        defaults.removeObject(forKey: Self.pendingPinKey)
+    }
+
+    private static func seconds(_ duration: Duration) -> TimeInterval {
+        let (seconds, attoseconds) = duration.components
+        return TimeInterval(seconds) + TimeInterval(attoseconds) / 1e18
     }
 }

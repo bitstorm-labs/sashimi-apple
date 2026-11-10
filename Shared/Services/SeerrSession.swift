@@ -77,6 +77,10 @@ final class SeerrSession: ObservableObject {
     private let defaults: UserDefaults
     private let credentials: SeerrCredentialStore
     private let pollInterval: Duration
+    private let plexPinLifetime: Duration
+    /// How many PIN checks have started, so Plex's web page can give the poll
+    /// one more after it closes.
+    private(set) var plexPinChecks = 0
     private var plexWait: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.mondominator.sashimi", category: "SeerrSession")
 
@@ -88,10 +92,12 @@ final class SeerrSession: ObservableObject {
         static let title = "seerr.applicationTitle"
     }
 
-    init(defaults: UserDefaults, credentials: SeerrCredentialStore, pollInterval: Duration) {
+    init(defaults: UserDefaults, credentials: SeerrCredentialStore, pollInterval: Duration,
+         plexPinLifetime: Duration = .seconds(15 * 60)) {
         self.defaults = defaults
         self.credentials = credentials
         self.pollInterval = pollInterval
+        self.plexPinLifetime = plexPinLifetime
         serverURL = defaults.string(forKey: Keys.server).flatMap(Self.normalizedServerURL)
         applicationTitle = defaults.string(forKey: Keys.title) ?? "Seerr"
     }
@@ -216,10 +222,11 @@ final class SeerrSession: ObservableObject {
     /// token for a Seerr session. Ends on cancel, on expiry (15 minutes), or
     /// on sign-in.
     func completePlexSignIn(pin: PlexPin) async {
-        let deadline = ContinuousClock.now + .seconds(15 * 60)
+        let deadline = ContinuousClock.now + plexPinLifetime
         let token = await plexClient.waitForToken(
             pinId: pin.id, deadline: deadline, interval: pollInterval,
-            isWaiting: { self.state == .awaitingPlex(code: pin.code) }
+            isWaiting: { self.state == .awaitingPlex(code: pin.code) },
+            onCheck: { self.plexPinChecks += 1 }
         )
         if let token {
             await exchangePlexToken(token)

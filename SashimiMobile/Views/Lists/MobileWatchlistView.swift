@@ -32,7 +32,10 @@ struct MobileWatchlistView: View {
             ToolbarItem(placement: .primaryAction) { menu }
         }
         .listMessage($message)
-        .task { await model.load() }
+        .task {
+            await model.load()
+            await connect.resumePendingIfAny()
+        }
         .refreshable { await model.load() }
         .onDisappear {
             model.cancelLookups()

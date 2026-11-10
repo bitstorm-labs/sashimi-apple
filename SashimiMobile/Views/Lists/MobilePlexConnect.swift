@@ -12,7 +12,8 @@ func connectPlex(model: PlexConnectModel) async {
         showPage: { await page.show(model.webSignInURL(for: pin)) },
         closePage: { page.close() },
         isWaiting: { model.isWaiting },
-        cancelWaiting: { model.cancel() }
+        cancelWaiting: { model.cancel() },
+        checksStarted: { model.pinChecks }
     )
 }
 
@@ -126,6 +127,7 @@ struct MobilePlexSettingsSection: View {
                 } footer: {
                     Text(model.footer)
                 }
+                .task { await connect.resumePendingIfAny() }
             }
         }
         // No cancel on disappear: a List section "disappears" when scrolled

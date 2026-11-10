@@ -294,12 +294,18 @@ enum PlexClientIdentity {
 
 extension PlexPinClient {
     /// Polls the PIN until the person links it. Nil on cancel, on the deadline,
-    /// or once `isWaiting` turns false.
+    /// or once `isWaiting` turns false. `onCheck` runs as each check starts.
+    /// The deadline is a continuous clock, which keeps running while the app
+    /// is suspended, so the PIN is always checked once more after it passes:
+    /// a link made while the app slept still counts.
     func waitForToken(pinId: Int, deadline: ContinuousClock.Instant, interval: Duration,
-                      isWaiting: @MainActor () -> Bool) async -> String? {
-        while await isWaiting(), ContinuousClock.now < deadline {
+                      isWaiting: @MainActor () -> Bool, onCheck: @MainActor () -> Void = {}) async -> String? {
+        while await isWaiting() {
             if Task.isCancelled { return nil }
+            let isLastCheck = ContinuousClock.now >= deadline
+            await onCheck()
             if let token = try? await checkPin(id: pinId).authToken, !token.isEmpty { return token }
+            if isLastCheck { return nil }
             if interval > .zero {
                 try? await Task.sleep(for: interval)
             } else {

@@ -2,11 +2,18 @@ import SwiftUI
 
 /// Connect Plex for the Watchlist on Apple TV: the plex.tv/link code, as
 /// Settings › Requests shows it. It needs nothing from Requests, so it works
-/// where Requests was never set up. Menu cancels.
+/// where Requests was never set up. Menu cancels. Handed a model that already
+/// has an answer (a PIN collected after a relaunch), it shows that instead of
+/// a new code.
 struct WatchlistPlexConnectView: View {
-    @StateObject private var model = PlexConnectModel()
+    @StateObject private var model: PlexConnectModel
     @Environment(\.dismiss) private var dismiss
     @State private var started = false
+
+    @MainActor
+    init(model: PlexConnectModel? = nil) {
+        _model = StateObject(wrappedValue: model ?? PlexConnectModel())
+    }
 
     var body: some View {
         ZStack {
@@ -25,7 +32,7 @@ struct WatchlistPlexConnectView: View {
             // Once per visit: a second onAppear would throw away the code on screen.
             guard !started else { return }
             started = true
-            model.startCodeFlow()
+            if model.state == .idle { model.startCodeFlow() }
         }
         .onDisappear { model.cancel() }
         .onChange(of: model.state) { _, state in
@@ -103,5 +110,36 @@ struct WatchlistPlexConnectView: View {
         .padding(50)
         .frame(maxWidth: .infinity, minHeight: 520)
         .background(RoundedRectangle(cornerRadius: CornerRadius.large).fill(SashimiTheme.cardBackground))
+    }
+}
+
+extension View {
+    /// Collects a Connect Plex PIN begun before the app was relaunched. A
+    /// different account already syncing brings up the switch question.
+    func resumingPlexConnect() -> some View {
+        modifier(ResumePlexConnect())
+    }
+}
+
+private struct ResumePlexConnect: ViewModifier {
+    @StateObject private var model = PlexConnectModel()
+    @State private var asking = false
+
+    func body(content: Content) -> some View {
+        content
+            .task { await model.resumePendingIfAny() }
+            .onChange(of: model.state) { _, state in
+                switch state {
+                case .conflict:
+                    asking = true
+                case .linked where !asking: // the question's own screen says so
+                    ToastManager.shared.show(WatchlistText.nowSyncs, type: .success)
+                default:
+                    break
+                }
+            }
+            .fullScreenCover(isPresented: $asking) {
+                WatchlistPlexConnectView(model: model)
+            }
     }
 }

@@ -146,6 +146,8 @@ struct ContentView: View {
                     networkMonitor.startServerProbing {
                         await JellyfinClient.shared.probeReachability()
                     }
+                    // A Connect Plex the app was killed in the middle of.
+                    await PlexConnectModel().resumePendingIfAny()
                     await DownloadManager.shared.syncPendingProgress()
                     await DownloadManager.shared.backfillAllSubtitles()
                 }

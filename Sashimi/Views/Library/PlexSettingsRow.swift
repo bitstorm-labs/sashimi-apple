@@ -24,6 +24,7 @@ struct PlexSettingsRow: View {
             .fullScreenCover(isPresented: $connecting) {
                 WatchlistPlexConnectView()
             }
+            .resumingPlexConnect()
             .confirmationDialog(WatchlistText.plexRowTitle, isPresented: $choosing, titleVisibility: .visible) {
                 ForEach(model.actions, id: \.self) { action in
                     if action == .disconnect {
