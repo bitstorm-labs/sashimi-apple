@@ -68,7 +68,7 @@ final class WatchlistStoreTests: XCTestCase {
     }
 
     func testANetworkErrorAfterALoadKeepsTheWatchlist() async throws {
-        JellyfinRouteStub.sequences["GET \(base)"] = [(200, listJSON(entries: [entryJSON()])), (500, "")]
+        JellyfinRouteStub.sequences["GET \(base)"] = [(200, listJSON(entries: [entryJSON()])), (400, "")]
         let store = store(try client())
         await store.refresh()
         await store.refresh()
@@ -228,7 +228,7 @@ final class WatchlistStoreTests: XCTestCase {
     func testAnotherUserWhoseLoadFailsSeesNothingOfTheLastOnes() async throws {
         let (store, client) = try await storeWithAPendingSwitch()
         await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "b")
-        JellyfinRouteStub.routes["GET \(base)"] = (500, "")
+        JellyfinRouteStub.routes["GET \(base)"] = (400, "") // a failed load (not retried, unlike a 5xx)
         await store.refresh()
         XCTAssertNil(store.watchlist)
         XCTAssertEqual(store.availability, .unknown)
@@ -238,7 +238,7 @@ final class WatchlistStoreTests: XCTestCase {
     func testAnotherServerSeesNothingOfTheLastOnes() async throws {
         let (store, client) = try await storeWithAPendingSwitch()
         await client.configure(serverURL: try XCTUnwrap(URL(string: "http://other.local")), accessToken: "token", userId: "a")
-        JellyfinRouteStub.routes["GET \(base)"] = (500, "")
+        JellyfinRouteStub.routes["GET \(base)"] = (400, "") // a failed load (not retried, unlike a 5xx)
         await store.refresh()
         XCTAssertNil(store.watchlist)
         XCTAssertEqual(store.availability, .unknown)

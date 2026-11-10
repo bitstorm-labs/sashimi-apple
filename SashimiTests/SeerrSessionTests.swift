@@ -191,7 +191,7 @@ final class SeerrSessionTests: XCTestCase {
         SeerrStubServer.on("POST", "/api/v1/auth/plex", body: SeerrFixtures.user(), headers: ["Set-Cookie": SeerrFixtures.setCookie])
         JellyfinRouteStub.reset()
         JellyfinRouteStub.routes = [
-            "GET /SashimiLists/Watchlist": (500, ""),
+            "GET /SashimiLists/Watchlist": (400, ""), // fails without the 5xx retry ladder
             "POST /SashimiLists/Watchlist/Plex": (500, "")
         ]
         JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]

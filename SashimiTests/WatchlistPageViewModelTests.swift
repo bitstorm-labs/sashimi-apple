@@ -253,12 +253,11 @@ final class WatchlistPageViewModelTests: XCTestCase {
         let fake = CountingLookup()
         fake.status = 2
         let model = try makeModel(seerr: await signedInSeerr(), lookup: { targets in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            return fake(targets)
+            await fake.answer(after: 200_000_000, targets)
         })
         await model.load()
         model.tiles.forEach(model.tileAppeared)
-        try await Task.sleep(nanoseconds: 50_000_000) // under way
+        await eventually { fake.starts == 1 } // under way
 
         model.cancelLookups() // the cover opened
         await model.load()    // and closed: no tileAppeared this time
@@ -274,15 +273,15 @@ final class WatchlistPageViewModelTests: XCTestCase {
         let fake = CountingLookup()
         fake.status = 2
         let model = try makeModel(seerr: await signedInSeerr(), lookup: { targets in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            return fake(targets)
+            await fake.answer(after: 200_000_000, targets)
         })
         await model.load()
         model.tiles.forEach(model.tileAppeared)
-        try await Task.sleep(nanoseconds: 50_000_000) // the lookup is under way
+        await eventually { fake.starts == 1 } // the lookup is under way
 
         model.cancelLookups()
-        try await Task.sleep(nanoseconds: 400_000_000)
+        await eventually { fake.ends == 1 } // its answer came back
+        await drainMainQueue()
 
         XCTAssertEqual(model.tiles.first?.missingTag, .notOnServer, "a page that went away takes no answers")
         model.tiles.forEach(model.tileAppeared)
@@ -413,6 +412,12 @@ extension WatchlistPageViewModelTests {
         return (WatchlistPageViewModel(store: store, service: service, seerr: seerr, lookup: lookup), store)
     }
 
+    /// Returns once everything already queued on the main queue has run (the
+    /// page's Combine sinks deliver there).
+    private func drainMainQueue() async {
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+    }
+
     /// Waits (bounded) for something the page does on its own after a store change.
     private func eventually(_ condition: () -> Bool) async {
         for _ in 0..<200 where !condition() {
@@ -498,7 +503,7 @@ extension WatchlistPageViewModelTests {
             (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2), entryJSON("c", tmdb: 3)])),
             (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("c", tmdb: 3)]))
         ]
-        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (500, "")
+        JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (400, "") // not retried, unlike a 5xx
         JellyfinRouteStub.routes["DELETE \(base)/Items/b"] = (204, "")
         let model = try makeModel(seerr: signedOutSeerr())
         await model.load()
@@ -541,7 +546,7 @@ extension WatchlistPageViewModelTests {
     func testRemoveWhoseRefreshFailsStillDropsTheTile() async throws {
         JellyfinRouteStub.sequences["GET \(base)"] = [
             (200, listJSON(entries: [entryJSON("a", tmdb: 1), entryJSON("b", tmdb: 2)])),
-            (500, "")
+            (400, "") // not retried, unlike a 5xx
         ]
         JellyfinRouteStub.routes["DELETE \(base)/Items/a"] = (204, "")
         let model = try makeModel(seerr: signedOutSeerr())
@@ -588,15 +593,14 @@ extension WatchlistPageViewModelTests {
         fake.status = 2
         let session = await signedInSeerr()
         let model = try makeModel(seerr: session, lookup: { targets in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            return fake(targets)
+            await fake.answer(after: 300_000_000, targets)
         })
         await model.load()
         model.tileAppeared(try tile(model, 0)) // a batch is now in flight
 
         SeerrStubServer.on("POST", "/api/v1/auth/local", body: SeerrFixtures.user(id: 8), headers: ["Set-Cookie": SeerrFixtures.setCookie])
         await session.signInLocal(email: "other@example.com", password: "pw")
-        try await Task.sleep(nanoseconds: 50_000_000) // the model has seen the new owner
+        await drainMainQueue() // the model has seen the new owner
         model.tileAppeared(try tile(model, 1)) // queued behind the stale batch
         await model.waitForLookups()
 
@@ -612,6 +616,18 @@ private final class CountingLookup {
     var batches: [[SeerrTarget]] = []
     var status: Int?
     var asked: [SeerrTarget] { batches.flatMap { $0 } }
+    /// Slow lookups started and answered, so a test waits on them, not on a clock.
+    private(set) var starts = 0
+    private(set) var ends = 0
+
+    /// Answers like `callAsFunction`, after `nanoseconds` (cut short by cancellation).
+    @MainActor
+    func answer(after nanoseconds: UInt64, _ targets: [SeerrTarget]) async -> [String: SeerrMediaInfo?] {
+        starts += 1
+        try? await Task.sleep(nanoseconds: nanoseconds)
+        defer { ends += 1 }
+        return self(targets)
+    }
 
     func callAsFunction(_ targets: [SeerrTarget]) -> [String: SeerrMediaInfo?] {
         batches.append(targets)
