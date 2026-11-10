@@ -27,7 +27,14 @@ final class WatchlistStore: ObservableObject {
     private var loadedServer: URL?
     /// The Plex token a pending switch waits on. In memory only; never logged,
     /// stored or published.
-    private var heldToken: (switchId: UUID, token: String)?
+    private var heldToken: HeldToken?
+
+    /// A switch question's token, and the user and server it was asked for.
+    private struct HeldToken {
+        let switchId: UUID
+        let token: String
+        let scope: Scope
+    }
     /// Bumped by each load; `landedGeneration` is the newest load whose answer
     /// was applied. An answer older than one already applied is dropped, but
     /// one whose newer loads are still on their way (or fail) still lands.
@@ -55,6 +62,21 @@ final class WatchlistStore: ObservableObject {
     func currentOwner() async -> (userId: String?, server: URL?) {
         let scope = await currentScope()
         return (scope.userId, scope.server)
+    }
+
+    /// Forgets everything of the current session: the Watchlist, the card, the
+    /// link, a waiting switch question and its token, and any notice.
+    func reset() {
+        refreshGeneration += 1
+        landedGeneration = refreshGeneration // anything still on its way is the last session's
+        watchlist = nil
+        availability = .unknown
+        pendingSwitch = nil
+        heldToken = nil
+        notice = nil
+        switchFailure = nil
+        loadedUserId = nil
+        loadedServer = nil
     }
 
     /// Reloads the Watchlist. Another user or server first loses everything of
@@ -171,7 +193,7 @@ final class WatchlistStore: ObservableObject {
             if !wasLinked { notice = WatchlistText.nowSyncs }
         case .conflict(let current, let new):
             let switchId = UUID()
-            heldToken = (switchId, token)
+            heldToken = HeldToken(switchId: switchId, token: token, scope: scope)
             pendingSwitch = PendingSwitch(id: switchId, currentUsername: current, newUsername: new)
         case .rejected, .plexUnreachable, nil:
             break
@@ -183,6 +205,11 @@ final class WatchlistStore: ObservableObject {
     func confirmSwitch() async -> Bool {
         guard let held = heldToken, let question = pendingSwitch, question.id == held.switchId else { return false }
         let scope = await currentScope()
+        guard scope == held.scope else {
+            // Asked for another user or server: their token is never sent here.
+            declineSwitch()
+            return false
+        }
         heldToken = nil
         pendingSwitch = nil
         switchFailure = nil

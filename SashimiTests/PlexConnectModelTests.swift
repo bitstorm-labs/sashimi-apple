@@ -388,5 +388,25 @@ final class PlexConnectModelTests: XCTestCase {
         XCTAssertEqual(model.state, .idle)
         XCTAssertNil(pendingRecord())
     }
+
+    /// The switch question was asked for this user; after a switch to another
+    /// one, "Switch" sends nothing and the question goes away.
+    func testAHeldTokenIsNotSentForAnotherUser() async throws {
+        JellyfinRouteStub.sequences["POST \(plexPath)"] = [
+            (409, "{\"username\":\"marge\",\"newUsername\":\"homer\"}"),
+            (200, "{\"username\":\"homer\",\"needsReconnect\":false}")
+        ]
+        let client = JellyfinClient(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "me")
+        let model = PlexConnectModel(store: WatchlistStore(service: WatchlistService(client: client)),
+                                     defaults: defaults, pollInterval: .zero)
+        try await connect(model)
+        XCTAssertEqual(model.state, .conflict(currentUsername: "marge", newUsername: "homer"))
+
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "other")
+        await model.confirmSwitch()
+
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, 1, "nothing sent for the other user")
+        XCTAssertEqual(model.state, .idle)
+    }
 }
 

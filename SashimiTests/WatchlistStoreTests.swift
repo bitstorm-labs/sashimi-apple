@@ -402,4 +402,46 @@ final class WatchlistStoreTests: XCTestCase {
         await second.value
         XCTAssertEqual(store.watchlist?.entries.map(\.id), ["e1", "e2"])
     }
+
+    // MARK: Another session
+
+    /// Sign-out or a switch to another account: nothing of the last one is
+    /// shown or kept, before any reload.
+    func testResetForgetsEverythingOfTheLastSession() async throws {
+        let (store, _) = try await storeWithAPendingSwitch()
+        store.notice = "Your Watchlist now syncs with Plex"
+        let settings = PlexSettingsModel(store: store)
+        XCTAssertNotNil(store.card)
+        XCTAssertEqual(settings.row, .connected(username: "marge"))
+        let posts = JellyfinRouteStub.requests("POST", plexPath).count
+
+        store.reset()
+
+        XCTAssertNil(store.watchlist)
+        XCTAssertEqual(store.availability, .unknown)
+        XCTAssertNil(store.card)
+        XCTAssertEqual(settings.row, .hidden)
+        XCTAssertNil(store.pendingSwitch)
+        XCTAssertNil(store.notice)
+        XCTAssertNil(store.switchFailure)
+        let switched = await store.confirmSwitch()
+        XCTAssertFalse(switched)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, posts, "the held token is gone")
+    }
+
+    /// A switch question asked for user A is never answered with A's Plex
+    /// token on user B's Watchlist.
+    func testASwitchQuestionForOneUserSendsNothingForAnother() async throws {
+        let (store, client) = try await storeWithAPendingSwitch()
+        let posts = JellyfinRouteStub.requests("POST", plexPath).count
+        JellyfinRouteStub.routes["POST \(plexPath)"] = (200, "{\"username\":\"chad\",\"needsReconnect\":false}")
+        await client.configure(serverURL: try XCTUnwrap(URL(string: "http://stub.local")), accessToken: "token", userId: "other")
+
+        let switched = await store.confirmSwitch()
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(JellyfinRouteStub.requests("POST", plexPath).count, posts, "nothing sent for the other user")
+        XCTAssertNil(store.pendingSwitch)
+    }
 }
+

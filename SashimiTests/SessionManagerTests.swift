@@ -211,9 +211,11 @@ final class SessionManagerTests: XCTestCase {
     @MainActor
     func testLogoutClearsState() async {
         let manager = SessionManager.shared
+        WatchlistStore.shared.notice = "Your Watchlist now syncs with Plex"
 
         // Perform logout
         manager.logout(reason: .userInitiated)
+        XCTAssertNil(WatchlistStore.shared.notice, "the Watchlist forgets the signed-out session at once")
 
         // Verify state is cleared
         XCTAssertFalse(manager.isAuthenticated)
@@ -286,9 +288,11 @@ final class SessionManagerTests: XCTestCase {
         }
         defer { observation.cancel() }
 
+        WatchlistStore.shared.notice = "Your Watchlist now syncs with Plex"
         await manager.switchServer(to: next.id)
 
         XCTAssertEqual(manager.activeServerId, next.id)
+        XCTAssertNil(WatchlistStore.shared.notice, "the Watchlist forgets the last server's session")
         XCTAssertEqual(urlWhenPublished, next.url,
                        "The root rebuilds on activeServerId; the client must already be on the new server")
     }

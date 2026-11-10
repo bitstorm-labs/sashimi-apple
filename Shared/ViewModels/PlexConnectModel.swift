@@ -37,7 +37,14 @@ final class PlexConnectModel: ObservableObject {
     private let pollInterval: Duration
     private let pinLifetime: Duration
     private let now: () -> Date
-    private var heldToken: String?
+    /// The token a switch question waits on, and whose Watchlist it was for.
+    private var heldToken: HeldToken?
+
+    private struct HeldToken {
+        let token: String
+        let userId: String?
+        let server: URL?
+    }
     private var flow: Task<Void, Never>?
     /// Bumped by `cancel()`, so a `begin` that was waiting on plex.tv when
     /// the person cancelled doesn't bring the code back.
@@ -108,10 +115,12 @@ final class PlexConnectModel: ObservableObject {
             }
             return
         }
+        let owner = await store.currentOwner()
+        guard state == .awaitingPlex(code: pin.code) else { return } // Cancelled meanwhile.
         state = .linking
         let result = await store.link(token: token, replace: false)
         guard state == .linking else { return } // Cancelled meanwhile.
-        apply(result, token: token)
+        apply(result, token: token, owner: owner)
     }
 
     /// Collects a PIN begun before the app was relaunched (or suspended until
@@ -139,7 +148,7 @@ final class PlexConnectModel: ObservableObject {
             state = .idle
             return
         }
-        apply(result, token: token)
+        apply(result, token: token, owner: owner)
     }
 
     /// The tvOS flow in one call: show a code and wait for it.
@@ -153,7 +162,14 @@ final class PlexConnectModel: ObservableObject {
 
     /// "Yes" to the switch question, with the token held from `complete`.
     func confirmSwitch() async {
-        guard case .conflict = state, let token = heldToken else { return }
+        guard case .conflict = state, let held = heldToken else { return }
+        let owner = await store.currentOwner()
+        guard owner.userId == held.userId, owner.server == held.server else {
+            // Asked for another user or server: their token is never sent here.
+            cancel()
+            return
+        }
+        let token = held.token
         let question = state
         message = nil
         state = .linking
@@ -165,7 +181,7 @@ final class PlexConnectModel: ObservableObject {
             message = WatchlistText.couldntReachPlex
             return
         }
-        apply(result, token: token)
+        apply(result, token: token, owner: owner)
     }
 
     func cancel() {
@@ -185,7 +201,8 @@ final class PlexConnectModel: ObservableObject {
         )
     }
 
-    private func apply(_ result: PlexLinkResult?, token: String) {
+    private func apply(_ result: PlexLinkResult?, token: String,
+                       owner: (userId: String?, server: URL?)) {
         heldToken = nil
         switch result {
         case .linked:
@@ -193,7 +210,7 @@ final class PlexConnectModel: ObservableObject {
         case .conflict(let current, let new):
             // The PIN stays saved until the question is answered, so a
             // relaunch asks it again.
-            heldToken = token
+            heldToken = HeldToken(token: token, userId: owner.userId, server: owner.server)
             state = .conflict(currentUsername: current, newUsername: new)
             return
         case .rejected:
