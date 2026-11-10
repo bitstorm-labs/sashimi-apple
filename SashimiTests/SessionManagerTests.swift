@@ -3,6 +3,24 @@ import XCTest
 @testable import Sashimi
 
 final class SessionManagerTests: XCTestCase {
+    /// Every request these tests cause is answered in-process (#874). Activating
+    /// a server starts a bandwidth probe and an admin-flag lookup; both used to
+    /// reach the real network and only "passed" after timing out.
+    override func setUp() {
+        super.setUp()
+        JellyfinRouteStub.reset()
+        JellyfinClient.testURLProtocolClasses = [JellyfinRouteStub.self]
+        // A complete, >1 MB sample: the probe records a reading and stops, so
+        // no retry outlives the test.
+        JellyfinRouteStub.routes["GET /Playback/BitrateTest"] = (200, String(repeating: "0", count: 1_100_000))
+    }
+
+    override func tearDown() {
+        JellyfinClient.testURLProtocolClasses = []
+        JellyfinRouteStub.reset()
+        super.tearDown()
+    }
+
     // MARK: - Temporary Client Scope Tests
 
     func testScopeStackRelinksOutOfOrderTeardownToOriginalParent() {
@@ -288,8 +306,26 @@ final class SessionManagerTests: XCTestCase {
         }
         defer { observation.cancel() }
 
+        JellyfinRouteStub.routes["GET /Users/user-server-next"] = (
+            200, #"{"Id":"user-server-next","Name":"tester","Policy":{"IsAdministrator":true}}"#
+        )
+        let adminFlagLoaded = expectation(description: "admin flag answered in-process")
+        let adminObservation = manager.$isAdministrator.first(where: { $0 }).sink { _ in
+            adminFlagLoaded.fulfill()
+        }
+        defer { adminObservation.cancel() }
+
         WatchlistStore.shared.notice = "Your Watchlist now syncs with Plex"
         await manager.switchServer(to: next.id)
+        await awaitBandwidthMeasurement(for: next.url)
+        await fulfillment(of: [adminFlagLoaded], timeout: 5)
+
+        // #874: the switch's bandwidth probe and admin lookup stay in-process.
+        XCTAssertEqual(JellyfinRouteStub.requests("GET", "/Playback/BitrateTest").count, 1,
+                       "the bandwidth probe must go through the test URLProtocol, not the network")
+        XCTAssertEqual(JellyfinRouteStub.requests("GET", "/Users/user-server-next").count, 1)
+        XCTAssertNotNil(BandwidthMeasurementStore.shared.measurement(for: next.url))
+        BandwidthMeasurementStore.shared.clearMeasurement(for: next.url)
 
         XCTAssertEqual(manager.activeServerId, next.id)
         XCTAssertNil(WatchlistStore.shared.notice, "the Watchlist forgets the last server's session")
@@ -361,8 +397,24 @@ final class SessionManagerTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "serverURL")
         UserDefaults.standard.removeObject(forKey: "userId")
     }
+}
 
-    private func makeServer(id: String) -> ServerConfig {
+// MARK: - Helpers
+
+private extension SessionManagerTests {
+    /// Waits (bounded) for the server's bandwidth probe to start and record a
+    /// reading. Polls: awaiting the probe task itself is not bounded, because
+    /// `Task.value` ignores cancellation and a failing round retries for ~80 s.
+    func awaitBandwidthMeasurement(for url: URL) async {
+        let deadline = Date().addingTimeInterval(5)
+        while BandwidthMeasurementStore.shared.measurement(for: url) == nil, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNotNil(BandwidthMeasurementStore.shared.probe(for: url),
+                        "activating the server should start a bandwidth probe")
+    }
+
+    func makeServer(id: String) -> ServerConfig {
         ServerConfig(
             id: id,
             name: id,
@@ -372,7 +424,7 @@ final class SessionManagerTests: XCTestCase {
         )
     }
 
-    private func snapshotDefaults(for keys: [String]) -> [String: Any] {
+    func snapshotDefaults(for keys: [String]) -> [String: Any] {
         keys.reduce(into: [String: Any]()) { snapshot, key in
             if let value = UserDefaults.standard.object(forKey: key) {
                 snapshot[key] = value
@@ -380,7 +432,7 @@ final class SessionManagerTests: XCTestCase {
         }
     }
 
-    private func restoreDefaults(_ values: [String: Any], for keys: [String]) {
+    func restoreDefaults(_ values: [String: Any], for keys: [String]) {
         for key in keys {
             if let value = values[key] {
                 UserDefaults.standard.set(value, forKey: key)
