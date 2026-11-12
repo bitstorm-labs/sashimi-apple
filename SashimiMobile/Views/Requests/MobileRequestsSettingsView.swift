@@ -18,11 +18,18 @@ struct MobileRequestsSettingsView: View {
         Form {
             Section {
                 if session.isServerAddressManaged {
-                    LabeledContent {
-                        Label(WatchlistV2Text.setByYourServer, systemImage: "lock.fill")
-                    } label: {
+                    // A Label as LabeledContent's value drew a ~300pt-tall
+                    // row on iPad (#904); a plain HStack stays one line.
+                    HStack {
                         Text(WatchlistV2Text.requestsServer)
+                        Spacer()
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        Text(WatchlistV2Text.setByYourServer)
+                            .foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                 } else if session.isActive {
                     LabeledContent("Request server", value: session.serverURL?.host ?? session.serverURL?.absoluteString ?? "")
                 } else {
@@ -64,6 +71,7 @@ struct MobileRequestsSettingsView: View {
                 }
             }
         }
+        .readableSettingsColumn()
         .navigationTitle("Requests")
         .onAppear {
             serverText = session.serverURL?.absoluteString ?? ""

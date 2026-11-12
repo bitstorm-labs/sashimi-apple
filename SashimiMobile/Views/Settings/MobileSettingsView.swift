@@ -255,6 +255,7 @@ struct MobileSettingsView: View {
             ServerEditView(server: server)
                 .environmentObject(sessionManager)
         }
+        .readableSettingsColumn()
         .navigationTitle("Settings")
         // Read once when Settings opens (and again on a server switch) for
         // the Server Plugins subtitle; that screen only adds Refresh.

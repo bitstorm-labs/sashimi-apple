@@ -41,6 +41,7 @@ struct MobileQuickConnectApprovalView: View {
 
             result
         }
+        .readableSettingsColumn()
         .navigationTitle("Sign In a TV")
         .onAppear {
             model.reset()
