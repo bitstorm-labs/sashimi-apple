@@ -311,7 +311,8 @@ struct HomeRowOrderView: View {
         let available = RailOrder.conditionalDestinations(
             seerr: seerr.state,
             canViewDashboard: sessionManager.canViewServerDashboard,
-            hasWatchlist: RailOrder.hasWatchlist(watchlist.availability)
+            hasWatchlist: RailOrder.hasWatchlist(watchlist.availability),
+            hasDownloads: showsSideMenu
         )
         return showsSideMenu
             ? settings.sideMenuEntries(libraryIds: railLibraries.map(\.id), available: available)
@@ -324,6 +325,8 @@ struct HomeRowOrderView: View {
         case .requests: return "Requests"
         case .dashboard: return "Dashboard"
         case .watchlist: return WatchlistText.name
+        case .search: return "Search"
+        case .downloads: return "Downloads"
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }
@@ -438,10 +441,11 @@ struct HomeRowOrderView: View {
                      : "Drag to reorder, tap to enable/disable")
             } footer: {
                 if showsSideMenu {
-                    Text("Home, Search, Downloads and Settings stay where they are in the side menu.")
+                    Text("Home and Settings stay where they are in the side menu.")
                 }
             }
         }
+        .readableSettingsColumn()
         .navigationTitle(showsSideMenu ? "Home & Side Menu" : "Row Order")
         .task {
             if showsSideMenu {

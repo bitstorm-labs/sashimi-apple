@@ -54,9 +54,9 @@ final class MenuFollowsRowOrderTests: XCTestCase {
         let menu = RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved, available: available)
         let standsFor = rows.compactMap(\.railDestination).filter { destination in
             switch destination {
-            case .requests, .dashboard, .watchlist: return available.contains(destination)
+            case .requests, .dashboard, .watchlist, .downloads: return available.contains(destination)
             case .library(let id): return libraryIds.contains(id)
-            case .finTV, .lists: return true
+            case .finTV, .lists, .search: return true
             }
         }
         XCTAssertEqual(menu.filter(standsFor.contains), standsFor,

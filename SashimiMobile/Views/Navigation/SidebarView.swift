@@ -56,8 +56,10 @@ enum SidebarSelection: Hashable {
         case .requests: return .requests
         case .dashboard: return .dashboard
         case .watchlist: return .watchlist
+        case .search: return .search
+        case .downloads: return .downloads
         case .library(let id, _, _): return .library(id)
-        case .home, .search, .downloads, .settings: return nil
+        case .home, .settings: return nil
         }
     }
 
@@ -154,7 +156,7 @@ struct MainNavigationView: View {
             }
 
             SidebarRail(
-                libraries: libraries,
+                items: railItems,
                 selection: selection,
                 downloadActivity: railDownloadActivity,
                 isOffline: !networkMonitor.isOnline,
@@ -233,7 +235,8 @@ struct MainNavigationView: View {
     }
 
     private var railItems: [SidebarSelection] {
-        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard, hasWatchlist: RailOrder.hasWatchlist(watchlist.availability))
+        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard,
+                                                          hasWatchlist: RailOrder.hasWatchlist(watchlist.availability), hasDownloads: true)
         return SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden,
                                           savedOrder: homeRows.sideMenuOrder, available: available)
     }

@@ -45,7 +45,7 @@ final class RequestsDashboardRailTests: XCTestCase {
     func testWithNothingSavedTheyFollowListsAtTheEnd() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, available: both),
-            [.finTV, .library("movies"), .library("boxsets"), .lists, .requests, .dashboard]
+            [.search, .finTV, .library("movies"), .library("boxsets"), .lists, .requests, .dashboard]
         )
         let names = MainTabView.navRows(rowConfigs: rows, libraries: libraries, hidden: [], available: both).map(\.title)
         XCTAssertEqual(names, ["Home", "Search", "SashimiTV", "Movies", "Collections", "Lists", "Requests", "Dashboard", "Settings"])
@@ -57,7 +57,7 @@ final class RequestsDashboardRailTests: XCTestCase {
         let oldRows: [HomeRowConfig] = [.builtIn(.hero), .library(id: "movies", name: "Movies")]
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: oldRows, libraryIds: libraryIds, available: both),
-            [.library("movies"), .library("boxsets"), .finTV, .lists, .requests, .dashboard]
+            [.search, .library("movies"), .library("boxsets"), .finTV, .lists, .requests, .dashboard]
         )
     }
 
@@ -74,7 +74,7 @@ final class RequestsDashboardRailTests: XCTestCase {
         let saved = ["menu:lists", "hero", "channels", "library_movies", "menu:library:boxsets"]
         let before = RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved)
         let after = RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved, available: both)
-        XCTAssertEqual(before, [.lists, .finTV, .library("movies"), .library("boxsets")])
+        XCTAssertEqual(before, [.search, .lists, .finTV, .library("movies"), .library("boxsets")])
         XCTAssertEqual(after, before + [.requests, .dashboard])
 
         let entries = SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: saved, available: both)

@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the nav rail lists between Home and Search, in order.
+/// What the nav rail lists between Home and Settings, in order.
 ///
 /// Pure and standalone because the rule is worth testing and the rail itself is
 /// a view: given the Home row order the user set and the libraries the server
@@ -25,31 +25,38 @@ enum RailOrder {
         case dashboard
         /// The Watchlist's Spotlight page (#894).
         case watchlist
+        /// Search. Once pinned under Home, now an entry like the rest: it
+        /// leads the list by default and can be moved or hidden (A1 parity).
+        case search
+        /// Downloads (iPad/Mac only): last by default, movable and hideable.
+        case downloads
     }
 
     /// The entries that come and go with the account or server: what is
     /// available now. `seerr` is the Seerr sign-in; an expired one keeps
     /// Requests so its page can say so. `hasWatchlist` is
     /// `hasWatchlist(_:)` of the Watchlist's availability (#894).
-    static func conditionalDestinations(seerr: SeerrAuthState, canViewDashboard: Bool, hasWatchlist: Bool = false) -> [Destination] {
+    /// `hasDownloads` is the iPad/Mac rail, which has a Downloads page.
+    static func conditionalDestinations(
+        seerr: SeerrAuthState,
+        canViewDashboard: Bool,
+        hasWatchlist: Bool = false,
+        hasDownloads: Bool = false
+    ) -> [Destination] {
         var result: [Destination] = hasWatchlist ? [.watchlist] : []
         switch seerr {
         case .signedIn, .expired: result.append(.requests)
         case .notConfigured, .signingIn, .awaitingPlex: break
         }
         if canViewDashboard { result.append(.dashboard) }
+        if hasDownloads { result.append(.downloads) }
         return result
     }
 
-    /// The menu-only entries that trail the list until the user moves them,
-    /// in that order. Requests is here for row orders that have no Requests
-    /// row yet; once a row stands for it, the row decides.
-    static let trailingDestinations: [Destination] = [.lists, .requests, .dashboard]
-
-    /// The Watchlist, Requests and Dashboard: listed only while
+    /// The Watchlist, Requests, Dashboard and Downloads: listed only while
     /// `conditionalDestinations` holds them, as rows or menu entries alike.
     static func isConditional(_ destination: Destination) -> Bool {
-        destination == .watchlist || destination == .requests || destination == .dashboard
+        destination == .watchlist || destination == .requests || destination == .dashboard || destination == .downloads
     }
 
     /// Whether the side menu offers the Watchlist (#894): unless the server
@@ -60,16 +67,17 @@ enum RailOrder {
     }
 
     /// `rowOrder` (the menu's entries in the user's order, see
-    /// `SideMenuOrder`) wins; libraries it does not account for follow in
-    /// server order, then SashimiTV, then Lists, then whichever of Requests
-    /// and Dashboard `available` holds (`conditionalDestinations`). An
-    /// available Watchlist it does not place leads, directly under Search (#894).
+    /// `SideMenuOrder`) wins. What it does not account for falls back to the
+    /// default order: Search, then an available Watchlist, at the top; then
+    /// libraries in server order, SashimiTV, Lists, and whichever of
+    /// Requests, Dashboard and Downloads `available` holds
+    /// (`conditionalDestinations`) at the end.
     ///
     /// Rows hidden on Home are still listed. Hiding a row is a statement about
     /// the Home screen, not about the destination. What leaves the rail is
     /// what the user hid from the side menu (`hidden`, #753), a setting of its
-    /// own; Home, Search and Settings are not destinations, so they can never
-    /// be hidden. Anything not in `hidden` — a library added on the server
+    /// own; Home and Settings are not destinations, so they can never be
+    /// hidden. Anything not in `hidden` — a library added on the server
     /// later included — shows, and hidden ids the server no longer has do
     /// nothing.
     static func destinations(
@@ -87,15 +95,16 @@ enum RailOrder {
             placed.insert(destination)
         }
 
+        if !rowOrder.contains(.search) { place(.search) }
         if available.contains(.watchlist) && !rowOrder.contains(.watchlist) {
             place(.watchlist)
         }
 
         for destination in rowOrder {
             switch destination {
-            case .finTV, .lists:
+            case .finTV, .lists, .search:
                 place(destination)
-            case .requests, .dashboard, .watchlist:
+            case .requests, .dashboard, .watchlist, .downloads:
                 // Saved while signed in, say, and not there now.
                 if available.contains(destination) { place(destination) }
             case .library(let libraryId) where libraryIds.contains(libraryId):
@@ -113,11 +122,10 @@ enum RailOrder {
             place(.library(libraryId))
         }
         // Likewise FinTV, if the saved order predates the row existing, and
-        // Lists, which has always come last, and the conditional entries
-        // after it (#845).
+        // Lists, and the conditional entries after it (#845).
         place(.finTV)
         place(.lists)
-        for destination in [Destination.requests, .dashboard] where available.contains(destination) {
+        for destination in [Destination.requests, .dashboard, .downloads] where available.contains(destination) {
             place(destination)
         }
 
@@ -134,11 +142,13 @@ enum RailOrder {
     /// in once it leaves the side menu (#845); Requests is still offered by
     /// Search's "Not in your library" row; Lists always opens the Watchlist.
     static func reachabilityNote(for destination: Destination?, isOnHome: Bool, isInSideMenu: Bool) -> String? {
-        if destination == .watchlist { return nil }
+        if destination == .watchlist || destination == .search || destination == .downloads { return nil }
         guard destination == .dashboard else { return reachabilityNote(isOnHome: isOnHome, isInSideMenu: isInSideMenu) }
         return isInSideMenu ? nil : "Hidden: the Dashboard has no other way in"
     }
 
+    static let searchIcon = "magnifyingglass"
+    static let downloadsIcon = "arrow.down.circle"
     static let watchlistIcon = "bookmark"
     static let requestsIcon = "tray.and.arrow.down"
     static let dashboardIcon = "gauge.with.dots.needle.67percent"

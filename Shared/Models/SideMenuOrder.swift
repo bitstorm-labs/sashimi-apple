@@ -30,18 +30,22 @@ enum SideMenuOrder {
     }
 
     /// The side menu's entries that are not Home rows, in their default order:
-    /// the Watchlist if `available` (#894), the libraries Home has no row for
-    /// (server order), then Lists, then whichever of Requests and Dashboard
-    /// are `available` (#845, see `RailOrder.conditionalDestinations`).
+    /// Search, the Watchlist if `available` (#894), the libraries Home has no
+    /// row for (server order), Lists, then whichever of Requests, Dashboard
+    /// and Downloads are `available` (#845, see
+    /// `RailOrder.conditionalDestinations`).
     /// A destination a row stands for is never also menu-only: Requests has
     /// a row on Home (#861), so a row order with it lists Requests once.
     static func menuOnly(rows: [Row], libraryIds: [String], available: [RailOrder.Destination] = []) -> [RailOrder.Destination] {
         let onHome = Set(rows.compactMap(\.destination))
-        let conditional = RailOrder.trailingDestinations.filter { $0 != .lists && available.contains($0) }
         let watchlist: [RailOrder.Destination] = available.contains(.watchlist) ? [.watchlist] : []
-        return (watchlist + libraryIds.map(RailOrder.Destination.library) + [.lists] + conditional)
+        let late = latePlaced.filter { available.contains($0) }
+        return ([.search] + watchlist + libraryIds.map(RailOrder.Destination.library) + [.lists] + late)
             .filter { !onHome.contains($0) }
     }
+
+    /// Menu-only entries whose default place is the very end of the list.
+    static let latePlaced: [RailOrder.Destination] = [.requests, .dashboard, .downloads]
 
     /// Whether Settings lists this row now: a row standing for Requests only
     /// while Seerr is `available`, the same rule as its menu entry (#861).
@@ -55,41 +59,64 @@ enum SideMenuOrder {
         rows.filter { isListed($0, available: available) }.map { .row($0.id) }
     }
 
+    /// Whether `saved` was written after Search joined the list (A1 parity).
+    /// One from before has its Watchlist put back under Search, once.
+    static func isMigrated(_ saved: [String]?) -> Bool {
+        saved?.contains(Entry.menuOnly(.search).storageKey) ?? false
+    }
+
     /// Home's rows, in their own order, with the menu-only entries among them.
     ///
     /// A saved menu-only entry goes straight after the nearest entry it
     /// followed that is still here (the start, if none is). One the saved
-    /// order has never seen (all of them before #841, a library added on the
-    /// server later) goes at the end, except the Watchlist, which goes first:
-    /// directly under Search, where it is new (#894). A saved entry that is no longer
-    /// menu-only (the library left the server, or Home gained a row for it)
-    /// is ignored.
+    /// order has not placed goes to its default place: Search first, the
+    /// Watchlist straight under Search, libraries and Lists after the last
+    /// library (or SashimiTV) row, and Requests, Dashboard and Downloads at
+    /// the end. A saved entry that is no longer menu-only (the library left
+    /// the server, or Home gained a row for it) is ignored.
     ///
-    /// Requests and Dashboard are listed only while `available`; saved
-    /// while signed in and absent now, they are skipped like a library
+    /// Migration (A1 parity): an order saved before Search was an entry
+    /// keeps everything's relative order, gains Search at the top, and has
+    /// its Watchlist moved to straight under it.
+    ///
+    /// Requests, Dashboard and Downloads are listed only while `available`;
+    /// saved while signed in and absent now, they are skipped like a library
     /// that left the server. The Requests row is left out the same way, and
     /// `reordered` keeps it where it was when the others move.
     static func entries(rows: [Row], libraryIds: [String], saved: [String]?, available: [RailOrder.Destination] = []) -> [Entry] {
         var result = rowEntries(rows: rows, available: available)
         var unplaced = menuOnly(rows: rows, libraryIds: libraryIds, available: available)
+        let migrated = isMigrated(saved)
 
         let savedEntries = (saved ?? []).map(Entry.init(storageKey:))
         for (index, entry) in savedEntries.enumerated() {
             guard case .menuOnly(let destination) = entry, unplaced.contains(destination) else { continue }
+            if destination == .watchlist && !migrated { continue }
             let anchor = savedEntries[..<index].reversed().lazy.compactMap { result.firstIndex(of: $0) }.first
             result.insert(entry, at: anchor.map { $0 + 1 } ?? 0)
             unplaced.removeAll { $0 == destination }
         }
 
-        if unplaced.first == .watchlist {
-            // Never saved: an order from before the Watchlist, or none at all.
-            result.insert(.menuOnly(.watchlist), at: 0)
-            unplaced.removeFirst()
+        if unplaced.contains(.search) {
+            result.insert(.menuOnly(.search), at: 0)
         }
-        return result + unplaced.map(Entry.menuOnly)
+        if unplaced.contains(.watchlist) {
+            let underSearch = result.firstIndex(of: .menuOnly(.search)).map { $0 + 1 } ?? 0
+            result.insert(.menuOnly(.watchlist), at: underSearch)
+        }
+        let middle = unplaced.filter { $0 != .search && $0 != .watchlist && !latePlaced.contains($0) }
+        let lastLibraryRow = result.lastIndex { entry in
+            guard case .row(let id) = entry else { return false }
+            switch rows.first(where: { $0.id == id })?.destination {
+            case .library, .finTV: return true
+            default: return false
+            }
+        }
+        result.insert(contentsOf: middle.map(Entry.menuOnly), at: lastLibraryRow.map { $0 + 1 } ?? result.count)
+        return result + unplaced.filter(latePlaced.contains).map(Entry.menuOnly)
     }
 
-    /// What the side menu lists between its fixed entries, in the order
+    /// What the side menu lists between Home and Settings, in the order
     /// Settings shows, less what the user hid from it (#753).
     static func destinations(
         rows: [Row],
@@ -98,21 +125,20 @@ enum SideMenuOrder {
         hidden: Set<RailOrder.Destination> = [],
         available: [RailOrder.Destination] = []
     ) -> [RailOrder.Destination] {
-        // Lists (and Requests, Dashboard) the user never moved are left to
-        // RailOrder, which puts them last as it always has, behind a
-        // SashimiTV the rows have not placed yet.
-        let savedKeys = Set(saved ?? [])
-        let order = entries(rows: rows, libraryIds: libraryIds, saved: saved, available: available)
+        var order = entries(rows: rows, libraryIds: libraryIds, saved: saved, available: available)
             .compactMap { entry -> RailOrder.Destination? in
                 switch entry {
-                case .row(let id):
-                    return rows.first { $0.id == id }?.destination
-                case .menuOnly(let destination) where RailOrder.trailingDestinations.contains(destination):
-                    return savedKeys.contains(entry.storageKey) ? destination : nil
-                case .menuOnly(let destination):
-                    return destination
+                case .row(let id): return rows.first { $0.id == id }?.destination
+                case .menuOnly(let destination): return destination
                 }
             }
+        // No row stands for SashimiTV (rows not loaded yet, or saved before
+        // it existed): it goes after the libraries, ahead of Lists, as the
+        // default order has it.
+        if !order.contains(.finTV) {
+            let afterLibraries = order.lastIndex { if case .library = $0 { return true }; return false }.map { $0 + 1 }
+            order.insert(.finTV, at: afterLibraries ?? order.firstIndex(of: .lists) ?? order.count)
+        }
         return RailOrder.destinations(rowOrder: order, libraryIds: libraryIds, hidden: hidden, available: available)
     }
 

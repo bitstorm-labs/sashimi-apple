@@ -3,8 +3,9 @@ import Foundation
 /// What the user took out of the side menu (#753), per device. Kept apart
 /// from the Home row config on purpose: the menu also lists libraries Home
 /// has no row for (Collections, Playlists), and hiding something from one is
-/// not hiding it from the other. Home, Search, Settings (and Downloads on
-/// iPad/Mac) are not `RailOrder.Destination`s, so they can never be hidden.
+/// not hiding it from the other. Home and Settings are not
+/// `RailOrder.Destination`s, so they can never be hidden; Search and
+/// Downloads can (A1 parity).
 /// Library ids are server GUIDs, so one set serves every server.
 @MainActor
 final class SideMenuSettings: ObservableObject {
@@ -43,6 +44,8 @@ extension RailOrder.Destination {
         case .requests: return "requests"
         case .dashboard: return "dashboard"
         case .watchlist: return "watchlist"
+        case .search: return "search"
+        case .downloads: return "downloads"
         case .library(let id): return "library:\(id)"
         }
     }
@@ -58,6 +61,10 @@ extension RailOrder.Destination {
             self = .dashboard
         } else if storageKey == "watchlist" {
             self = .watchlist
+        } else if storageKey == "search" {
+            self = .search
+        } else if storageKey == "downloads" {
+            self = .downloads
         } else if storageKey.hasPrefix("library:") {
             self = .library(String(storageKey.dropFirst("library:".count)))
         } else {

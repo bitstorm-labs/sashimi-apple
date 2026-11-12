@@ -3,7 +3,8 @@ import XCTest
 
 /// The Watchlist in the side menu (#894): a menu-only destination like Lists,
 /// directly under Search until moved, there while the server has a Watchlist,
-/// and saved orders from before it keep everything else where it was.
+/// and saved orders from before it keep everything else where it was. Search
+/// is an entry of the same list (A1 parity), so both lead it by default.
 @MainActor
 final class WatchlistRailTests: XCTestCase {
     private let libraries = [
@@ -53,15 +54,16 @@ final class WatchlistRailTests: XCTestCase {
     func testWithNothingSavedItSitsDirectlyUnderSearch() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, available: [.watchlist]),
-            [.watchlist, .finTV, .library("movies"), .library("boxsets"), .lists]
+            [.search, .watchlist, .finTV, .library("movies"), .library("boxsets"), .lists]
         )
         let rail = MainTabView.navRows(rowConfigs: rows, libraries: libraries, hidden: [], available: [.watchlist])
         XCTAssertEqual(rail.map(\.title), ["Home", "Search", "Watchlist", "SashimiTV", "Movies", "Collections", "Lists", "Settings"])
         XCTAssertEqual(rail.first { $0.id == .watchlist }?.icon, "bookmark")
         XCTAssertEqual(
-            SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: nil, available: [.watchlist]).first,
-            .menuOnly(.watchlist),
-            "Settings lists it first too"
+            Array(SideMenuOrder.entries(rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: nil, available: [.watchlist])
+                .prefix(2)),
+            [.menuOnly(.search), .menuOnly(.watchlist)],
+            "Settings lists it under Search too"
         )
     }
 
@@ -75,14 +77,14 @@ final class WatchlistRailTests: XCTestCase {
         let after = RailOrder.destinations(
             rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved, available: [.watchlist] + available
         )
-        XCTAssertEqual(before, [.lists, .finTV, .requests, .library("movies"), .library("boxsets")])
-        XCTAssertEqual(after, [.watchlist] + before)
+        XCTAssertEqual(before, [.search, .lists, .finTV, .requests, .library("movies"), .library("boxsets")])
+        XCTAssertEqual(after, [.search, .watchlist] + before.dropFirst())
 
         let entries = SideMenuOrder.entries(
             rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: saved, available: [.watchlist] + available
         )
-        XCTAssertEqual(entries.first, .menuOnly(.watchlist))
-        XCTAssertEqual(Array(entries.dropFirst()), SideMenuOrder.entries(
+        XCTAssertEqual(Array(entries.prefix(2)), [.menuOnly(.search), .menuOnly(.watchlist)])
+        XCTAssertEqual(entries.filter { $0 != .menuOnly(.watchlist) }, SideMenuOrder.entries(
             rows: rows.map(\.sideMenuRow), libraryIds: libraryIds, saved: saved, available: available
         ))
     }
@@ -97,7 +99,7 @@ final class WatchlistRailTests: XCTestCase {
 
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved, available: [.watchlist]),
-            [.finTV, .library("movies"), .watchlist, .library("boxsets"), .lists]
+            [.search, .finTV, .library("movies"), .watchlist, .library("boxsets"), .lists]
         )
         // A server without the plugin leaves the place saved for the next one.
         XCTAssertFalse(RailOrder.destinations(rowConfigs: rows, libraryIds: libraryIds, savedOrder: saved).contains(.watchlist))
@@ -127,6 +129,9 @@ final class WatchlistRailTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = HomeScreenSettings(defaults: defaults)
         settings.rowConfigs = rows
-        XCTAssertEqual(settings.sideMenuEntries(libraryIds: libraryIds, available: [.watchlist]).first, .menuOnly(.watchlist))
+        XCTAssertEqual(
+            Array(settings.sideMenuEntries(libraryIds: libraryIds, available: [.watchlist]).prefix(2)),
+            [.menuOnly(.search), .menuOnly(.watchlist)]
+        )
     }
 }

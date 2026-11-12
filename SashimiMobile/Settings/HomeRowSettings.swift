@@ -122,11 +122,28 @@ final class HomeRowSettings: ObservableObject {
                 }
             }
         } else {
-            // Default order - just Continue Watching, libraries added dynamically
-            rows = HomeRowType.allCases.map {
-                HomeRowConfig(type: .builtIn($0), isEnabled: true)
-            }
+            // Default order: the built-ins, libraries added dynamically after
+            // SashimiTV, then Requests, so the side menu reads Search,
+            // Watchlist, SashimiTV, libraries, Lists, Requests, Dashboard,
+            // Downloads (A1 parity).
+            rows = Self.defaultRows
         }
+    }
+
+    static let defaultRows: [HomeRowConfig] = [HomeRowType.continueWatching, .channels, .requests].map {
+        HomeRowConfig(type: .builtIn($0), isEnabled: true)
+    }
+
+    /// Where `updateLibraries` puts a library it has not seen: after the last
+    /// library row, else after SashimiTV, else at the end.
+    static func newLibraryIndex(in rows: [HomeRowConfig]) -> Int {
+        if let last = rows.lastIndex(where: { if case .library = $0.type { return true }; return false }) {
+            return last + 1
+        }
+        if let channels = rows.firstIndex(where: { $0.type == .builtIn(.channels) }) {
+            return channels + 1
+        }
+        return rows.count
     }
 
     /// Falling back to defaults is correct, but doing it silently made a
@@ -158,7 +175,8 @@ final class HomeRowSettings: ObservableObject {
             }
             return false
         }) {
-            rows.append(HomeRowConfig(type: .library(id: library.id, name: library.name), isEnabled: true))
+            rows.insert(HomeRowConfig(type: .library(id: library.id, name: library.name), isEnabled: true),
+                        at: Self.newLibraryIndex(in: rows))
         }
 
         // Remove libraries that no longer exist

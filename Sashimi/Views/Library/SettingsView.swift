@@ -409,13 +409,15 @@ class HomeScreenSettings: ObservableObject {
     func updateWithLibraries(_ libraries: [JellyfinLibrary]) {
         var newConfigs: [HomeRowConfig] = []
 
-        // Add built-in rows if not already present
-        for type in HomeRowType.allCases {
-            if let existing = rowConfigs.first(where: { $0.type == type }) {
-                newConfigs.append(existing)
-            } else {
-                newConfigs.append(.builtIn(type))
-            }
+        // Add built-in rows if not already present. Requests follows the
+        // libraries: the side menu's default order is Search, Watchlist,
+        // SashimiTV, libraries, Lists, Requests, Dashboard (A1 parity). Saved
+        // orders keep theirs (the sort below).
+        func builtIn(_ type: HomeRowType) -> HomeRowConfig {
+            rowConfigs.first { $0.type == type } ?? .builtIn(type)
+        }
+        for type in HomeRowType.allCases where type != .requests {
+            newConfigs.append(builtIn(type))
         }
 
         // Add library rows
@@ -432,6 +434,8 @@ class HomeScreenSettings: ObservableObject {
             }
         }
 
+        newConfigs.append(builtIn(.requests))
+
         // Subscribed lists keep their rows; updateWithLists owns them.
         newConfigs += rowConfigs.filter { $0.listId != nil }
 
@@ -447,11 +451,13 @@ class HomeScreenSettings: ObservableObject {
         if let data = defaults.data(forKey: userDefaultsKey),
            let savedConfigs = decodeSavedConfigs(data) {
             let savedOrder = Self.withRequestsRow(savedConfigs).map { $0.id }
-            rowConfigs.sort { a, b in
-                let indexA = savedOrder.firstIndex(of: a.id) ?? Int.max
-                let indexB = savedOrder.firstIndex(of: b.id) ?? Int.max
-                return indexA < indexB
-            }
+            // Stable: rows the saved order lacks (new libraries) keep the
+            // order built above instead of whatever sort() leaves them in.
+            rowConfigs = rowConfigs.enumerated().sorted { a, b in
+                let indexA = savedOrder.firstIndex(of: a.element.id) ?? Int.max
+                let indexB = savedOrder.firstIndex(of: b.element.id) ?? Int.max
+                return indexA != indexB ? indexA < indexB : a.offset < b.offset
+            }.map(\.element)
         }
     }
 
@@ -567,7 +573,7 @@ struct HomeScreenSettingsView: View {
                         .foregroundStyle(SashimiTheme.textPrimary)
                         .padding(.bottom, 8)
 
-                    Text("Arrows move an item on Home and in the side menu. Home, Search and Settings stay where they are.")
+                    Text("Arrows move an item on Home and in the side menu. Home and Settings stay where they are.")
                         .font(Typography.caption)
                         .foregroundStyle(SashimiTheme.textSecondary)
                         .padding(.bottom, 16)
@@ -630,6 +636,8 @@ struct HomeScreenSettingsView: View {
         case .requests: return "Requests"
         case .dashboard: return "Dashboard"
         case .watchlist: return WatchlistText.name
+        case .search: return "Search"
+        case .downloads: return "Downloads"
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }
