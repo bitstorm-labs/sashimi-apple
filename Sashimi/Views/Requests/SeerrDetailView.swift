@@ -73,7 +73,7 @@ struct SeerrDetailView: View {
         ZStack {
             SashimiTheme.background
             SpotlightBackdrop { frame in
-                if let url = SeerrImages.backdrop(model.details?.backdropPath) {
+                if let url = SeerrImages.backdrop(model.details?.backdropPath, pixelWidth: frame.requestPixelWidth) {
                     LazyImage(url: url) { state in
                         if let image = state.image {
                             image.resizable().aspectRatio(contentMode: .fill)

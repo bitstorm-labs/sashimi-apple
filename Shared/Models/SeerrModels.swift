@@ -417,6 +417,13 @@ enum SeerrImages {
         url(path, size: "w1280")
     }
 
+    /// TMDB's smallest backdrop size that covers `pixelWidth`: w780, w1280,
+    /// or the original (up to 3840 wide) for a big screen.
+    static func backdrop(_ path: String?, pixelWidth: Int) -> URL? {
+        let size = pixelWidth <= 780 ? "w780" : pixelWidth <= 1280 ? "w1280" : "original"
+        return url(path, size: size)
+    }
+
     static func profile(_ path: String?) -> URL? {
         url(path, size: "w185")
     }

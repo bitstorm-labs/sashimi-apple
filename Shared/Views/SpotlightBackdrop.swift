@@ -55,10 +55,36 @@ struct SpotlightBackdropLayout: Equatable {
         return CGSize(width: width, height: height)
     }
 
+    /// The picture's drawn width on a page of `size`. It fills its frame, so a
+    /// 16:9 backdrop in the landscape frame (1344×864 on Apple TV) is drawn
+    /// 864 × 16/9 = 1536pt wide, wider than the frame, with the sides cropped.
+    func imagePointWidth(in size: CGSize, imageAspect: CGFloat = 16 / 9) -> CGFloat {
+        let frame = frame(in: size)
+        return max(frame.width, frame.height * imageAspect)
+    }
+
+    /// The backdrop's request width in pixels: its drawn width at `scale`
+    /// (1 on a 1080p Apple TV, 2 at 4K), capped at a 4K screen's width. Asking
+    /// for the frame's width instead upscaled the picture about 1.13× and read
+    /// soft on the TV.
+    func requestPixelWidth(in size: CGSize, scale: CGFloat) -> Int {
+        min(ImageSizing.pixelWidth(points: imagePointWidth(in: size), scale: scale), ImageSizing.maxSpotlightBackdropWidth)
+    }
+
     /// How far down a page of `size` its details start.
     func contentInset(in size: CGSize) -> CGFloat {
         contentStartsAt.map { frame(in: size).height * $0 } ?? 0
     }
+}
+
+/// Where a Spotlight backdrop's picture goes, and how big to ask for it.
+struct SpotlightBackdropSlot {
+    /// The picture's frame.
+    let width: CGFloat
+    let height: CGFloat
+    /// Pixels to request at the display's scale: the drawn width, which for a
+    /// filled 16:9 picture is wider than the frame.
+    let requestPixelWidth: Int
 }
 
 /// A Spotlight backdrop: `content` (a picture, and a trailer over it) laid out
@@ -70,16 +96,20 @@ struct SpotlightBackdropLayout: Equatable {
 struct SpotlightBackdrop<Content: View>: View {
     /// Nil: `.fitting` the page, landscape or portrait.
     var layout: SpotlightBackdropLayout? = .landscape
-    /// The picture's frame, for sizing its image request.
-    @ViewBuilder let content: (CGSize) -> Content
+    @ViewBuilder let content: (SpotlightBackdropSlot) -> Content
 
     var body: some View {
         GeometryReader { geometry in
             let layout = layout ?? .fitting(geometry.size)
             let frame = layout.frame(in: geometry.size)
+            let slot = SpotlightBackdropSlot(
+                width: frame.width,
+                height: frame.height,
+                requestPixelWidth: layout.requestPixelWidth(in: geometry.size, scale: ImageSizing.displayScale)
+            )
             ZStack(alignment: .topTrailing) {
                 Color.clear
-                content(frame)
+                content(slot)
                     .frame(width: frame.width, height: frame.height)
                     .clipped()
                     .spotlightFade(layout)

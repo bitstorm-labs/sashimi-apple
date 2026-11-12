@@ -46,6 +46,22 @@ enum ImageSizing {
     /// visible and decodes are expensive (2560x1440x4 is about 15 MB).
     static let maxBackdropWidth = 2560
 
+    /// Largest Spotlight backdrop request (detail pages, list pages): a 4K
+    /// screen's width. The Spotlight picture covers most of the screen, so it
+    /// needs more than `maxBackdropWidth`.
+    static let maxSpotlightBackdropWidth = 3840
+
+    /// The display's pixels per point. tvOS reports 1 for 1080p output and 2
+    /// for 4K, so a full-screen backdrop asks for what the TV shows; elsewhere
+    /// `screenScale`.
+    @MainActor static var displayScale: CGFloat {
+        #if os(tvOS)
+        return max(1, UIScreen.main.scale)
+        #else
+        return screenScale
+        #endif
+    }
+
     /// Pixel width for a backdrop drawn `points` wide, capped at
     /// `maxBackdropWidth`.
     static func backdropPixelWidth(points: CGFloat, scale: CGFloat) -> Int {

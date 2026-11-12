@@ -21,7 +21,7 @@ struct PadDetailHeroBackground: View {
             MobileColors.background
 
             SpotlightBackdrop(layout: nil) { frame in
-                if let backdropURL = url(ImageSizing.backdropPixelWidth(points: frame.width)) {
+                if let backdropURL = url(frame.requestPixelWidth) {
                     LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
                         if let image = state.image {
                             image.resizable().scaledToFill()

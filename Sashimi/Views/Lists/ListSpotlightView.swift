@@ -103,7 +103,7 @@ struct ListSpotlightBackdrop: View {
 
     var body: some View {
         SpotlightBackdrop { frame in
-            image(width: frame.width)
+            image(pixelWidth: frame.requestPixelWidth)
                 .frame(width: frame.width, height: frame.height)
                 .id(spotlight?.id)
                 .transition(.opacity)
@@ -112,13 +112,13 @@ struct ListSpotlightBackdrop: View {
     }
 
     @ViewBuilder
-    private func image(width: CGFloat) -> some View {
+    private func image(pixelWidth: Int) -> some View {
         switch spotlight?.backdrop {
         case .library(let itemId, let imageType):
             AsyncItemImage(
                 itemId: itemId,
                 imageType: imageType,
-                maxWidth: ImageSizing.pixelWidth(points: width),
+                maxWidth: pixelWidth,
                 contentMode: .fill,
                 fallbackImageTypes: imageType == "Backdrop" ? ["Thumb", "Primary"] : []
             )
