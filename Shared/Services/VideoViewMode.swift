@@ -84,6 +84,13 @@ final class VideoViewModeStore: ObservableObject {
         setDefault(activeMode)
     }
 
+    /// Re-reads the saved default after another device's choice was synced
+    /// in (WORK-106). A session pick stays: it is this device's own choice.
+    func reloadDefault() {
+        let stored = defaults.string(forKey: Self.defaultModeKey)
+        defaultMode = stored.flatMap(VideoViewMode.init(rawValue:)) ?? .normal
+    }
+
     /// Saves `mode` as the default for every video, replacing any session pick.
     func setDefault(_ mode: VideoViewMode) {
         defaults.set(mode.rawValue, forKey: Self.defaultModeKey)

@@ -25,6 +25,8 @@ struct SettingsView: View {
     @StateObject private var serverPlugins = ServerPluginsViewModel()
     @ObservedObject private var seerr = SeerrSession.shared
     @StateObject private var plexSettings = PlexSettingsModel()
+    /// WORK-106. Never synced itself; turning it on syncs straight away.
+    @AppStorage(SettingsSyncService.enabledKey) private var settingsSyncEnabled = true
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -69,6 +71,14 @@ struct SettingsView: View {
                             // Plex. Hidden without the Watchlist plugin; needs
                             // nothing from Requests.
                             PlexSettingsRow(model: plexSettings)
+
+                            SettingsSection(title: "General") {
+                                SettingsToggleRow(title: "Sync Settings Across Devices", isOn: $settingsSyncEnabled)
+                                Text(SettingsSyncService.toggleFooter)
+                                    .font(Typography.captionSmall)
+                                    .foregroundStyle(SashimiTheme.textTertiary)
+                                    .padding(.horizontal, 8)
+                            }
 
                             SettingsOptionRow(
                                 icon: "house",
@@ -1165,6 +1175,7 @@ struct ResumeThresholdSettingsView: View {
 
     let thresholdOptions = [
         (label: "Always ask", value: 0),
+        (label: "10 seconds", value: 10),
         (label: "30 seconds", value: 30),
         (label: "1 minute", value: 60),
         (label: "2 minutes", value: 120),
