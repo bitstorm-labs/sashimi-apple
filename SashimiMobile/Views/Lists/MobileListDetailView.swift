@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// One list: the selected title's Spotlight (backdrop, details, Play) with
-/// Subscribe and Shuffle, then its titles as a poster grid. The
+/// Subscribe and Shuffle, then its titles as a poster grid. A tap shows a
+/// title in the Spotlight; a tap on the title it shows, or Details, opens it. The
 /// owner also gets Edit List: rename, public/private, delete, and per title
 /// Move Earlier / Later and Remove (long-press a poster, or the Edit menu's
 /// Reorder / Remove modes, where a tap acts on the title).
@@ -18,8 +19,11 @@ struct MobileListDetailView: View {
     @State private var confirmDelete = false
     @State private var message: String?
     @State private var playing: BaseItemDto?
-    /// The title the Spotlight shows: the one under the pointer, else the first.
+    /// The title the Spotlight shows: the one last tapped, else the first.
     @State private var spotlightId: String?
+    /// Taps that selected a title, so the page scrolls back up to it.
+    @State private var selectionCount = 0
+    @State private var opened: BaseItemDto?
 
     private let columns = [GridItem(.adaptive(minimum: PhoneSizing.posterWidth, maximum: MobileSizing.posterWidth), spacing: MobileSpacing.sm, alignment: .top)]
 
@@ -28,15 +32,17 @@ struct MobileListDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: MobileSpacing.md) {
-                header
-                content
-                    .padding(.horizontal, MobileSpacing.md)
-            }
-            .padding(.bottom, MobileSpacing.md)
+        MobileListSpotlightPage(
+            eyebrow: model.eyebrow,
+            spotlight: spotlightItem.map(ListSpotlight.init(item:)),
+            selectionCount: selectionCount,
+            actions: { actions },
+            notice: { editingHint },
+            content: { content }
+        )
+        .navigationDestination(item: $opened) { item in
+            AdaptiveDetailView(item: item, libraryName: item.libraryName)
         }
-        .background(MobileColors.background)
         .fullScreenPlayer(item: $playing)
         .navigationTitle(model.list.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -76,32 +82,32 @@ struct MobileListDetailView: View {
         return items.first { $0.id == spotlightId } ?? items.first
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.xs) {
-            MobileListSpotlightHeader(eyebrow: model.eyebrow, spotlight: spotlightItem.map(ListSpotlight.init(item:))) {
-                if let item = spotlightItem {
-                    MobileListSpotlightAction(action: .play(item)) { playing = $0 }
-                }
-                Button {
+    @ViewBuilder
+    private var actions: some View {
+        if let item = spotlightItem {
+            MobileListSpotlightAction(action: .play(item)) { playing = $0 }
+            MobileListSpotlightDetailsButton { opened = item }
+        }
+        Button {
                     Task { message = await model.toggleSubscription() }
                 } label: {
                     Label(model.isSubscribed ? "Subscribed" : "Subscribe", systemImage: model.isSubscribed ? "checkmark" : "plus")
                 }
                 .buttonStyle(.bordered)
-                Button { Task { await shuffle() } } label: { Label("Shuffle", systemImage: "shuffle") }
-                    .buttonStyle(.bordered)
-                    .disabled(model.contents.items.isEmpty)
-            }
+        Button { Task { await shuffle() } } label: { Label("Shuffle", systemImage: "shuffle") }
+            .buttonStyle(.bordered)
+            .disabled(model.contents.items.isEmpty)
+    }
 
-            if let editing {
-                HStack {
-                    Text(editing == .reorder ? "Tap a title to move it." : "Tap a title to remove it.")
-                        .font(MobileTypography.bodySmall)
-                        .foregroundStyle(MobileColors.accentSecondary)
-                    Spacer()
-                    Button("Done") { self.editing = nil }
-                }
-                .padding(.horizontal, MobileSpacing.md)
+    @ViewBuilder
+    private var editingHint: some View {
+        if let editing {
+            HStack {
+                Text(editing == .reorder ? "Tap a title to move it." : "Tap a title to remove it.")
+                    .font(MobileTypography.bodySmall)
+                    .foregroundStyle(MobileColors.accentSecondary)
+                Spacer()
+                Button("Done") { self.editing = nil }
             }
         }
     }
@@ -158,18 +164,27 @@ struct MobileListDetailView: View {
     @ViewBuilder
     private func poster(_ item: BaseItemDto) -> some View {
         let card = ListPosterCard(item: item, isNew: model.newIds.contains(item.id))
-            .onHover { if $0 { spotlightId = item.id } }
+            .listSpotlightSelected(editing == nil && item.id == spotlightItem?.id)
         if editing != nil {
             Button { actionItem = item } label: { card }
                 .buttonStyle(.plain)
         } else {
-            NavigationLink {
-                AdaptiveDetailView(item: item, libraryName: item.libraryName)
-            } label: { card }
+            Button { tap(item) } label: { card }
                 .buttonStyle(.plain)
                 .contextMenu {
+                    Button(ListSpotlightText.details, systemImage: "info.circle") { opened = item }
                     if model.isOwner { editActions(for: item, removeOnly: false) }
                 }
+        }
+    }
+
+    private func tap(_ item: BaseItemDto) {
+        switch ListSpotlightTap.tapped(item.id, shownId: spotlightItem?.id) {
+        case .select(let id):
+            spotlightId = id
+            selectionCount += 1
+        case .open:
+            opened = item
         }
     }
 

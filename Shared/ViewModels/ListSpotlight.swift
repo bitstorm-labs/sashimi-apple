@@ -166,4 +166,18 @@ enum ListSpotlightText {
     static let play = "Play"
     static let request = "Request"
     static let signInToRequests = "Sign in to Requests"
+    static let details = "Details"
+}
+
+/// What a tap on a list page's poster does on iPhone, iPad and Mac, as a
+/// remote's focus does on Apple TV: the first tap shows the title in the
+/// Spotlight, a tap on the title it already shows opens it.
+enum ListSpotlightTap: Equatable {
+    case select(String)
+    case open
+
+    /// `shownId`: the title the Spotlight shows now (the first, until one is picked).
+    static func tapped(_ id: String, shownId: String?) -> ListSpotlightTap {
+        id == shownId ? .open : .select(id)
+    }
 }

@@ -5,7 +5,8 @@ import SwiftUI
 /// (backdrop, details, and Play, or Request / Sign in to Requests for a title
 /// the server doesn't have), "Use Plex too?" (or the Plex sync line), then
 /// every title, with those the server doesn't have dimmed and tagged "Not on
-/// server" or "Requested".
+/// server" or "Requested". A tap shows a title in the Spotlight; a tap on the
+/// title it shows, or Details, opens it.
 struct MobileWatchlistView: View {
     @StateObject private var model = WatchlistPageViewModel()
     @StateObject private var connect = PlexConnectModel()
@@ -17,22 +18,34 @@ struct MobileWatchlistView: View {
     @State private var message: String?
     @State private var playing: BaseItemDto?
     @State private var adding = false
-    /// The title the Spotlight shows: the one under the pointer, else the first.
+    /// The title the Spotlight shows: the one last tapped, else the first.
     @State private var spotlightId: String?
+    /// Taps that selected a title, so the page scrolls back up to it.
+    @State private var selectionCount = 0
+    @State private var opened: WatchlistOpenedTitle?
 
     private let columns = [GridItem(.adaptive(minimum: PhoneSizing.posterWidth, maximum: MobileSizing.posterWidth),
                                     spacing: MobileSpacing.sm, alignment: .top)]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: MobileSpacing.md) {
-                header
-                content
-                    .padding(.horizontal, MobileSpacing.md)
+        MobileListSpotlightPage(
+            eyebrow: model.eyebrow,
+            spotlight: spotlightTile.map(model.spotlight(for:)),
+            selectionCount: selectionCount,
+            actions: { actions },
+            notice: { plexAndRemoval },
+            content: { content }
+        )
+        .navigationDestination(item: $opened) { opened in
+            switch opened {
+            case .library(let item): AdaptiveDetailView(item: item, libraryName: item.libraryName)
+            case .title(let seed): MobileWatchlistTitleView(seed: seed)
+            case .request(let target): MobileSeerrDetailView(target: target)
             }
-            .padding(.bottom, MobileSpacing.md)
         }
-        .background(MobileColors.background)
+        .onChange(of: opened) { old, new in
+            if old != nil && new == nil { reload() }
+        }
         .fullScreenPlayer(item: $playing)
         .task(id: spotlightTile?.id) {
             if let tile = spotlightTile { await model.spotlightShown(tile) }
@@ -78,15 +91,11 @@ struct MobileWatchlistView: View {
         model.tiles.first { $0.id == spotlightId } ?? model.tiles.first
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: MobileSpacing.sm) {
-            MobileListSpotlightHeader(eyebrow: model.eyebrow, spotlight: spotlightTile.map(model.spotlight(for:))) {
-                if let tile = spotlightTile {
-                    MobileListSpotlightAction(action: model.spotlight(for: tile).action) { playing = $0 }
-                }
-            }
-            plexAndRemoval
-                .padding(.horizontal, MobileSpacing.md)
+    @ViewBuilder
+    private var actions: some View {
+        if let tile = spotlightTile {
+            MobileListSpotlightAction(action: model.spotlight(for: tile).action) { playing = $0 }
+            MobileListSpotlightDetailsButton { open(tile) }
         }
     }
 
@@ -210,27 +219,36 @@ struct MobileWatchlistView: View {
     @ViewBuilder
     private func tileLink(_ tile: WatchlistTile) -> some View {
         let label = WatchlistTileView(tile: tile)
-            .onHover { if $0 { spotlightId = tile.id } }
+            .listSpotlightSelected(!removing && tile.id == spotlightTile?.id)
         if removing {
             Button { removal = tile } label: { label }
                 .buttonStyle(.plain)
         } else {
-            Group {
-                switch model.action(for: tile) {
-                case .openLibrary(let item):
-                    NavigationLink { AdaptiveDetailView(item: item, libraryName: item.libraryName) } label: { label }
-                case .openTitle(let seed):
-                    NavigationLink { MobileWatchlistTitleView(seed: seed) } label: { label }
-                case .openRequest(let target):
-                    NavigationLink { MobileSeerrDetailView(target: target) } label: { label }
-                case .explain(let text):
-                    Button { message = text } label: { label }
+            Button { tap(tile) } label: { label }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button(ListSpotlightText.details, systemImage: "info.circle") { open(tile) }
+                    Button(WatchlistText.remove, systemImage: "minus.circle", role: .destructive) { remove(tile) }
                 }
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button(WatchlistText.remove, systemImage: "minus.circle", role: .destructive) { remove(tile) }
-            }
+        }
+    }
+
+    private func tap(_ tile: WatchlistTile) {
+        switch ListSpotlightTap.tapped(tile.id, shownId: spotlightTile?.id) {
+        case .select(let id):
+            spotlightId = id
+            selectionCount += 1
+        case .open:
+            open(tile)
+        }
+    }
+
+    private func open(_ tile: WatchlistTile) {
+        switch model.action(for: tile) {
+        case .openLibrary(let item): opened = .library(item)
+        case .openTitle(let seed): opened = .title(seed)
+        case .openRequest(let target): opened = .request(target)
+        case .explain(let text): message = text
         }
     }
 
@@ -257,6 +275,21 @@ struct MobileWatchlistView: View {
         connectTask?.cancel()
         connectTask = nil
         connect.cancel()
+    }
+}
+
+/// A Watchlist title opened from its page.
+enum WatchlistOpenedTitle: Hashable {
+    case library(BaseItemDto)
+    case title(WatchlistTitleSeed)
+    case request(SeerrTarget)
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .library(let item): hasher.combine("library-\(item.id)")
+        case .title(let seed): hasher.combine("title-\(seed.id)")
+        case .request(let target): hasher.combine(target)
+        }
     }
 }
 
