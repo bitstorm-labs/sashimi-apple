@@ -140,3 +140,19 @@ extension View {
         )
     }
 }
+
+extension SpotlightBackdropLayout {
+    /// How wide a list page's details may run on a page of `size`: on a
+    /// landscape page, the dark left side beside the picture; on a portrait
+    /// page, the page's width (they sit under the picture).
+    func detailsMaxWidth(in size: CGSize) -> CGFloat {
+        contentStartsAt == nil ? size.width * 0.5 : size.width
+    }
+
+    /// The least height of a list page's details on a page of `size`, so the
+    /// posters below start over the picture's faded lower part, never over
+    /// its bright middle.
+    func detailsMinHeight(in size: CGSize) -> CGFloat {
+        frame(in: size).height * (bottomFadeStartsAt + 0.1)
+    }
+}
