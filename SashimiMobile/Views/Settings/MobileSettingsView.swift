@@ -19,6 +19,7 @@ struct MobileSettingsView: View {
         ("fi", "Finnish")
     ]
     @State private var showingDeleteAllDownloads = false
+    @AppStorage(SettingsSyncService.enabledKey) private var settingsSyncEnabled = true
     @AppStorage(DownloadWatchPolicy.deleteAfterWatchingKey) private var deleteDownloadsAfterWatching = false
     @AppStorage(DownloadNetworkPolicy.allowCellularKey) private var downloadOverCellular = false
     @State private var showAddServer = false
@@ -133,6 +134,14 @@ struct MobileSettingsView: View {
                 }
             }
 
+            Section {
+                Toggle("Sync Settings Across Devices", isOn: $settingsSyncEnabled)
+            } header: {
+                Text("General")
+            } footer: {
+                Text(SettingsSyncService.toggleFooter)
+            }
+
             // Home Screen Section
             Section("Home Screen") {
                 NavigationLink(MobileLayoutIdiom.usesPadLayout ? "Home & Side Menu" : "Customize Row Order") {
@@ -163,6 +172,7 @@ struct MobileSettingsView: View {
                 // tvOS parity — same values as the tvOS Resume Threshold screen
                 Picker("Resume Threshold", selection: $playbackSettings.resumeThresholdSeconds) {
                     Text("Always resume").tag(0)
+                    Text("10 seconds").tag(10)
                     Text("30 seconds").tag(30)
                     Text("1 minute").tag(60)
                     Text("2 minutes").tag(120)
