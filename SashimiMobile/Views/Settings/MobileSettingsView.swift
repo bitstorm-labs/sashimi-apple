@@ -435,6 +435,7 @@ struct HomeRowOrderView: View {
                 }
             }
         }
+        .readableSettingsColumn()
         .navigationTitle(showsSideMenu ? "Home & Side Menu" : "Row Order")
         .task {
             if showsSideMenu {
