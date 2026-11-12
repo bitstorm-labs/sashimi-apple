@@ -38,9 +38,11 @@ struct PhoneHeroBanner: View {
             .frame(height: Self.height)
             .overlay {
                 // Read the drawn width so the request matches it: full
-                // width is 440pt in portrait but ~950pt in landscape.
+                // width is 440pt in portrait but ~950pt in landscape. The
+                // picture fills the banner, so a 16:9 one is drawn at least
+                // `height` × 16/9 wide (462pt on a 393pt-wide iPhone).
                 GeometryReader { geo in
-                    LazyImage(request: request(geo.size.width)) { state in
+                    LazyImage(request: request(max(geo.size.width, geo.size.height * 16 / 9))) { state in
                         if let image = state.image {
                             image.resizable().scaledToFill()
                                 .blur(radius: isBlurred ? 32 : 0)

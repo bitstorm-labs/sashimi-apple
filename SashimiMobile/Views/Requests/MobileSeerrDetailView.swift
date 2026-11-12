@@ -87,7 +87,8 @@ struct MobileSeerrDetailView: View {
     /// page over its lower half.
     private var backdrop: some View {
         ZStack(alignment: .bottom) {
-            if let url = SeerrImages.backdrop(model.details?.backdropPath) {
+            // Full width: an iPad's needs more than TMDB's w1280.
+            if let url = SeerrImages.backdrop(model.details?.backdropPath, pixelWidth: ImageSizing.isPhone ? 1280 : 2560) {
                 LazyImage(url: url) { state in
                     if let image = state.image {
                         image.resizable().scaledToFill()

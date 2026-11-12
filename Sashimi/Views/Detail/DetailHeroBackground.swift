@@ -24,9 +24,9 @@ struct DetailHeroBackground: View {
                 AsyncItemImage(
                     itemId: image.itemId,
                     imageType: image.type,
-                    // Request at native pixel density: tvOS lays out in
-                    // 1920pt but Apple TV 4K renders @2x.
-                    maxWidth: ImageSizing.pixelWidth(points: frame.width),
+                    // Its drawn width at the display's scale (1920pt canvas,
+                    // @2x at 4K), so the picture is never upscaled.
+                    maxWidth: frame.requestPixelWidth,
                     contentMode: .fill,
                     fallbackImageTypes: DetailHero.tvFallbackTypes(isYouTubeSeries: isYouTubeSeries),
                     serverID: serverID,
