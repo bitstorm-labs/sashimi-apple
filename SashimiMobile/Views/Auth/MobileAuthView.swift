@@ -23,6 +23,8 @@ struct MobileAuthView: View {
     @State private var normalizedServerURL: URL?
     /// The sign-in attempt in flight, so the user can cancel it (#476).
     @State private var signInTask: Task<Void, Never>?
+    /// Quick Connect sign-in (#901), offered only when the server has it on.
+    @StateObject private var quickConnect = QuickConnectViewModel()
 
     var body: some View {
         // No NavigationStack here on purpose: this view is always hosted inside
@@ -31,6 +33,10 @@ struct MobileAuthView: View {
         Form {
             if !showLogin {
                 serverEntrySection
+            } else if quickConnect.isActive {
+                MobileQuickConnectSections(viewModel: quickConnect) {
+                    quickConnect.cancel()
+                }
             } else {
                 loginSection
             }
@@ -40,7 +46,7 @@ struct MobileAuthView: View {
         .frame(maxWidth: MacPlatform.isMac ? 560 : .infinity)
         .frame(maxWidth: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(showLogin ? "Sign In" : "Connect to Server")
+        .navigationTitle(navigationTitle)
         .toolbar {
             if let onCancel {
                 ToolbarItem(placement: .cancellationAction) {
@@ -53,6 +59,17 @@ struct MobileAuthView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .onAppear {
+            quickConnect.onSignedIn = { onComplete?() }
+        }
+        // Leaving the screen (signed in, sheet dismissed) stops any poll.
+        .onDisappear {
+            quickConnect.cancel()
+        }
+        // Ask the connected server whether it accepts Quick Connect.
+        .task(id: showLogin ? normalizedServerURL : nil) {
+            await quickConnect.refreshAvailability(for: showLogin ? normalizedServerURL : nil)
+        }
         .task {
             guard let prefillServerURL, !showLogin else { return }
             await JellyfinClient.shared.configure(serverURL: prefillServerURL)
@@ -63,6 +80,11 @@ struct MobileAuthView: View {
             }
             showLogin = true
         }
+    }
+
+    private var navigationTitle: String {
+        if !showLogin { return "Connect to Server" }
+        return quickConnect.isActive ? "Quick Connect" : "Sign In"
     }
 
     private var serverEntrySection: some View {
@@ -133,7 +155,22 @@ struct MobileAuthView: View {
                     .spansRowSeparator()
                 }
 
+                if MobileQuickConnect.offersButton(
+                    isAvailable: quickConnect.isAvailable,
+                    serverURL: normalizedServerURL,
+                    isSigningIn: isConnecting
+                ), let url = normalizedServerURL {
+                    Button {
+                        quickConnect.start(serverURL: url)
+                    } label: {
+                        Label("Use Quick Connect", systemImage: "qrcode")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .spansRowSeparator()
+                }
+
                 Button {
+                    quickConnect.cancel()
                     showLogin = false
                     serverURL = ""
                     normalizedServerURL = nil
@@ -222,7 +259,7 @@ struct MobileAuthView: View {
     }
 }
 
-private extension View {
+extension View {
     /// A centred button's row separator otherwise starts where its title
     /// starts, partway across (#809); this starts it at the row's leading
     /// edge, like the separator between Username and Password.
