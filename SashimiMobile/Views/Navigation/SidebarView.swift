@@ -14,6 +14,8 @@ enum SidebarSelection: Hashable {
     case requests
     /// The admin Server dashboard (#845).
     case dashboard
+    /// The Watchlist's Spotlight page (#894).
+    case watchlist
     case library(id: String, name: String, collectionType: String?)
 
     var displayName: String {
@@ -26,6 +28,7 @@ enum SidebarSelection: Hashable {
         case .lists: return "Lists"
         case .requests: return "Requests"
         case .dashboard: return "Dashboard"
+        case .watchlist: return WatchlistText.name
         case .library(_, let name, _): return name
         }
     }
@@ -52,6 +55,7 @@ enum SidebarSelection: Hashable {
         case .lists: return .lists
         case .requests: return .requests
         case .dashboard: return .dashboard
+        case .watchlist: return .watchlist
         case .library(let id, _, _): return .library(id)
         case .home, .search, .downloads, .settings: return nil
         }
@@ -62,7 +66,7 @@ enum SidebarSelection: Hashable {
     var isAvailableOffline: Bool {
         switch self {
         case .home, .downloads, .settings: return true
-        case .finTV, .search, .library, .lists, .requests, .dashboard: return false
+        case .finTV, .search, .library, .lists, .requests, .dashboard, .watchlist: return false
         }
     }
 
@@ -76,6 +80,7 @@ enum SidebarSelection: Hashable {
         case .lists: return "list.bullet.rectangle"
         case .requests: return RailOrder.requestsIcon
         case .dashboard: return RailOrder.dashboardIcon
+        case .watchlist: return RailOrder.watchlistIcon
         case .library(_, let name, let collectionType):
             // Same symbols as the tvOS rail.
             return RailOrder.libraryIcon(name: name, collectionType: collectionType)
@@ -112,6 +117,8 @@ struct MainNavigationView: View {
     @ObservedObject private var sideMenu = SideMenuSettings.shared
     /// Requests is in the rail while a Seerr account is connected (#845).
     @ObservedObject private var seerr = SeerrSession.shared
+    /// The Watchlist is in the rail unless the server has none (#894).
+    @ObservedObject private var watchlist = WatchlistStore.shared
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -226,7 +233,7 @@ struct MainNavigationView: View {
     }
 
     private var railItems: [SidebarSelection] {
-        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard, hasWatchlist: RailOrder.hasWatchlist(watchlist.availability))
         return SidebarSelection.railItems(rowConfigs: homeRows.rows, libraries: libraries, hidden: sideMenu.hidden,
                                           savedOrder: homeRows.sideMenuOrder, available: available)
     }
@@ -404,6 +411,8 @@ struct MainNavigationView: View {
                 MobileRequestsPage()
             case .dashboard:
                 MobileServerDashboardView()
+            case .watchlist:
+                MobileWatchlistView()
             case .library(let id, let name, let collectionType):
                 MobileLibraryBrowseView(
                     libraryId: id,

@@ -2,9 +2,18 @@ import SwiftUI
 import NukeUI
 
 /// iPhone: the full-width picture at the top of a detail page, with its hero
-/// trailer, fading into the page at the bottom (`BackdropFade`). The series, movie, episode
-/// and season pages all use it, so they blend into the page identically (#764).
+/// trailer, fading into the page over its lower half: the Watchlist
+/// Spotlight's portrait form (#894). The page's details start over the faded
+/// part (`contentOverlap`). The series, movie, episode and season pages all
+/// use it, so they blend into the page identically (#764).
 struct PhoneHeroBanner: View {
+    /// Taller than the old 220pt strip: the picture covers the top of the
+    /// page, as the Spotlight's does.
+    static let height: CGFloat = 260
+    /// How far the details below ride up over the faded lower part: they
+    /// start where the Spotlight's portrait layout starts them.
+    static let contentOverlap: CGFloat = height * (1 - (SpotlightBackdropLayout.portrait.contentStartsAt ?? 1))
+
     let serverID: String?
     /// The page's item; `HeroTrailerPolicy` picks the trailer from it (a
     /// season's or episode's is its series').
@@ -16,7 +25,7 @@ struct PhoneHeroBanner: View {
     let request: (CGFloat) -> ImageRequest?
 
     var body: some View {
-        // A definite screen-width × 220 frame (Color.clear) with the image
+        // A definite screen-width × `height` frame (Color.clear) with the image
         // as an OVERLAY. Critical: a resizable `.aspectRatio(.fill)` image
         // reports an oversized intrinsic width for a PORTRAIT poster
         // fallback (missing-backdrop items like Ratatouille), and if it
@@ -26,7 +35,7 @@ struct PhoneHeroBanner: View {
         // dictating layout width.
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: 220)
+            .frame(height: Self.height)
             .overlay {
                 // Read the drawn width so the request matches it: full
                 // width is 440pt in portrait but ~950pt in landscape.
@@ -45,8 +54,8 @@ struct PhoneHeroBanner: View {
             }
             .heroTrailer(for: trailerItem, serverID: serverID)
             .clipped()
-            // The bottom edge fades into the page, picture and trailer
-            // alike; the sides are the screen's.
-            .backdropBottomFade()
+            // The lower part fades into the page, picture and trailer alike;
+            // the sides are the screen's.
+            .spotlightFade(.portrait)
     }
 }

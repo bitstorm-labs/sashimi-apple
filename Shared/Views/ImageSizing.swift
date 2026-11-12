@@ -56,11 +56,6 @@ enum ImageSizing {
         backdropPixelWidth(points: points, scale: screenScale)
     }
 
-    /// Share of the screen width the iPad detail picture fills, flush
-    /// top-right: the home hero's rule (`HeroLayout.imageWidth`, 70%), so the
-    /// detail page reads like the hero it was opened from.
-    static let padDetailPictureFraction: CGFloat = 0.7
-
     /// Series/movie logo on the mobile detail pages (≤300pt wide on iPad @2x,
     /// a ~70pt-tall full-width slot on iPhone @3x). One constant because
     /// `OfflineShowView` looks the exact same URL up cache-only.

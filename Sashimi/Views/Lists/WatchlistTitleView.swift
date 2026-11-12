@@ -1,8 +1,8 @@
 import NukeUI
 import SwiftUI
 
-/// A title the server doesn't have, on Apple TV (design §3): backdrop, poster,
-/// details from the server's metadata providers, Add to Watchlist / ✓ On
+/// A title the server doesn't have, on Apple TV (design §3): the Spotlight
+/// backdrop (#894), details from the server's metadata providers, Add to Watchlist / ✓ On
 /// Watchlist, and Request (or Sign in to Requests). Once the server has the
 /// title, the normal library page with Play takes over.
 struct WatchlistTitleView: View {
@@ -37,10 +37,7 @@ struct WatchlistTitleView: View {
         ZStack(alignment: .topLeading) {
             SashimiTheme.background.ignoresSafeArea()
             backdrop
-            HStack(alignment: .top, spacing: 50) {
-                SeerrArtwork(url: model.posterURL, title: model.title, cornerRadius: 16,
-                             titleFont: .system(size: 26, weight: .bold))
-                    .frame(width: 300, height: 450)
+            HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(model.title)
                         .font(Typography.displayMedium)
@@ -78,31 +75,34 @@ struct WatchlistTitleView: View {
                             .foregroundStyle(SashimiTheme.textTertiary)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: MediaDetailView.headerWidth, alignment: .leading)
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 80)
             .padding(.top, 100)
         }
     }
 
+    /// The Watchlist Spotlight's backdrop (#894); the poster, soft and grey,
+    /// when the provider has no backdrop, as the Spotlight shows it.
     private var backdrop: some View {
-        GeometryReader { geometry in
+        SpotlightBackdrop { frame in
             if let url = model.backdropURL {
                 LazyImage(url: url) { state in
                     if let image = state.image {
                         image.resizable().aspectRatio(contentMode: .fill)
                     }
                 }
-                .frame(width: geometry.size.width * 0.6, height: geometry.size.height * 0.75)
-                .clipped()
-                .mask(LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing))
-                .mask(LinearGradient(colors: [.black, .clear], startPoint: .center, endPoint: .bottom))
-                .opacity(0.6)
-                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                .frame(width: frame.width, height: frame.height)
+            } else if let poster = model.posterURL {
+                SeerrArtwork(url: poster, title: "", cornerRadius: 0)
+                    .frame(width: frame.width, height: frame.height)
+                    .blur(radius: 30)
+                    .grayscale(1)
+                    .brightness(-0.3)
             }
         }
         .ignoresSafeArea()
-        .allowsHitTesting(false)
     }
 
     @ViewBuilder

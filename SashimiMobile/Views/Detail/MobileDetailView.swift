@@ -154,6 +154,7 @@ struct MobileDetailView: View {
                 Spacer().frame(height: 40)
             }
         }
+        .padSpotlightContentInset()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         // The backdrop runs up behind the status bar and back button. Left to

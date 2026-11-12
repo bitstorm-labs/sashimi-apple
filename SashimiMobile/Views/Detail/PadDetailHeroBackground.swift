@@ -1,10 +1,12 @@
 import SwiftUI
 import NukeUI
 
-/// iPad and Mac: the picture behind a detail page's header, with its hero
-/// trailer, flush to the top-right and fading into the page on its left and
-/// bottom, the same way the home hero does. The series, movie, episode and
-/// season pages all use it, so they blend into the page identically (#764).
+/// iPad and Mac: the picture behind a detail page, with its hero trailer, in
+/// the Watchlist Spotlight's coverage (#894): on a landscape page bright
+/// across the right two thirds, fading into the page on the left and the
+/// bottom; on a portrait page across the top, fading into the content. The
+/// series, movie, episode and season pages all use it, so they blend into
+/// the page identically (#764).
 struct PadDetailHeroBackground: View {
     let serverID: String?
     /// The page's item; `HeroTrailerPolicy` picks the trailer from it (a
@@ -14,43 +16,65 @@ struct PadDetailHeroBackground: View {
     let url: (Int) -> URL?
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Dark background base
-                MobileColors.background
+        ZStack {
+            // Dark background base
+            MobileColors.background
 
-                HStack(spacing: 0) {
-                    Spacer()
-                    let pictureWidth = geometry.size.width * ImageSizing.padDetailPictureFraction
-                    if let backdropURL = url(ImageSizing.backdropPixelWidth(points: pictureWidth)) {
-                        LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
-                            if let image = state.image {
-                                image
-                                    .resizable().scaledToFit()
-                            } else {
-                                Color.clear
-                            }
+            SpotlightBackdrop(layout: nil) { frame in
+                if let backdropURL = url(ImageSizing.backdropPixelWidth(points: frame.width)) {
+                    LazyImage(request: SashimiImagePipeline.request(url: backdropURL, serverID: serverID)) { state in
+                        if let image = state.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.clear
                         }
-                        .frame(width: pictureWidth)
-                        .heroTrailer(for: trailerItem, serverID: serverID)
-                        // Only the left and bottom edges fade, picture and
-                        // trailer alike; the top and right run off the screen.
-                        .backdropFade()
                     }
+                    .frame(width: frame.width, height: frame.height)
+                    // The trailer fills the picture's frame, so the fade
+                    // covers picture and trailer alike.
+                    .heroTrailer(for: trailerItem, serverID: serverID)
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
-
-                // Top scrim under the status bar and back button, which are
-                // drawn on the backdrop: confined to them, not a page wash.
-                LinearGradient(
-                    colors: [Color.black.opacity(0.5), Color.clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 140)
-                .frame(maxHeight: .infinity, alignment: .top)
             }
+
+            // Top scrim under the status bar and back button, which are
+            // drawn on the backdrop: confined to them, not a page wash.
+            LinearGradient(
+                colors: [Color.black.opacity(0.5), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 140)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .ignoresSafeArea()
+    }
+}
+
+extension View {
+    /// For the scroll view of an iPad or Mac detail page over
+    /// `PadDetailHeroBackground`: on a portrait page the details start over
+    /// the backdrop's faded lower part, as the Spotlight's do (#894); on a
+    /// landscape page they start at the top, beside the picture.
+    func padSpotlightContentInset() -> some View {
+        modifier(PadSpotlightContentInset())
+    }
+}
+
+private struct PadSpotlightContentInset: ViewModifier {
+    @State private var pageSize: CGSize = .zero
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.top, SpotlightBackdropLayout.fitting(pageSize).contentInset(in: pageSize), for: .scrollContent)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { pageSize = $0 }
+    }
+}
+
+extension View {
+    /// `padSpotlightContentInset()` when `isPad`; a page with the iPhone
+    /// banner places its details itself.
+    @ViewBuilder
+    func padSpotlightContentInsetOnPad(_ isPad: Bool) -> some View {
+        if isPad { padSpotlightContentInset() } else { self }
     }
 }

@@ -245,44 +245,39 @@ struct MediaDetailView: View {
     }
 
     // MARK: - Main Content
+
+    /// The overview's width: the Spotlight's dark left side (#894), so the
+    /// text never runs over the bright part of the backdrop.
+    static let headerWidth: CGFloat = 1000
+
     private var mainContentSection: some View {
         VStack(alignment: .leading, spacing: 30) {
-            if isEpisode {
-                // Episode layout: logo above title, no poster
-                episodeHeaderSection
-                    .padding(.horizontal, 60)
-                    .focusSection()
-            } else if isSeries {
-                // Series layout: logo above info, no poster
-                seriesHeaderSection
-                    .padding(.horizontal, 60)
-                    .focusSection()
-            } else {
-                // Movie layout: poster + info side by side
-                HStack(alignment: .top, spacing: 40) {
-                    posterSection
+            // The Spotlight layout (#894): logo or title, details and overview
+            // on the backdrop's dark side, no poster beside them.
+            VStack(alignment: .leading, spacing: 20) {
+                if isEpisode {
+                    episodeHeaderSection
+                } else if isSeries {
+                    seriesHeaderSection
+                } else {
                     infoSection
                 }
-                .padding(.horizontal, 60)
-                .focusSection()
+                if let overview = item.overview {
+                    Text(overview)
+                        .font(.body)
+                        .foregroundStyle(SashimiTheme.textPrimary.opacity(0.85))
+                        .lineLimit(3)
+                        .frame(maxWidth: Self.headerWidth, alignment: .leading)
+                }
             }
+            .padding(.horizontal, 60)
+            .focusSection()
 
-            // Action buttons in their own full-width row under the cover art
-            // (Plex layout), rather than squeezed at the bottom of the info
-            // column beside the poster. Down from the poster/info lands here.
+            // The actions in their own full-width row under the details. Down
+            // from the details lands here, and Down from here on the row below.
             actionButtonsRow
                 .padding(.horizontal, 60)
                 .focusSection()
-
-            if let overview = item.overview {
-                Text(overview)
-                    .font(.body)
-                    .foregroundStyle(SashimiTheme.textSecondary)
-                    .lineLimit(4)
-                    .padding(.horizontal, 60)
-                    .padding(.top, 20)
-                    .padding(.bottom, 40)
-            }
 
             if isSeries {
                 seasonsSection

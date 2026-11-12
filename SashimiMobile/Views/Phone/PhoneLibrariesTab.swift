@@ -4,15 +4,31 @@ struct PhoneLibrariesTab: View {
     @State private var libraries: [JellyfinLibrary] = []
     @ObservedObject private var seerr = SeerrSession.shared
     @ObservedObject private var sessionManager = SessionManager.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
 
-    /// What the iPad's side menu lists after Lists (#845): Requests with a
-    /// Seerr account, Dashboard for administrators.
+    /// What the iPad's side menu lists besides the libraries and Lists: the
+    /// Watchlist unless the server has none (#894), Requests with a Seerr
+    /// account, Dashboard for administrators (#845).
     private var extras: [RailOrder.Destination] {
-        RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        RailOrder.conditionalDestinations(
+            seerr: seerr.state,
+            canViewDashboard: sessionManager.canViewServerDashboard,
+            hasWatchlist: RailOrder.hasWatchlist(watchlist.availability)
+        )
     }
 
     var body: some View {
         List {
+            // The Watchlist first, as the iPad's side menu has it (#894).
+            if extras.contains(.watchlist) {
+                NavigationLink {
+                    MobileWatchlistView()
+                } label: {
+                    Label(WatchlistText.name, systemImage: RailOrder.watchlistIcon)
+                }
+                .listRowBackground(MobileColors.cardBackground)
+            }
+
             // Shared lists live here on iPhone: the tab bar has no room for a
             // sixth tab without hiding Settings behind More.
             NavigationLink {

@@ -112,10 +112,6 @@ enum MobileSizing {
     static let iconMedium: CGFloat = 20
     static let iconLarge: CGFloat = 28
 
-    // Hero section
-    static let heroHeight: CGFloat = 400
-    static let heroTitleSize: CGFloat = 40
-
     // FinTV channel cards. Wider than any other card because the caption
     // carries a metadata line and two lines of synopsis, not just a title.
     static let channelCardWidth: CGFloat = 380
@@ -126,7 +122,6 @@ enum MobileSizing {
 enum PhoneSizing {
     static let posterWidth: CGFloat = 110
     static let posterHeight: CGFloat = 165
-    static let heroHeight: CGFloat = 250
     static let continueWatchingWidth: CGFloat = 200
     static let episodeCardHeight: CGFloat = 80
     static let channelCardWidth: CGFloat = 300

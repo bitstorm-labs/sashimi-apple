@@ -23,13 +23,16 @@ enum RailOrder {
         case requests
         /// The admin Server dashboard (#845). Menu-only, administrators only.
         case dashboard
+        /// The Watchlist's Spotlight page (#894).
+        case watchlist
     }
 
-    /// The entries that come and go with the account: what is available
-    /// now, in their default order (after Lists). `seerr` is the
-    /// Seerr sign-in; an expired one keeps Requests so its page can say so.
-    static func conditionalDestinations(seerr: SeerrAuthState, canViewDashboard: Bool) -> [Destination] {
-        var result: [Destination] = []
+    /// The entries that come and go with the account or server: what is
+    /// available now. `seerr` is the Seerr sign-in; an expired one keeps
+    /// Requests so its page can say so. `hasWatchlist` is
+    /// `hasWatchlist(_:)` of the Watchlist's availability (#894).
+    static func conditionalDestinations(seerr: SeerrAuthState, canViewDashboard: Bool, hasWatchlist: Bool = false) -> [Destination] {
+        var result: [Destination] = hasWatchlist ? [.watchlist] : []
         switch seerr {
         case .signedIn, .expired: result.append(.requests)
         case .notConfigured, .signingIn, .awaitingPlex: break
@@ -43,16 +46,24 @@ enum RailOrder {
     /// row yet; once a row stands for it, the row decides.
     static let trailingDestinations: [Destination] = [.lists, .requests, .dashboard]
 
-    /// Requests and Dashboard: listed only while `conditionalDestinations`
-    /// holds them, as rows or menu entries alike.
+    /// The Watchlist, Requests and Dashboard: listed only while
+    /// `conditionalDestinations` holds them, as rows or menu entries alike.
     static func isConditional(_ destination: Destination) -> Bool {
-        destination == .requests || destination == .dashboard
+        destination == .watchlist || destination == .requests || destination == .dashboard
+    }
+
+    /// Whether the side menu offers the Watchlist (#894): unless the server
+    /// has said it has none (no Sashimi Lists plugin). Not knowing yet counts
+    /// as having one, so a launch never waits on the answer to draw the menu.
+    static func hasWatchlist(_ availability: WatchlistStore.Availability) -> Bool {
+        availability != .unavailable
     }
 
     /// `rowOrder` (the menu's entries in the user's order, see
     /// `SideMenuOrder`) wins; libraries it does not account for follow in
     /// server order, then SashimiTV, then Lists, then whichever of Requests
-    /// and Dashboard `available` holds (`conditionalDestinations`).
+    /// and Dashboard `available` holds (`conditionalDestinations`). An
+    /// available Watchlist it does not place leads, directly under Search (#894).
     ///
     /// Rows hidden on Home are still listed. Hiding a row is a statement about
     /// the Home screen, not about the destination. What leaves the rail is
@@ -76,11 +87,15 @@ enum RailOrder {
             placed.insert(destination)
         }
 
+        if available.contains(.watchlist) && !rowOrder.contains(.watchlist) {
+            place(.watchlist)
+        }
+
         for destination in rowOrder {
             switch destination {
             case .finTV, .lists:
                 place(destination)
-            case .requests, .dashboard:
+            case .requests, .dashboard, .watchlist:
                 // Saved while signed in, say, and not there now.
                 if available.contains(destination) { place(destination) }
             case .library(let libraryId) where libraryIds.contains(libraryId):
@@ -117,12 +132,14 @@ enum RailOrder {
 
     /// The same footnote for one destination. The Dashboard has no other way
     /// in once it leaves the side menu (#845); Requests is still offered by
-    /// Search's "Not in your library" row.
+    /// Search's "Not in your library" row; Lists always opens the Watchlist.
     static func reachabilityNote(for destination: Destination?, isOnHome: Bool, isInSideMenu: Bool) -> String? {
+        if destination == .watchlist { return nil }
         guard destination == .dashboard else { return reachabilityNote(isOnHome: isOnHome, isInSideMenu: isInSideMenu) }
         return isInSideMenu ? nil : "Hidden: the Dashboard has no other way in"
     }
 
+    static let watchlistIcon = "bookmark"
     static let requestsIcon = "tray.and.arrow.down"
     static let dashboardIcon = "gauge.with.dots.needle.67percent"
 

@@ -102,27 +102,13 @@ struct ListSpotlightBackdrop: View {
     let spotlight: ListSpotlight?
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topTrailing) {
-                Color.clear
-                image(width: geometry.size.width * 0.7)
-                    .frame(width: geometry.size.width * 0.7, height: geometry.size.height * 0.8)
-                    .clipped()
-                    .mask(
-                        LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.45)],
-                                       startPoint: .leading, endPoint: .trailing)
-                    )
-                    .mask(
-                        LinearGradient(stops: [.init(color: .black, location: 0.5), .init(color: .clear, location: 1)],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-                    .id(spotlight?.id)
-                    .transition(.opacity)
-            }
-            .animation(.easeInOut(duration: 0.5), value: spotlight?.id)
+        SpotlightBackdrop { frame in
+            image(width: frame.width)
+                .frame(width: frame.width, height: frame.height)
+                .id(spotlight?.id)
+                .transition(.opacity)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .animation(.easeInOut(duration: 0.5), value: spotlight?.id)
     }
 
     @ViewBuilder
