@@ -16,6 +16,7 @@ struct MobileServerPluginsView: View {
 
     var body: some View {
         content
+            .readableSettingsColumn()
             .navigationTitle("Server Plugins")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
