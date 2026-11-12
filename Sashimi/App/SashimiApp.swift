@@ -17,7 +17,7 @@ struct SashimiApp: App {
         SashimiImagePipeline.configureCaches()
         SashimiImagePipeline.install()
         SashimiImagePipeline.resetCachesIfNeeded()
-        SettingsSyncService.shared.startApp(layout: HomeRowsSettingsSync())
+        SettingsSyncService.shared.startApp(layout: HomeRowsSettingsSync(), sideMenu: SideMenuSettingsSync())
     }
 
     private func resetAppIconToDefault() {
