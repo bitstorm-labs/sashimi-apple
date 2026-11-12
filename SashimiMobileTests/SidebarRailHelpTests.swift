@@ -12,9 +12,9 @@ final class SidebarRailHelpTests: XCTestCase {
         ]
         let rows = [HomeRowConfig(type: .builtIn(.channels), isEnabled: true)]
 
-        let items = SidebarSelection.railItems(rowConfigs: rows, libraries: libraries)
+        let items = SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, available: [.downloads])
 
-        XCTAssertEqual(items.count, 9, "Home, SashimiTV, three libraries, Lists, Search, Downloads, Settings")
+        XCTAssertEqual(items.count, 9, "Home, Search, SashimiTV, three libraries, Lists, Downloads, Settings")
         for item in items {
             XCTAssertFalse(item.helpLabel.trimmingCharacters(in: .whitespaces).isEmpty, "\(item) has no tooltip")
         }

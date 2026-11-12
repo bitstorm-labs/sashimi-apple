@@ -27,6 +27,17 @@ enum SidebarRailMetrics {
     /// lines up under the centre of the 48pt expanded logo.
     static let expandedRowInset: CGFloat = 8
 
+    /// A row's vertical padding: 11pt, less when the rail is too short to
+    /// show every row (iPad landscape with many libraries), down to 4pt, so
+    /// the last rows aren't pushed under the account avatar. Past that the
+    /// list scrolls. A row is its ~28pt icon, the padding twice, and the 4pt
+    /// gap to the next one.
+    static func rowVerticalPadding(rows: Int, height: CGFloat) -> CGFloat {
+        guard rows > 0, height > 0 else { return 11 }
+        let fitting = (height / CGFloat(rows) - 4 - 28) / 2
+        return min(11, max(4, fitting.rounded(.down)))
+    }
+
     static let logoCollapsed: CGFloat = 40
     static let logoExpanded: CGFloat = 48
 
@@ -65,7 +76,11 @@ struct RailDownloadActivity: Equatable {
 /// Selection and collapse policy belong to the caller (`onSelect`), which owns
 /// the navigation state.
 struct SidebarRail<Footer: View>: View {
-    let libraries: [JellyfinLibrary]
+    /// The destinations, top to bottom (`SidebarSelection.railItems`). The
+    /// caller computes them once, so the rail and the menu bar's ⌘1…⌘9
+    /// always agree (the rail used to rebuild them without the Watchlist,
+    /// Requests and Dashboard).
+    let items: [SidebarSelection]
     let selection: SidebarSelection
     /// Shown on the Downloads row (the iPad has no header indicator).
     var downloadActivity = RailDownloadActivity()
@@ -77,10 +92,6 @@ struct SidebarRail<Footer: View>: View {
     /// menu). It is told whether the rail is expanded so it can add a label.
     @ViewBuilder let footer: (_ isExpanded: Bool) -> Footer
 
-    /// The rail lists destinations in the order Home lists them.
-    @ObservedObject private var homeRows = HomeRowSettings.shared
-    @ObservedObject private var sideMenu = SideMenuSettings.shared
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             logoButton
@@ -91,8 +102,9 @@ struct SidebarRail<Footer: View>: View {
             GeometryReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(navItems, id: \.self) { item in
-                            row(item)
+                        let padding = SidebarRailMetrics.rowVerticalPadding(rows: items.count, height: proxy.size.height)
+                        ForEach(items, id: \.self) { item in
+                            row(item, verticalPadding: padding)
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height)
@@ -150,15 +162,6 @@ struct SidebarRail<Footer: View>: View {
         .animation(SidebarRailMetrics.animation, value: isExpanded)
     }
 
-    private var navItems: [SidebarSelection] {
-        SidebarSelection.railItems(
-            rowConfigs: homeRows.rows,
-            libraries: libraries,
-            hidden: sideMenu.hidden,
-            savedOrder: homeRows.sideMenuOrder
-        )
-    }
-
     /// The sushi mark, with the "Sashimi" wordmark beside it when expanded.
     /// It is the rail's open/close control.
     private var logoButton: some View {
@@ -190,7 +193,7 @@ struct SidebarRail<Footer: View>: View {
         .help(isExpanded ? "Close menu" : "Open menu")
     }
 
-    private func row(_ item: SidebarSelection) -> some View {
+    private func row(_ item: SidebarSelection, verticalPadding: CGFloat) -> some View {
         let isSelected = selection == item
         let isAvailable = !isOffline || item.isAvailableOffline
         return Button {
@@ -215,7 +218,7 @@ struct SidebarRail<Footer: View>: View {
                     }
                 }
             }
-            .padding(.vertical, 11)
+            .padding(.vertical, verticalPadding)
             .padding(.horizontal, isExpanded ? SidebarRailMetrics.expandedRowInset : 0)
             .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
         }
@@ -230,11 +233,11 @@ struct SidebarRail<Footer: View>: View {
         .accessibilityHint(isAvailable ? "" : "Unavailable offline")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         // Right-click (Mac) / long-press (iPad): drop a library or SashimiTV
-        // from the menu (#753). Home, Search, Downloads and Settings stay.
+        // from the menu (#753). Home and Settings stay.
         .contextMenu {
             if let destination = item.railDestination {
                 Button {
-                    sideMenu.setShown(false, for: destination)
+                    SideMenuSettings.shared.setShown(false, for: destination)
                 } label: {
                     Label("Hide from Side Menu", systemImage: "eye.slash")
                 }
@@ -287,12 +290,13 @@ struct SidebarRail<Footer: View>: View {
 }
 
 extension SidebarSelection {
-    /// The rail's destinations, top to bottom: Home, then SashimiTV, the
-    /// libraries and Lists in the order Settings › Home & Side Menu sets
-    /// (#841), then Search, Downloads (iPad only) and Settings, which never
+    /// The rail's destinations, top to bottom: Home, then the one list
+    /// Settings › Home & Side Menu orders (#841, A1 parity: Search, the
+    /// Watchlist, SashimiTV, the libraries, Lists, Requests, Dashboard and
+    /// Downloads by default), then Settings. Only Home and Settings never
     /// move. The menu bar's ⌘1…⌘9 number them in this order.
     /// `hidden`: what the user took out of the side menu (#753); `available`:
-    /// Requests and Dashboard while the account allows them (#845).
+    /// the Watchlist, Requests, Dashboard and Downloads while they apply (#845).
     static func railItems(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
@@ -326,9 +330,13 @@ extension SidebarSelection {
                 items.append(.dashboard)
             case .watchlist:
                 items.append(.watchlist)
+            case .search:
+                items.append(.search)
+            case .downloads:
+                items.append(.downloads)
             }
         }
-        items += [.search, .downloads, .settings]
+        items.append(.settings)
         return items
     }
 }

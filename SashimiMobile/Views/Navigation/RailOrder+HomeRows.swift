@@ -1,7 +1,7 @@
 import Foundation
 
 extension RailOrder {
-    /// The iPad rail's entries between Home and Search: Home's rows that are
+    /// The iPad rail's entries between Home and Settings: Search, Downloads, Home's rows that are
     /// destinations (SashimiTV, the libraries) and the menu-only entries
     /// (Lists, Collections, Playlists) in the one order Settings edits
     /// (#841) — the same rule as the tvOS rail. Continue Watching and

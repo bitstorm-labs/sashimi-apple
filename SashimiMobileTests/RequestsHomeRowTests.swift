@@ -45,9 +45,12 @@ final class RequestsHomeRowTests: XCTestCase {
         XCTAssertEqual(row(.builtIn(.requests)).railDestination, .requests)
     }
 
-    func testANewInstallHasItRightAfterContinueWatching() {
+    /// The shared default order (A1 parity) puts Requests after the libraries.
+    func testANewInstallHasItAfterTheLibraries() {
         withSettings(saved: nil) { settings in
-            XCTAssertEqual(settings.rows.map(\.id), ["continue_watching", "requests", "channels"])
+            XCTAssertEqual(settings.rows.map(\.id), ["continue_watching", "channels", "requests"])
+            settings.updateLibraries(libraries)
+            XCTAssertEqual(settings.rows.map(\.id), ["continue_watching", "channels", "movies", "tv", "requests"])
         }
     }
 
@@ -70,18 +73,18 @@ final class RequestsHomeRowTests: XCTestCase {
             XCTAssertEqual(
                 SidebarSelection.railItems(rowConfigs: settings.rows, libraries: libraries, savedOrder: settings.sideMenuOrder,
                                            available: [.requests, .dashboard]),
-                [.home, .requests, .finTV, movies, tv, .lists, .dashboard, .search, .downloads, .settings]
+                [.home, .search, .finTV, movies, tv, .lists, .requests, .dashboard, .settings]
             )
             let entries = settings.sideMenuEntries(libraryIds: libraries.map(\.id), available: [.requests])
             XCTAssertFalse(entries.contains(.menuOnly(.requests)), "one entry: the row")
             let requests = entries.firstIndex(of: .row("requests")) ?? 0
-            settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [requests], to: entries.count))
+            settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [requests], to: 0))
             XCTAssertEqual(
                 SidebarSelection.railItems(rowConfigs: settings.rows, libraries: libraries, savedOrder: settings.sideMenuOrder,
                                            available: [.requests]),
-                [.home, .finTV, movies, tv, .lists, .requests, .search, .downloads, .settings]
+                [.home, .requests, .search, .finTV, movies, tv, .lists, .settings]
             )
-            XCTAssertEqual(settings.rows.last?.id, "requests", "and Home's row moved with it")
+            XCTAssertEqual(settings.rows.first?.id, "requests", "and Home's row moved with it")
         }
     }
 
@@ -100,12 +103,10 @@ final class RequestsHomeRowTests: XCTestCase {
         withSettings(saved: nil) { settings in
             settings.updateLibraries(libraries)
             var entries = settings.homeRowEntries(available: [.requests])
-            settings.applyRowOrder(SideMenuOrder.moving(entries, from: [1], to: entries.count))
-            XCTAssertEqual(settings.rows.map(\.id), ["continue_watching", "channels", "movies", "tv", "requests"])
+            settings.applyRowOrder(SideMenuOrder.moving(entries, from: [4], to: 1))
+            XCTAssertEqual(settings.rows.map(\.id), ["continue_watching", "requests", "channels", "movies", "tv"])
             XCTAssertNil(settings.sideMenuOrder, "iPhone has no side menu order to save")
 
-            entries = settings.homeRowEntries(available: [.requests])
-            settings.applyRowOrder(SideMenuOrder.moving(entries, from: [4], to: 1))
             entries = settings.homeRowEntries()
             settings.applyRowOrder(SideMenuOrder.moving(entries, from: [entries.count - 1], to: 0))
             XCTAssertEqual(settings.rows.map(\.id), ["tv", "continue_watching", "requests", "channels", "movies"])

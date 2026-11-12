@@ -15,10 +15,10 @@ final class IPadRequestsDashboardRailTests: XCTestCase {
     ]
     private let movies = SidebarSelection.library(id: "movies", name: "Movies", collectionType: "movies")
 
-    func testTheyFollowListsBeforeSearchDownloadsAndSettings() {
+    func testTheyFollowListsBeforeSettings() {
         XCTAssertEqual(
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, available: [.requests, .dashboard]),
-            [.home, .finTV, movies, .lists, .requests, .dashboard, .search, .downloads, .settings]
+            [.home, .search, .finTV, movies, .lists, .requests, .dashboard, .settings]
         )
     }
 
@@ -32,7 +32,7 @@ final class IPadRequestsDashboardRailTests: XCTestCase {
                 libraries: libraries,
                 available: RailOrder.conditionalDestinations(seerr: .notConfigured, canViewDashboard: true)
             ),
-            [.home, .finTV, movies, .lists, .dashboard, .search, .downloads, .settings]
+            [.home, .search, .finTV, movies, .lists, .dashboard, .settings]
         )
     }
 
@@ -57,7 +57,7 @@ final class IPadRequestsDashboardRailTests: XCTestCase {
         let saved = SideMenuOrder.savedKeys(SideMenuOrder.moving(start, from: [requests], to: 0))
         XCTAssertEqual(
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, savedOrder: saved, available: [.requests]),
-            [.home, .requests, .finTV, movies, .lists, .search, .downloads, .settings]
+            [.home, .requests, .search, .finTV, movies, .lists, .settings]
         )
     }
 }

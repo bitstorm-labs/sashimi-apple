@@ -97,7 +97,7 @@ final class RailShortcutTests: XCTestCase {
     }
 
     /// The menu numbers the same list the rail draws.
-    func testRailItemsAreHomeThenLibrariesThenSearchDownloadsSettings() {
+    func testRailItemsAreHomeThenTheOrderedListThenSettings() {
         let libraries = [
             JellyfinLibrary(id: "movies", name: "Movies", collectionType: "movies", imageTags: nil),
             JellyfinLibrary(id: "tv", name: "TV", collectionType: "tvshows", imageTags: nil)
@@ -110,11 +110,12 @@ final class RailShortcutTests: XCTestCase {
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries),
             [
                 .home,
+                .search,
                 .library(id: "tv", name: "TV", collectionType: "tvshows"),
                 .finTV,
                 .library(id: "movies", name: "Movies", collectionType: "movies"),
                 .lists,
-                .search, .downloads, .settings
+                .settings
             ]
         )
     }

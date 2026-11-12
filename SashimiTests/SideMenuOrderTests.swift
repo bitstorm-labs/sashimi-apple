@@ -2,8 +2,8 @@ import SwiftUI
 import XCTest
 @testable import Sashimi
 
-/// Settings › Home & Side Menu is one list (#841): Lists and the libraries
-/// Home has no row for move among Home's rows, and the rail follows.
+/// Settings › Home & Side Menu is one list (#841): Search, Lists and the
+/// libraries Home has no row for move among Home's rows, and the rail follows.
 @MainActor
 final class SideMenuOrderTests: XCTestCase {
     private let suite = "SideMenuOrderTests"
@@ -59,9 +59,9 @@ final class SideMenuOrderTests: XCTestCase {
 
     // MARK: - Existing installs
 
-    /// Nothing saved yet: the menu-only entries sit where the rail has always
-    /// put them, after the libraries with Lists last.
-    func testWithNothingSavedTheRailIsUnchanged() {
+    /// Nothing saved yet: Search leads, and the menu-only libraries and Lists
+    /// follow the last library row, ahead of the rows after it (A1 parity).
+    func testWithNothingSavedMenuOnlyEntriesFollowTheLibraries() {
         let settings = settings()
         XCTAssertNil(settings.sideMenuOrder)
         XCTAssertEqual(
@@ -69,9 +69,11 @@ final class SideMenuOrderTests: XCTestCase {
             ["Home", "Search", "SashimiTV", "Movies", "TV Shows", "Collections", "Playlists", "Lists", "Settings"]
         )
         XCTAssertEqual(
-            settings.sideMenuEntries(libraryIds: libraryIds).suffix(3),
-            [.menuOnly(.library("boxsets")), .menuOnly(.library("playlists")), .menuOnly(.lists)],
-            "Settings lists them at the end too, ready to be moved"
+            settings.sideMenuEntries(libraryIds: libraryIds),
+            [.menuOnly(.search), .row("hero"), .row("continueWatching"), .row("channels"), .row("library_movies"),
+             .row("library_tv"), .menuOnly(.library("boxsets")), .menuOnly(.library("playlists")), .menuOnly(.lists),
+             .row("list_abc")],
+            "Settings lists them in the same places, ready to be moved"
         )
     }
 
@@ -91,7 +93,7 @@ final class SideMenuOrderTests: XCTestCase {
         XCTAssertEqual(settings.rowConfigs, homeRows, "Home's rows neither move nor gain the menu-only entries")
     }
 
-    func testAMenuOnlyLibraryCanMoveAboveTheHomeRows() {
+    func testAMenuOnlyLibraryCanMoveAboveSearchAndTheHomeRows() {
         let settings = settings()
         let entries = settings.sideMenuEntries(libraryIds: libraryIds)
         let playlists = entries.firstIndex(of: .menuOnly(.library("playlists"))) ?? 0
@@ -99,8 +101,8 @@ final class SideMenuOrderTests: XCTestCase {
 
         XCTAssertEqual(
             railTitles(settings),
-            ["Home", "Search", "Playlists", "SashimiTV", "Movies", "TV Shows", "Collections", "Lists", "Settings"],
-            "Home and Search stay first whatever moves"
+            ["Home", "Playlists", "Search", "SashimiTV", "Movies", "TV Shows", "Collections", "Lists", "Settings"],
+            "Only Home stays first whatever moves; Search is an entry like the rest"
         )
     }
 
@@ -124,7 +126,8 @@ final class SideMenuOrderTests: XCTestCase {
         }
         let before = settings.heroHidden(itemLibraryIds: ["a": "tv"])
         let entries = settings.sideMenuEntries(libraryIds: libraryIds)
-        settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [entries.count - 1], to: 0))
+        let lists = entries.firstIndex(of: .menuOnly(.lists)) ?? 0
+        settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [lists], to: 0))
 
         XCTAssertEqual(settings.heroHidden(itemLibraryIds: ["a": "tv"]), before)
         XCTAssertEqual(before.libraryIds, ["tv"])
@@ -135,7 +138,8 @@ final class SideMenuOrderTests: XCTestCase {
     func testTheOrderSurvivesARelaunchAndHomeRowsKeepTheirShape() throws {
         let first = settings()
         let entries = first.sideMenuEntries(libraryIds: libraryIds)
-        let moved = SideMenuOrder.moving(entries, from: [entries.count - 1], to: 3)
+        let lists = entries.firstIndex(of: .menuOnly(.lists)) ?? 0
+        let moved = SideMenuOrder.moving(entries, from: [lists], to: 3)
         first.applySideMenuOrder(moved)
 
         let relaunched = HomeScreenSettings(defaults: defaults)
@@ -147,7 +151,7 @@ final class SideMenuOrderTests: XCTestCase {
         XCTAssertEqual(saved.map(\.id), homeRows.map(\.id))
         XCTAssertEqual(
             defaults.stringArray(forKey: HomeScreenSettings.sideMenuOrderKey)?.filter { $0.hasPrefix("menu:") },
-            ["menu:lists", "menu:library:boxsets", "menu:library:playlists"]
+            ["menu:search", "menu:lists", "menu:library:boxsets", "menu:library:playlists"]
         )
     }
 
@@ -163,7 +167,7 @@ final class SideMenuOrderTests: XCTestCase {
         let saved = ["hero", "list_gone", "menu:lists", "library_movies"]
         XCTAssertEqual(
             SideMenuOrder.entries(rows: rows, libraryIds: ["movies"], saved: saved),
-            [.row("hero"), .menuOnly(.lists), .row("library_movies")]
+            [.menuOnly(.search), .row("hero"), .menuOnly(.lists), .row("library_movies")]
         )
     }
 
@@ -176,17 +180,22 @@ final class SideMenuOrderTests: XCTestCase {
         let saved = ["menu:library:boxsets", "hero", "continue_watching", "channels", "menu:lists"]
         XCTAssertEqual(
             SideMenuOrder.entries(rows: rows, libraryIds: ["boxsets"], saved: saved),
-            [.menuOnly(.library("boxsets")), .row("hero"), .row("continue_watching"), .row("list_new"),
-             .row("channels"), .menuOnly(.lists)]
+            [.menuOnly(.search), .menuOnly(.library("boxsets")), .row("hero"), .row("continue_watching"),
+             .row("list_new"), .row("channels"), .menuOnly(.lists)]
         )
     }
 
-    func testALibraryAddedOnTheServerAfterTheSaveGoesLast() {
-        let saved = ["menu:lists", "channels"]
-        let rows = [SideMenuOrder.Row(id: "channels", destination: .finTV)]
+    /// It goes after the last library (or SashimiTV) row, ahead of the rows
+    /// that follow it, as it would with nothing saved.
+    func testALibraryAddedOnTheServerAfterTheSaveFollowsTheLastLibraryRow() {
+        let saved = ["menu:search", "menu:lists", "channels", "list_abc"]
+        let rows = [
+            SideMenuOrder.Row(id: "channels", destination: .finTV),
+            SideMenuOrder.Row(id: "list_abc", destination: nil)
+        ]
         XCTAssertEqual(
             SideMenuOrder.entries(rows: rows, libraryIds: ["photos"], saved: saved),
-            [.menuOnly(.lists), .row("channels"), .menuOnly(.library("photos"))]
+            [.menuOnly(.search), .menuOnly(.lists), .row("channels"), .menuOnly(.library("photos")), .row("list_abc")]
         )
     }
 
@@ -197,7 +206,7 @@ final class SideMenuOrderTests: XCTestCase {
         let saved = ["menu:library:music", "menu:library:gone", "library_music", "menu:lists"]
         XCTAssertEqual(
             SideMenuOrder.entries(rows: rows, libraryIds: ["music"], saved: saved),
-            [.row("library_music"), .menuOnly(.lists)]
+            [.menuOnly(.search), .row("library_music"), .menuOnly(.lists)]
         )
     }
 

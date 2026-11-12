@@ -1,8 +1,8 @@
 import XCTest
 @testable import SashimiMobile
 
-/// The iPad/Mac side menu drops what the user hid from it (#753); Home,
-/// Search, Downloads and Settings are always there.
+/// The iPad/Mac side menu drops what the user hid from it (#753); Home and
+/// Settings are always there (A1 parity: Search and Downloads can be hidden).
 final class IPadSideMenuVisibilityTests: XCTestCase {
     private let libraries = [
         JellyfinLibrary(id: "movies", name: "Movies", collectionType: "movies", imageTags: nil),
@@ -17,7 +17,7 @@ final class IPadSideMenuVisibilityTests: XCTestCase {
         ]
         XCTAssertEqual(
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.library("kids"), .finTV]),
-            [.home, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .search, .downloads, .settings]
+            [.home, .search, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .settings]
         )
     }
 
@@ -28,16 +28,16 @@ final class IPadSideMenuVisibilityTests: XCTestCase {
         XCTAssertEqual(SidebarSelection.lists.railDestination, .lists)
         XCTAssertEqual(
             SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.finTV]),
-            [.home, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .search, .downloads, .settings]
+            [.home, .search, .library(id: "movies", name: "Movies", collectionType: "movies"), .lists, .settings]
         )
         XCTAssertFalse(SidebarSelection.railItems(rowConfigs: rows, libraries: libraries, hidden: [.lists]).contains(.lists))
     }
 
-    func testOnlyLibrariesAndSashimiTVCanBeHidden() {
+    func testOnlyHomeAndSettingsCannotBeHidden() {
         XCTAssertNil(SidebarSelection.home.railDestination)
-        XCTAssertNil(SidebarSelection.search.railDestination)
-        XCTAssertNil(SidebarSelection.downloads.railDestination)
         XCTAssertNil(SidebarSelection.settings.railDestination)
+        XCTAssertEqual(SidebarSelection.search.railDestination, .search)
+        XCTAssertEqual(SidebarSelection.downloads.railDestination, .downloads)
         XCTAssertEqual(SidebarSelection.finTV.railDestination, .finTV)
         XCTAssertEqual(
             SidebarSelection.library(id: "m", name: "Movies", collectionType: nil).railDestination, .library("m")

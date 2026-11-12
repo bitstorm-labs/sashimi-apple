@@ -4,7 +4,9 @@ import XCTest
 /// Requests is a Home row (#861): Home drew the Seerr requests row pinned
 /// after the first row while the side menu listed Requests last, so the two
 /// disagreed and Settings could move only the menu entry. Now the row carries
-/// the menu entry, the way SashimiTV's and the libraries' rows do.
+/// the menu entry, the way SashimiTV's and the libraries' rows do. A fresh
+/// install has it after the libraries (A1 parity); saved orders without it
+/// still get it right after Continue Watching.
 @MainActor
 final class RequestsHomeRowTests: XCTestCase {
     private let suite = "RequestsHomeRowTests"
@@ -70,10 +72,10 @@ final class RequestsHomeRowTests: XCTestCase {
         XCTAssertEqual(HomeRowConfig.builtIn(.requests).railDestination, .requests)
     }
 
-    func testANewInstallHasItRightAfterContinueWatching() {
+    func testANewInstallHasItAfterTheLibraries() {
         XCTAssertEqual(
             settings().rowConfigs.map(\.id),
-            ["hero", "continueWatching", "requests", "channels", "library_movies", "library_tv"]
+            ["hero", "continueWatching", "channels", "library_movies", "library_tv", "requests"]
         )
     }
 
@@ -95,10 +97,10 @@ final class RequestsHomeRowTests: XCTestCase {
         }
         let entries = first.sideMenuEntries(libraryIds: libraryIds, available: [.requests])
         let index = entries.firstIndex(of: .row("requests")) ?? 0
-        first.applySideMenuOrder(SideMenuOrder.moving(entries, from: [index], to: entries.count))
+        first.applySideMenuOrder(SideMenuOrder.moving(entries, from: [index], to: 0))
 
         let relaunched = settings()
-        XCTAssertEqual(relaunched.rowConfigs.last?.id, "requests")
+        XCTAssertEqual(relaunched.rowConfigs.first?.id, "requests")
         XCTAssertEqual(relaunched.isRowVisible(.requests), false)
     }
 
@@ -106,11 +108,14 @@ final class RequestsHomeRowTests: XCTestCase {
 
     func testTheMenuListsRequestsWhereItsRowIs() {
         let settings = settings()
-        XCTAssertEqual(rail(settings), [.requests, .finTV, .library("movies"), .library("tv"), .library("boxsets"), .lists])
+        XCTAssertEqual(
+            rail(settings),
+            [.search, .finTV, .library("movies"), .library("tv"), .library("boxsets"), .lists, .requests]
+        )
         XCTAssertEqual(
             MainTabView.navRows(rowConfigs: settings.rowConfigs, libraries: libraries, hidden: [], available: [.requests])
                 .map(\.title),
-            ["Home", "Search", "Requests", "SashimiTV", "Movies", "TV Shows", "Collections", "Lists", "Settings"]
+            ["Home", "Search", "SashimiTV", "Movies", "TV Shows", "Collections", "Lists", "Requests", "Settings"]
         )
     }
 
@@ -124,7 +129,10 @@ final class RequestsHomeRowTests: XCTestCase {
         settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [requests], to: movies + 1))
 
         XCTAssertEqual(settings.rowConfigs.map(\.id), ["hero", "continueWatching", "channels", "library_movies", "requests", "library_tv"])
-        XCTAssertEqual(rail(settings, available: both), [.finTV, .library("movies"), .requests, .library("tv"), .library("boxsets"), .lists, .dashboard])
+        XCTAssertEqual(
+            rail(settings, available: both),
+            [.search, .finTV, .library("movies"), .requests, .library("tv"), .library("boxsets"), .lists, .dashboard]
+        )
     }
 
     func testAMenuRequestsKeySavedBeforeTheRowIsIgnored() {
@@ -132,12 +140,19 @@ final class RequestsHomeRowTests: XCTestCase {
         defaults.set(["menu:requests", "hero", "continueWatching", "channels", "library_movies", "library_tv"],
                      forKey: HomeScreenSettings.sideMenuOrderKey)
         let settings = settings()
-        XCTAssertEqual(rail(settings), [.requests, .finTV, .library("movies"), .library("tv"), .library("boxsets"), .lists])
-        XCTAssertEqual(settings.sideMenuEntries(libraryIds: libraryIds, available: [.requests]).first, .row("hero"))
-        if let channels = settings.rowConfigs.firstIndex(where: { $0.type == .channels }) {
-            settings.rowConfigs.move(fromOffsets: [channels], toOffset: 0)
+        XCTAssertEqual(
+            rail(settings),
+            [.search, .finTV, .library("movies"), .library("tv"), .library("boxsets"), .lists, .requests]
+        )
+        XCTAssertEqual(
+            Array(settings.sideMenuEntries(libraryIds: libraryIds, available: [.requests]).prefix(2)),
+            [.menuOnly(.search), .row("hero")]
+        )
+        if let requests = settings.rowConfigs.firstIndex(where: { $0.type == .requests }),
+           let channels = settings.rowConfigs.firstIndex(where: { $0.type == .channels }) {
+            settings.rowConfigs.move(fromOffsets: [requests], toOffset: channels + 1)
         }
-        XCTAssertEqual(rail(settings).prefix(2), [.finTV, .requests], "the row, not the stale key, decides")
+        XCTAssertEqual(rail(settings).prefix(3), [.search, .finTV, .requests], "the row, not the stale key, decides")
     }
 
     func testHiddenOnHomeItStaysInTheMenu() {
@@ -163,12 +178,12 @@ final class RequestsHomeRowTests: XCTestCase {
         }
     }
 
-    func testMovingOtherRowsWhileSignedOutLeavesItAfterContinueWatching() {
+    func testMovingOtherRowsWhileSignedOutLeavesItAfterTheRowItFollowed() {
         let settings = settings()
         let entries = settings.sideMenuEntries(libraryIds: libraryIds)
-        let tv = entries.firstIndex(of: .row("library_tv")) ?? 0
-        settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [tv], to: 0))
+        let movies = entries.firstIndex(of: .row("library_movies")) ?? 0
+        settings.applySideMenuOrder(SideMenuOrder.moving(entries, from: [movies], to: 0))
 
-        XCTAssertEqual(settings.rowConfigs.map(\.id), ["library_tv", "hero", "continueWatching", "requests", "channels", "library_movies"])
+        XCTAssertEqual(settings.rowConfigs.map(\.id), ["library_movies", "hero", "continueWatching", "channels", "library_tv", "requests"])
     }
 }

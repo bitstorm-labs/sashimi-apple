@@ -41,12 +41,11 @@ extension MainTabView {
     }
 
     /// Nav rows follow the order set in Settings › Home & Side Menu, so the
-    /// rail and the screen it opens onto agree with each other. Home and
-    /// Search lead and Settings trails: they are destinations rather than
-    /// rows, and have no place in that ordering. RailOrder decides the
-    /// middle: Home's rows with Lists and the menu-only libraries among them
-    /// (#841), the Watchlist, Requests and Dashboard when `available` (#845,
-    /// #894), less what the user hid (#753).
+    /// rail and the screen it opens onto agree with each other. Home leads
+    /// and Settings trails, on every platform; everything between is that
+    /// one list (A1 parity): Search, Home's rows with Lists and the
+    /// menu-only libraries among them (#841), the Watchlist, Requests and
+    /// Dashboard when `available` (#845, #894), less what the user hid (#753).
     static func navRows(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
@@ -54,10 +53,7 @@ extension MainTabView {
         savedOrder: [String]? = nil,
         available: [RailOrder.Destination] = []
     ) -> [NavRow] {
-        var rows: [NavRow] = [
-            NavRow(id: .home, title: "Home", icon: "house"),
-            NavRow(id: .search, title: "Search", icon: "magnifyingglass")
-        ]
+        var rows: [NavRow] = [NavRow(id: .home, title: "Home", icon: "house")]
 
         for destination in RailOrder.destinations(
             rowConfigs: rowConfigs,
@@ -81,6 +77,11 @@ extension MainTabView {
                 rows.append(NavRow(id: .dashboard, title: "Dashboard", icon: RailOrder.dashboardIcon))
             case .watchlist:
                 rows.append(NavRow(id: .watchlist, title: WatchlistText.name, icon: RailOrder.watchlistIcon))
+            case .search:
+                rows.append(NavRow(id: .search, title: "Search", icon: RailOrder.searchIcon))
+            case .downloads:
+                // No Downloads on Apple TV.
+                continue
             }
         }
 

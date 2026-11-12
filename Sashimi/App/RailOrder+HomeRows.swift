@@ -1,7 +1,7 @@
 import Foundation
 
 extension RailOrder {
-    /// The tvOS rail's entries between Search and Settings: Home's rows that
+    /// The tvOS rail's entries between Home and Settings: Search, Home's rows that
     /// are destinations (SashimiTV, the libraries) and the menu-only entries
     /// (Lists, Collections, Playlists) in the one order Settings edits
     /// (#841). Rows that are not destinations — hero, Continue Watching,

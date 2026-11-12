@@ -3,7 +3,7 @@ import XCTest
 
 /// iPad/Mac Home & Side Menu is one list (#841): Lists and the libraries Home
 /// has no row for drag among Home's rows, and the rail follows. Home stays
-/// first; Search, Downloads and Settings stay at the end.
+/// first and Settings last; Search is an entry like the rest (A1 parity).
 @MainActor
 final class IPadSideMenuOrderTests: XCTestCase {
     private let server = "side-menu-order-test"
@@ -44,12 +44,12 @@ final class IPadSideMenuOrderTests: XCTestCase {
         try body(settings)
     }
 
-    func testWithNothingSavedTheRailIsUnchanged() {
+    func testWithNothingSavedTheRailOnlyGainsSearchFirst() {
         withSettings { settings in
             XCTAssertNil(settings.sideMenuOrder)
             XCTAssertEqual(
                 names(SidebarSelection.railItems(rowConfigs: settings.rows, libraries: libraries, savedOrder: nil)),
-                ["Home", "SashimiTV", "Movies", "Collections", "Playlists", "Lists", "Search", "Downloads", "Settings"]
+                ["Home", "Search", "SashimiTV", "Movies", "Collections", "Playlists", "Lists", "Settings"]
             )
         }
     }
@@ -69,7 +69,7 @@ final class IPadSideMenuOrderTests: XCTestCase {
                 names(SidebarSelection.railItems(
                     rowConfigs: settings.rows, libraries: libraries, savedOrder: settings.sideMenuOrder
                 )),
-                ["Home", "Playlists", "SashimiTV", "Lists", "Movies", "Collections", "Search", "Downloads", "Settings"]
+                ["Home", "Playlists", "Search", "SashimiTV", "Lists", "Movies", "Collections", "Settings"]
             )
             XCTAssertEqual(settings.rows, homeRows, "Home (and iPhone's Row Order) never gains the menu-only entries")
         }

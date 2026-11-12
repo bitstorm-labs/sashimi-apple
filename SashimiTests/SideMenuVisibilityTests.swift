@@ -29,7 +29,7 @@ final class SideMenuVisibilityTests: XCTestCase {
             RailOrder.destinations(
                 rowConfigs: configs, libraryIds: ["movies", "anime", "kids"], hidden: [.library("kids")]
             ),
-            [.library("movies"), .library("anime"), .finTV, .lists],
+            [.search, .library("movies"), .library("anime"), .finTV, .lists],
             "hidden from Home only: still listed; hidden from the menu: dropped"
         )
     }
@@ -41,21 +41,21 @@ final class SideMenuVisibilityTests: XCTestCase {
                 libraryIds: ["movies", "playlists"],
                 hidden: [.finTV, .library("playlists")]
             ),
-            [.library("movies"), .lists]
+            [.search, .library("movies"), .lists]
         )
     }
 
     func testALibraryAddedOnTheServerLaterIsListed() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("movies")], libraryIds: ["movies", "new"], hidden: [.library("movies")]),
-            [.library("new"), .finTV, .lists]
+            [.search, .library("new"), .finTV, .lists]
         )
     }
 
     func testAHiddenIdTheServerNoLongerHasChangesNothing() {
         XCTAssertEqual(
             RailOrder.destinations(rowOrder: [], libraryIds: ["tv"], hidden: [.library("gone")]),
-            [.library("tv"), .finTV, .lists]
+            [.search, .library("tv"), .finTV, .lists]
         )
     }
 
@@ -73,7 +73,7 @@ final class SideMenuVisibilityTests: XCTestCase {
         let rows = [HomeRowConfig.builtIn(.channels), library("movies")].map(\.sideMenuRow)
         XCTAssertEqual(
             SideMenuOrder.menuOnly(rows: rows, libraryIds: libraries.map(\.id)),
-            [.library("collections"), .library("playlists"), .lists]
+            [.search, .library("collections"), .library("playlists"), .lists]
         )
     }
 

@@ -1,7 +1,8 @@
 import XCTest
 @testable import SashimiMobile
 
-/// The iPad rail lists destinations in Home's row order, as the tvOS rail does.
+/// The iPad rail lists destinations in Home's row order, as the tvOS rail does,
+/// with Search first until it is moved (A1 parity).
 final class IPadRailOrderTests: XCTestCase {
     private func library(_ id: String) -> HomeRowConfig {
         HomeRowConfig(type: .library(id: id, name: "Library \(id)"), isEnabled: true)
@@ -16,21 +17,21 @@ final class IPadRailOrderTests: XCTestCase {
                 rowConfigs: [continueWatching, library("movies"), channels, library("tv")],
                 libraryIds: ["tv", "movies"]
             ),
-            [.library("movies"), .finTV, .library("tv"), .lists]
+            [.search, .library("movies"), .finTV, .library("tv"), .lists]
         )
     }
 
     func testUnlistedLibrariesAndChannelsFollowInServerOrder() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("tv")], libraryIds: ["movies", "tv", "music"]),
-            [.library("tv"), .library("movies"), .library("music"), .finTV, .lists]
+            [.search, .library("tv"), .library("movies"), .library("music"), .finTV, .lists]
         )
     }
 
     func testRowsForRemovedLibrariesAreDropped() {
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [library("gone"), channels], libraryIds: ["movies"]),
-            [.finTV, .library("movies"), .lists]
+            [.search, .finTV, .library("movies"), .lists]
         )
     }
 
@@ -39,7 +40,7 @@ final class IPadRailOrderTests: XCTestCase {
         let hiddenMovies = HomeRowConfig(type: .library(id: "movies", name: "Movies"), isEnabled: false)
         XCTAssertEqual(
             RailOrder.destinations(rowConfigs: [channels, hiddenMovies], libraryIds: ["tv", "movies"]),
-            [.finTV, .library("movies"), .library("tv"), .lists]
+            [.search, .finTV, .library("movies"), .library("tv"), .lists]
         )
     }
 
