@@ -30,15 +30,17 @@ enum SideMenuOrder {
     }
 
     /// The side menu's entries that are not Home rows, in their default order:
-    /// the libraries Home has no row for (server order), then Lists, then
-    /// whichever of Requests and Dashboard are `available` (#845, see
-    /// `RailOrder.conditionalDestinations`).
+    /// the Watchlist if `available` (#894), the libraries Home has no row for
+    /// (server order), then Lists, then whichever of Requests and Dashboard
+    /// are `available` (#845, see `RailOrder.conditionalDestinations`).
     /// A destination a row stands for is never also menu-only: Requests has
     /// a row on Home (#861), so a row order with it lists Requests once.
     static func menuOnly(rows: [Row], libraryIds: [String], available: [RailOrder.Destination] = []) -> [RailOrder.Destination] {
         let onHome = Set(rows.compactMap(\.destination))
         let conditional = RailOrder.trailingDestinations.filter { $0 != .lists && available.contains($0) }
-        return (libraryIds.map(RailOrder.Destination.library) + [.lists] + conditional).filter { !onHome.contains($0) }
+        let watchlist: [RailOrder.Destination] = available.contains(.watchlist) ? [.watchlist] : []
+        return (watchlist + libraryIds.map(RailOrder.Destination.library) + [.lists] + conditional)
+            .filter { !onHome.contains($0) }
     }
 
     /// Whether Settings lists this row now: a row standing for Requests only
@@ -58,7 +60,8 @@ enum SideMenuOrder {
     /// A saved menu-only entry goes straight after the nearest entry it
     /// followed that is still here (the start, if none is). One the saved
     /// order has never seen (all of them before #841, a library added on the
-    /// server later) goes at the end. A saved entry that is no longer
+    /// server later) goes at the end, except the Watchlist, which goes first:
+    /// directly under Search, where it is new (#894). A saved entry that is no longer
     /// menu-only (the library left the server, or Home gained a row for it)
     /// is ignored.
     ///
@@ -78,6 +81,11 @@ enum SideMenuOrder {
             unplaced.removeAll { $0 == destination }
         }
 
+        if unplaced.first == .watchlist {
+            // Never saved: an order from before the Watchlist, or none at all.
+            result.insert(.menuOnly(.watchlist), at: 0)
+            unplaced.removeFirst()
+        }
         return result + unplaced.map(Entry.menuOnly)
     }
 

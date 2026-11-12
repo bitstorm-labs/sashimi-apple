@@ -6,7 +6,15 @@ import SwiftUI
 /// doesn't have dimmed and tagged "Not on server" or "Requested"). "Use Plex
 /// too?" (or the Plex sync line) sits under the actions. Remove a Title works
 /// as Edit List's does.
+///
+/// Opened from Lists it is a full-screen cover; opened from the rail (#894)
+/// it is the rail's page, and Menu goes back to Home like the other pages.
 struct WatchlistPageView: View {
+    /// Set when the rail shows the page: Menu at its root calls this.
+    var onBackAtRoot: (() -> Void)?
+    /// The rail's scope, so Right from the rail lands on the first title.
+    var focusNamespace: Namespace.ID?
+
     @StateObject private var model = WatchlistPageViewModel()
     @Environment(\.dismiss) private var dismiss
 
@@ -23,6 +31,11 @@ struct WatchlistPageView: View {
     @State private var removal: WatchlistTile?
     @State private var confirmDisconnect = false
     @FocusState private var menuFocused: Bool
+    /// The loading spinner holds focus (Right from the rail while loading).
+    @FocusState private var spinnerFocused: Bool
+    /// The spinner had focus when the load ended, so the first title takes it.
+    @State private var spinnerHeldFocus = false
+    @Environment(\.resetFocus) private var resetFocus
 
     var body: some View {
         ListSpotlightPage(
@@ -89,7 +102,7 @@ struct WatchlistPageView: View {
             }
         }
         .onExitCommand {
-            if removing { removing = false } else { dismiss() }
+            if removing { removing = false } else { leave() }
         }
         .task { await model.load() }
         .resumingPlexConnect()
@@ -97,11 +110,26 @@ struct WatchlistPageView: View {
         .toastOverlay()
         .onDisappear { model.cancelLookups() }
         .onChange(of: model.isGone) { _, gone in
-            if gone { dismiss() }
+            if gone { leave() }
+        }
+        // The spinner goes when the titles come: focus on it would be
+        // orphaned, so the first title takes it (the rail's page only).
+        .onChange(of: spinnerFocused) { _, focused in
+            // Leaving it while still loading (back to the rail) lets it go.
+            if focused { spinnerHeldFocus = true } else if model.isLoading { spinnerHeldFocus = false }
+        }
+        .onChange(of: model.isLoading) { _, loading in
+            guard !loading, spinnerHeldFocus, let focusNamespace else { return }
+            spinnerHeldFocus = false
+            resetFocus(in: focusNamespace)
         }
         .onChange(of: model.tiles.isEmpty) { _, empty in
             if empty { removing = false }
         }
+    }
+
+    private func leave() {
+        if let onBackAtRoot { onBackAtRoot() } else { dismiss() }
     }
 
     // MARK: Header
@@ -218,14 +246,18 @@ struct WatchlistPageView: View {
             ProgressView()
                 .focusable()
                 .focusEffectDisabled()
+                .focused($spinnerFocused)
+                .listsDefaultFocus(in: focusNamespace)
         } else if model.tiles.isEmpty {
             Text(model.failed ? WatchlistText.couldntLoad : WatchlistText.empty)
                 .font(Typography.body)
                 .foregroundStyle(SashimiTheme.textTertiary)
                 .focusable()
+                .listsDefaultFocus(in: focusNamespace)
         } else {
             ForEach(model.tiles) { tile in
                 tileButton(tile)
+                    .listsDefaultFocus(in: tile.id == model.tiles.first?.id ? focusNamespace : nil)
                     .opacity(model.isRemoving(tile) ? 0.4 : 1)
                     .onAppear { model.tileAppeared(tile) }
             }

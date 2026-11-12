@@ -11,6 +11,8 @@ extension MainTabView {
         case home, finTV, search, settings, avatar, lists
         /// Seerr requests and the admin Server dashboard (#845).
         case requests, dashboard
+        /// The Watchlist's Spotlight page (#894).
+        case watchlist
         case library(String)
     }
 
@@ -43,8 +45,8 @@ extension MainTabView {
     /// Search lead and Settings trails: they are destinations rather than
     /// rows, and have no place in that ordering. RailOrder decides the
     /// middle: Home's rows with Lists and the menu-only libraries among them
-    /// (#841), Requests and Dashboard when `available` (#845), less what the
-    /// user hid (#753).
+    /// (#841), the Watchlist, Requests and Dashboard when `available` (#845,
+    /// #894), less what the user hid (#753).
     static func navRows(
         rowConfigs: [HomeRowConfig],
         libraries: [JellyfinLibrary],
@@ -77,6 +79,8 @@ extension MainTabView {
                 rows.append(NavRow(id: .requests, title: "Requests", icon: RailOrder.requestsIcon))
             case .dashboard:
                 rows.append(NavRow(id: .dashboard, title: "Dashboard", icon: RailOrder.dashboardIcon))
+            case .watchlist:
+                rows.append(NavRow(id: .watchlist, title: WatchlistText.name, icon: RailOrder.watchlistIcon))
             }
         }
 

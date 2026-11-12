@@ -122,7 +122,9 @@ struct PhoneDetailView: View {
                     Spacer().frame(height: 40)
                 }
                 .padding(.horizontal, MobileSpacing.md)
-                .padding(.top, MobileSpacing.sm)
+                // Over the banner's faded lower part, as the Spotlight's
+                // details are (#894). The YouTube channel header keeps its own.
+                .padding(.top, isYouTubeSeriesStyle ? MobileSpacing.sm : -PhoneHeroBanner.contentOverlap)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

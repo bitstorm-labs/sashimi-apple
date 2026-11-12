@@ -122,6 +122,9 @@ struct ContentView: View {
                 // The server's Sashimi Lists features and Requests address, again
                 // for each signed-in session (a server switch).
                 .task(id: sessionManager.activeSessionIdentity) { await SashimiListsFeatures.shared.refresh() }
+                // Whether the server has a Watchlist, which decides its side-menu
+                // entry (#894), before anything opens Lists.
+                .task(id: sessionManager.activeSessionIdentity) { await WatchlistStore.shared.refresh() }
                 .id(sessionManager.activeSessionIdentity)
             } else {
                 ServerConnectionView(
@@ -240,6 +243,8 @@ struct MainTabView: View {
     @ObservedObject private var sideMenu = SideMenuSettings.shared
     /// Requests is in the rail while a Seerr account is connected (#845).
     @ObservedObject private var seerr = SeerrSession.shared
+    /// The Watchlist is in the rail unless the server has none (#894).
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @State private var showServerSwitcher = false
     @State private var showAddServer = false
     // One-shot: the hero grabs focus once on cold launch (the rail otherwise
@@ -403,6 +408,8 @@ struct MainTabView: View {
             RequestsPageView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .dashboard:
             ServerDashboardView()
+        case .watchlist:
+            WatchlistPageView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .settings:
             SettingsView(onBackAtRoot: { selection = .home }, focusNamespace: mainScope)
         case .library(let id):
@@ -675,10 +682,7 @@ private extension MainTabView {
             libraries: libraries,
             hidden: sideMenu.hidden,
             savedOrder: homeSettings.sideMenuOrder,
-            available: RailOrder.conditionalDestinations(
-                seerr: seerr.state,
-                canViewDashboard: sessionManager.canViewServerDashboard
-            )
+            available: RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard, hasWatchlist: RailOrder.hasWatchlist(watchlist.availability))
         )
     }
 }

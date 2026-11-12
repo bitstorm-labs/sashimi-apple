@@ -48,10 +48,13 @@ struct MobileSeasonView: View {
                     episodesSection
                 }
                 .padding(MobileSpacing.md)
+                // iPhone: over the banner's faded lower part (#894).
+                .padding(.top, layout == .phone ? -PhoneHeroBanner.contentOverlap : 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .clipped()
+        .padSpotlightContentInsetOnPad(layout == .pad)
         // iPad and Mac: the series' backdrop and trailer top-right, fading
         // into the page, as on the series page (#764).
         .background {
@@ -125,22 +128,11 @@ struct MobileSeasonView: View {
 
     // MARK: - Header
 
-    private var posterSize: CGSize {
-        layout == .pad ? CGSize(width: 180, height: 270) : CGSize(width: 110, height: 165)
-    }
-
+    /// The Spotlight layout (#894): the details over the backdrop's faded
+    /// part, no poster beside them.
     private var header: some View {
         VStack(alignment: .leading, spacing: MobileSpacing.md) {
-            HStack(alignment: .top, spacing: MobileSpacing.md) {
-                SmartPosterImage(
-                    itemIds: [model.season.id, model.seriesId].compactMap { $0 },
-                    maxWidth: ImageSizing.pixelWidth(points: posterSize.width),
-                    serverID: serverID,
-                    tagSource: model.season
-                )
-                .frame(width: posterSize.width, height: posterSize.height)
-                .clipShape(RoundedRectangle(cornerRadius: MobileCornerRadius.medium))
-
+            HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                     Text(isYouTube ? model.title.cleanedYouTubeTitle : model.title)
                         .font(.system(size: layout == .pad ? 28 : 22, weight: .bold))
@@ -150,7 +142,7 @@ struct MobileSeasonView: View {
                         .font(MobileTypography.caption)
                         .foregroundStyle(MobileColors.textSecondary)
                     infoRow
-                    // iPad and Mac have the width for the buttons beside the poster.
+                    // iPad and Mac have the width for the buttons beside the details.
                     if layout == .pad {
                         actionRow
                             .padding(.top, MobileSpacing.xs)

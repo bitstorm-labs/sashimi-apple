@@ -1,8 +1,8 @@
 import NukeUI
 import SwiftUI
 
-/// A title the server doesn't have, on iPhone, iPad and Mac (design §3):
-/// backdrop, poster, details from the server's metadata providers, Add to
+/// A title the server doesn't have, on iPhone, iPad and Mac (design §3): the
+/// Spotlight's portrait backdrop (#894), details from the server's metadata providers, Add to
 /// Watchlist / ✓ On Watchlist, and Request (or Sign in to Requests). Once the
 /// server has the title, the normal library page with Play takes over.
 struct MobileWatchlistTitleView: View {
@@ -72,26 +72,30 @@ struct MobileWatchlistTitleView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// The Spotlight's portrait form (#894): the backdrop across the top,
+    /// fading over its lower half into the page, the title on the faded part.
+    /// No backdrop: the poster, soft and grey, as the Spotlight shows it.
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
             ZStack {
-                MobileColors.cardBackground
                 if let url = model.backdropURL {
                     LazyImage(url: url) { state in
                         if let image = state.image { image.resizable().scaledToFill() }
                     }
+                } else if let poster = model.posterURL {
+                    SeerrArtwork(url: poster, title: "", cornerRadius: 0)
+                        .blur(radius: 30)
+                        .grayscale(1)
+                        .brightness(-0.3)
                 }
             }
             .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 9, contentMode: .fit)
+            .aspectRatio(3 / 2, contentMode: .fit)
             .frame(maxHeight: 340)
             .clipped()
-            .overlay(LinearGradient(colors: [.clear, MobileColors.background], startPoint: .center, endPoint: .bottom))
+            .spotlightFade(.portrait)
 
             HStack(alignment: .bottom, spacing: MobileSpacing.sm) {
-                SeerrArtwork(url: model.posterURL, title: model.title, cornerRadius: MobileCornerRadius.medium)
-                    .frame(width: 92, height: 138)
-                    .shadow(color: .black.opacity(0.6), radius: 8)
                 VStack(alignment: .leading, spacing: MobileSpacing.xxs) {
                     Text(model.title)
                         .font(MobileTypography.displayLarge)

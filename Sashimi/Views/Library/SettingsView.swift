@@ -513,6 +513,7 @@ struct HomeScreenSettingsView: View {
     @StateObject private var settings = HomeScreenSettings.shared
     @ObservedObject private var sideMenu = SideMenuSettings.shared
     @ObservedObject private var seerr = SeerrSession.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var isLoading = true
     /// Every library the rail can list, for the ones Home has no row for.
@@ -523,7 +524,11 @@ struct HomeScreenSettingsView: View {
     private var entries: [SideMenuOrder.Entry] {
         settings.sideMenuEntries(
             libraryIds: railLibraries.map(\.id),
-            available: RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+            available: RailOrder.conditionalDestinations(
+                seerr: seerr.state,
+                canViewDashboard: sessionManager.canViewServerDashboard,
+                hasWatchlist: RailOrder.hasWatchlist(watchlist.availability)
+            )
         )
     }
 
@@ -614,6 +619,7 @@ struct HomeScreenSettingsView: View {
         case .lists: return "Lists"
         case .requests: return "Requests"
         case .dashboard: return "Dashboard"
+        case .watchlist: return WatchlistText.name
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }

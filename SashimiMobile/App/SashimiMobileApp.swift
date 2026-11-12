@@ -145,6 +145,9 @@ struct ContentView: View {
                 // The server's Sashimi Lists features and Requests address, again
                 // for each signed-in session (a server switch).
                 .task(id: sessionManager.activeSessionIdentity) { await SashimiListsFeatures.shared.refresh() }
+                // Whether the server has a Watchlist, which decides its side-menu
+                // entry (#894), before anything opens Lists.
+                .task(id: sessionManager.activeSessionIdentity) { await WatchlistStore.shared.refresh() }
                 .id(sessionManager.activeSessionIdentity)
                 .task {
                     // Re-runs on a server switch (the id above), which starts

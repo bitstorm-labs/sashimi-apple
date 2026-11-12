@@ -52,6 +52,8 @@ struct MobileSeerrDetailView: View {
                 backdrop
                 VStack(alignment: .leading, spacing: MobileSpacing.md) {
                     titleBlock
+                        // Over the backdrop's faded lower part (#894).
+                        .padding(.top, -PhoneHeroBanner.contentOverlap)
                     actions
                     if let quota = model.quotaNote {
                         Text(quota)
@@ -81,9 +83,10 @@ struct MobileSeerrDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// The Spotlight's portrait form (#894): across the top, fading into the
+    /// page over its lower half.
     private var backdrop: some View {
         ZStack(alignment: .bottom) {
-            Rectangle().fill(MobileColors.cardBackground)
             if let url = SeerrImages.backdrop(model.details?.backdropPath) {
                 LazyImage(url: url) { state in
                     if let image = state.image {
@@ -91,18 +94,16 @@ struct MobileSeerrDetailView: View {
                     }
                 }
             }
-            LinearGradient(colors: [.clear, MobileColors.background], startPoint: .center, endPoint: .bottom)
         }
-        .frame(height: PhoneSizing.heroHeight)
+        .frame(height: PhoneHeroBanner.height)
         .frame(maxWidth: .infinity)
         .clipped()
+        .spotlightFade(.portrait)
     }
 
+    /// No poster beside the title (#894): the backdrop above stands for it.
     private var titleBlock: some View {
-        HStack(alignment: .top, spacing: MobileSpacing.md) {
-            SeerrArtwork(url: SeerrImages.poster(model.details?.posterPath ?? model.target.posterPath),
-                         title: model.target.title)
-                .frame(width: 84, height: 126)
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: MobileSpacing.xs) {
                 Text(model.details?.title ?? model.target.title)
                     .font(MobileTypography.displayMedium)

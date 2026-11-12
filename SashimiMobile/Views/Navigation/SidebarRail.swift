@@ -324,6 +324,8 @@ extension SidebarSelection {
                 items.append(.requests)
             case .dashboard:
                 items.append(.dashboard)
+            case .watchlist:
+                items.append(.watchlist)
             }
         }
         items += [.search, .downloads, .settings]

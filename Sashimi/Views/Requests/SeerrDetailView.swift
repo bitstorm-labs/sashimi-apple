@@ -68,36 +68,30 @@ struct SeerrDetailView: View {
         .background { backdrop }
     }
 
+    /// The Watchlist Spotlight's backdrop, as on every detail page (#894).
     private var backdrop: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topTrailing) {
-                SashimiTheme.background.ignoresSafeArea()
+        ZStack {
+            SashimiTheme.background
+            SpotlightBackdrop { frame in
                 if let url = SeerrImages.backdrop(model.details?.backdropPath) {
                     LazyImage(url: url) { state in
                         if let image = state.image {
-                            image.resizable().aspectRatio(contentMode: .fit)
+                            image.resizable().aspectRatio(contentMode: .fill)
                         }
                     }
-                    .frame(width: geometry.size.width * 0.55, alignment: .topTrailing)
-                    .backdropFade()
-                    .ignoresSafeArea()
+                    .frame(width: frame.width, height: frame.height)
                 }
             }
         }
+        .ignoresSafeArea()
     }
 
     // MARK: Header
 
+    /// The Spotlight layout (#894): the details on the backdrop's dark side,
+    /// no poster beside them.
     private var header: some View {
-        HStack(alignment: .top, spacing: 50) {
-            SeerrArtwork(
-                url: SeerrImages.poster(model.details?.posterPath ?? model.target.posterPath),
-                title: model.target.title,
-                cornerRadius: 16,
-                titleFont: .system(size: 26, weight: .bold)
-            )
-            .frame(width: 300, height: 450)
-
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 22) {
                 Text(model.details?.title ?? model.target.title)
                     .font(Typography.displayMedium)
@@ -129,7 +123,8 @@ struct SeerrDetailView: View {
                         .foregroundStyle(SashimiTheme.warning)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: MediaDetailView.headerWidth, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 80)
     }

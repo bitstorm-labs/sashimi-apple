@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One season of a show (#760): poster, the show's name, "Season N · X
+/// One season of a show (#760): the show's name, "Season N · X
 /// episodes · Y of X watched", Play for the next unwatched episode, the
 /// season-wide watched mark, Series, and the season's episodes, over the
 /// series' backdrop and hero trailer (#764).
@@ -84,17 +84,10 @@ struct SeasonDetailView: View {
 
     // MARK: - Header
 
+    /// The Spotlight layout (#894): the details on the backdrop's dark side,
+    /// no poster beside them.
     private var header: some View {
-        HStack(alignment: .top, spacing: 40) {
-            SmartPosterImage(
-                itemIds: [model.season.id, model.seriesId].compactMap { $0 },
-                maxWidth: ImageSizing.pixelWidth(points: 260),
-                serverID: serverID,
-                tagSource: model.season
-            )
-            .frame(width: 260, height: 390)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 Text(forceYouTubeStyle ? model.title.cleanedYouTubeTitle : model.title)
                     .font(.system(size: 44, weight: .bold))
@@ -106,10 +99,11 @@ struct SeasonDetailView: View {
                     .foregroundStyle(SashimiTheme.textSecondary)
 
                 infoRow
-
-                actionRow
-                    .padding(.top, 20)
             }
+            .frame(maxWidth: MediaDetailView.headerWidth, alignment: .leading)
+
+            actionRow
+                .padding(.top, 20)
         }
     }
 

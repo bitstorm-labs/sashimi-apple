@@ -42,6 +42,7 @@ extension RailOrder.Destination {
         case .lists: return "lists"
         case .requests: return "requests"
         case .dashboard: return "dashboard"
+        case .watchlist: return "watchlist"
         case .library(let id): return "library:\(id)"
         }
     }
@@ -55,6 +56,8 @@ extension RailOrder.Destination {
             self = .requests
         } else if storageKey == "dashboard" {
             self = .dashboard
+        } else if storageKey == "watchlist" {
+            self = .watchlist
         } else if storageKey.hasPrefix("library:") {
             self = .library(String(storageKey.dropFirst("library:".count)))
         } else {

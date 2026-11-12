@@ -43,7 +43,7 @@ extension MediaDetailView {
                         serverID: serverID,
                         tagSource: item
                     )
-                    .frame(maxHeight: 220, alignment: .leading)
+                    .frame(maxHeight: 160, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .clipped()
                 } else if let seriesName = item.seriesName {
@@ -75,73 +75,12 @@ extension MediaDetailView {
                     serverID: serverID,
                     tagSource: item
                 )
-                .frame(maxHeight: 220, alignment: .leading)
+                .frame(maxHeight: 160, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .clipped()
             }
 
             infoSection
-        }
-    }
-
-    // MARK: - Poster
-
-    // All possible poster IDs to try in order
-    private var posterFallbackIds: [String] {
-        var ids: [String] = []
-        if isEpisode {
-            if isYouTubeStyle {
-                // YouTube-style: episode thumbnail first, then series
-                ids.append(item.id)
-                if let seriesId = item.seriesId {
-                    ids.append(seriesId)
-                }
-            } else {
-                // Regular TV: season poster first, then episode, then series
-                if let seasonId = item.seasonId {
-                    ids.append(seasonId)
-                }
-                ids.append(item.id)
-                if let seriesId = item.seriesId {
-                    ids.append(seriesId)
-                }
-            }
-        } else {
-            ids.append(item.id)
-        }
-        return ids
-    }
-
-    @ViewBuilder
-    var posterSection: some View {
-        if isYouTubeSeriesStyle {
-            // Circular art for YouTube channels
-            Circle()
-                .fill(SashimiTheme.cardBackground)
-                .frame(width: 200, height: 280)
-                .overlay(
-                    SmartPosterImage(
-                        itemIds: posterFallbackIds,
-                        maxWidth: 400,
-                        imageTypes: ["Primary", "Thumb"],
-                        contentMode: .fit,
-                        serverID: serverID,
-                        tagSource: item
-                    )
-                    .clipShape(Circle())
-                )
-                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-        } else {
-            SmartPosterImage(
-                itemIds: posterFallbackIds,
-                maxWidth: isYouTubeStyle ? 640 : 400,
-                imageTypes: isYouTubeStyle ? ["Primary", "Thumb", "Backdrop"] : ["Primary", "Thumb"],
-                serverID: serverID,
-                tagSource: item
-            )
-            .frame(width: isYouTubeStyle ? 320 : 200, height: isYouTubeStyle ? 180 : 300)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
         }
     }
 

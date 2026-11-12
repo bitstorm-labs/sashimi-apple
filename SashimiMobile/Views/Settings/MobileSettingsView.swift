@@ -281,6 +281,7 @@ struct HomeRowOrderView: View {
     @ObservedObject private var settings = HomeRowSettings.shared
     @ObservedObject private var sideMenu = SideMenuSettings.shared
     @ObservedObject private var seerr = SeerrSession.shared
+    @ObservedObject private var watchlist = WatchlistStore.shared
     @ObservedObject private var sessionManager = SessionManager.shared
     /// Every library the side menu can list, for the ones Home has no row for.
     @State private var railLibraries: [JellyfinLibrary] = []
@@ -296,7 +297,11 @@ struct HomeRowOrderView: View {
     /// libraries among them, in side-menu order. iPhone lists Home rows only.
     /// Either way the Requests row only while Seerr is connected (#861).
     private var entries: [SideMenuOrder.Entry] {
-        let available = RailOrder.conditionalDestinations(seerr: seerr.state, canViewDashboard: sessionManager.canViewServerDashboard)
+        let available = RailOrder.conditionalDestinations(
+            seerr: seerr.state,
+            canViewDashboard: sessionManager.canViewServerDashboard,
+            hasWatchlist: RailOrder.hasWatchlist(watchlist.availability)
+        )
         return showsSideMenu
             ? settings.sideMenuEntries(libraryIds: railLibraries.map(\.id), available: available)
             : settings.homeRowEntries(available: available)
@@ -307,6 +312,7 @@ struct HomeRowOrderView: View {
         case .lists: return "Lists"
         case .requests: return "Requests"
         case .dashboard: return "Dashboard"
+        case .watchlist: return WatchlistText.name
         case .finTV: return HomeRowType.channels.displayName
         case .library(let id): return railLibraries.first { $0.id == id }?.name ?? "Library"
         }

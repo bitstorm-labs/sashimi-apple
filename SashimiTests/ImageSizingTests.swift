@@ -44,14 +44,16 @@ final class ImageSizingTests: XCTestCase {
         XCTAssertEqual(ImageSizing.pixelWidth(points: layout.displayedImagePoints(in: size), scale: 2), 1680)
     }
 
-    /// iPad detail picture: 70% of the width, like the home hero, requested at
-    /// its drawn size (was a flat 1280 at 55%).
+    /// iPad detail picture: the Spotlight's 70% of the width in landscape
+    /// (#894), requested at its drawn size (was a flat 1280 at 55%).
     func testPadDetailPictureRequestsItsDrawnWidth() {
-        XCTAssertEqual(ImageSizing.padDetailPictureFraction, 0.7)
+        let landscape = SpotlightBackdropLayout.landscape
         // iPad (10th gen) landscape, 1180pt: 826pt drawn → 1680px.
-        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: 1180 * ImageSizing.padDetailPictureFraction, scale: 2), 1680)
+        let ipad = landscape.frame(in: CGSize(width: 1180, height: 820)).width
+        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: ipad, scale: 2), 1680)
         // 13" iPad landscape, 1376pt: 963pt drawn → 1960px.
-        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: 1376 * ImageSizing.padDetailPictureFraction, scale: 2), 1960)
+        let large = landscape.frame(in: CGSize(width: 1376, height: 1032)).width
+        XCTAssertEqual(ImageSizing.backdropPixelWidth(points: large, scale: 2), 1960)
     }
 
     func testBackdropRequestsAreCapped() {
