@@ -48,4 +48,67 @@ final class HomeRowsSettingsSyncTests: XCTestCase {
         XCTAssertEqual(settings.serverID, "sync-test", "reading the layout switches to the active server's rows")
         XCTAssertEqual(sync.stampKey, "homeRows.sync-test")
     }
+
+    // MARK: Side menu (phase 2)
+
+    /// iPad/Mac's side menu in shared ids, Downloads included, applied from
+    /// another device and kept per server.
+    func testSideMenuMapsToSharedIdsAndAppliesPerServer() throws {
+        let settings = HomeRowSettings.shared
+        let original = settings.serverID
+        let suite = "HomeRowsSettingsSyncTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            settings.use(serverID: original)
+            UserDefaults.standard.removeObject(forKey: "homeRowOrder.sync-menu")
+            UserDefaults.standard.removeObject(forKey: "sideMenuOrder.sync-menu")
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let menu = SideMenuSettings(defaults: defaults)
+        let sync = SideMenuSettingsSync(settings: settings, menu: menu, activeServerID: { "sync-menu" })
+        _ = sync.currentRows()
+        settings.rows = rows
+        XCTAssertEqual(sync.stampKey, "sideMenu.sync-menu")
+
+        let layout = try XCTUnwrap(sync.currentLayout())
+        XCTAssertEqual(layout.map(\.id), ["search", "watchlist", "continueWatching", "requests", "fintv", "library:f137",
+                                          "lists", "list:9d1c", "dashboard", "downloads"])
+        XCTAssertEqual(layout.map(\.menu), [true, true, nil, true, true, true, true, nil, true, true])
+
+        var remote = layout
+        remote.insert(SettingsSync.MenuEntry(id: "downloads", menu: false), at: 0)
+        remote.removeLast()
+        sync.apply(remote: remote, rowsFromMenu: true)
+        XCTAssertEqual(settings.sideMenuOrder?.first, "menu:downloads")
+        XCTAssertEqual(UserDefaults.standard.stringArray(forKey: "sideMenuOrder.sync-menu")?.first, "menu:downloads")
+        XCTAssertEqual(menu.hidden, [.downloads])
+        XCTAssertEqual(settings.rows.map(\.id), rows.map(\.id), "the rows did not move")
+    }
+
+    /// Seeding: Downloads saved before the Dashboard was available sits
+    /// above it, the app's doing; Downloads moved above Lists is the user's.
+    func testDownloadsAboveTheDashboardIsNotACustomisation() throws {
+        let settings = HomeRowSettings.shared
+        let original = settings.serverID
+        let suite = "HomeRowsSettingsSyncTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer {
+            settings.use(serverID: original)
+            UserDefaults.standard.removeObject(forKey: "homeRowOrder.sync-seed")
+            UserDefaults.standard.removeObject(forKey: "sideMenuOrder.sync-seed")
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let sync = SideMenuSettingsSync(settings: settings, menu: SideMenuSettings(defaults: defaults),
+                                        activeServerID: { "sync-seed" })
+        _ = sync.currentRows()
+        settings.rows = rows
+        let rowKeys = rows.map(\.id)
+        settings.applySideMenuOrder((["menu:search", "menu:watchlist"] + rowKeys + ["menu:lists", "menu:downloads"])
+            .map(SideMenuOrder.Entry.init(storageKey:)))
+        XCTAssertFalse(sync.isCustomised)
+
+        settings.applySideMenuOrder((["menu:search", "menu:watchlist", "menu:downloads"] + rowKeys + ["menu:lists"])
+            .map(SideMenuOrder.Entry.init(storageKey:)))
+        XCTAssertTrue(sync.isCustomised)
+    }
 }

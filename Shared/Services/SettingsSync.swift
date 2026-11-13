@@ -15,6 +15,7 @@ enum SettingsSync {
     /// The stamp a seeded setting gets: older than any real change.
     static let seedStamp: Int64 = 1
     static let homeRowsKey = "homeRows"
+    static let sideMenuKey = "sideMenu"
 
     /// One row of a layout value: a shared id and whether it shows.
     struct LayoutEntry: Equatable, Hashable {
@@ -22,11 +23,27 @@ enum SettingsSync {
         let on: Bool
     }
 
+    /// One entry of the side menu's combined order (`sideMenu`): a shared
+    /// id and, for destinations only, whether the side menu shows it. Home
+    /// rows that are not destinations (the hero, Continue Watching, shared
+    /// lists) carry no `menu`: absent is not the same as switched off, so
+    /// the optional Bool is on purpose.
+    struct MenuEntry: Equatable, Hashable {
+        let id: String
+        let menu: Bool? // swiftlint:disable:this discouraged_optional_boolean
+
+        init(id: String, menu: Bool? = nil) { // swiftlint:disable:this discouraged_optional_boolean
+            self.id = id
+            self.menu = menu
+        }
+    }
+
     enum Value: Equatable {
         case bool(Bool)
         case int(Int)
         case string(String)
         case layout([LayoutEntry])
+        case menuLayout([MenuEntry])
     }
 
     struct Stamped: Equatable {
@@ -40,6 +57,7 @@ enum SettingsSync {
         case int(allowed: [Int])
         case string(allowed: [String])
         case layout
+        case menuLayout
     }
 
     struct Key: Equatable {
@@ -53,7 +71,7 @@ enum SettingsSync {
     static let shuffleModes = ["randomEpisode", "randomShowNextEpisode"]
     static let viewModes = ["normal", "zoom", "stretch"]
 
-    /// Every shared key and its kind. `sideMenu` comes later.
+    /// Every shared key and its kind.
     static let keys: [Key] = [
         Key(name: "autoPlayNextEpisode", kind: .bool),
         Key(name: "autoSkipIntro", kind: .bool),
@@ -70,6 +88,7 @@ enum SettingsSync {
         Key(name: "useEpisodeRatings", kind: .bool),
         Key(name: "use24HourTime", kind: .bool),
         Key(name: homeRowsKey, kind: .layout),
+        Key(name: sideMenuKey, kind: .menuLayout),
     ]
 
     static func key(_ name: String) -> Key? {
@@ -113,7 +132,7 @@ enum SettingsSync {
 
     static func isValid(_ value: Value, kind: Kind) -> Bool {
         switch (value, kind) {
-        case (.bool, .bool), (.layout, .layout): return true
+        case (.bool, .bool), (.layout, .layout), (.menuLayout, .menuLayout): return true
         case (.int(let int), .int(let allowed)): return allowed.contains(int)
         case (.string(let string), .string(let allowed)): return allowed.contains(string)
         default: return false
@@ -140,6 +159,19 @@ enum SettingsSync {
                 entries.append(LayoutEntry(id: id, on: on.boolValue))
             }
             parsed = .layout(entries)
+        case .menuLayout:
+            guard let array = any as? [Any] else { return nil }
+            var entries: [MenuEntry] = []
+            for element in array {
+                guard let object = element as? [String: Any], let id = object["id"] as? String else { return nil }
+                var menu: Bool? // swiftlint:disable:this discouraged_optional_boolean
+                if let flag = object["menu"] {
+                    guard let number = flag as? NSNumber, isBool(number) else { return nil }
+                    menu = number.boolValue
+                }
+                entries.append(MenuEntry(id: id, menu: menu))
+            }
+            parsed = .menuLayout(entries)
         }
         guard let parsed, isValid(parsed, kind: kind) else { return nil }
         return parsed
@@ -151,6 +183,12 @@ enum SettingsSync {
         case .int(let int): return int
         case .string(let string): return string
         case .layout(let entries): return entries.map { ["id": $0.id, "on": $0.on] as [String: Any] }
+        case .menuLayout(let entries):
+            return entries.map { entry -> [String: Any] in
+                var object: [String: Any] = ["id": entry.id]
+                if let menu = entry.menu { object["menu"] = menu }
+                return object
+            }
         }
     }
 
@@ -226,16 +264,21 @@ enum SettingsSync {
     /// stays right after the row it follows here; ids this device lacks are
     /// skipped.
     static func applyLayout(local: [LayoutEntry], remote: [LayoutEntry]) -> [LayoutEntry] {
-        let localIds = Set(local.map(\.id))
-        var result: [LayoutEntry] = []
+        applyOrder(local: local, remote: remote, id: \.id)
+    }
+
+    /// `applyLayout`'s rule for any entry type with an id.
+    static func applyOrder<Entry>(local: [Entry], remote: [Entry], id: (Entry) -> String) -> [Entry] {
+        let localIds = Set(local.map(id))
+        var result: [Entry] = []
         var placed: Set<String> = []
-        for entry in remote where localIds.contains(entry.id) && placed.insert(entry.id).inserted {
+        for entry in remote where localIds.contains(id(entry)) && placed.insert(id(entry)).inserted {
             result.append(entry)
         }
-        for (index, row) in local.enumerated() where !placed.contains(row.id) {
-            let at = index == 0 ? 0 : (result.firstIndex { $0.id == local[index - 1].id }.map { $0 + 1 } ?? result.count)
+        for (index, row) in local.enumerated() where !placed.contains(id(row)) {
+            let at = index == 0 ? 0 : (result.firstIndex { id($0) == id(local[index - 1]) }.map { $0 + 1 } ?? result.count)
             result.insert(row, at: at)
-            placed.insert(row.id)
+            placed.insert(id(row))
         }
         return result
     }
@@ -244,13 +287,26 @@ enum SettingsSync {
     /// remote entry it doesn't have put back after the same predecessor it had
     /// remotely, so one device never drops another's rows (or unknown ids).
     static func writeLayout(local: [LayoutEntry], remote: [LayoutEntry]?) -> [LayoutEntry] {
+        writeOrder(local: local, remote: remote, id: \.id)
+    }
+
+    /// `writeLayout`'s rule for any entry type with an id. `carry` picks the
+    /// remote entries to put back (all of them by default).
+    static func writeOrder<Entry>(local: [Entry], remote: [Entry]?, id: (Entry) -> String,
+                                  carry: (Entry) -> Bool = { _ in true }) -> [Entry] {
         var result = local
-        var ids = Set(local.map(\.id))
+        var ids = Set(local.map(id))
         guard let remote else { return result }
-        for (index, entry) in remote.enumerated() where !ids.contains(entry.id) {
-            let at = index == 0 ? 0 : (result.firstIndex { $0.id == remote[index - 1].id }.map { $0 + 1 } ?? result.count)
-            result.insert(entry, at: at)
-            ids.insert(entry.id)
+        for (index, entry) in remote.enumerated() where !ids.contains(id(entry)) && carry(entry) {
+            // Straight after the nearest remote entry before it that is here
+            // (always the one right before it, unless `carry` skipped it).
+            var anchor: Int?
+            for previous in remote[..<index].reversed() {
+                anchor = result.firstIndex { id($0) == id(previous) }
+                if anchor != nil { break }
+            }
+            result.insert(entry, at: anchor.map { $0 + 1 } ?? 0)
+            ids.insert(id(entry))
         }
         return result
     }

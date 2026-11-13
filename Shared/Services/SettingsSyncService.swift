@@ -34,7 +34,7 @@ struct SettingsSyncBinding {
         case .bool(let fallback): return .bool(defaults.object(forKey: localKey) as? Bool ?? fallback)
         case .int(let fallback): return .int(defaults.object(forKey: localKey) as? Int ?? fallback)
         case .string(let fallback): return .string(defaults.string(forKey: localKey) ?? fallback)
-        case .layout: return defaultValue
+        case .layout, .menuLayout: return defaultValue
         }
     }
 
@@ -43,7 +43,7 @@ struct SettingsSyncBinding {
         case .bool(let bool): defaults.set(bool, forKey: localKey)
         case .int(let int): defaults.set(int, forKey: localKey)
         case .string(let string): defaults.set(string, forKey: localKey)
-        case .layout: break
+        case .layout, .menuLayout: break
         }
     }
 
@@ -59,7 +59,7 @@ struct SettingsSyncBinding {
 
     /// This platform's scalar settings. 24-Hour Time syncs on tvOS only:
     /// iPhone, iPad and Mac follow the system clock format.
-    static var platform: [SettingsSyncBinding] {
+    @MainActor static var platform: [SettingsSyncBinding] {
         var bindings: [SettingsSyncBinding] = [
             binding("autoPlayNextEpisode", .bool(true)),
             binding("autoSkipIntro", .bool(false)),
@@ -103,6 +103,10 @@ final class SettingsSyncService {
         didSet { observeLayout() }
     }
 
+    var sideMenuSource: SettingsSyncSideMenuSource? {
+        didSet { observeSideMenu() }
+    }
+
     private let defaults: UserDefaults
     private let client: () -> JellyfinClient
     private let now: () -> Int64
@@ -116,6 +120,7 @@ final class SettingsSyncService {
     private var lastEnabled: Bool
     private var defaultsObserver: NSObjectProtocol?
     private var layoutObserver: AnyCancellable?
+    private var sideMenuObserver: AnyCancellable?
     private var appObservers: [AnyCancellable] = []
     private var inFlight: Task<Void, Never>?
     private var pendingPush: Task<Void, Never>?
@@ -123,12 +128,12 @@ final class SettingsSyncService {
     init(defaults: UserDefaults = .standard,
          client: @escaping () -> JellyfinClient = { JellyfinClient.shared },
          now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
-         bindings: [SettingsSyncBinding] = SettingsSyncBinding.platform,
+         bindings: [SettingsSyncBinding]? = nil,
          pushDelay: Duration = .seconds(1)) {
         self.defaults = defaults
         self.client = client
         self.now = now
-        self.bindings = bindings
+        self.bindings = bindings ?? SettingsSyncBinding.platform
         self.pushDelay = pushDelay
         self.lastEnabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
     }
@@ -161,6 +166,7 @@ final class SettingsSyncService {
         started = true
         noteLocalChanges()
         layoutChanged()
+        sideMenuChanged()
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -172,8 +178,9 @@ final class SettingsSyncService {
     /// setting, so the first change is stamped rather than seeded). Reconciles
     /// on every signed-in session (launch, server or user switch) and on each
     /// return to the foreground.
-    func startApp(layout: SettingsSyncLayoutSource) {
+    func startApp(layout: SettingsSyncLayoutSource, sideMenu: SettingsSyncSideMenuSource) {
         layoutSource = layout
+        sideMenuSource = sideMenu
         start()
         let session = SessionManager.shared
         appObservers = [
@@ -268,6 +275,31 @@ final class SettingsSyncService {
         source.apply(placed)
     }
 
+    private func observeSideMenu() {
+        sideMenuObserver = sideMenuSource?.changes
+            .sink { [weak self] in self?.sideMenuChanged() }
+        if started { sideMenuChanged() }
+    }
+
+    /// The side menu changed. A new saved order (a move in the unified
+    /// editor) or a menu switch is the user's edit; rows coming, going or
+    /// moving on their own, and the migration's Search, are not.
+    func sideMenuChanged() {
+        guard let source = sideMenuSource, source.currentRows() != nil else { return }
+        let key = source.stampKey
+        let signature = source.editSignature
+        guard let previous = snapshot[key] else {
+            if stamps[key] == nil, source.isCustomised { stamps[key] = SettingsSync.seedStamp }
+            snapshot[key] = signature
+            schedulePush()
+            return
+        }
+        guard previous != signature else { return }
+        snapshot[key] = signature
+        stamps[key] = now()
+        schedulePush()
+    }
+
     private func schedulePush() {
         guard isEnabled else { return }
         pendingPush?.cancel()
@@ -316,6 +348,7 @@ final class SettingsSyncService {
         var writes: [String: String] = [:]
         reconcileScalars(remote: remote, writes: &writes)
         reconcileLayout(remote: remote, writes: &writes)
+        reconcileSideMenu(remote: remote, writes: &writes)
         guard !writes.isEmpty else { return }
         let body = SettingsSync.displayPreferencesBody(stored: stored, writes: writes)
         do {
@@ -368,7 +401,16 @@ final class SettingsSyncService {
             stamps[key] = stamped.t
             snapshot[key] = SettingsSync.encodeValue(.layout(applied))
             layoutCache[key] = SettingsSync.encode(stamped)
-            if applied != local { source.apply(applied) }
+            guard applied != local else { return }
+            let menu = sideMenuSource
+            let menuBefore = menu?.entriesBeforeRowsMove()
+            source.apply(applied)
+            // Applying `homeRows` moves only the rows, never a menu-only
+            // entry; that is not a side-menu edit either.
+            if let menu, let menuBefore {
+                menu.keepMenuSlots(of: menuBefore)
+                if snapshot[menu.stampKey] != nil { snapshot[menu.stampKey] = menu.editSignature }
+            }
         case .write(let t):
             var remoteLayout: [SettingsSync.LayoutEntry]?
             if case .valid(let stamped) = decoded, case .layout(let layout) = stamped.value { remoteLayout = layout }
@@ -376,6 +418,35 @@ final class SettingsSyncService {
             let encoded = SettingsSync.encode(written)
             writes[SettingsSync.homeRowsKey] = encoded
             layoutCache[key] = encoded
+        case .none:
+            break
+        }
+    }
+
+    /// After `reconcileLayout`, so the rows it applied are the ones the side
+    /// menu's order lands on. When both keys carry an order, the newer `t`
+    /// decides the rows' relative order (`rowsFromMenu`).
+    private func reconcileSideMenu(remote: [String: String], writes: inout [String: String]) {
+        guard let source = sideMenuSource, let local = source.currentLayout() else { return }
+        let key = source.stampKey
+        let decoded = SettingsSync.decode(remote[SettingsSync.sideMenuKey], kind: .menuLayout)
+        switch SettingsSync.decide(kind: .menuLayout, localValue: .menuLayout(local), localStamp: stamps[key], remote: decoded) {
+        case .apply(let stamped):
+            guard case .menuLayout(let layout) = stamped.value else { return }
+            let rowsStamp = layoutSource.flatMap { stamps[$0.stampKey] } ?? 0
+            stamps[key] = stamped.t
+            source.apply(remote: layout, rowsFromMenu: stamped.t > rowsStamp)
+            // Neither the new order nor rows it moved are local edits; the
+            // change notifications they post arrive after these.
+            snapshot[key] = source.editSignature
+            if let rows = layoutSource, let current = rows.currentLayout() {
+                snapshot[rows.stampKey] = SettingsSync.encodeValue(.layout(current))
+            }
+        case .write(let t):
+            var remoteLayout: [SettingsSync.MenuEntry]?
+            if case .valid(let stamped) = decoded, case .menuLayout(let layout) = stamped.value { remoteLayout = layout }
+            let written = SettingsSync.writeOrder(local: local, remote: remoteLayout, id: \.id)
+            writes[SettingsSync.sideMenuKey] = SettingsSync.encode(.init(value: .menuLayout(written), t: t))
         case .none:
             break
         }

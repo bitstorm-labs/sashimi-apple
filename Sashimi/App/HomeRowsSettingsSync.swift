@@ -8,8 +8,10 @@ final class HomeRowsSettingsSync: SettingsSyncLayoutSource {
     private let settings: HomeScreenSettings
     private let defaults: UserDefaults
 
-    init(settings: HomeScreenSettings = .shared, defaults: UserDefaults = .standard) {
-        self.settings = settings
+    /// `settings` nil: `HomeScreenSettings.shared` (a default argument can't
+    /// name the main-actor singleton).
+    init(settings: HomeScreenSettings? = nil, defaults: UserDefaults = .standard) {
+        self.settings = settings ?? .shared
         self.defaults = defaults
     }
 
@@ -51,5 +53,46 @@ final class HomeRowsSettingsSync: SettingsSyncLayoutSource {
             row.isVisible = entry.on
             return row
         }
+    }
+}
+
+/// tvOS side menu as the `sideMenu` sync value (WORK-106 phase 2): the order
+/// `HomeScreenSettings.sideMenuOrder` saves among `rowConfigs`, and
+/// `SideMenuSettings.hidden`. One for every server, like the rows.
+@MainActor
+final class SideMenuSettingsSync: SettingsSyncSideMenuSource {
+    private let settings: HomeScreenSettings
+    private let menu: SideMenuSettings
+
+    init(settings: HomeScreenSettings? = nil, menu: SideMenuSettings? = nil) {
+        self.settings = settings ?? .shared
+        self.menu = menu ?? .shared
+    }
+
+    let stampKey = SettingsSync.sideMenuKey
+
+    func currentRows() -> [SideMenuOrder.Row]? {
+        settings.rowConfigs.isEmpty ? nil : settings.rowConfigs.map(\.sideMenuRow)
+    }
+
+    var savedOrder: [String]? { settings.sideMenuOrder }
+
+    var hidden: Set<RailOrder.Destination> { menu.hidden }
+
+    /// No Downloads on tvOS: another device's is carried through.
+    let platformDestinations: [RailOrder.Destination] = [.watchlist, .requests, .dashboard]
+
+    func sharedRowId(_ localId: String) -> String {
+        SettingsSync.RowIds.shared(tvOS: localId)
+    }
+
+    func applySideMenu(_ entries: [SideMenuOrder.Entry], shown: [RailOrder.Destination: Bool]) {
+        if !entries.isEmpty { settings.applySideMenuOrder(entries) }
+        for (destination, isShown) in shown { menu.setShown(isShown, for: destination) }
+    }
+
+    var changes: AnyPublisher<Void, Never> {
+        Publishers.Merge3(settings.$rowConfigs.map { _ in }, settings.$sideMenuOrder.map { _ in }, menu.$hidden.map { _ in })
+            .receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 }

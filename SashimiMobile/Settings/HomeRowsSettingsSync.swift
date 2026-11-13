@@ -9,9 +9,11 @@ final class HomeRowsSettingsSync: SettingsSyncLayoutSource {
     private let settings: HomeRowSettings
     private let activeServerID: @MainActor () -> String?
 
-    init(settings: HomeRowSettings = .shared,
+    /// `settings` nil: `HomeRowSettings.shared` (a default argument can't
+    /// name the main-actor singleton).
+    init(settings: HomeRowSettings? = nil,
          activeServerID: @escaping @MainActor () -> String? = { SessionManager.shared.activeServerId }) {
-        self.settings = settings
+        self.settings = settings ?? .shared
         self.activeServerID = activeServerID
     }
 
@@ -58,5 +60,53 @@ final class HomeRowsSettingsSync: SettingsSyncLayoutSource {
             row.isEnabled = entry.on
             return row
         }
+    }
+}
+
+/// iPhone/iPad/Mac side menu as the `sideMenu` sync value (WORK-106 phase 2):
+/// `HomeRowSettings.sideMenuOrder` (per server, like the rows) and
+/// `SideMenuSettings.hidden`. iPhone has no side menu to edit, but applies
+/// and keeps the value like iPad, so it never drops it on a write.
+@MainActor
+final class SideMenuSettingsSync: SettingsSyncSideMenuSource {
+    private let settings: HomeRowSettings
+    private let menu: SideMenuSettings
+    private let activeServerID: @MainActor () -> String?
+
+    init(settings: HomeRowSettings? = nil, menu: SideMenuSettings? = nil,
+         activeServerID: @escaping @MainActor () -> String? = { SessionManager.shared.activeServerId }) {
+        self.settings = settings ?? .shared
+        self.menu = menu ?? .shared
+        self.activeServerID = activeServerID
+    }
+
+    var stampKey: String {
+        settings.serverID.map { "\(SettingsSync.sideMenuKey).\($0)" } ?? SettingsSync.sideMenuKey
+    }
+
+    func currentRows() -> [SideMenuOrder.Row]? {
+        // Never the previous server's order on a server switch.
+        settings.use(serverID: activeServerID())
+        return settings.rows.isEmpty ? nil : settings.rows.map(\.sideMenuRow)
+    }
+
+    var savedOrder: [String]? { settings.sideMenuOrder }
+
+    var hidden: Set<RailOrder.Destination> { menu.hidden }
+
+    let platformDestinations: [RailOrder.Destination] = [.watchlist, .requests, .dashboard, .downloads]
+
+    func sharedRowId(_ localId: String) -> String {
+        SettingsSync.RowIds.shared(mobile: localId)
+    }
+
+    func applySideMenu(_ entries: [SideMenuOrder.Entry], shown: [RailOrder.Destination: Bool]) {
+        if !entries.isEmpty { settings.applySideMenuOrder(entries) }
+        for (destination, isShown) in shown { menu.setShown(isShown, for: destination) }
+    }
+
+    var changes: AnyPublisher<Void, Never> {
+        Publishers.Merge3(settings.$rows.map { _ in }, settings.$sideMenuOrder.map { _ in }, menu.$hidden.map { _ in })
+            .receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 }

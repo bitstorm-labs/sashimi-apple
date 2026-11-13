@@ -34,7 +34,7 @@ struct SashimiMobileApp: App {
         SashimiImagePipeline.configureCaches()
         SashimiImagePipeline.install()
         SashimiImagePipeline.resetCachesIfNeeded()
-        SettingsSyncService.shared.startApp(layout: HomeRowsSettingsSync())
+        SettingsSyncService.shared.startApp(layout: HomeRowsSettingsSync(), sideMenu: SideMenuSettingsSync())
 #if compiler(>=6.4)
         if #available(iOS 27.0, *) {
             SashimiAppShortcuts.updateAppShortcutParameters()
