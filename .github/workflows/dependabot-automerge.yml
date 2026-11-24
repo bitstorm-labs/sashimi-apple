@@ -16,6 +16,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Merge as the bitstorm-bot app, not GITHUB_TOKEN: GitHub never starts
+      # workflows from GITHUB_TOKEN's own pushes, so merges made with it skipped
+      # the CI and release runs that should follow on main (OC-10). Dependabot
+      # runs read Dependabot secrets only, so the app's ID and key live there.
+      - name: bitstorm-bot token
+        id: bot
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
       - name: Dependabot metadata
         id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
@@ -25,7 +36,7 @@ jobs:
       - name: Queue patch/minor updates
         if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         # No --squash: the merge queue's own merge method applies.
         run: gh pr merge --auto "$PR_URL"
