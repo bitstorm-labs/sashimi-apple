@@ -62,8 +62,49 @@ env:
   XCODE_VERSION: 'latest-stable'
 
 jobs:
+  tag-origin:
+    # A tag the Release workflow pushed is deployed by that workflow, which
+    # calls this one. Its tag message carries "Released-by: Release workflow";
+    # the tag-push run sees that and stands down so nothing ships twice.
+    # Hand-pushed tags (no such line) deploy as before.
+    name: Tag pushed by the Release workflow?
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      released_by_workflow: ${{ steps.check.outputs.released_by_workflow }}
+    steps:
+      - name: Read the tag message
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # A failed lookup fails this job, and the deploy then stands down too
+          # (re-run it): better than risking a second upload.
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '"\(.object.type) \(.object.sha)"')
+          read -r type sha <<< "$ref"
+          message=""
+          if [ "$type" = tag ]; then
+            message=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq .message)
+          fi
+          if printf '%s\n' "$message" | grep -qx 'Released-by: Release workflow'; then
+            echo "released_by_workflow=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG was pushed by the Release workflow, which deploys it itself. Nothing to do here." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "released_by_workflow=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Deploy tvOS to ${{ inputs.environment || 'testflight' }}${{ inputs.dry_run && ' (dry run)' || '' }}
+    needs: tag-origin
+    # Runs for workflow_call / workflow_dispatch (tag-origin skipped) and for
+    # hand-pushed tags; stands down for the Release workflow's own tags.
+    if: ${{ !cancelled() && needs.tag-origin.result != 'failure' && needs.tag-origin.outputs.released_by_workflow != 'true' }}
     runs-on: macos-15
     environment: ${{ inputs.environment || 'testflight' }}
     timeout-minutes: 40
